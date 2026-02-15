@@ -800,15 +800,15 @@ class MainWindow(QMainWindow):
         wl_layout.setContentsMargins(24, 24, 24, 24)
         wl_layout.setSpacing(10)
 
-        center = QWidget(self.web_loading)
-        center_layout = QVBoxLayout(center)
-        center_layout.setContentsMargins(0, 0, 0, 0)
-        center_layout.setSpacing(10)
+        loading_center = QWidget(self.web_loading)
+        center_layout_loading = QVBoxLayout(loading_center)
+        center_layout_loading.setContentsMargins(0, 0, 0, 0)
+        center_layout_loading.setSpacing(10)
 
         self.web_loading_label = QLabel("Loading gallery UI…")
         self.web_loading_label.setStyleSheet("color: rgba(255,255,255,200); font-size: 13px;")
         self.web_loading_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        center_layout.addWidget(self.web_loading_label)
+        center_layout_loading.addWidget(self.web_loading_label)
 
         self.web_loading_bar = QProgressBar()
         self.web_loading_bar.setRange(0, 100)
@@ -824,10 +824,10 @@ class MainWindow(QMainWindow):
             "QProgressBar{background: rgba(255,255,255,25); border-radius: 5px;}"
             f"QProgressBar::chunk{{background: {accent}; border-radius: 5px;}}"
         )
-        center_layout.addWidget(self.web_loading_bar, 0, Qt.AlignmentFlag.AlignHCenter)
+        center_layout_loading.addWidget(self.web_loading_bar, 0, Qt.AlignmentFlag.AlignHCenter)
 
         wl_layout.addStretch(1)
-        wl_layout.addWidget(center, 0, Qt.AlignmentFlag.AlignCenter)
+        wl_layout.addWidget(loading_center, 0, Qt.AlignmentFlag.AlignCenter)
         wl_layout.addStretch(1)
 
         self._devtools: QWebEngineView | None = None
