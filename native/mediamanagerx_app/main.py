@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import os
 import hashlib
 import subprocess
 import shutil
@@ -224,19 +225,29 @@ class Bridge(QObject):
         exts = image_exts | video_exts
 
         candidates: list[Path] = []
-        for p in root.rglob("*"):
-            if not p.is_file():
-                continue
-            if p.suffix.lower() not in exts:
-                continue
-
+        for root_dir, dirs, files in os.walk(folder, followlinks=True):
+            curr_root = Path(root_dir)
+            
+            # If hiding dots is enabled, filter out hidden directories
             if self._hide_dot_enabled():
-                # Skip any file under a dot-prefixed directory, or dot files.
-                rel_parts = p.relative_to(root).parts
-                if any(part.startswith(".") for part in rel_parts):
-                    continue
+                # Modify dirs in-place to prevent os.walk from descending into them
+                dirs[:] = [d for d in dirs if not d.startswith(".")]
+                
+                # Also skip if the current root itself or its parents were hidden
+                try:
+                    rel_parts = curr_root.relative_to(root).parts
+                    if any(part.startswith(".") for part in rel_parts):
+                        continue
+                except Exception:
+                    pass
 
-            candidates.append(p)
+            for f in files:
+                if self._hide_dot_enabled() and f.startswith("."):
+                    continue
+                
+                p = curr_root / f
+                if p.suffix.lower() in exts:
+                    candidates.append(p)
 
         candidates.sort(key=lambda p: str(p).lower())
 
