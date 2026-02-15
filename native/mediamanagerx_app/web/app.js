@@ -116,22 +116,40 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
   const unhideBtn = document.getElementById('ctxUnhide');
   const renameBtn = document.getElementById('ctxRename');
 
-  const isHidden = item && item.path && item.path.split(/[/\\]/).pop().startsWith('.');
-  if (hideBtn) hideBtn.style.display = isHidden ? 'none' : 'block';
-  if (unhideBtn) unhideBtn.style.display = isHidden ? 'block' : 'none';
-
-  ctx.hidden = false;
-
   // Position clamped to viewport
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const rect = ctx.getBoundingClientRect();
   const w = rect.width || 200;
   const h = rect.height || 180;
+
   const left = Math.max(8, Math.min(vw - w - 8, x));
   const top = Math.max(8, Math.min(vh - h - 8, y));
   ctx.style.left = `${left}px`;
   ctx.style.top = `${top}px`;
+  ctx.hidden = false;
+
+  // Enable/disable Paste
+  const pasteBtn = document.getElementById('ctxPaste');
+  if (pasteBtn && gBridge && gBridge.has_files_in_clipboard) {
+    gBridge.has_files_in_clipboard(function (has) {
+      pasteBtn.disabled = !has;
+    });
+  }
+
+  // Show/hide per-item actions if clicking background
+  const hasItem = !!item;
+  ['ctxHide', 'ctxUnhide', 'ctxRename', 'ctxMeta', 'ctxExplorer', 'ctxCut', 'ctxCopy'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = hasItem ? 'block' : 'none';
+  });
+
+  // Refine Hide/Unhide display
+  if (hasItem) {
+    const isHidden = item && item.path && item.path.split(/[/\\]/).pop().startsWith('.');
+    if (hideBtn) hideBtn.style.display = isHidden ? 'none' : 'block';
+    if (unhideBtn) unhideBtn.style.display = isHidden ? 'block' : 'none';
+  }
 }
 
 function wireCtxMenu() {
@@ -195,6 +213,49 @@ function wireCtxMenu() {
       hideCtx();
       if (!item || !item.path || !gBridge || !gBridge.show_metadata) return;
       gBridge.show_metadata(item.path, function () { });
+    });
+  }
+
+  const explorerBtn = document.getElementById('ctxExplorer');
+  if (explorerBtn) {
+    explorerBtn.addEventListener('click', () => {
+      const item = gCtxItem;
+      hideCtx();
+      if (!item || !item.path || !gBridge || !gBridge.open_in_explorer) return;
+      gBridge.open_in_explorer(item.path);
+    });
+  }
+
+  const cutBtn = document.getElementById('ctxCut');
+  if (cutBtn) {
+    cutBtn.addEventListener('click', () => {
+      const item = gCtxItem;
+      hideCtx();
+      if (!item || !item.path || !gBridge || !gBridge.cut_to_clipboard) return;
+      gBridge.cut_to_clipboard([item.path]);
+    });
+  }
+
+  const copyBtn = document.getElementById('ctxCopy');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', () => {
+      const item = gCtxItem;
+      hideCtx();
+      if (!item || !item.path || !gBridge || !gBridge.copy_to_clipboard) return;
+      gBridge.copy_to_clipboard([item.path]);
+    });
+  }
+
+  const pasteBtn = document.getElementById('ctxPaste');
+  if (pasteBtn) {
+    pasteBtn.addEventListener('click', () => {
+      hideCtx();
+      if (!gBridge || !gBridge.paste_into_folder_async) return;
+      gBridge.get_selected_folder(function (folder) {
+        if (!folder) return;
+        setGlobalLoading(true, 'Pasting…', 25);
+        gBridge.paste_into_folder_async(folder);
+      });
     });
   }
 }
@@ -296,6 +357,14 @@ function renderMediaList(items) {
     }
 
     el.appendChild(card);
+  });
+
+  // Enable background context menu for pasting into current folder
+  el.addEventListener('contextmenu', (e) => {
+    if (e.target === el) {
+      e.preventDefault();
+      showCtx(e.clientX, e.clientY, null, -1, false);
+    }
   });
 }
 
@@ -577,6 +646,15 @@ function closeSettings() {
   if (m) m.hidden = true;
 }
 
+function syncStartFolderEnabled() {
+  const restoreToggle = document.getElementById('toggleRestoreLast');
+  const startInput = document.getElementById('startFolder');
+  const browse = document.getElementById('browseStartFolder');
+  const on = !!(restoreToggle && restoreToggle.checked);
+  if (startInput) startInput.disabled = on;
+  if (browse) browse.disabled = on;
+}
+
 function wireSettings() {
   const openBtn = document.getElementById('openSettings');
   const closeBtn = document.getElementById('closeSettings');
@@ -614,13 +692,6 @@ function wireSettings() {
       gBridge.set_setting_str('gallery.start_folder', startInput.value || '', function () { });
     });
   }
-
-  function syncStartFolderEnabled() {
-    const on = !!(restoreToggle && restoreToggle.checked);
-    if (startInput) startInput.disabled = on;
-    if (browse) browse.disabled = on;
-  }
-
   if (restoreToggle) {
     restoreToggle.addEventListener('change', () => {
       if (!gBridge || !gBridge.set_setting_bool) return;

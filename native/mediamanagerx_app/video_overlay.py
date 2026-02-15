@@ -145,7 +145,6 @@ class LightboxVideoOverlay(QWidget):
             " border: none;"
             " padding: 6px 10px;"
             " font-size: 16px;"
-            " cursor: pointer;"
             " }"
             "QPushButton:hover {"
             " background: rgba(255,255,255,22);"
@@ -154,6 +153,7 @@ class LightboxVideoOverlay(QWidget):
         )
         for b in (self.btn_play, self.btn_pause, self.btn_mute, self.btn_close):
             b.setStyleSheet(btn_css)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self.lbl_time.setStyleSheet("color: rgba(255,255,255,170); font-size: 12px;")
         # Debug label hidden by default

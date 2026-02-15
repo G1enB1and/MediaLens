@@ -20,6 +20,7 @@ from PySide6.QtCore import (
     QSize,
     QSettings,
     QPoint,
+    QMimeData,
 )
 from PySide6.QtGui import QAction, QColor, QImageReader, QIcon
 from PySide6.QtGui import QMouseEvent
@@ -547,6 +548,144 @@ class Bridge(QObject):
         except Exception:
             return False
 
+    @Slot(str)
+    def open_in_explorer(self, path: str) -> None:
+        """Open Windows Explorer with the specified file selected or folder opened."""
+        try:
+            p = Path(path).resolve()
+            if not p.exists():
+                return
+            
+            if p.is_dir():
+                # Open the folder itself
+                subprocess.Popen(["explorer.exe", str(p)])
+            else:
+                # Select the file in its parent folder
+                # Standard Windows syntax: explorer /select,"C:\path\to\file"
+                # Using list is safer, but /select, must be followed immediately by path
+                subprocess.Popen(["explorer.exe", "/select,", str(p)])
+        except Exception:
+            pass
+
+    def _build_dropfiles_w(self, abs_paths: list[str]) -> bytes:
+        """Construct the Windows DROPFILES header + null-terminated UTF-16 strings."""
+        # struct DROPFILES { DWORD pFiles; POINT pt; BOOL fNC; BOOL fWide; }
+        # pFiles = 20 (offset to the first file)
+        # pt = (0,0) (point of drop)
+        # fNC = 0 (false)
+        # fWide = 1 (true, UTF-16)
+        import struct
+        header = struct.pack("IiiII", 20, 0, 0, 0, 1)
+        # Files are null-terminated, list ends with double null.
+        files_data = b"".join([p.encode("utf-16-le") + b"\x00\x00" for p in abs_paths]) + b"\x00\x00"
+        return header + files_data
+
+    @Slot(list)
+    def copy_to_clipboard(self, paths: list[str]) -> None:
+        """Copy file paths to the system clipboard with Windows Explorer compatibility."""
+        try:
+            clipboard = QApplication.clipboard()
+            mime = QMimeData()
+            
+            abs_paths = [str(Path(p).resolve()) for p in paths]
+            urls = [QUrl.fromLocalFile(p) for p in abs_paths]
+            mime.setUrls(urls)
+            mime.setText("\n".join(abs_paths))
+
+            # Preferred DropEffect: 5 = Copy
+            mime.setData("Preferred DropEffect", b'\x05\x00\x00\x00')
+            
+            # FileNameW: DROPFILES structure is required for Explorer to see it as a file transfer
+            mime.setData("FileNameW", self._build_dropfiles_w(abs_paths))
+            
+            clipboard.setMimeData(mime)
+        except Exception:
+            pass
+
+    @Slot(list)
+    def cut_to_clipboard(self, paths: list[str]) -> None:
+        """Cut file paths to the system clipboard (sets Preferred DropEffect)."""
+        try:
+            clipboard = QApplication.clipboard()
+            mime = QMimeData()
+            
+            abs_paths = [str(Path(p).resolve()) for p in paths]
+            urls = [QUrl.fromLocalFile(p) for p in abs_paths]
+            mime.setUrls(urls)
+            mime.setText("\n".join(abs_paths))
+
+            # Preferred DropEffect: 2 = Move
+            mime.setData("Preferred DropEffect", b'\x02\x00\x00\x00')
+            
+            mime.setData("FileNameW", self._build_dropfiles_w(abs_paths))
+            
+            clipboard.setMimeData(mime)
+        except Exception:
+            pass
+
+    @Slot(result=bool)
+    def has_files_in_clipboard(self) -> bool:
+        """Check if there are files (URLs) in the system clipboard."""
+        try:
+            clipboard = QApplication.clipboard()
+            return clipboard.mimeData().hasUrls()
+        except Exception:
+            return False
+
+    @Slot(str)
+    def paste_into_folder_async(self, target_folder: str) -> None:
+        """Paste files from clipboard into the target folder asynchronously."""
+        target_dir = Path(target_folder)
+        if not target_dir.exists() or not target_dir.is_dir():
+             self.fileOpFinished.emit("paste", False, "", "")
+             return
+
+        # Must access clipboard on main thread
+        try:
+            clipboard = QApplication.clipboard()
+            mime = clipboard.mimeData()
+            if not mime.hasUrls():
+                self.fileOpFinished.emit("paste", False, "", "")
+                return
+
+            is_move = False
+            if mime.hasFormat("Preferred DropEffect"):
+                data = mime.data("Preferred DropEffect")
+                if len(data) >= 1 and data[0] == 2:
+                    is_move = True
+
+            src_paths = [Path(url.toLocalFile()) for url in mime.urls() if url.toLocalFile()]
+        except Exception:
+            self.fileOpFinished.emit("paste", False, "", "")
+            return
+
+        def work() -> None:
+            try:
+                for src in src_paths:
+                    if not src.exists(): continue
+                    
+                    dst = target_dir / src.name
+                    # Avoid overwriting
+                    count = 1
+                    while dst.exists():
+                        dst = target_dir / f"{src.stem} ({count}){src.suffix}"
+                        count += 1
+                    
+                    if is_move:
+                        shutil.move(str(src), str(dst))
+                    else:
+                        if src.is_dir():
+                            shutil.copytree(str(src), str(dst))
+                        else:
+                            shutil.copy2(str(src), str(dst))
+                
+                self._media_cache.clear()
+                self.fileOpFinished.emit("paste", True, "", str(target_dir))
+            except Exception:
+                self.fileOpFinished.emit("paste", False, "", "")
+
+        threading.Thread(target=work, daemon=True).start()
+
     # reshuffle_gallery removed intentionally (kept randomize-per-session without UI clutter)
 
     @Slot(str, result=float)
@@ -987,6 +1126,16 @@ class MainWindow(QMainWindow):
             act_hide = menu.addAction("Hide Folder")
 
         act_rename = menu.addAction("Rename…")
+        
+        menu.addSeparator()
+        act_explorer = menu.addAction("Open in File Explorer")
+        act_cut = menu.addAction("Cut")
+        act_copy = menu.addAction("Copy")
+        act_paste = menu.addAction("Paste")
+        
+        # Disable paste if no files in clipboard
+        if not self.bridge.has_files_in_clipboard():
+            act_paste.setEnabled(False)
 
         chosen = menu.exec(self.tree.viewport().mapToGlobal(pos))
 
@@ -1013,6 +1162,18 @@ class MainWindow(QMainWindow):
                     parent = str(Path(new_path).parent)
                     self.tree.setCurrentIndex(self.fs_model.index(parent))
                     self._set_selected_folder(parent)
+
+        if chosen == act_explorer:
+            self.bridge.open_in_explorer(folder_path)
+
+        if chosen == act_cut:
+            self.bridge.cut_to_clipboard([folder_path])
+
+        if chosen == act_copy:
+            self.bridge.copy_to_clipboard([folder_path])
+
+        if chosen == act_paste:
+            self.bridge.paste_into_folder_async(folder_path)
 
     def choose_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Choose a media folder")

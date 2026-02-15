@@ -1,136 +1,146 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>MediaManagerX</title>
-    <link rel="icon" type="image/png" href="favicon.png" />
-    <link rel="stylesheet" href="style.css" />
-  </head>
-  <body>
-    <div id="app">
-      <header>
-        <div class="brand">
-          <img src="media-manager-logo-64.png" alt="" class="logo" />
-          MediaManagerX
-        </div>
-        <div class="search">
-          <input id="searchInput" class="search-input" placeholder="Search…" />
-        </div>
-        <div class="status" id="status">Starting…</div>
-        <button class="icon-btn" id="openSettings" title="Settings">⚙</button>
-      </header>
 
-      <div class="ctx" id="ctx" hidden>
-        <button class="ctx-item" id="ctxHide">Hide</button>
-        <button class="ctx-item" id="ctxUnhide">Unhide</button>
-        <button class="ctx-item" id="ctxRename">Rename…</button>
-        <button class="ctx-item" id="ctxMeta">Show metadata</button>
-        <div class="ctx-sep"></div>
-        <button class="ctx-item" id="ctxCancel">Cancel</button>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MediaManagerX</title>
+  <link rel="icon" type="image/png" href="favicon.png" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+  <div id="app">
+    <header>
+      <div class="brand">
+        <img src="media-manager-logo-64.png" alt="" class="logo" />
+        MediaManagerX
       </div>
+      <div class="search">
+        <input id="searchInput" class="search-input" placeholder="Search…" />
+      </div>
+      <div class="status" id="status">Starting…</div>
+      <button class="icon-btn" id="openSettings" title="Settings">⚙</button>
+    </header>
 
-      <main>
-        <div class="pane">
-          <div class="kv">
-            <div class="k">Selected folder</div>
-            <div class="v" id="selectedFolder">(none)</div>
-          </div>
-
-          <div class="toolbar" data-pager>
-            <div class="pager">
-              <button class="tb-btn" data-prev>Prev</button>
-              <div class="tb-links" data-links></div>
-              <button class="tb-btn" data-next>Next</button>
-            </div>
-          </div>
-
-          <div class="masonry" id="mediaList"></div>
-
-          <div class="toolbar bottom" data-pager>
-            <div class="pager">
-              <button class="tb-btn" data-prev>Prev</button>
-              <div class="tb-links" data-links></div>
-              <button class="tb-btn" data-next>Next</button>
-            </div>
-          </div>
-
-          <div class="loading" id="globalLoading">
-            <div class="loading-card">
-              <div class="spinner" aria-hidden="true"></div>
-              <div class="loading-text" id="loadingText">Loading…</div>
-              <div class="bar"><div class="bar-fill" id="loadingBar" style="width: 10%"></div></div>
-            </div>
-          </div>
-
-          <div class="lightbox" id="lightbox" hidden>
-            <div class="lightbox-backdrop" id="lightboxBackdrop"></div>
-            <div class="lightbox-ui">
-              <button class="lb-btn" id="lbPrev" title="Previous (←)">←</button>
-              <button class="lb-btn" id="lbNext" title="Next (→)">→</button>
-              <button class="lb-btn lb-close" id="lbClose" title="Close (Esc)">✕</button>
-            </div>
-            <div class="lightbox-content">
-              <img id="lightboxImg" alt="" />
-              <video id="lightboxVideo" controls></video>
-            </div>
-          </div>
-
-          <div class="modal" id="settingsModal" hidden>
-            <div class="modal-backdrop" id="settingsBackdrop"></div>
-            <div class="modal-card">
-              <div class="modal-title">Settings</div>
-              <label class="toggle">
-                <input type="checkbox" id="toggleRandomize" />
-                <span>Randomize gallery order</span>
-              </label>
-              <div class="field">
-                <div class="field-label">Starting folder</div>
-                <div class="field-row">
-                  <input class="text" id="startFolder" placeholder="(not set)" />
-                  <button class="tb-btn" id="browseStartFolder">Browse…</button>
-                </div>
-              </div>
-
-              <label class="toggle">
-                <input type="checkbox" id="toggleRestoreLast" />
-                <span>Restore previous folder on launch</span>
-              </label>
-
-              <label class="toggle">
-                <input type="checkbox" id="toggleHideDot" />
-                <span>Hide dot folders/files (start with “.”)</span>
-              </label>
-
-              <label class="toggle">
-                <input type="checkbox" id="toggleLeftPanel" />
-                <span>Show left folder panel</span>
-              </label>
-
-              <label class="toggle">
-                <input type="checkbox" id="toggleRightPanel" />
-                <span>Show right metadata panel</span>
-              </label>
-
-              <div class="field">
-                <div class="field-label">Accent color</div>
-                <div class="field-row">
-                  <input class="color" type="color" id="accentColor" />
-                  <div class="hint">Used for progress, links, and highlights.</div>
-                </div>
-              </div>
-
-              <div class="modal-actions">
-                <button class="tb-btn" id="closeSettings">Close</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </main>
+    <div class="ctx" id="ctx" hidden>
+      <button class="ctx-item" id="ctxHide">Hide</button>
+      <button class="ctx-item" id="ctxUnhide">Unhide</button>
+      <button class="ctx-item" id="ctxRename">Rename…</button>
+      <button class="ctx-item" id="ctxMeta">Show metadata</button>
+      <button class="ctx-item" id="ctxExplorer">Open in Explorer</button>
+      <div class="ctx-sep"></div>
+      <button class="ctx-item" id="ctxCut">Cut</button>
+      <button class="ctx-item" id="ctxCopy">Copy</button>
+      <button class="ctx-item" id="ctxPaste">Paste</button>
+      <div class="ctx-sep"></div>
+      <button class="ctx-item" id="ctxCancel">Cancel</button>
     </div>
 
-    <!-- QWebChannel is provided by Qt; this path works in Qt WebEngine -->
-    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
-    <script src="app.js"></script>
-  </body>
+    <main>
+      <div class="pane">
+        <div class="kv">
+          <div class="k">Selected folder</div>
+          <div class="v" id="selectedFolder">(none)</div>
+        </div>
+
+        <div class="toolbar" data-pager>
+          <div class="pager">
+            <button class="tb-btn" data-prev>Prev</button>
+            <div class="tb-links" data-links></div>
+            <button class="tb-btn" data-next>Next</button>
+          </div>
+        </div>
+
+        <div class="masonry" id="mediaList"></div>
+
+        <div class="toolbar bottom" data-pager>
+          <div class="pager">
+            <button class="tb-btn" data-prev>Prev</button>
+            <div class="tb-links" data-links></div>
+            <button class="tb-btn" data-next>Next</button>
+          </div>
+        </div>
+
+        <div class="loading" id="globalLoading">
+          <div class="loading-card">
+            <div class="spinner" aria-hidden="true"></div>
+            <div class="loading-text" id="loadingText">Loading…</div>
+            <div class="bar">
+              <div class="bar-fill" id="loadingBar" style="width: 10%"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="lightbox" id="lightbox" hidden>
+          <div class="lightbox-backdrop" id="lightboxBackdrop"></div>
+          <div class="lightbox-ui">
+            <button class="lb-btn" id="lbPrev" title="Previous (←)">←</button>
+            <button class="lb-btn" id="lbNext" title="Next (→)">→</button>
+            <button class="lb-btn lb-close" id="lbClose" title="Close (Esc)">✕</button>
+          </div>
+          <div class="lightbox-content">
+            <img id="lightboxImg" alt="" />
+            <video id="lightboxVideo" controls></video>
+          </div>
+        </div>
+
+        <div class="modal" id="settingsModal" hidden>
+          <div class="modal-backdrop" id="settingsBackdrop"></div>
+          <div class="modal-card">
+            <div class="modal-title">Settings</div>
+            <label class="toggle">
+              <input type="checkbox" id="toggleRandomize" />
+              <span>Randomize gallery order</span>
+            </label>
+            <div class="field">
+              <div class="field-label">Starting folder</div>
+              <div class="field-row">
+                <input class="text" id="startFolder" placeholder="(not set)" />
+                <button class="tb-btn" id="browseStartFolder">Browse…</button>
+              </div>
+            </div>
+
+            <label class="toggle">
+              <input type="checkbox" id="toggleRestoreLast" />
+              <span>Restore previous folder on launch</span>
+            </label>
+
+            <label class="toggle">
+              <input type="checkbox" id="toggleHideDot" />
+              <span>Hide dot folders/files (start with “.”)</span>
+            </label>
+
+            <label class="toggle">
+              <input type="checkbox" id="toggleLeftPanel" />
+              <span>Show left folder panel</span>
+            </label>
+
+            <label class="toggle">
+              <input type="checkbox" id="toggleRightPanel" />
+              <span>Show right metadata panel</span>
+            </label>
+
+            <div class="field">
+              <div class="field-label">Accent color</div>
+              <div class="field-row">
+                <input class="color" type="color" id="accentColor" />
+                <div class="hint">Used for progress, links, and highlights.</div>
+              </div>
+            </div>
+
+            <div class="modal-actions">
+              <button class="tb-btn" id="closeSettings">Close</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- QWebChannel is provided by Qt; this path works in Qt WebEngine -->
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+  <script src="app.js"></script>
+</body>
+
 </html>
