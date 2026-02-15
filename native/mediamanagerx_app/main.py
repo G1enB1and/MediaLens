@@ -55,6 +55,10 @@ class FolderTreeView(QTreeView):
     the active selection (unless explicitly choosing/selecting).
     """
 
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setMouseTracking(True)
+
     def mousePressEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
         if event.button() == Qt.MouseButton.RightButton:
             # Let the customContextMenuRequested signal fire, but avoid changing
@@ -63,6 +67,14 @@ class FolderTreeView(QTreeView):
             self.customContextMenuRequested.emit(event.position().toPoint())
             return
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
+        idx = self.indexAt(event.position().toPoint())
+        if idx.isValid():
+            self.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+        else:
+            self.viewport().setCursor(Qt.CursorShape.ArrowCursor)
+        super().mouseMoveEvent(event)
 
 
 class Bridge(QObject):
@@ -664,9 +676,11 @@ class MainWindow(QMainWindow):
         self._build_layout()
 
     def _build_menu(self) -> None:
-        file_menu = self.menuBar().addMenu("&File")
+        menubar = self.menuBar()
 
-        edit_menu = self.menuBar().addMenu("&Edit")
+        file_menu = menubar.addMenu("&File")
+
+        edit_menu = menubar.addMenu("&Edit")
         settings_action = QAction("&Settings", self)
         settings_action.triggered.connect(self.open_settings)
         edit_menu.addAction(settings_action)
@@ -681,7 +695,7 @@ class MainWindow(QMainWindow):
         quit_action.triggered.connect(self.close)
         file_menu.addAction(quit_action)
 
-        view_menu = self.menuBar().addMenu("&View")
+        view_menu = menubar.addMenu("&View")
 
         toggle_left = QAction("Toggle Left Panel", self)
         toggle_left.triggered.connect(lambda: self._toggle_panel_setting("ui/show_left_panel"))
@@ -698,7 +712,7 @@ class MainWindow(QMainWindow):
         devtools_action.triggered.connect(self.toggle_devtools)
         view_menu.addAction(devtools_action)
 
-        help_menu = self.menuBar().addMenu("&Help")
+        help_menu = menubar.addMenu("&Help")
         about_action = QAction("&About", self)
         about_action.triggered.connect(self.about)
         help_menu.addAction(about_action)

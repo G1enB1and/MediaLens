@@ -79,6 +79,7 @@ header {
 
 .icon-btn:hover {
   background: rgba(255, 255, 255, 0.06);
+  cursor: pointer;
 }
 
 .ctx {
@@ -108,6 +109,7 @@ header {
 
 .ctx-item:hover {
   background: rgba(255, 255, 255, 0.06);
+  cursor: pointer;
 }
 
 .ctx-sep {
@@ -154,6 +156,7 @@ header {
   align-items: center;
   color: var(--fg);
   font-size: 13px;
+  cursor: pointer;
 }
 
 .field {
@@ -183,6 +186,7 @@ header {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: transparent;
+  cursor: pointer;
 }
 
 .hint {
@@ -323,6 +327,7 @@ main {
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.03);
   color: var(--fg);
+  cursor: pointer;
 }
 
 .tb-btn:disabled {
@@ -345,6 +350,7 @@ main {
   background: rgba(255, 255, 255, 0.02);
   color: var(--muted);
   font-size: 12px;
+  cursor: pointer;
 }
 
 .tb-page[aria-current="page"] {
@@ -487,6 +493,7 @@ p {
   background: rgba(20, 20, 25, 0.65);
   color: rgba(255, 255, 255, 0.9);
   font-size: 18px;
+  cursor: pointer;
 }
 
 #lbPrev {
