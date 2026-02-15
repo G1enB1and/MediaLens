@@ -198,8 +198,17 @@ header {
 }
 
 .brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   font-weight: 700;
   letter-spacing: 0.2px;
+}
+
+.logo {
+  height: 24px;
+  width: 24px;
+  object-fit: contain;
 }
 
 .status {

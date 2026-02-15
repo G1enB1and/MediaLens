@@ -21,7 +21,7 @@ from PySide6.QtCore import (
     QSettings,
     QPoint,
 )
-from PySide6.QtGui import QAction, QColor, QImageReader
+from PySide6.QtGui import QAction, QColor, QImageReader, QIcon
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -648,6 +648,11 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("MediaManagerX")
         self.resize(1200, 800)
+
+        # Set window icon
+        icon_path = Path(__file__).with_name("web") / "favicon.png"
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
 
         self.bridge = Bridge()
         self.bridge.openVideoRequested.connect(self._open_video_overlay)
