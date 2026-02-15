@@ -632,6 +632,35 @@ class Bridge(QObject):
         except Exception:
             return False
 
+    @Slot(str, result=bool)
+    def delete_path(self, path_str: str) -> bool:
+        """Delete a file or folder from the filesystem."""
+        try:
+            p = Path(path_str)
+            if not p.exists():
+                return False
+            
+            if p.is_dir():
+                shutil.rmtree(p)
+            else:
+                p.unlink()
+            
+            self._media_cache.clear()
+            return True
+        except Exception:
+            return False
+
+    @Slot(str, str, result=str)
+    def create_folder(self, parent_path: str, name: str) -> str:
+        """Create a new folder inside the parent path."""
+        try:
+            p = Path(parent_path) / name
+            p.mkdir(parents=True, exist_ok=True)
+            self._media_cache.clear()
+            return str(p)
+        except Exception:
+            return ""
+
     @Slot(str)
     def paste_into_folder_async(self, target_folder: str) -> None:
         """Paste files from clipboard into the target folder asynchronously."""
@@ -1128,6 +1157,10 @@ class MainWindow(QMainWindow):
         act_rename = menu.addAction("Rename…")
         
         menu.addSeparator()
+        act_new_folder = menu.addAction("New Folder…")
+        act_delete = menu.addAction("Delete")
+        
+        menu.addSeparator()
         act_explorer = menu.addAction("Open in File Explorer")
         act_cut = menu.addAction("Cut")
         act_copy = menu.addAction("Copy")
@@ -1174,6 +1207,33 @@ class MainWindow(QMainWindow):
 
         if chosen == act_paste:
             self.bridge.paste_into_folder_async(folder_path)
+
+        if chosen == act_new_folder:
+            self._create_folder_at(folder_path)
+
+        if chosen == act_delete:
+            self._delete_item(folder_path)
+
+    def _create_folder_at(self, parent_path: str):
+        name, ok = QInputDialog.getText(self, "New Folder", "Folder Name:")
+        if ok and name:
+            new_path = self.bridge.create_folder(parent_path, name)
+            if new_path:
+                 # QFileSystemModel auto-updates, but we might want to select it
+                 pass
+
+    def _delete_item(self, path_str: str):
+        p = Path(path_str)
+        if p.is_dir():
+            reply = QMessageBox.question(
+                self, "Confirm Delete",
+                f"Are you sure you want to delete the folder and all its contents?\n\n{p.name}",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        
+        self.bridge.delete_path(path_str)
 
     def choose_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Choose a media folder")

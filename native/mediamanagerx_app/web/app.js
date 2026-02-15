@@ -137,12 +137,16 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
     });
   }
 
-  // Show/hide per-item actions if clicking background
+  // Show/hide per-item actions
   const hasItem = !!item;
-  ['ctxHide', 'ctxUnhide', 'ctxRename', 'ctxMeta', 'ctxExplorer', 'ctxCut', 'ctxCopy'].forEach(id => {
+  ['ctxHide', 'ctxUnhide', 'ctxRename', 'ctxDelete', 'ctxMeta', 'ctxExplorer', 'ctxCut', 'ctxCopy'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = hasItem ? 'block' : 'none';
   });
+
+  // New folder is shown only when right-clicking background (no item)
+  const newFolderBtn = document.getElementById('ctxNewFolder');
+  if (newFolderBtn) newFolderBtn.style.display = hasItem ? 'none' : 'block';
 
   // Refine Hide/Unhide display
   if (hasItem) {
@@ -255,6 +259,34 @@ function wireCtxMenu() {
         if (!folder) return;
         setGlobalLoading(true, 'Pasting…', 25);
         gBridge.paste_into_folder_async(folder);
+      });
+    });
+  }
+
+  const deleteBtn = document.getElementById('ctxDelete');
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', () => {
+      const item = gCtxItem;
+      hideCtx();
+      if (!item || !item.path || !gBridge || !gBridge.delete_path) return;
+      gBridge.delete_path(item.path, function (ok) {
+        if (ok) refreshFromBridge(gBridge);
+      });
+    });
+  }
+
+  const newFolderBtn = document.getElementById('ctxNewFolder');
+  if (newFolderBtn) {
+    newFolderBtn.addEventListener('click', () => {
+      hideCtx();
+      const name = prompt('New Folder Name:');
+      if (!name) return;
+      if (!gBridge || !gBridge.create_folder || !gBridge.get_selected_folder) return;
+      gBridge.get_selected_folder(function (folder) {
+        if (!folder) return;
+        gBridge.create_folder(folder, name, function (res) {
+          if (res) refreshFromBridge(gBridge);
+        });
       });
     });
   }
