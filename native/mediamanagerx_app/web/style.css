@@ -7,9 +7,16 @@
   --accent: #8ab4f8;
 }
 
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 html,
 body {
   height: 100%;
+  overflow-x: hidden;
 }
 
 body {
@@ -20,7 +27,9 @@ body {
 }
 
 /* Prevent a white flash while the page/app initializes */
-html { background: var(--bg); }
+html {
+  background: var(--bg);
+}
 
 #app {
   height: 100%;
@@ -48,7 +57,7 @@ header {
   height: 34px;
   border-radius: 12px;
   border: 1px solid var(--border);
-  background: rgba(255,255,255,0.03);
+  background: rgba(255, 255, 255, 0.03);
   color: var(--fg);
   padding: 0 12px;
 }
@@ -64,12 +73,12 @@ header {
   height: 34px;
   border-radius: 10px;
   border: 1px solid var(--border);
-  background: rgba(255,255,255,0.03);
+  background: rgba(255, 255, 255, 0.03);
   color: var(--fg);
 }
 
 .icon-btn:hover {
-  background: rgba(255,255,255,0.06);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .ctx {
@@ -80,10 +89,12 @@ header {
   border-radius: 12px;
   background: rgba(23, 26, 33, 0.98);
   overflow: hidden;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
 }
 
-.ctx[hidden] { display: none; }
+.ctx[hidden] {
+  display: none;
+}
 
 .ctx-item {
   width: 100%;
@@ -96,7 +107,7 @@ header {
 }
 
 .ctx-item:hover {
-  background: rgba(255,255,255,0.06);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .ctx-sep {
@@ -110,12 +121,14 @@ header {
   z-index: 8000;
 }
 
-.modal[hidden] { display: none; }
+.modal[hidden] {
+  display: none;
+}
 
 .modal-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0,0,0,0.55);
+  background: rgba(0, 0, 0, 0.55);
 }
 
 .modal-card {
@@ -148,7 +161,7 @@ header {
   padding: 10px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: rgba(255,255,255,0.02);
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .field-label {
@@ -182,7 +195,7 @@ header {
   height: 30px;
   border-radius: 8px;
   border: 1px solid var(--border);
-  background: rgba(0,0,0,0.2);
+  background: rgba(0, 0, 0, 0.2);
   color: var(--fg);
   padding: 0 10px;
 }
@@ -404,7 +417,7 @@ p {
   inset: 0;
   display: grid;
   place-items: center;
-  background: rgba(255,255,255,0.02);
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .skel::before {
@@ -412,7 +425,7 @@ p {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  border: 3px solid rgba(255,255,255,0.12);
+  border: 3px solid rgba(255, 255, 255, 0.12);
   border-top-color: var(--accent);
   animation: spin 1s linear infinite;
 }
