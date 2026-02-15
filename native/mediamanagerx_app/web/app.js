@@ -158,7 +158,7 @@ function wireCtxMenu() {
       if (!item || !item.path || !gBridge || !gBridge.hide_by_renaming_dot_async) return;
       if (fromLb) closeLightbox();
       setGlobalLoading(true, 'Hiding…', 25);
-      gBridge.hide_by_renaming_dot_async(item.path, function () {});
+      gBridge.hide_by_renaming_dot_async(item.path, function () { });
     });
   }
 
@@ -170,7 +170,7 @@ function wireCtxMenu() {
       if (!item || !item.path || !gBridge || !gBridge.unhide_by_renaming_dot_async) return;
       if (fromLb) closeLightbox();
       setGlobalLoading(true, 'Unhiding…', 25);
-      gBridge.unhide_by_renaming_dot_async(item.path, function () {});
+      gBridge.unhide_by_renaming_dot_async(item.path, function () { });
     });
   }
 
@@ -185,7 +185,7 @@ function wireCtxMenu() {
       if (!next || next === curName) return;
       if (fromLb) closeLightbox();
       setGlobalLoading(true, 'Renaming…', 25);
-      gBridge.rename_path_async(item.path, next, function () {});
+      gBridge.rename_path_async(item.path, next, function () { });
     });
   }
 
@@ -194,7 +194,7 @@ function wireCtxMenu() {
       const item = gCtxItem;
       hideCtx();
       if (!item || !item.path || !gBridge || !gBridge.show_metadata) return;
-      gBridge.show_metadata(item.path, function () {});
+      gBridge.show_metadata(item.path, function () { });
     });
   }
 }
@@ -322,7 +322,7 @@ function openLightboxByIndex(idx) {
 
   // Stop native overlay ONLY if it was previously opened for a video.
   if (gLightboxNativeVideo && gBridge && gBridge.close_native_video) {
-    gBridge.close_native_video(function () {});
+    gBridge.close_native_video(function () { });
   }
   gLightboxNativeVideo = false;
 
@@ -354,8 +354,9 @@ function openLightboxByIndex(idx) {
       gLightboxNativeVideo = true;
       gBridge.get_video_duration_seconds(item.path, function (dur) {
         const seconds = Number(dur || 0);
-        const short = seconds > 0 && seconds < 60;
-        gBridge.open_native_video(item.path, short, short, short);
+        const loop = seconds > 0 && seconds < 60;
+        // Always autoplay, always muted, loop only if short
+        gBridge.open_native_video(item.path, true, loop, true);
       });
     }
     return;
@@ -390,7 +391,7 @@ function closeLightbox() {
   vid.style.display = 'none';
 
   if (!gClosingFromNative && gBridge && gBridge.close_native_video) {
-    gBridge.close_native_video(function () {});
+    gBridge.close_native_video(function () { });
   }
 
   gIndex = -1;
@@ -601,7 +602,7 @@ function wireSettings() {
         if (!path) return;
         if (startInput) startInput.value = path;
         if (gBridge.set_setting_str) {
-          gBridge.set_setting_str('gallery.start_folder', path, function () {});
+          gBridge.set_setting_str('gallery.start_folder', path, function () { });
         }
       });
     });
@@ -610,7 +611,7 @@ function wireSettings() {
   if (startInput) {
     startInput.addEventListener('change', () => {
       if (!gBridge || !gBridge.set_setting_str) return;
-      gBridge.set_setting_str('gallery.start_folder', startInput.value || '', function () {});
+      gBridge.set_setting_str('gallery.start_folder', startInput.value || '', function () { });
     });
   }
 
@@ -642,14 +643,14 @@ function wireSettings() {
   if (leftToggle) {
     leftToggle.addEventListener('change', () => {
       if (!gBridge || !gBridge.set_setting_bool) return;
-      gBridge.set_setting_bool('ui.show_left_panel', !!leftToggle.checked, function () {});
+      gBridge.set_setting_bool('ui.show_left_panel', !!leftToggle.checked, function () { });
     });
   }
 
   if (rightToggle) {
     rightToggle.addEventListener('change', () => {
       if (!gBridge || !gBridge.set_setting_bool) return;
-      gBridge.set_setting_bool('ui.show_right_panel', !!rightToggle.checked, function () {});
+      gBridge.set_setting_bool('ui.show_right_panel', !!rightToggle.checked, function () { });
     });
   }
 
@@ -658,7 +659,7 @@ function wireSettings() {
       const v = accentInput.value || '#8ab4f8';
       document.documentElement.style.setProperty('--accent', v);
       if (gBridge && gBridge.set_setting_str) {
-        gBridge.set_setting_str('ui.accent_color', v, function () {});
+        gBridge.set_setting_str('ui.accent_color', v, function () { });
       }
     });
   }

@@ -47,6 +47,9 @@ class VideoFrameWidget(QWidget):
 
     def paintEvent(self, event) -> None:  # type: ignore[override]
         p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
         # Do NOT paint black behind the video; let the overlay backdrop show.
         p.fillRect(self.rect(), Qt.GlobalColor.transparent)
 
@@ -57,13 +60,13 @@ class VideoFrameWidget(QWidget):
         target = self.rect()
         src = self._img.size()
         scaled = src.scaled(target.size(), Qt.AspectRatioMode.KeepAspectRatio)
+        
+        # Center within the widget
         x = (target.width() - scaled.width()) // 2
         y = (target.height() - scaled.height()) // 2
-        p.drawImage(
-            x,
-            y,
-            self._img.scaled(scaled, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation),
-        )
+        
+        target_rect = QRect(x, y, scaled.width(), scaled.height())
+        p.drawImage(target_rect, self._img)
 
 
 class LightboxVideoOverlay(QWidget):
@@ -142,6 +145,7 @@ class LightboxVideoOverlay(QWidget):
             " border: none;"
             " padding: 6px 10px;"
             " font-size: 16px;"
+            " cursor: pointer;"
             " }"
             "QPushButton:hover {"
             " background: rgba(255,255,255,22);"
@@ -251,7 +255,8 @@ class LightboxVideoOverlay(QWidget):
         super().keyPressEvent(event)
 
     def _compute_video_rect(self) -> QRect:
-        pad = 20
+        # Removed internal padding (pad=0) to maximize fill space.
+        pad = 0
         bounds = self.rect().adjusted(pad, pad, -pad, -pad)
 
         if not self._native_size or self._native_size.width() <= 0 or self._native_size.height() <= 0:
@@ -293,6 +298,7 @@ class LightboxVideoOverlay(QWidget):
         path = str(Path(req.path))
         self._loop = bool(req.loop)
         self.audio.setMuted(bool(req.muted))
+        self.btn_mute.setText("🔇" if req.muted else "🔊")
 
         if req.width > 0 and req.height > 0:
             self._native_size = QSize(int(req.width), int(req.height))
