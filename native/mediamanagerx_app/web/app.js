@@ -718,6 +718,17 @@ function wireSettings() {
     });
   }
 
+  const loadNowBtn = document.getElementById('loadStartFolderNow');
+  if (loadNowBtn) {
+    loadNowBtn.addEventListener('click', () => {
+      if (!gBridge || !gBridge.load_folder_now) return;
+      if (startInput) {
+        const path = startInput.value;
+        if (path) gBridge.load_folder_now(path);
+      }
+    });
+  }
+
   if (startInput) {
     startInput.addEventListener('change', () => {
       if (!gBridge || !gBridge.set_setting_str) return;

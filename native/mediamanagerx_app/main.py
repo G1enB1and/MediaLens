@@ -132,6 +132,7 @@ class Bridge(QObject):
 
     uiFlagChanged = Signal(str, bool)  # key, value
     metadataRequested = Signal(str)
+    loadFolderRequested = Signal(str)
 
     # Async file ops (so WebEngine UI doesn't freeze during rename)
     fileOpFinished = Signal(str, bool, str, str)  # op, ok, old_path, new_path
@@ -448,6 +449,11 @@ class Bridge(QObject):
             return True
         except Exception:
             return False
+
+    @Slot(str)
+    def load_folder_now(self, path: str) -> None:
+        """Trigger immediate loading of the specified folder."""
+        self.loadFolderRequested.emit(str(path))
 
     @Slot(result=str)
     def pick_folder(self) -> str:
@@ -896,6 +902,7 @@ class MainWindow(QMainWindow):
         self.bridge.closeVideoRequested.connect(self._close_video_overlay)
         self.bridge.uiFlagChanged.connect(self._apply_ui_flag)
         self.bridge.metadataRequested.connect(self._show_metadata_for_path)
+        self.bridge.loadFolderRequested.connect(self._on_load_folder_requested)
 
         self._build_menu()
         self._build_layout()
@@ -995,11 +1002,19 @@ class MainWindow(QMainWindow):
         self.tree.setModel(self.proxy_model)
         
         # Set the tree root to the PARENT of our desired root folder
-        # so that the root folder itself is visible as a child.
-        root_parent = default_root.parent
         # setRootPath returns the QModelIndex for the path, and ensures it's watched/loaded.
+        # We set both the root and parent to ensure icons and child info are primed.
+        self.fs_model.setRootPath(str(default_root))
+        root_parent = default_root.parent
         parent_idx = self.fs_model.setRootPath(str(root_parent))
-        self.tree.setRootIndex(self.proxy_model.mapFromSource(parent_idx))
+        
+        proxy_parent_idx = self.proxy_model.mapFromSource(parent_idx)
+        self.tree.setRootIndex(proxy_parent_idx)
+
+        # Expand the root folder by default
+        root_idx = self.proxy_model.mapFromSource(self.fs_model.index(str(default_root)))
+        if root_idx.isValid():
+            self.tree.expand(root_idx)
         
         self.tree.setHeaderHidden(True)
         self.tree.setAnimated(True)
@@ -1132,6 +1147,32 @@ class MainWindow(QMainWindow):
 
     def _set_selected_folder(self, folder_path: str) -> None:
         self.bridge.set_selected_folder(folder_path)
+
+    def _on_load_folder_requested(self, folder_path: str) -> None:
+        if not folder_path:
+            return
+        p = Path(folder_path)
+        if not p.exists() or not p.is_dir():
+            QMessageBox.warning(self, "Invalid Folder", f"The folder does not exist:\n{folder_path}")
+            return
+            
+        path_str = str(p.resolve())
+        # Update the tree root and select the chosen folder.
+        self.proxy_model.setRootPath(path_str)
+        root_parent = p.resolve().parent
+        
+        # Prime both paths for icons and children
+        self.fs_model.setRootPath(path_str)
+        parent_idx = self.fs_model.setRootPath(str(root_parent))
+        
+        self.tree.setRootIndex(self.proxy_model.mapFromSource(parent_idx))
+        
+        root_idx = self.proxy_model.mapFromSource(self.fs_model.index(path_str))
+        self.tree.setCurrentIndex(root_idx)
+        if root_idx.isValid():
+            self.tree.expand(root_idx)
+            
+        self._set_selected_folder(path_str)
 
     def _on_tree_selection(self, *_args) -> None:
         idx = self.tree.currentIndex()
@@ -1310,14 +1351,7 @@ class MainWindow(QMainWindow):
     def choose_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Choose a media folder")
         if folder:
-            folder_path = str(Path(folder))
-            # Update the tree root and select the chosen folder.
-            self.proxy_model.setRootPath(folder_path)
-            root_parent = Path(folder_path).parent
-            parent_idx = self.fs_model.setRootPath(str(root_parent))
-            self.tree.setRootIndex(self.proxy_model.mapFromSource(parent_idx))
-            self.tree.setCurrentIndex(self.proxy_model.mapFromSource(self.fs_model.index(folder_path)))
-            self._set_selected_folder(folder_path)
+            self._on_load_folder_requested(folder)
 
     def _open_video_overlay(
         self, path: str, autoplay: bool, loop: bool, muted: bool, width: int, height: int

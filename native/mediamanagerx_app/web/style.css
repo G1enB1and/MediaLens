@@ -360,6 +360,18 @@ main {
   opacity: 0.45;
 }
 
+.tb-btn.highlight {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.tb-btn.highlight:hover {
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+  border-color: var(--accent);
+}
+
 .tb-links {
   display: flex;
   align-items: center;
