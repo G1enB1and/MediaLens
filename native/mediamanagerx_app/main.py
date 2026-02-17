@@ -48,6 +48,7 @@ from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage
 from native.mediamanagerx_app.video_overlay import LightboxVideoOverlay, VideoRequest
+from PySide6.QtCore import QSortFilterProxyModel, QModelIndex
 
 
 class FolderTreeView(QTreeView):
@@ -77,6 +78,51 @@ class FolderTreeView(QTreeView):
         else:
             self.viewport().setCursor(Qt.CursorShape.ArrowCursor)
         super().mouseMoveEvent(event)
+
+
+class RootFilterProxyModel(QSortFilterProxyModel):
+    """Filters a QFileSystemModel to only show a specific root folder and its children.
+    
+    Siblings of the root folder are hidden.
+    """
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._root_path: str = ""
+
+    def setRootPath(self, path: str) -> None:
+        self._root_path = str(Path(path).resolve())
+        self.invalidateFilter()
+
+    def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:
+        source_model = self.sourceModel()
+        if not isinstance(source_model, QFileSystemModel):
+            return True
+            
+        # Get the path of the item being checked
+        idx = source_model.index(source_row, 0, source_parent)
+        path_str = source_model.filePath(idx)
+        if not path_str:
+            return True # Allow it to load
+            
+        try:
+            item_p = Path(path_str).resolve()
+            root_p = Path(self._root_path).resolve()
+            
+            # 1. Accept the root folder itself
+            if item_p == root_p:
+                return True
+                
+            # 2. Accept children/descendants of the root folder
+            if root_p in item_p.parents:
+                return True
+                
+            # 3. Accept ancestors of the root folder (so we can reach it from drive)
+            if item_p in root_p.parents:
+                return True
+                
+            return False
+        except Exception:
+            return True
 
 
 class Bridge(QObject):
@@ -940,16 +986,28 @@ class MainWindow(QMainWindow):
         self.fs_model.setFilter(QDir.Filter.AllDirs | QDir.Filter.NoDotAndDotDot | QDir.Filter.Drives)
         self.fs_model.setRootPath(str(default_root))
 
+        # Use a proxy model to show the root folder itself at the top.
+        self.proxy_model = RootFilterProxyModel(self)
+        self.proxy_model.setSourceModel(self.fs_model)
+        self.proxy_model.setRootPath(str(default_root))
+
         self.tree = FolderTreeView()
-        self.tree.setModel(self.fs_model)
-        self.tree.setRootIndex(self.fs_model.index(str(default_root)))
+        self.tree.setModel(self.proxy_model)
+        
+        # Set the tree root to the PARENT of our desired root folder
+        # so that the root folder itself is visible as a child.
+        root_parent = default_root.parent
+        # setRootPath returns the QModelIndex for the path, and ensures it's watched/loaded.
+        parent_idx = self.fs_model.setRootPath(str(root_parent))
+        self.tree.setRootIndex(self.proxy_model.mapFromSource(parent_idx))
+        
         self.tree.setHeaderHidden(True)
         self.tree.setAnimated(True)
         self.tree.setIndentation(14)
         self.tree.setExpandsOnDoubleClick(True)
 
-        # Hide columns: keep only name
-        for col in range(1, self.fs_model.columnCount()):
+        # Hide columns: keep only name (indices are on the proxy model)
+        for col in range(1, self.proxy_model.columnCount()):
             self.tree.hideColumn(col)
 
         self.tree.selectionModel().selectionChanged.connect(self._on_tree_selection)
@@ -1079,7 +1137,9 @@ class MainWindow(QMainWindow):
         idx = self.tree.currentIndex()
         if not idx.isValid():
             return
-        path = self.fs_model.filePath(idx)
+        # mapFromProxy
+        source_idx = self.proxy_model.mapToSource(idx)
+        path = self.fs_model.filePath(source_idx)
         if path:
             self._set_selected_folder(path)
 
@@ -1149,7 +1209,8 @@ class MainWindow(QMainWindow):
         if not idx.isValid():
             return
 
-        folder_path = self.fs_model.filePath(idx)
+        source_idx = self.proxy_model.mapToSource(idx)
+        folder_path = self.fs_model.filePath(source_idx)
         if not folder_path:
             return
 
@@ -1187,14 +1248,14 @@ class MainWindow(QMainWindow):
             new_path = self.bridge.hide_by_renaming_dot(folder_path)
             if new_path:
                 parent = str(Path(folder_path).parent)
-                self.tree.setCurrentIndex(self.fs_model.index(parent))
+                self.tree.setCurrentIndex(self.proxy_model.mapFromSource(self.fs_model.index(parent)))
                 self._set_selected_folder(parent)
 
         if chosen == act_unhide:
             new_path = self.bridge.unhide_by_renaming_dot(folder_path)
             if new_path:
                 parent = str(Path(new_path).parent)
-                self.tree.setCurrentIndex(self.fs_model.index(parent))
+                self.tree.setCurrentIndex(self.proxy_model.mapFromSource(self.fs_model.index(parent)))
                 self._set_selected_folder(parent)
 
         if chosen == act_rename:
@@ -1204,7 +1265,7 @@ class MainWindow(QMainWindow):
                 new_path = self.bridge.rename_path(folder_path, next_name)
                 if new_path:
                     parent = str(Path(new_path).parent)
-                    self.tree.setCurrentIndex(self.fs_model.index(parent))
+                    self.tree.setCurrentIndex(self.proxy_model.mapFromSource(self.fs_model.index(parent)))
                     self._set_selected_folder(parent)
 
         if chosen == act_explorer:
@@ -1251,8 +1312,11 @@ class MainWindow(QMainWindow):
         if folder:
             folder_path = str(Path(folder))
             # Update the tree root and select the chosen folder.
-            self.tree.setRootIndex(self.fs_model.index(folder_path))
-            self.tree.setCurrentIndex(self.fs_model.index(folder_path))
+            self.proxy_model.setRootPath(folder_path)
+            root_parent = Path(folder_path).parent
+            parent_idx = self.fs_model.setRootPath(str(root_parent))
+            self.tree.setRootIndex(self.proxy_model.mapFromSource(parent_idx))
+            self.tree.setCurrentIndex(self.proxy_model.mapFromSource(self.fs_model.index(folder_path)))
             self._set_selected_folder(folder_path)
 
     def _open_video_overlay(
