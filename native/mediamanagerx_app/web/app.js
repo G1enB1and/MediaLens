@@ -837,10 +837,7 @@ async function main() {
     }
 
     bridge.get_tools_status(function (st) {
-      const ff = st && st.ffmpeg ? 'ffmpeg✓' : 'ffmpeg×';
-      const fp = st && st.ffprobe ? 'ffprobe✓' : 'ffprobe×';
-      const td = st && st.thumb_dir ? st.thumb_dir : '';
-      setStatus(`Ready (${ff}, ${fp})${td ? ' | thumbs: ' + td : ''}`);
+      setStatus('Ready');
       console.log('tools_status', st);
     });
 

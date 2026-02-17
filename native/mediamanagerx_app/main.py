@@ -1478,11 +1478,20 @@ class MainWindow(QMainWindow):
             self.video_overlay.raise_()
 
     def about(self) -> None:
-        QMessageBox.information(
-            self,
-            "About MediaManagerX",
-            "MediaManagerX\n\nWindows native app (PySide6) — UI shell in progress.",
+        st = self.bridge.get_tools_status()
+        ff = "✓" if st.get("ffmpeg") else "×"
+        fp = "✓" if st.get("ffprobe") else "×"
+        
+        info = (
+            "MediaManagerX\n\n"
+            "Windows native app (PySide6)\n\n"
+            "Diagnostics:\n"
+            f"• ffmpeg: {ff} ({st.get('ffmpeg_path', 'not found')})\n"
+            f"• ffprobe: {fp} ({st.get('ffprobe_path', 'not found')})\n"
+            f"• Thumbnails: {st.get('thumb_dir')}"
         )
+
+        QMessageBox.information(self, "About MediaManagerX", info)
 
 
 def main() -> None:
