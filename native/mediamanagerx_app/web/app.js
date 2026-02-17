@@ -400,18 +400,77 @@ function renderMediaList(items) {
   });
 }
 
-let gMedia = [];
-let gIndex = -1;
-let gBridge = null;
-let gPage = 0;
-let gTotal = 0;
-const PAGE_SIZE = 100;
 
+// Globals for state
 let gSearchQuery = '';
+let gOffset = 0; // Not used? we use gPage instead
+let gPage = 0;
+const PAGE_SIZE = 100;
+let gTotal = 0;
+let gMedia = []; // Current page items
+let gBridge = null;
+let gPosterTx = null; // db transaction?
+let gPosterRequested = new Set();
+let gPosterObserver = null;
+let gSort = 'name_asc';
+let gFilter = 'all';
+
+document.addEventListener('DOMContentLoaded', () => {
+  // Hook up custom dropdowns
+  function setupCustomSelect(id, onChange) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const trigger = el.querySelector('.select-trigger');
+    const options = el.querySelector('.select-options');
+
+    // Toggle open
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // Close others
+      document.querySelectorAll('.custom-select').forEach(s => {
+        if (s !== el) s.classList.remove('open');
+      });
+      el.classList.toggle('open');
+    });
+
+    // Handle option click
+    options.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const opt = e.target.closest('[data-value]');
+      if (!opt) return;
+
+      const val = opt.getAttribute('data-value');
+      const text = opt.textContent;
+
+      // Update UI
+      trigger.textContent = text;
+      el.querySelectorAll('.selected').forEach(s => s.classList.remove('selected'));
+      opt.classList.add('selected');
+      el.classList.remove('open');
+
+      // Callback
+      onChange(val);
+    });
+  }
+
+  // Close on outside click
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.custom-select').forEach(s => s.classList.remove('open'));
+  });
+
+  setupCustomSelect('sortSelect', (val) => {
+    gSort = val;
+    if (gBridge) refreshFromBridge(gBridge, true);
+  });
+
+  setupCustomSelect('filterSelect', (val) => {
+    gFilter = val;
+    gPage = 0; // Reset page on filter change
+    if (gBridge) refreshFromBridge(gBridge, true);
+  });
+});
 
 // Lazy poster loading for videos
-let gPosterObserver = null;
-const gPosterRequested = new Set();
 
 let gLightboxNativeVideo = false;
 
@@ -612,7 +671,7 @@ function renderPager() {
   });
 }
 
-function refreshFromBridge(bridge) {
+function refreshFromBridge(bridge, resetPage = false) {
   bridge.get_selected_folder(function (folder) {
     setSelectedFolder(folder);
     if (!folder) {
@@ -623,16 +682,22 @@ function refreshFromBridge(bridge) {
       return;
     }
 
+    if (resetPage) {
+      gPage = 0;
+    }
+
     setGlobalLoading(true, 'Scanning media…', 15);
 
-    bridge.count_media(folder, function (count) {
+    // Pass filter to count_media
+    bridge.count_media(folder, gFilter, function (count) {
       gTotal = count || 0;
       const tp = totalPages();
-      if (gPage >= tp) gPage = tp - 1;
+      if (gPage >= tp) gPage = Math.max(0, tp - 1);
 
       setGlobalLoading(true, `Loading page ${gPage + 1} of ${tp}…`, 55);
 
-      bridge.list_media(folder, PAGE_SIZE, gPage * PAGE_SIZE, function (items) {
+      // Pass sort/filter to list_media
+      bridge.list_media(folder, PAGE_SIZE, gPage * PAGE_SIZE, gSort, gFilter, function (items) {
         renderMediaList(items);
         renderPager();
         // Hide after containers are painted at least once.
@@ -831,13 +896,14 @@ async function main() {
         // hide overlay regardless; refresh handles the rest.
         setGlobalLoading(false);
         if (ok) {
-          refreshFromBridge(bridge);
+          refreshFromBridge(bridge, false);
         }
       });
     }
 
     bridge.get_tools_status(function (st) {
-      setStatus('Ready');
+      // Diagnostic data moved to About popup.
+      // Controls are strictly for sort/filter now.
       console.log('tools_status', st);
     });
 

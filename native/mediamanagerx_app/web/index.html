@@ -19,7 +19,28 @@
       <div class="search">
         <input id="searchInput" class="search-input" placeholder="Search…" />
       </div>
-      <div class="status" id="status">Starting…</div>
+      <div class="controls">
+        <div class="custom-select" id="sortSelect" tabindex="0">
+          <div class="select-trigger">Sort: Name (A-Z)</div>
+          <div class="select-options">
+            <div data-value="name_asc" class="selected">Name (A-Z)</div>
+            <div data-value="name_desc">Name (Z-A)</div>
+            <div data-value="date_desc">Date (Newest)</div>
+            <div data-value="date_asc">Date (Oldest)</div>
+            <div data-value="size_desc">Size (Largest)</div>
+            <div data-value="size_asc">Size (Smallest)</div>
+          </div>
+        </div>
+        <div class="custom-select" id="filterSelect" tabindex="0">
+          <div class="select-trigger">Filter: All Types</div>
+          <div class="select-options">
+            <div data-value="all" class="selected">All Types</div>
+            <div data-value="image">Images</div>
+            <div data-value="video">Videos</div>
+            <div data-value="animated">Animated</div>
+          </div>
+        </div>
+      </div>
       <button class="icon-btn" id="openSettings" title="Settings">⚙</button>
     </header>
 
@@ -101,7 +122,8 @@
                 <input class="text" id="startFolder" placeholder="(not set)" />
                 <button class="tb-btn" id="browseStartFolder">Browse…</button>
                 <button class="tb-btn highlight" id="loadStartFolderNow"
-                  title="Load this folder now without restart">Load Now</button>
+                  title="Load this folder now without restart">Load
+                  Now</button>
               </div>
             </div>
 

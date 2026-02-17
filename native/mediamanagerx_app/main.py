@@ -229,8 +229,26 @@ class Bridge(QObject):
             if r.returncode != 0:
                 return None
             return out if out.exists() else None
+
         except Exception:
             return None
+
+    def _is_animated(self, path: Path) -> bool:
+        """Check if image is animated (GIF or animated WebP)."""
+        suffix = path.suffix.lower()
+        if suffix == ".gif":
+            return True
+        if suffix == ".webp":
+            try:
+                with open(path, "rb") as f:
+                    header = f.read(32)
+                # RIFF....WEBPVP8X
+                if header[0:4] == b"RIFF" and header[8:12] == b"WEBP" and header[12:16] == b"VP8X":
+                    flags = header[20]
+                    return bool(flags & 2)  # Bit 1 is Animation
+            except Exception:
+                pass
+        return False
 
     def set_selected_folder(self, folder: str) -> None:
         folder = folder or ""
@@ -877,18 +895,48 @@ class Bridge(QObject):
         except Exception:
             return False
 
-    @Slot(str, int, int, result=list)
-    def list_media(self, folder: str, limit: int = 100, offset: int = 0) -> list[dict]:
-        """Return a list of media entries under folder.
-
-        Each entry is a dict:
-          {"path": <fs-path>, "url": <file://...>, "media_type": "image"|"video"}
-        """
+    @Slot(str, int, int, str, str, result=list)
+    def list_media(
+        self,
+        folder: str,
+        limit: int = 100,
+        offset: int = 0,
+        sort_by: str = "name_asc",
+        filter_type: str = "all",
+    ) -> list[dict]:
+        """Return a list of media entries under folder with sorting and filtering."""
 
         try:
             image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+            video_exts = {".mp4", ".webview", ".webm", ".mov", ".mkv", ".avi", ".wmv"}
 
+            # Get all candidates (already hides dots if enabled)
             candidates = self._scan_media_paths(folder)
+
+            # 1. Filter
+            if filter_type == "image":
+                candidates = [p for p in candidates if p.suffix.lower() in image_exts]
+            elif filter_type == "video":
+                candidates = [p for p in candidates if p.suffix.lower() in video_exts]
+            elif filter_type == "animated":
+                candidates = [p for p in candidates if self._is_animated(p)]
+            
+            # 2. Sort
+            # "name_asc" is default from _scan_media_paths
+            if sort_by == "name_desc":
+                candidates.sort(key=lambda p: str(p).lower(), reverse=True)
+            elif sort_by == "date_desc":
+                # sort by mtime descending
+                candidates.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
+            elif sort_by == "date_asc":
+                candidates.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0)
+            elif sort_by == "size_desc":
+                candidates.sort(key=lambda p: p.stat().st_size if p.exists() else 0, reverse=True)
+            elif sort_by == "size_asc":
+                candidates.sort(key=lambda p: p.stat().st_size if p.exists() else 0)
+            # name_asc is default
+            
+            # 3. Paginate
             start = max(0, int(offset))
             end = start + max(0, int(limit))
             page = candidates[start:end]
@@ -907,6 +955,27 @@ class Bridge(QObject):
             return out
         except Exception:
             return []
+
+    @Slot(str, str, result=int)
+    def count_media(self, folder: str, filter_type: str = "all") -> int:
+        """Return total number of discoverable media items under folder, filtered."""
+
+        try:
+            candidates = self._scan_media_paths(folder)
+            
+            image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+            video_exts = {".mp4", ".webview", ".webm", ".mov", ".mkv", ".avi", ".wmv"}
+
+            if filter_type == "image":
+                candidates = [p for p in candidates if p.suffix.lower() in image_exts]
+            elif filter_type == "video":
+                candidates = [p for p in candidates if p.suffix.lower() in video_exts]
+            elif filter_type == "animated":
+                candidates = [p for p in candidates if self._is_animated(p)]
+
+            return len(candidates)
+        except Exception:
+            return 0
 
 
 class MainWindow(QMainWindow):
