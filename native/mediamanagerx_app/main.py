@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QTreeView,
+    QFileIconProvider,
     QFileSystemModel,
     QDialog,
     QPushButton,
@@ -88,10 +89,11 @@ class RootFilterProxyModel(QSortFilterProxyModel):
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._root_path: str = ""
+        self._fallback_icon: QIcon | None = None
 
     def setRootPath(self, path: str) -> None:
         self._root_path = str(Path(path).resolve())
-        self.invalidateFilter()
+        self.invalidate()
 
     def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:
         source_model = self.sourceModel()
@@ -105,24 +107,45 @@ class RootFilterProxyModel(QSortFilterProxyModel):
             return True # Allow it to load
             
         try:
+            # Normalize and lowercase for Windows robustness
             item_p = Path(path_str).resolve()
             root_p = Path(self._root_path).resolve()
             
+            # Use lowercase strings for membership checks to handle Windows case-insensitivity
+            item_p_str = str(item_p).lower()
+            root_p_str = str(root_p).lower()
+            root_parents_lower = [str(p).lower() for p in root_p.parents]
+            item_parents_lower = [str(p).lower() for p in item_p.parents]
+            
             # 1. Accept the root folder itself
-            if item_p == root_p:
+            if item_p_str == root_p_str:
                 return True
                 
             # 2. Accept children/descendants of the root folder
-            if root_p in item_p.parents:
+            if root_p_str in item_parents_lower:
                 return True
                 
             # 3. Accept ancestors of the root folder (so we can reach it from drive)
-            if item_p in root_p.parents:
+            if item_p_str in root_parents_lower:
                 return True
                 
             return False
         except Exception:
             return True
+
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
+        # Prevent "customized" folder icons (which sometimes fail to load or are empty)
+        # by forcing the standard folder icon for all directories.
+        if role == Qt.ItemDataRole.DecorationRole:
+            source_idx = self.mapToSource(index)
+            source_model = self.sourceModel()
+            if isinstance(source_model, QFileSystemModel) and source_model.isDir(source_idx):
+                if not self._fallback_icon:
+                    provider = QFileIconProvider()
+                    self._fallback_icon = provider.icon(QFileIconProvider.IconType.Folder)
+                return self._fallback_icon
+                
+        return super().data(index, role)
 
 
 class Bridge(QObject):
@@ -1002,9 +1025,7 @@ class MainWindow(QMainWindow):
         self.tree.setModel(self.proxy_model)
         
         # Set the tree root to the PARENT of our desired root folder
-        # setRootPath returns the QModelIndex for the path, and ensures it's watched/loaded.
-        # We set both the root and parent to ensure icons and child info are primed.
-        self.fs_model.setRootPath(str(default_root))
+        # root_parent needs to be loaded by fs_model for visibility.
         root_parent = default_root.parent
         parent_idx = self.fs_model.setRootPath(str(root_parent))
         
@@ -1026,10 +1047,11 @@ class MainWindow(QMainWindow):
             self.tree.hideColumn(col)
 
         self.tree.selectionModel().selectionChanged.connect(self._on_tree_selection)
-
-        # Context menu: hide folder
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._on_tree_context_menu)
+
+        # Connect to directoryLoaded so we can refresh icons/expansion once ready
+        self.fs_model.directoryLoaded.connect(self._on_directory_loaded)
 
         left_layout.addWidget(self.tree, 1)
 
@@ -1157,12 +1179,11 @@ class MainWindow(QMainWindow):
             return
             
         path_str = str(p.resolve())
-        # Update the tree root and select the chosen folder.
+        # Update the proxy model's local filtering root
         self.proxy_model.setRootPath(path_str)
-        root_parent = p.resolve().parent
         
-        # Prime both paths for icons and children
-        self.fs_model.setRootPath(path_str)
+        # The tree needs to show the root folder, so we set the tree-root to the PAparent
+        root_parent = p.resolve().parent
         parent_idx = self.fs_model.setRootPath(str(root_parent))
         
         self.tree.setRootIndex(self.proxy_model.mapFromSource(parent_idx))
@@ -1173,6 +1194,11 @@ class MainWindow(QMainWindow):
             self.tree.expand(root_idx)
             
         self._set_selected_folder(path_str)
+
+    def _on_directory_loaded(self, path: str) -> None:
+        """Triggered when QFileSystemModel finishes loading a directory's contents."""
+        # Refresh the proxy so newly loaded icons appear.
+        self.proxy_model.invalidate()
 
     def _on_tree_selection(self, *_args) -> None:
         idx = self.tree.currentIndex()
