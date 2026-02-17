@@ -5,7 +5,7 @@ description = "Local-first media asset manager"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-  "PySide6>=6.6",
+  "PySide6>=6.8.2.1,<6.10",
 ]
 
 [project.scripts]
