@@ -1344,10 +1344,6 @@ class MainWindow(QMainWindow):
                     pass
 
             self.meta_text.setText("\n".join(lines))
-
-            # Auto-open right panel
-            self.bridge.settings.setValue("ui/show_right_panel", True)
-            self._apply_ui_flag("ui.show_right_panel", True)
         except Exception:
             pass
 

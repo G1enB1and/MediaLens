@@ -348,9 +348,20 @@ function renderMediaList(items) {
       img.addEventListener('error', () => sk.remove());
       card.appendChild(img);
 
-      card.addEventListener('click', () => openLightboxByIndex(idx));
+      card.addEventListener('click', (e) => {
+        // Selection logic
+        document.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected'));
+        card.classList.add('selected');
+        // Update metadata panel
+        if (gBridge && gBridge.show_metadata) {
+          gBridge.show_metadata(item.path);
+        }
+      });
+      card.addEventListener('dblclick', () => openLightboxByIndex(idx));
       card.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') openLightboxByIndex(idx);
+        if (e.key === 'Enter' || e.key === ' ') {
+          openLightboxByIndex(idx);
+        }
       });
 
       card.addEventListener('contextmenu', (e) => {
@@ -377,9 +388,20 @@ function renderMediaList(items) {
 
       if (item.path) gPosterObserver.observe(img);
 
-      card.addEventListener('click', () => openLightboxByIndex(idx));
+      card.addEventListener('click', (e) => {
+        // Selection logic
+        document.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected'));
+        card.classList.add('selected');
+        // Update metadata panel
+        if (gBridge && gBridge.show_metadata) {
+          gBridge.show_metadata(item.path);
+        }
+      });
+      card.addEventListener('dblclick', () => openLightboxByIndex(idx));
       card.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') openLightboxByIndex(idx);
+        if (e.key === 'Enter' || e.key === ' ') {
+          openLightboxByIndex(idx);
+        }
       });
 
       card.addEventListener('contextmenu', (e) => {

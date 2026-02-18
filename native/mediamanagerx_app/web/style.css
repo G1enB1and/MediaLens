@@ -447,8 +447,9 @@ p {
   cursor: pointer;
 }
 
-.card:focus {
-  outline: 2px solid rgba(138, 180, 248, 0.8);
+.card:focus,
+.card.selected {
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
