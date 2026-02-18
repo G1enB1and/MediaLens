@@ -1227,6 +1227,16 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(1, 4)
         splitter.setStretchFactor(2, 1)
 
+        # Apply persistent widths
+        state = self.bridge.settings.value("ui/splitter_state")
+        if state:
+            splitter.restoreState(state)
+        else:
+            # Default to 200px sidebars if no saved state
+            splitter.setSizes([200, 800, 200])
+
+        splitter.splitterMoved.connect(lambda *args: self._save_splitter_state())
+
         self.setCentralWidget(splitter)
 
         # Apply right panel flag from settings
@@ -1512,8 +1522,20 @@ class MainWindow(QMainWindow):
             new = not cur
             self.bridge.settings.setValue(qkey, new)
             self.bridge.uiFlagChanged.emit(qkey.replace("/", "."), new)
+            # Save state after toggle to remember relative widths
+            self._save_splitter_state()
         except Exception:
             pass
+
+    def _save_splitter_state(self) -> None:
+        try:
+            self.bridge.settings.setValue("ui/splitter_state", self.splitter.saveState())
+        except Exception:
+            pass
+
+    def closeEvent(self, event) -> None:
+        self._save_splitter_state()
+        super().closeEvent(event)
 
     def open_settings(self) -> None:
         try:
