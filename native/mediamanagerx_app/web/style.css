@@ -79,7 +79,9 @@ header {
 }
 
 .search-input {
-  width: min(560px, 70vw);
+  flex: 1;
+  min-width: 150px;
+  max-width: 560px;
   height: 34px;
   border-radius: 12px;
   border: 1px solid var(--border);
