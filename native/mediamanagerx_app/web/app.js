@@ -602,18 +602,26 @@ function lightboxNext() {
 }
 
 function wireLightbox() {
+  const lb = document.getElementById('lightbox');
   const backdrop = document.getElementById('lightboxBackdrop');
   const img = document.getElementById('lightboxImg');
   const vid = document.getElementById('lightboxVideo');
 
-  // Click outside closes (most clicks should hit backdrop because content has pointer-events:none)
-  if (backdrop) backdrop.addEventListener('click', closeLightbox);
-  if (img) img.addEventListener('click', (e) => e.stopPropagation());
-  if (vid) vid.addEventListener('click', (e) => e.stopPropagation());
+  // Click anywhere on the lightbox area (including background or media) closes it,
+  // EXCEPT when clicking specifically on navigation/UI buttons.
+  if (lb) {
+    lb.addEventListener('click', (e) => {
+      // If the target is a navigation button or a UI control, don't close.
+      // We check for "lb-btn" class or if it's inside the lightbox-ui.
+      if (e.target.closest('.lb-btn')) {
+        return;
+      }
+      closeLightbox();
+    });
+  }
 
   // Right-click anywhere on the lightbox (including the image) opens the same context menu.
   // Use capture to avoid any odd event swallowing.
-  const lb = document.getElementById('lightbox');
   const handler = (e) => {
     if (!gMedia || gIndex < 0 || gIndex >= gMedia.length) return;
     e.preventDefault();

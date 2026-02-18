@@ -228,12 +228,17 @@ class LightboxVideoOverlay(QWidget):
         self.player.mediaStatusChanged.connect(self._on_media_status)
 
     def eventFilter(self, obj, event) -> bool:  # type: ignore[override]
-        if obj is self.backdrop and event.type() == QEvent.Type.MouseButtonPress:
+        if (obj is self or obj is self.backdrop or obj is self.video_view) and event.type() == QEvent.Type.MouseButtonPress:
             self.close_overlay()
             return True
         if event.type() in (QEvent.Type.MouseMove, QEvent.Type.HoverMove):
             self._show_controls()
         return super().eventFilter(obj, event)
+
+    def mousePressEvent(self, event) -> None:  # type: ignore[override]
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.close_overlay()
+        super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:  # type: ignore[override]
         self._show_controls()

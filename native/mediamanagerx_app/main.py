@@ -908,7 +908,7 @@ class Bridge(QObject):
 
         try:
             image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
-            video_exts = {".mp4", ".webview", ".webm", ".mov", ".mkv", ".avi", ".wmv"}
+            video_exts = {".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}
 
             # Get all candidates (already hides dots if enabled)
             candidates = self._scan_media_paths(folder)
@@ -964,7 +964,7 @@ class Bridge(QObject):
             candidates = self._scan_media_paths(folder)
             
             image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
-            video_exts = {".mp4", ".webview", ".webm", ".mov", ".mkv", ".avi", ".wmv"}
+            video_exts = {".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}
 
             if filter_type == "image":
                 candidates = [p for p in candidates if p.suffix.lower() in image_exts and not self._is_animated(p)]
