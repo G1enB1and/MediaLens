@@ -1223,17 +1223,18 @@ class MainWindow(QMainWindow):
         splitter.addWidget(left)
         splitter.addWidget(center)
         splitter.addWidget(meta)
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 4)
-        splitter.setStretchFactor(2, 1)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(2, 0)
 
         # Apply persistent widths
         state = self.bridge.settings.value("ui/splitter_state")
         if state:
             splitter.restoreState(state)
         else:
-            # Default to 200px sidebars if no saved state
-            splitter.setSizes([200, 800, 200])
+            # Side panels fixed (0 stretch), Gallery expands (1 stretch)
+            # Default to 200px left, 300px right sidebars if no saved state
+            splitter.setSizes([200, 700, 300])
 
         splitter.splitterMoved.connect(lambda *args: self._save_splitter_state())
 
