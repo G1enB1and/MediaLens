@@ -915,7 +915,7 @@ class Bridge(QObject):
 
             # 1. Filter
             if filter_type == "image":
-                candidates = [p for p in candidates if p.suffix.lower() in image_exts]
+                candidates = [p for p in candidates if p.suffix.lower() in image_exts and not self._is_animated(p)]
             elif filter_type == "video":
                 candidates = [p for p in candidates if p.suffix.lower() in video_exts]
             elif filter_type == "animated":
@@ -967,7 +967,7 @@ class Bridge(QObject):
             video_exts = {".mp4", ".webview", ".webm", ".mov", ".mkv", ".avi", ".wmv"}
 
             if filter_type == "image":
-                candidates = [p for p in candidates if p.suffix.lower() in image_exts]
+                candidates = [p for p in candidates if p.suffix.lower() in image_exts and not self._is_animated(p)]
             elif filter_type == "video":
                 candidates = [p for p in candidates if p.suffix.lower() in video_exts]
             elif filter_type == "animated":
