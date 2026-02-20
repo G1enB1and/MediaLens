@@ -133,12 +133,12 @@ body.lightbox-open header {
 .ctx {
   position: fixed;
   z-index: 12000;
-  min-width: 180px;
+  min-width: 170px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 6px;
   background: rgba(23, 26, 33, 0.98);
   overflow: hidden;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
 }
 
 .ctx[hidden] {
@@ -148,7 +148,7 @@ body.lightbox-open header {
 .ctx-item {
   width: 100%;
   text-align: left;
-  padding: 10px 12px;
+  padding: 6px 14px;
   border: none;
   background: transparent;
   color: var(--fg);
@@ -163,6 +163,7 @@ body.lightbox-open header {
 .ctx-sep {
   height: 1px;
   background: var(--border);
+  margin: 4px 0;
 }
 
 .modal {
