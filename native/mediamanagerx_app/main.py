@@ -1058,8 +1058,13 @@ class MainWindow(QMainWindow):
 
         # Left: folder tree (native) — functional first, styling later
         left = QWidget()
+        left.setStyleSheet("""
+            QWidget { background-color: #16181d; color: #ccc; }
+            QTreeView { background-color: #16181d; border: none; }
+            QLabel { color: #ccc; font-weight: bold; }
+        """)
         left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(8, 8, 8, 8)
+        left_layout.setContentsMargins(10, 10, 10, 10)
 
         left_layout.addWidget(QLabel("Folders"))
 
@@ -1154,8 +1159,13 @@ class MainWindow(QMainWindow):
 
         # Right: metadata panel placeholder
         meta = QWidget()
+        meta.setStyleSheet("""
+            QWidget { background-color: #16181d; color: #ccc; }
+            QTextEdit { background-color: #16181d; border: none; color: #bbb; font-family: 'Segoe UI', sans-serif; }
+            QLabel { color: #ccc; font-weight: bold; }
+        """)
         meta_layout = QVBoxLayout(meta)
-        meta_layout.setContentsMargins(8, 8, 8, 8)
+        meta_layout.setContentsMargins(10, 10, 10, 10)
         meta_layout.setSpacing(8)
         meta_layout.addWidget(QLabel("Metadata"))
         self.meta_text = QTextEdit()
