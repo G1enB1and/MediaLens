@@ -1584,6 +1584,41 @@ class MainWindow(QMainWindow):
 
 def main() -> None:
     app = QApplication(sys.argv)
+    
+    # Global styling to flatten native menus and remove shadows/thick borders
+    app.setStyleSheet("""
+        QMenuBar {
+            background-color: #171a21;
+            color: #e6e6e6;
+            border-bottom: 1px solid #2a2f3a;
+        }
+        QMenuBar::item {
+            background: transparent;
+            padding: 4px 10px;
+        }
+        QMenuBar::item:selected {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        QMenu {
+            background-color: #171a21;
+            color: #e6e6e6;
+            border: 1px solid #2a2f3a;
+            border-radius: 6px;
+            padding: 4px 0;
+        }
+        QMenu::item {
+            padding: 4px 24px 4px 14px;
+        }
+        QMenu::item:selected {
+            background-color: rgba(255, 255, 255, 0.06);
+        }
+        QMenu::separator {
+            height: 1px;
+            background: #2a2f3a;
+            margin: 4px 0;
+        }
+    """)
+
     # Ensure QStandardPaths.AppDataLocation resolves to a stable, app-specific dir.
     app.setOrganizationName("G1enB1and")
     app.setApplicationName("MediaManagerX")
