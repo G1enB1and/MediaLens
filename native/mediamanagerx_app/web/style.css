@@ -1,16 +1,26 @@
 :root {
-  --bg: #0f1115;
-  --fg: #e6e6e6;
-  --muted: #9aa4b2;
-  --panel: #171a21;
-  --border: #2a2f3a;
+  /* Base Neutral Palette */
+  --bg-dark: #111111;
+  --panel-dark: #191919;
+  --border-dark: #2d2d2d;
+
+  /* User Accent */
   --accent: #8ab4f8;
-  --card-bg: rgba(255, 255, 255, 0.02);
-  --input-bg: rgba(255, 255, 255, 0.03);
-  --hover-bg: rgba(255, 255, 255, 0.06);
-  --modal-bg: rgba(23, 26, 33, 0.98);
+
+  /* Dynamic Tinted Surfaces (using sRGB for maximum compatibility) */
+  --bg: color-mix(in srgb, var(--bg-dark), var(--accent) 7%);
+  --panel: color-mix(in srgb, var(--panel-dark), var(--accent) 10%);
+  --border: color-mix(in srgb, var(--border-dark), var(--accent) 18%);
+
+  /* UI Tokens */
+  --fg: #e6e6e6;
+  --muted: color-mix(in srgb, #9aa4b2, var(--accent) 15%);
+  --card-bg: color-mix(in srgb, var(--panel), white 2%);
+  --input-bg: color-mix(in srgb, var(--panel), black 4%);
+  --hover-bg: color-mix(in srgb, var(--accent), transparent 88%);
+  --modal-bg: color-mix(in srgb, var(--panel), black 5%);
   --shadow: rgba(0, 0, 0, 0.5);
-  --thumb-bg: #0b0d12;
+  --thumb-bg: color-mix(in srgb, var(--bg), black 8%);
 }
 
 *,
@@ -75,10 +85,9 @@ header {
   display: flex;
   flex-direction: column;
   border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--panel) 85%, transparent);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  /* GPU acceleration hints: */
   transform: translateZ(0);
   will-change: backdrop-filter;
 }
@@ -371,8 +380,8 @@ main {
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
-  /* GPU acceleration hints: */
+  border-top: 1px solid var(--border);
+  background: var(--panel);
   transform: translateZ(0);
 }
 
@@ -385,6 +394,14 @@ body.lightbox-open .toolbar {
   /* Already removed from HTML, but cleaning up CSS */
 }
 
+.toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--panel);
+}
+
 .pager {
   display: flex;
   align-items: center;
@@ -394,15 +411,18 @@ body.lightbox-open .toolbar {
 
 
 .tb-btn {
-  height: 30px;
-  padding: 0 10px;
-  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  background: var(--input-bg);
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--muted);
-  /* Neutral brighter grey */
+  border-radius: 8px;
+  color: var(--fg);
+  font-size: 13px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.2s;
 }
 
 .tb-btn:disabled {
@@ -420,15 +440,9 @@ body.lightbox-open .toolbar {
 }
 
 .tb-btn.highlight {
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
-  color: var(--accent);
-  font-weight: 500;
-}
-
-.tb-btn.highlight:hover {
-  background: color-mix(in srgb, var(--accent) 25%, transparent);
+  background: color-mix(in oklch, var(--accent), transparent 85%);
   border-color: var(--accent);
+  color: #fff;
 }
 
 .tb-links {
@@ -444,9 +458,8 @@ body.lightbox-open .toolbar {
   padding: 0 10px;
   border-radius: 8px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.02);
-  color: var(--muted);
-  /* Neutral brighter grey */
+  background: var(--card-bg);
+  color: #eeeeee;
   font-size: 13px;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -532,7 +545,7 @@ body.lightbox-open main {
   height: auto;
   object-fit: contain;
   display: block;
-  background: #0b0d12;
+  background: var(--thumb-bg);
 }
 
 .skel {
@@ -540,7 +553,7 @@ body.lightbox-open main {
   inset: 0;
   display: grid;
   place-items: center;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--card-bg);
 }
 
 .skel::before {
@@ -554,7 +567,7 @@ body.lightbox-open main {
 }
 
 .thumb.poster {
-  background: #0b0d12;
+  background: var(--thumb-bg);
   min-height: 120px;
 }
 
@@ -683,13 +696,12 @@ body.lightbox-open main {
 }
 
 .v {
-  background: rgba(255, 255, 255, 0.08);
-  /* slightly more visible */
+  background: var(--input-bg);
   padding: 4px 10px;
   border-radius: 6px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 13px;
-  color: #f0f0f0;
+  color: #ffffff;
   word-break: break-all;
 }
 
@@ -705,7 +717,7 @@ body.lightbox-open main {
   position: relative;
   width: 160px;
   height: 34px;
-  background: #2a2a2a;
+  background: var(--input-bg);
   border: 1px solid var(--border);
   border-radius: 4px;
   font-size: 13px;
@@ -743,7 +755,7 @@ body.lightbox-open main {
   top: 100%;
   left: -1px;
   right: -1px;
-  background: #2a2a2a;
+  background: var(--modal-bg);
   border: 1px solid var(--border);
   border-top: none;
   border-radius: 0 0 4px 4px;
@@ -769,7 +781,7 @@ body.lightbox-open main {
 }
 
 .select-options div:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--hover-bg);
 }
 
 .select-options div.selected {

@@ -1046,6 +1046,14 @@ async function main() {
         refreshFromBridge(bridge);
       });
     }
+
+    if (bridge.accentColorChanged) {
+      bridge.accentColorChanged.connect(function (v) {
+        document.documentElement.style.setProperty('--accent', v);
+        const ac = document.getElementById('accentColor');
+        if (ac) ac.value = v;
+      });
+    }
   });
 }
 

@@ -55,14 +55,50 @@ from PySide6.QtCore import QSortFilterProxyModel, QModelIndex
 
 
 class Theme:
-    """Centralized theme colors for the native UI."""
-    BG = "#0f1115"
-    SIDEBAR_BG = "#16181d"
+    """Centralized theme system for dynamic accent tinting."""
+    @staticmethod
+    def mix(base_hex: str, accent_color: QColor, strength: float) -> str:
+        """Mix a base hex color with an accent QColor."""
+        base = QColor(base_hex)
+        r = int(base.red() + (accent_color.red() - base.red()) * strength)
+        g = int(base.green() + (accent_color.green() - base.green()) * strength)
+        b = int(base.blue() + (accent_color.blue() - base.blue()) * strength)
+        return QColor(r, g, b).name()
+
+    # Base Palette (Used as starting point for tinting)
+    BASE_BG = "#111111"
+    BASE_SIDEBAR_BG = "#191919"
+    BASE_BORDER = "#2d2d2d"
+    
+    @staticmethod
+    def get_bg(accent: QColor) -> str:
+        return Theme.mix(Theme.BASE_BG, accent, 0.04)
+
+    @staticmethod
+    def get_sidebar_bg(accent: QColor) -> str:
+        return Theme.mix(Theme.BASE_SIDEBAR_BG, accent, 0.08)
+
+    @staticmethod
+    def get_border(accent: QColor) -> str:
+        return Theme.mix(Theme.BASE_BORDER, accent, 0.15)
+
+    @staticmethod
+    def get_scrollbar_track(accent: QColor) -> str:
+        return Theme.mix(Theme.BASE_SIDEBAR_BG, accent, 0.05)
+
+    @staticmethod
+    def get_scrollbar_thumb(accent: QColor) -> str:
+        return Theme.mix("#333333", accent, 0.20)
+
+    @staticmethod
+    def get_splitter_idle(accent: QColor) -> str:
+        return Theme.mix("#444444", accent, 0.12)
+
+    # UI constants
     TEXT = "#ccc"
     TEXT_MUTED = "#bbb"
     ACCENT_DEFAULT = "#8ab4f8"
     SPLITTER_IDLE = "#444"
-    BORDER = "#2a2f3a"
     HEADER_TEXT = "#ccc"
 
 
@@ -78,8 +114,14 @@ class CustomSplitterHandle(QSplitterHandle):
         painter = QPainter(self)
         # Use a slightly lighter/darker border to give it some depth if desired
         # but for now, solid color per user request.
-        accent = getattr(self.window(), "_current_accent", Theme.ACCENT_DEFAULT)
-        color = QColor(accent) if self._hovered else QColor(Theme.SPLITTER_IDLE)
+        accent_str = getattr(self.window(), "_current_accent", Theme.ACCENT_DEFAULT)
+        accent_q = QColor(accent_str)
+        
+        if self._hovered:
+            color = accent_q
+        else:
+            color = QColor(Theme.get_splitter_idle(accent_q))
+            
         painter.fillRect(self.contentsRect(), color)
 
     def event(self, event: QEvent) -> bool:
@@ -1043,7 +1085,7 @@ class MainWindow(QMainWindow):
         self.bridge.uiFlagChanged.connect(self._apply_ui_flag)
         self.bridge.metadataRequested.connect(self._show_metadata_for_path)
         self.bridge.loadFolderRequested.connect(self._on_load_folder_requested)
-        self.bridge.accentColorChanged.connect(self._update_splitter_style)
+        self.bridge.accentColorChanged.connect(self._on_accent_changed)
         self._current_accent = Theme.ACCENT_DEFAULT
 
         self._build_menu()
@@ -1102,17 +1144,20 @@ class MainWindow(QMainWindow):
             m.aboutToShow.connect(self._dismiss_web_menus)
 
     def _build_layout(self) -> None:
+        try:
+            accent_val = str(self.bridge.settings.value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT)
+        except Exception:
+            accent_val = Theme.ACCENT_DEFAULT
+        
+        self._current_accent = accent_val
+        accent_q = QColor(accent_val)
+
         splitter = CustomSplitter(Qt.Orientation.Horizontal)
         self.splitter = splitter
 
         # Left: folder tree (native)
-        left = QWidget()
-        left.setStyleSheet(f"""
-            QWidget {{ background-color: {Theme.SIDEBAR_BG}; color: {Theme.TEXT}; }}
-            QTreeView {{ background-color: {Theme.SIDEBAR_BG}; border: none; }}
-            QLabel {{ color: {Theme.HEADER_TEXT}; font-weight: bold; }}
-        """)
-        left_layout = QVBoxLayout(left)
+        self.left_panel = QWidget()
+        left_layout = QVBoxLayout(self.left_panel)
         left_layout.setContentsMargins(10, 10, 10, 10)
 
         left_layout.addWidget(QLabel("Folders"))
@@ -1207,13 +1252,8 @@ class MainWindow(QMainWindow):
         center_layout.addWidget(self.web)
 
         # Right: metadata panel placeholder
-        meta = QWidget()
-        meta.setStyleSheet(f"""
-            QWidget {{ background-color: {Theme.SIDEBAR_BG}; color: {Theme.TEXT}; }}
-            QTextEdit {{ background-color: {Theme.SIDEBAR_BG}; border: none; color: {Theme.TEXT_MUTED}; font-family: 'Segoe UI', sans-serif; }}
-            QLabel {{ color: {Theme.HEADER_TEXT}; font-weight: bold; }}
-        """)
-        meta_layout = QVBoxLayout(meta)
+        self.right_panel = QWidget()
+        meta_layout = QVBoxLayout(self.right_panel)
         meta_layout.setContentsMargins(10, 10, 10, 10)
         meta_layout.setSpacing(8)
         meta_layout.addWidget(QLabel("Metadata"))
@@ -1224,7 +1264,7 @@ class MainWindow(QMainWindow):
 
         # Native loading overlay shown while the WebEngine page itself is loading.
         self.web_loading = QWidget(self.web)
-        self.web_loading.setStyleSheet(f"background: {Theme.BG};")
+        self.web_loading.setStyleSheet(f"background: {Theme.get_bg(accent_q)};")
         self.web_loading.setGeometry(self.web.rect())
         self.web_loading.setVisible(True)
 
@@ -1262,6 +1302,8 @@ class MainWindow(QMainWindow):
         wl_layout.addWidget(loading_center, 0, Qt.AlignmentFlag.AlignCenter)
         wl_layout.addStretch(1)
 
+        self._update_native_styles(accent_val)
+
         self._devtools: QWebEngineView | None = None
         self.video_overlay = LightboxVideoOverlay(parent=self.web)
         self.video_overlay.setGeometry(self.web.rect())
@@ -1273,7 +1315,7 @@ class MainWindow(QMainWindow):
 
         # Prevent white flash while the first HTML/CSS loads.
         try:
-            self.web.page().setBackgroundColor(QColor(Theme.BG))
+            self.web.page().setBackgroundColor(QColor(Theme.get_bg(accent_q)))
         except Exception:
             pass
 
@@ -1292,9 +1334,9 @@ class MainWindow(QMainWindow):
 
         self.web.setUrl(QUrl.fromLocalFile(str(index_path.resolve())))
 
-        splitter.addWidget(left)
+        splitter.addWidget(self.left_panel)
         splitter.addWidget(center)
-        splitter.addWidget(meta)
+        splitter.addWidget(self.right_panel)
         splitter.setStretchFactor(2, 0)
         splitter.setObjectName("mainSplitter")
         splitter.setMouseTracking(True)
@@ -1313,8 +1355,8 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(splitter)
 
-        # Apply initial splitter style
-        self._update_splitter_style(accent)
+        # Apply initial style
+        self._update_splitter_style(accent_val)
 
         # Apply right panel flag from settings
         try:
@@ -1573,11 +1615,125 @@ class MainWindow(QMainWindow):
         
         # We no longer need stylesheets or manual loops here because 
         # CustomSplitterHandle.paintEvent handles everything natively.
-        # We just trigger a redraw of the handles.
         for i in range(self.splitter.count()):
             h = self.splitter.handle(i)
             if h:
                 h.update()
+
+    def _on_accent_changed(self, accent_color: str) -> None:
+        """Called when the bridge emits accentColorChanged."""
+        self._current_accent = accent_color
+        self._update_native_styles(accent_color)
+        self._update_splitter_style(accent_color)
+        
+        # Belt and suspenders: force update web layer via injection
+        js = f"document.documentElement.style.setProperty('--accent', '{accent_color}');"
+        if hasattr(self, "webview") and self.webview.page():
+            self.webview.page().runJavaScript(js)
+
+    def _update_native_styles(self, accent_str: str) -> None:
+        """Apply tinted styles to sidebars, metadata, and global native elements."""
+        accent = QColor(accent_str)
+        sb_bg = Theme.get_sidebar_bg(accent)
+        scrollbar_style = self._get_native_scrollbar_style(accent)
+        
+        # Left Panel (Folders)
+        self.left_panel.setStyleSheet(f"""
+            QWidget {{ background-color: {sb_bg}; color: {Theme.TEXT}; }}
+            QTreeView {{ background-color: {sb_bg}; border: none; }}
+            QLabel {{ color: {Theme.HEADER_TEXT}; font-weight: bold; }}
+            {scrollbar_style}
+        """)
+        
+        # Right Panel (Metadata)
+        self.right_panel.setStyleSheet(f"""
+            QWidget {{ background-color: {sb_bg}; color: {Theme.TEXT}; }}
+            QTextEdit {{ background-color: {sb_bg}; border: none; color: {Theme.TEXT_MUTED}; font-family: 'Segoe UI', sans-serif; }}
+            QLabel {{ color: {Theme.HEADER_TEXT}; font-weight: bold; }}
+            {scrollbar_style}
+        """)
+        
+        self._update_app_style(accent)
+
+    def _update_app_style(self, accent: QColor) -> None:
+        """Update global application styles like tinted native menus."""
+        sb_bg = Theme.get_sidebar_bg(accent)
+        border = Theme.get_border(accent)
+        
+        QApplication.instance().setStyleSheet(f"""
+            QMenuBar {{
+                background-color: {sb_bg};
+                color: {Theme.TEXT};
+                border-bottom: 1px solid {border};
+            }}
+            QMenuBar::item {{
+                background: transparent;
+                padding: 4px 10px;
+            }}
+            QMenuBar::item:selected {{
+                background: rgba(255, 255, 255, 0.05);
+            }}
+            QMenu {{
+                background-color: {sb_bg};
+                color: {Theme.TEXT};
+                border: 1px solid {border};
+                padding: 4px 0;
+            }}
+            QMenu::item {{
+                padding: 4px 24px 4px 14px;
+            }}
+            QMenu::item:selected {{
+                background-color: rgba(255, 255, 255, 0.05);
+            }}
+            QMenu::separator {{
+                height: 1px;
+                background: {border};
+                margin: 4px 0;
+            }}
+        """)
+
+    def _get_native_scrollbar_style(self, accent: QColor) -> str:
+        """Generate a QSS string for tinted native scrollbars."""
+        track = Theme.get_scrollbar_track(accent)
+        thumb = Theme.get_scrollbar_thumb(accent)
+        hover = Theme.mix(thumb, accent, 0.1)
+        
+        return f"""
+            QScrollBar:vertical {{
+                background: {track};
+                width: 10px;
+                margin: 0px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {thumb};
+                min-height: 20px;
+                border-radius: 5px;
+                margin: 2px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {hover};
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+            QScrollBar:horizontal {{
+                background: {track};
+                height: 10px;
+                margin: 0px;
+            }}
+            QScrollBar::handle:horizontal {{
+                background: {thumb};
+                min-width: 20px;
+                border-radius: 5px;
+                margin: 2px;
+            }}
+            QScrollBar::handle:horizontal:hover {{
+                background: {hover};
+            }}
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+                width: 0px;
+            }}
+        """
 
     def _on_video_prev(self) -> None:
         try:
@@ -1734,38 +1890,8 @@ class MainWindow(QMainWindow):
 def main() -> None:
     app = QApplication(sys.argv)
     
-    # Global styling to flatten native menus and remove shadows/thick borders
-    app.setStyleSheet(f"""
-        QMenuBar {{
-            background-color: {Theme.SIDEBAR_BG};
-            color: {Theme.TEXT};
-            border-bottom: 1px solid {Theme.BORDER};
-        }}
-        QMenuBar::item {{
-            background: transparent;
-            padding: 4px 10px;
-        }}
-        QMenuBar::item:selected {{
-            background: rgba(255, 255, 255, 0.05);
-        }}
-        QMenu {{
-            background-color: {Theme.SIDEBAR_BG};
-            color: {Theme.TEXT};
-            border: 1px solid {Theme.BORDER};
-            padding: 4px 0;
-        }}
-        QMenu::item {{
-            padding: 4px 24px 4px 14px;
-        }}
-        QMenu::item:selected {{
-            background-color: rgba(255, 255, 255, 0.05);
-        }}
-        QMenu::separator {{
-            height: 1px;
-            background: {Theme.BORDER};
-            margin: 4px 0;
-        }}
-    """)
+    # Global styling is now handled dynamically in MainWindow
+    app.setStyleSheet("")
 
     # Ensure QStandardPaths.AppDataLocation resolves to a stable, app-specific dir.
     app.setOrganizationName("G1enB1and")
