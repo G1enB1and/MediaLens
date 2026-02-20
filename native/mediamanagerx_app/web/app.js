@@ -916,6 +916,38 @@ function wireSettings() {
   }
 }
 
+function updateSidebarButtonIcons(side, visible) {
+  const icon = document.getElementById('icon' + (side === 'left' ? 'Left' : 'Right') + 'Panel');
+  if (!icon) return;
+  const state = visible ? 'opened' : 'closed';
+  icon.src = `${side}-sidebar-${state}.png`;
+}
+
+function wireSidebarToggles() {
+  const btnLeft = document.getElementById('toggleLeftPanel');
+  const btnRight = document.getElementById('toggleRightPanel');
+
+  if (btnLeft) {
+    btnLeft.addEventListener('click', () => {
+      if (!gBridge || !gBridge.get_settings) return;
+      gBridge.get_settings(function (s) {
+        const cur = !!(s && s['ui.show_left_panel']);
+        gBridge.set_setting_bool('ui.show_left_panel', !cur);
+      });
+    });
+  }
+
+  if (btnRight) {
+    btnRight.addEventListener('click', () => {
+      if (!gBridge || !gBridge.get_settings) return;
+      gBridge.get_settings(function (s) {
+        const cur = !!(s && s['ui.show_right_panel']);
+        gBridge.set_setting_bool('ui.show_right_panel', !cur);
+      });
+    });
+  }
+}
+
 function wireSearch() {
   const inp = document.getElementById('searchInput');
   if (!inp) return;
@@ -933,6 +965,7 @@ async function main() {
   wireSettings();
   wireCtxMenu();
   wireSearch();
+  wireSidebarToggles();
 
   // Show immediately on first paint (prevents "nothing then overlay" behavior)
   setGlobalLoading(true, 'Starting…', 10);
@@ -952,6 +985,16 @@ async function main() {
     }
 
     gBridge = bridge;
+
+    if (bridge.uiFlagChanged) {
+      bridge.uiFlagChanged.connect(function (key, value) {
+        if (key === 'ui.show_left_panel') {
+          updateSidebarButtonIcons('left', value);
+        } else if (key === 'ui.show_right_panel') {
+          updateSidebarButtonIcons('right', value);
+        }
+      });
+    }
 
     if (bridge.fileOpFinished) {
       bridge.fileOpFinished.connect(function (op, ok, oldPath, newPath) {
@@ -988,6 +1031,9 @@ async function main() {
       const v = (s && s['ui.accent_color']) || '#8ab4f8';
       document.documentElement.style.setProperty('--accent', v);
       if (ac) ac.value = v;
+
+      updateSidebarButtonIcons('left', !!(s && s['ui.show_left_panel']));
+      updateSidebarButtonIcons('right', !!(s && s['ui.show_right_panel']));
     });
 
     // Initial sync

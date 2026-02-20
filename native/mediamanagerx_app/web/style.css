@@ -130,6 +130,19 @@ body.lightbox-open header {
   cursor: pointer;
 }
 
+.icon-btn img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  opacity: 0.85;
+  display: block;
+  margin: 0 auto;
+}
+
+.icon-btn:hover img {
+  opacity: 1;
+}
+
 .ctx {
   position: fixed;
   z-index: 12000;
