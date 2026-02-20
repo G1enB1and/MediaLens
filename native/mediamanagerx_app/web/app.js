@@ -757,6 +757,21 @@ function wirePager() {
     if (prev) prev.addEventListener('click', prevPage);
     if (next) next.addEventListener('click', nextPage);
   });
+
+  const scrollBtn = document.getElementById('scrollTop');
+  if (scrollBtn) {
+    console.log('[MMX] Scroll to top button found');
+    scrollBtn.addEventListener('click', () => {
+      console.log('[MMX] Scroll to top clicked');
+      const header = document.querySelector('header');
+      if (header) {
+        header.scrollIntoView({ behavior: 'smooth' });
+      } else {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    });
+  }
+
   renderPager();
 }
 
