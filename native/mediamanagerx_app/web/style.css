@@ -379,12 +379,24 @@ body.lightbox-open .toolbar {
   border-radius: 8px;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.03);
-  color: var(--fg);
+  color: var(--muted);
+  /* Neutral brighter grey */
   cursor: pointer;
+  transition: all 0.2s ease;
 }
 
 .tb-btn:disabled {
-  opacity: 0.45;
+  color: rgba(255, 255, 255, 0.2);
+  /* Darkest grey for inactive */
+  border-color: rgba(255, 255, 255, 0.05);
+  cursor: default;
+}
+
+.tb-btn:not(:disabled):hover {
+  color: #ffffff;
+  /* Brightest white on hover */
+  border-color: var(--accent);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .tb-btn.highlight {
@@ -414,14 +426,25 @@ body.lightbox-open .toolbar {
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.02);
   color: var(--muted);
-  font-size: 12px;
+  /* Neutral brighter grey */
+  font-size: 13px;
   cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tb-page:hover {
+  color: #ffffff;
+  /* Brightest white on hover */
+  border-color: var(--accent);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .tb-page[aria-current="page"] {
-  color: var(--fg);
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  color: #ffffff;
+  /* Brightest white for current */
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
 }
 
 .tb-ellipsis {
