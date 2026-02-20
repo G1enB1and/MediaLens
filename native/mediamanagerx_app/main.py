@@ -195,25 +195,21 @@ class RootFilterProxyModel(QSortFilterProxyModel):
             return True # Allow it to load
             
         try:
-            # Normalize and lowercase for Windows robustness
-            item_p = Path(path_str).resolve()
-            root_p = Path(self._root_path).resolve()
+            # DO NOT use .resolve() here, as it follows symlinks outside the root.
+            # QFileSystemModel already provides absolute apparent paths.
+            item_p = Path(path_str)
+            root_p = Path(self._root_path)
             
-            # Use lowercase strings for membership checks to handle Windows case-insensitivity
-            item_p_str = str(item_p).lower()
-            root_p_str = str(root_p).lower()
-            root_parents_lower = [str(p).lower() for p in root_p.parents]
-            item_parents_lower = [str(p).lower() for p in item_p.parents]
+            # Normalize for Windows case-insensitivity and slash consistency
+            item_p_str = str(item_p).lower().replace("\\", "/")
+            root_p_str = str(root_p).lower().replace("\\", "/")
             
-            # 1. Accept the root folder itself
-            if item_p_str == root_p_str:
+            # 1. Accept the root folder itself or its descendants
+            if item_p_str == root_p_str or item_p_str.startswith(root_p_str + "/"):
                 return True
                 
-            # 2. Accept children/descendants of the root folder
-            if root_p_str in item_parents_lower:
-                return True
-                
-            # 3. Accept ancestors of the root folder (so we can reach it from drive)
+            # 2. Accept ancestors of the root folder (so we can reach it from drive)
+            root_parents_lower = [str(p).lower().replace("\\", "/") for p in root_p.parents]
             if item_p_str in root_parents_lower:
                 return True
                 
