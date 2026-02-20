@@ -760,15 +760,18 @@ function wirePager() {
 
   const scrollBtn = document.getElementById('scrollTop');
   if (scrollBtn) {
-    console.log('[MMX] Scroll to top button found');
     scrollBtn.addEventListener('click', () => {
-      console.log('[MMX] Scroll to top clicked');
-      const header = document.querySelector('header');
-      if (header) {
-        header.scrollIntoView({ behavior: 'smooth' });
-      } else {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  }
+
+  const scrollBottomBtn = document.getElementById('scrollBottom');
+  if (scrollBottomBtn) {
+    scrollBottomBtn.addEventListener('click', () => {
+      window.scrollTo({
+        top: document.documentElement.scrollHeight,
+        behavior: 'smooth'
+      });
     });
   }
 

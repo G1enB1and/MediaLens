@@ -12,35 +12,51 @@
 <body>
   <div id="app">
     <header>
-      <div class="brand">
-        <img src="media-manager-logo-64.png" alt="" class="logo" />
-        MediaManagerX
-      </div>
-      <div class="search">
-        <input id="searchInput" class="search-input" placeholder="Search…" />
-      </div>
-      <div class="controls">
-        <div class="custom-select" id="sortSelect" tabindex="0">
-          <div class="select-trigger">Sort: Name (A-Z)</div>
-          <div class="select-options">
-            <div data-value="name_asc" class="selected">Name (A-Z)</div>
-            <div data-value="name_desc">Name (Z-A)</div>
-            <div data-value="date_desc">Date (Newest)</div>
-            <div data-value="date_asc">Date (Oldest)</div>
-            <div data-value="size_desc">Size (Largest)</div>
-            <div data-value="size_asc">Size (Smallest)</div>
-          </div>
+      <div class="header-top">
+        <div class="brand">
+          <img src="media-manager-logo-64.png" alt="" class="logo" />
+          MediaManagerX
         </div>
-        <div class="custom-select" id="filterSelect" tabindex="0">
-          <div class="select-trigger">Filter: All Types</div>
-          <div class="select-options">
-            <div data-value="all" class="selected">All Types</div>
-            <div data-value="image">Images</div>
-            <div data-value="video">Videos</div>
-            <div data-value="animated">Animated</div>
-          </div>
+        <div class="search">
+          <input id="searchInput" class="search-input" placeholder="Search…" />
         </div>
-        <button class="icon-btn" id="openSettings" title="Settings">⚙</button>
+        <div class="controls">
+          <div class="custom-select" id="sortSelect" tabindex="0">
+            <div class="select-trigger">Sort: Name (A-Z)</div>
+            <div class="select-options">
+              <div data-value="name_asc" class="selected">Name (A-Z)</div>
+              <div data-value="name_desc">Name (Z-A)</div>
+              <div data-value="date_desc">Date (Newest)</div>
+              <div data-value="date_asc">Date (Oldest)</div>
+              <div data-value="size_desc">Size (Largest)</div>
+              <div data-value="size_asc">Size (Smallest)</div>
+            </div>
+          </div>
+          <div class="custom-select" id="filterSelect" tabindex="0">
+            <div class="select-trigger">Filter: All Types</div>
+            <div class="select-options">
+              <div data-value="all" class="selected">All Types</div>
+              <div data-value="image">Images</div>
+              <div data-value="video">Videos</div>
+              <div data-value="animated">Animated</div>
+            </div>
+          </div>
+          <button class="icon-btn" id="openSettings" title="Settings">⚙</button>
+        </div>
+      </div>
+
+      <div class="toolbar" data-pager>
+        <div class="kv">
+          <div class="k">Selected folder</div>
+          <div class="v" id="selectedFolder">(none)</div>
+        </div>
+        <div class="pager">
+          <button class="tb-btn" data-prev>Prev</button>
+          <div class="tb-links" data-links></div>
+          <button class="tb-btn" data-next>Next</button>
+          <button class="tb-btn" id="scrollBottom" title="Scroll to bottom">↓</button>
+          <button class="tb-btn" id="scrollTop" title="Scroll to top">↑</button>
+        </div>
       </div>
     </header>
 
@@ -61,87 +77,71 @@
     </div>
 
     <main>
-      <div class="pane">
-        <div class="kv">
-          <div class="k">Selected folder</div>
-          <div class="v" id="selectedFolder">(none)</div>
-        </div>
 
-        <div class="toolbar" data-pager>
-          <div class="pager">
-            <button class="tb-btn" data-prev>Prev</button>
-            <div class="tb-links" data-links></div>
-            <button class="tb-btn" data-next>Next</button>
-            <button class="tb-btn" id="scrollTop" title="Scroll to top">↑</button>
+      <div class="masonry" id="mediaList"></div>
+
+
+      <div class="loading" id="globalLoading">
+        <div class="loading-card">
+          <div class="spinner" aria-hidden="true"></div>
+          <div class="loading-text" id="loadingText">Loading…</div>
+          <div class="bar">
+            <div class="bar-fill" id="loadingBar" style="width: 10%"></div>
           </div>
         </div>
+      </div>
 
-        <div class="masonry" id="mediaList"></div>
-
-
-        <div class="loading" id="globalLoading">
-          <div class="loading-card">
-            <div class="spinner" aria-hidden="true"></div>
-            <div class="loading-text" id="loadingText">Loading…</div>
-            <div class="bar">
-              <div class="bar-fill" id="loadingBar" style="width: 10%"></div>
-            </div>
-          </div>
+      <div class="lightbox" id="lightbox" hidden>
+        <div class="lightbox-backdrop" id="lightboxBackdrop"></div>
+        <div class="lightbox-ui">
+          <button class="lb-btn" id="lbPrev" title="Previous (←)">←</button>
+          <button class="lb-btn" id="lbNext" title="Next (→)">→</button>
+          <button class="lb-btn lb-close" id="lbClose" title="Close (Esc)">✕</button>
         </div>
-
-        <div class="lightbox" id="lightbox" hidden>
-          <div class="lightbox-backdrop" id="lightboxBackdrop"></div>
-          <div class="lightbox-ui">
-            <button class="lb-btn" id="lbPrev" title="Previous (←)">←</button>
-            <button class="lb-btn" id="lbNext" title="Next (→)">→</button>
-            <button class="lb-btn lb-close" id="lbClose" title="Close (Esc)">✕</button>
-          </div>
-          <div class="lightbox-content">
-            <img id="lightboxImg" alt="" />
-            <video id="lightboxVideo" controls></video>
-          </div>
+        <div class="lightbox-content">
+          <img id="lightboxImg" alt="" />
+          <video id="lightboxVideo" controls></video>
         </div>
+      </div>
 
-        <div class="modal" id="settingsModal" hidden>
-          <div class="modal-backdrop" id="settingsBackdrop"></div>
-          <div class="modal-card">
-            <div class="modal-title">Settings</div>
-            <label class="toggle">
-              <input type="checkbox" id="toggleRandomize" />
-              <span>Randomize gallery order</span>
-            </label>
-            <div class="field">
-              <div class="field-label">Starting folder</div>
-              <div class="field-row">
-                <input class="text" id="startFolder" placeholder="(not set)" />
-                <button class="tb-btn" id="browseStartFolder">Browse…</button>
-                <button class="tb-btn highlight" id="loadStartFolderNow"
-                  title="Load this folder now without restart">Load
-                  Now</button>
-              </div>
+      <div class="modal" id="settingsModal" hidden>
+        <div class="modal-backdrop" id="settingsBackdrop"></div>
+        <div class="modal-card">
+          <div class="modal-title">Settings</div>
+          <label class="toggle">
+            <input type="checkbox" id="toggleRandomize" />
+            <span>Randomize gallery order</span>
+          </label>
+          <div class="field">
+            <div class="field-label">Starting folder</div>
+            <div class="field-row">
+              <input class="text" id="startFolder" placeholder="(not set)" />
+              <button class="tb-btn" id="browseStartFolder">Browse…</button>
+              <button class="tb-btn highlight" id="loadStartFolderNow" title="Load this folder now without restart">Load
+                Now</button>
             </div>
+          </div>
 
-            <label class="toggle">
-              <input type="checkbox" id="toggleRestoreLast" />
-              <span>Restore previous folder on launch</span>
-            </label>
+          <label class="toggle">
+            <input type="checkbox" id="toggleRestoreLast" />
+            <span>Restore previous folder on launch</span>
+          </label>
 
-            <label class="toggle">
-              <input type="checkbox" id="toggleHideDot" />
-              <span>Hide dot folders/files (start with “.”)</span>
-            </label>
+          <label class="toggle">
+            <input type="checkbox" id="toggleHideDot" />
+            <span>Hide dot folders/files (start with “.”)</span>
+          </label>
 
-            <div class="field">
-              <div class="field-label">Accent color</div>
-              <div class="field-row">
-                <input class="color" type="color" id="accentColor" />
-                <div class="hint">Used for progress, links, and highlights.</div>
-              </div>
+          <div class="field">
+            <div class="field-label">Accent color</div>
+            <div class="field-row">
+              <input class="color" type="color" id="accentColor" />
+              <div class="hint">Used for progress, links, and highlights.</div>
             </div>
+          </div>
 
-            <div class="modal-actions">
-              <button class="tb-btn" id="closeSettings">Close</button>
-            </div>
+          <div class="modal-actions">
+            <button class="tb-btn" id="closeSettings">Close</button>
           </div>
         </div>
       </div>

@@ -15,8 +15,7 @@
 
 html,
 body {
-  height: 100%;
-  overflow-x: hidden;
+  min-height: 100%;
 }
 
 body {
@@ -58,20 +57,30 @@ html {
 }
 
 #app {
-  height: 100%;
+  min-height: 100%;
   display: flex;
   flex-direction: column;
 }
 
 header {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 85%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.header-top {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 16px;
   row-gap: 12px;
   padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--panel);
 }
 
 .search {
@@ -265,6 +274,7 @@ header {
 
 main {
   padding: 16px;
+  flex: 1;
 }
 
 .loading {
@@ -327,33 +337,26 @@ main {
 }
 
 .toolbar {
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  background: linear-gradient(to bottom, rgba(15, 17, 21, 0.95), rgba(15, 17, 21, 0.7));
-  backdrop-filter: blur(6px);
-  padding: 8px 0 10px 0;
-  margin-bottom: 10px;
+  padding: 8px 16px 12px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .toolbar.bottom {
-  position: static;
-  background: none;
-  backdrop-filter: none;
-  padding: 14px 0 0 0;
-  margin: 0;
+  display: none;
+  /* Already removed from HTML, but cleaning up CSS */
 }
 
 .pager {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
-}
-
-#scrollTop {
   margin-left: auto;
 }
+
 
 .tb-btn {
   height: 30px;
@@ -598,21 +601,30 @@ p {
 }
 
 .kv {
-  display: grid;
-  grid-template-columns: 160px 1fr;
-  gap: 8px 12px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.02);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 200px;
 }
 
 .k {
   color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
 }
 
 .v {
-  word-break: break-word;
+  background: rgba(255, 255, 255, 0.08);
+  /* slightly more visible */
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  color: var(--accent);
+  word-break: break-all;
 }
 
 .controls {
