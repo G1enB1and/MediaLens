@@ -1160,7 +1160,7 @@ class MainWindow(QMainWindow):
         meta_layout.addWidget(QLabel("Metadata"))
         self.meta_text = QTextEdit()
         self.meta_text.setReadOnly(True)
-        self.meta_text.setText("(Metadata panel scaffold)\n\nSelect a file to show details here.")
+        self.meta_text.setText("Select a file to show details here.")
         meta_layout.addWidget(self.meta_text, 1)
 
         # Native loading overlay shown while the WebEngine page itself is loading.
@@ -1320,8 +1320,13 @@ class MainWindow(QMainWindow):
 
     def _show_metadata_for_path(self, path: str) -> None:
         try:
+            if not path:
+                self.meta_text.setText("Select a file to show details here.")
+                return
+
             p = Path(path)
             if not p.exists() or not p.is_file():
+                self.meta_text.setText("Select a file to show details here.")
                 return
 
             st = p.stat()
@@ -1554,17 +1559,42 @@ class MainWindow(QMainWindow):
             pass
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
-        if event.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease):
-            # Only dismiss if the click is NOT on the web view itself or its descendants.
-            # This prevents the dismissal logic from interfering with the web menu's own lifecycle.
-            if watched != self.web and not self.web.isAncestorOf(watched):
+        # Only handle MouseButtonPress to avoid duplicate triggers on release.
+        if event.type() == QEvent.Type.MouseButtonPress:
+            # Check if the click is within the web view's internal hierarchy.
+            obj_name = watched.objectName() or watched.__class__.__name__
+            is_web = (watched == self.web) or ("WebEngine" in obj_name) or ("RenderWidget" in obj_name)
+            
+            if not is_web:
+                curr = watched
+                while curr:
+                    if curr == self.web:
+                        is_web = True
+                        break
+                    if hasattr(curr, "parent"):
+                        try:
+                            curr = QObject.parent(curr) if not isinstance(curr, QWidget) else curr.parent()
+                        except Exception:
+                            curr = None
+                    else:
+                        curr = None
+
+            if not is_web:
                 self._dismiss_web_menus()
+                self._deselect_web_items()
         return super().eventFilter(watched, event)
 
     def _dismiss_web_menus(self) -> None:
         """Tell the web gallery to hide its custom context menu."""
         try:
             self.web.page().runJavaScript("window.hideCtx && window.hideCtx();")
+        except Exception:
+            pass
+
+    def _deselect_web_items(self) -> None:
+        """Tell the web gallery to deselect any currently selected media items."""
+        try:
+            self.web.page().runJavaScript("window.deselectAll && window.deselectAll();")
         except Exception:
             pass
 

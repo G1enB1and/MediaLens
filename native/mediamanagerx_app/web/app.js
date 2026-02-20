@@ -105,6 +105,14 @@ function hideCtx() {
 }
 window.hideCtx = hideCtx;
 
+function deselectAll() {
+  document.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected'));
+  if (gBridge && gBridge.show_metadata) {
+    gBridge.show_metadata("");
+  }
+}
+window.deselectAll = deselectAll;
+
 function showCtx(x, y, item, idx, fromLightbox = false) {
   const ctx = document.getElementById('ctx');
   if (!ctx) return;
@@ -350,6 +358,7 @@ function renderMediaList(items) {
       card.appendChild(img);
 
       card.addEventListener('click', (e) => {
+        e.stopPropagation();
         // Selection logic
         document.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected'));
         card.classList.add('selected');
@@ -390,6 +399,7 @@ function renderMediaList(items) {
       if (item.path) gPosterObserver.observe(img);
 
       card.addEventListener('click', (e) => {
+        e.stopPropagation();
         // Selection logic
         document.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected'));
         card.classList.add('selected');
@@ -412,6 +422,13 @@ function renderMediaList(items) {
     }
 
     el.appendChild(card);
+  });
+
+  el.addEventListener('click', (e) => {
+    // If we click on the mediaList container itself (not a card)
+    if (e.target === el) {
+      deselectAll();
+    }
   });
 
   // Enable background context menu for pasting into current folder
@@ -476,9 +493,15 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Close on outside click
-  document.addEventListener('click', () => {
+  // Close on outside click and handle global deselection
+  document.addEventListener('click', (e) => {
     document.querySelectorAll('.custom-select').forEach(s => s.classList.remove('open'));
+
+    // If we clicked something that is NOT a card or a descendant of a card,
+    // and not a menu item or other interactive element that should keep selection.
+    if (!e.target.closest('.card') && !e.target.closest('.ctx') && !e.target.closest('.select-trigger') && !e.target.closest('.select-options')) {
+      deselectAll();
+    }
   });
 
   setupCustomSelect('sortSelect', (val) => {
