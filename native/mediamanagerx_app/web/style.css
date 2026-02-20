@@ -72,6 +72,15 @@ header {
   background: color-mix(in srgb, var(--panel) 85%, transparent);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+  /* GPU acceleration hints: */
+  transform: translateZ(0);
+  will-change: backdrop-filter;
+}
+
+body.lightbox-open header {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: var(--panel);
 }
 
 .header-top {
@@ -343,6 +352,12 @@ main {
   align-items: center;
   gap: 12px;
   border-top: 1px solid rgba(255, 255, 255, 0.05);
+  /* GPU acceleration hints: */
+  transform: translateZ(0);
+}
+
+body.lightbox-open .toolbar {
+  background: var(--bg);
 }
 
 .toolbar.bottom {
@@ -453,6 +468,14 @@ p {
   overflow: hidden;
   padding: 0;
   cursor: pointer;
+  /* GPU acceleration hints: */
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+body.lightbox-open main {
+  /* Reduce rendering load by hiding gallery when lightbox is open */
+  visibility: hidden;
 }
 
 .card:focus,
@@ -623,7 +646,7 @@ p {
   border-radius: 6px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 13px;
-  color: var(--accent);
+  color: #f0f0f0;
   word-break: break-all;
 }
 

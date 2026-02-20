@@ -90,62 +90,62 @@
           </div>
         </div>
       </div>
-
-      <div class="lightbox" id="lightbox" hidden>
-        <div class="lightbox-backdrop" id="lightboxBackdrop"></div>
-        <div class="lightbox-ui">
-          <button class="lb-btn" id="lbPrev" title="Previous (←)">←</button>
-          <button class="lb-btn" id="lbNext" title="Next (→)">→</button>
-          <button class="lb-btn lb-close" id="lbClose" title="Close (Esc)">✕</button>
-        </div>
-        <div class="lightbox-content">
-          <img id="lightboxImg" alt="" />
-          <video id="lightboxVideo" controls></video>
-        </div>
-      </div>
-
-      <div class="modal" id="settingsModal" hidden>
-        <div class="modal-backdrop" id="settingsBackdrop"></div>
-        <div class="modal-card">
-          <div class="modal-title">Settings</div>
-          <label class="toggle">
-            <input type="checkbox" id="toggleRandomize" />
-            <span>Randomize gallery order</span>
-          </label>
-          <div class="field">
-            <div class="field-label">Starting folder</div>
-            <div class="field-row">
-              <input class="text" id="startFolder" placeholder="(not set)" />
-              <button class="tb-btn" id="browseStartFolder">Browse…</button>
-              <button class="tb-btn highlight" id="loadStartFolderNow" title="Load this folder now without restart">Load
-                Now</button>
-            </div>
-          </div>
-
-          <label class="toggle">
-            <input type="checkbox" id="toggleRestoreLast" />
-            <span>Restore previous folder on launch</span>
-          </label>
-
-          <label class="toggle">
-            <input type="checkbox" id="toggleHideDot" />
-            <span>Hide dot folders/files (start with “.”)</span>
-          </label>
-
-          <div class="field">
-            <div class="field-label">Accent color</div>
-            <div class="field-row">
-              <input class="color" type="color" id="accentColor" />
-              <div class="hint">Used for progress, links, and highlights.</div>
-            </div>
-          </div>
-
-          <div class="modal-actions">
-            <button class="tb-btn" id="closeSettings">Close</button>
-          </div>
-        </div>
-      </div>
     </main>
+
+    <div class="lightbox" id="lightbox" hidden>
+      <div class="lightbox-backdrop" id="lightboxBackdrop"></div>
+      <div class="lightbox-ui">
+        <button class="lb-btn" id="lbPrev" title="Previous (←)">←</button>
+        <button class="lb-btn" id="lbNext" title="Next (→)">→</button>
+        <button class="lb-btn lb-close" id="lbClose" title="Close (Esc)">✕</button>
+      </div>
+      <div class="lightbox-content">
+        <img id="lightboxImg" alt="" />
+        <video id="lightboxVideo" controls></video>
+      </div>
+    </div>
+
+    <div class="modal" id="settingsModal" hidden>
+      <div class="modal-backdrop" id="settingsBackdrop"></div>
+      <div class="modal-card">
+        <div class="modal-title">Settings</div>
+        <label class="toggle">
+          <input type="checkbox" id="toggleRandomize" />
+          <span>Randomize gallery order</span>
+        </label>
+        <div class="field">
+          <div class="field-label">Starting folder</div>
+          <div class="field-row">
+            <input class="text" id="startFolder" placeholder="(not set)" />
+            <button class="tb-btn" id="browseStartFolder">Browse…</button>
+            <button class="tb-btn highlight" id="loadStartFolderNow" title="Load this folder now without restart">Load
+              Now</button>
+          </div>
+        </div>
+
+        <label class="toggle">
+          <input type="checkbox" id="toggleRestoreLast" />
+          <span>Restore previous folder on launch</span>
+        </label>
+
+        <label class="toggle">
+          <input type="checkbox" id="toggleHideDot" />
+          <span>Hide dot folders/files (start with “.”)</span>
+        </label>
+
+        <div class="field">
+          <div class="field-label">Accent color</div>
+          <div class="field-row">
+            <input class="color" type="color" id="accentColor" />
+            <div class="hint">Used for progress, links, and highlights.</div>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button class="tb-btn" id="closeSettings">Close</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- QWebChannel is provided by Qt; this path works in Qt WebEngine -->

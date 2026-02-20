@@ -502,6 +502,8 @@ function openLightboxByIndex(idx) {
   const vid = document.getElementById('lightboxVideo');
   if (!lb || !img || !vid) return;
 
+  document.body.classList.add('lightbox-open');
+
   // Stop native overlay ONLY if it was previously opened for a video.
   if (gLightboxNativeVideo && gBridge && gBridge.close_native_video) {
     gBridge.close_native_video(function () { });
@@ -564,6 +566,7 @@ function closeLightbox() {
   const vid = document.getElementById('lightboxVideo');
   if (!lb || !img || !vid) return;
   lb.hidden = true;
+  document.body.classList.remove('lightbox-open');
 
   img.src = '';
   img.style.display = 'block';
