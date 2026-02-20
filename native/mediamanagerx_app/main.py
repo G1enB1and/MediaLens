@@ -24,8 +24,8 @@ from PySide6.QtCore import (
     QMimeData,
     QEvent,
 )
-from PySide6.QtGui import QAction, QColor, QImageReader, QIcon
-from PySide6.QtGui import QMouseEvent
+from PySide6.QtGui import QAction, QColor, QImageReader, QIcon, QPainter
+from PySide6.QtGui import QMouseEvent, QPen
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QSplitter,
+    QSplitterHandle,
     QWidget,
     QVBoxLayout,
     QTreeView,
@@ -51,6 +52,50 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage
 from native.mediamanagerx_app.video_overlay import LightboxVideoOverlay, VideoRequest
 from PySide6.QtCore import QSortFilterProxyModel, QModelIndex
+
+
+class Theme:
+    """Centralized theme colors for the native UI."""
+    BG = "#0f1115"
+    SIDEBAR_BG = "#16181d"
+    TEXT = "#ccc"
+    TEXT_MUTED = "#bbb"
+    ACCENT_DEFAULT = "#8ab4f8"
+    SPLITTER_IDLE = "#444"
+    BORDER = "#2a2f3a"
+    HEADER_TEXT = "#ccc"
+
+
+class CustomSplitterHandle(QSplitterHandle):
+    """Custom handle that paints itself to ensure hover colors work on all platforms."""
+    def __init__(self, orientation: Qt.Orientation, parent: QSplitter) -> None:
+        super().__init__(orientation, parent)
+        self.setMouseTracking(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover)
+        self._hovered = False
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        # Use a slightly lighter/darker border to give it some depth if desired
+        # but for now, solid color per user request.
+        accent = getattr(self.window(), "_current_accent", Theme.ACCENT_DEFAULT)
+        color = QColor(accent) if self._hovered else QColor(Theme.SPLITTER_IDLE)
+        painter.fillRect(self.contentsRect(), color)
+
+    def event(self, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.HoverEnter:
+            self._hovered = True
+            self.update()
+        elif event.type() == QEvent.Type.HoverLeave:
+            self._hovered = False
+            self.update()
+        return super().event(event)
+
+
+class CustomSplitter(QSplitter):
+    """Splitter that uses CustomSplitterHandle."""
+    def createHandle(self) -> QSplitterHandle:
+        return CustomSplitterHandle(self.orientation(), self)
 
 
 class FolderTreeView(QTreeView):
@@ -158,6 +203,7 @@ class Bridge(QObject):
     metadataRequested = Signal(str)
     loadFolderRequested = Signal(str)
 
+    accentColorChanged = Signal(str)
     # Async file ops (so WebEngine UI doesn't freeze during rename)
     fileOpFinished = Signal(str, bool, str, str)  # op, ok, old_path, new_path
 
@@ -487,7 +533,8 @@ class Bridge(QObject):
                 return False
             qkey = key.replace(".", "/")
             self.settings.setValue(qkey, str(value or ""))
-            # (Future) if key affects UI, we can emit a signal.
+            if key == "ui.accent_color":
+                self.accentColorChanged.emit(str(value or "#8ab4f8"))
             return True
         except Exception:
             return False
@@ -996,6 +1043,8 @@ class MainWindow(QMainWindow):
         self.bridge.uiFlagChanged.connect(self._apply_ui_flag)
         self.bridge.metadataRequested.connect(self._show_metadata_for_path)
         self.bridge.loadFolderRequested.connect(self._on_load_folder_requested)
+        self.bridge.accentColorChanged.connect(self._update_splitter_style)
+        self._current_accent = Theme.ACCENT_DEFAULT
 
         self._build_menu()
         self._build_layout()
@@ -1053,15 +1102,15 @@ class MainWindow(QMainWindow):
             m.aboutToShow.connect(self._dismiss_web_menus)
 
     def _build_layout(self) -> None:
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter = CustomSplitter(Qt.Orientation.Horizontal)
         self.splitter = splitter
 
-        # Left: folder tree (native) — functional first, styling later
+        # Left: folder tree (native)
         left = QWidget()
-        left.setStyleSheet("""
-            QWidget { background-color: #16181d; color: #ccc; }
-            QTreeView { background-color: #16181d; border: none; }
-            QLabel { color: #ccc; font-weight: bold; }
+        left.setStyleSheet(f"""
+            QWidget {{ background-color: {Theme.SIDEBAR_BG}; color: {Theme.TEXT}; }}
+            QTreeView {{ background-color: {Theme.SIDEBAR_BG}; border: none; }}
+            QLabel {{ color: {Theme.HEADER_TEXT}; font-weight: bold; }}
         """)
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(10, 10, 10, 10)
@@ -1159,10 +1208,10 @@ class MainWindow(QMainWindow):
 
         # Right: metadata panel placeholder
         meta = QWidget()
-        meta.setStyleSheet("""
-            QWidget { background-color: #16181d; color: #ccc; }
-            QTextEdit { background-color: #16181d; border: none; color: #bbb; font-family: 'Segoe UI', sans-serif; }
-            QLabel { color: #ccc; font-weight: bold; }
+        meta.setStyleSheet(f"""
+            QWidget {{ background-color: {Theme.SIDEBAR_BG}; color: {Theme.TEXT}; }}
+            QTextEdit {{ background-color: {Theme.SIDEBAR_BG}; border: none; color: {Theme.TEXT_MUTED}; font-family: 'Segoe UI', sans-serif; }}
+            QLabel {{ color: {Theme.HEADER_TEXT}; font-weight: bold; }}
         """)
         meta_layout = QVBoxLayout(meta)
         meta_layout.setContentsMargins(10, 10, 10, 10)
@@ -1175,7 +1224,7 @@ class MainWindow(QMainWindow):
 
         # Native loading overlay shown while the WebEngine page itself is loading.
         self.web_loading = QWidget(self.web)
-        self.web_loading.setStyleSheet("background: #0f1115;")
+        self.web_loading.setStyleSheet(f"background: {Theme.BG};")
         self.web_loading.setGeometry(self.web.rect())
         self.web_loading.setVisible(True)
 
@@ -1224,7 +1273,7 @@ class MainWindow(QMainWindow):
 
         # Prevent white flash while the first HTML/CSS loads.
         try:
-            self.web.page().setBackgroundColor(QColor("#0f1115"))
+            self.web.page().setBackgroundColor(QColor(Theme.BG))
         except Exception:
             pass
 
@@ -1246,9 +1295,10 @@ class MainWindow(QMainWindow):
         splitter.addWidget(left)
         splitter.addWidget(center)
         splitter.addWidget(meta)
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
+        splitter.setObjectName("mainSplitter")
+        splitter.setMouseTracking(True)
+        splitter.setHandleWidth(7)
 
         # Apply persistent widths
         state = self.bridge.settings.value("ui/splitter_state")
@@ -1262,6 +1312,9 @@ class MainWindow(QMainWindow):
         splitter.splitterMoved.connect(lambda *args: self._save_splitter_state())
 
         self.setCentralWidget(splitter)
+
+        # Apply initial splitter style
+        self._update_splitter_style(accent)
 
         # Apply right panel flag from settings
         try:
@@ -1510,6 +1563,22 @@ class MainWindow(QMainWindow):
     def _close_video_overlay(self) -> None:
         self.video_overlay.close_overlay(notify_web=False)
 
+    def _update_splitter_style(self, accent_color: str) -> None:
+        """Update QSplitter handles with light grey idle and accent color hover."""
+        if not hasattr(self, "splitter"):
+            return
+        
+        self._current_accent = accent_color
+        self.splitter.setHandleWidth(5)
+        
+        # We no longer need stylesheets or manual loops here because 
+        # CustomSplitterHandle.paintEvent handles everything natively.
+        # We just trigger a redraw of the handles.
+        for i in range(self.splitter.count()):
+            h = self.splitter.handle(i)
+            if h:
+                h.update()
+
     def _on_video_prev(self) -> None:
         try:
             self.web.page().runJavaScript("try{ window.lightboxPrev && window.lightboxPrev(); }catch(e){}")
@@ -1666,37 +1735,36 @@ def main() -> None:
     app = QApplication(sys.argv)
     
     # Global styling to flatten native menus and remove shadows/thick borders
-    app.setStyleSheet("""
-        QMenuBar {
-            background-color: #171a21;
-            color: #e6e6e6;
-            border-bottom: 1px solid #2a2f3a;
-        }
-        QMenuBar::item {
+    app.setStyleSheet(f"""
+        QMenuBar {{
+            background-color: {Theme.SIDEBAR_BG};
+            color: {Theme.TEXT};
+            border-bottom: 1px solid {Theme.BORDER};
+        }}
+        QMenuBar::item {{
             background: transparent;
             padding: 4px 10px;
-        }
-        QMenuBar::item:selected {
+        }}
+        QMenuBar::item:selected {{
             background: rgba(255, 255, 255, 0.05);
-        }
-        QMenu {
-            background-color: #171a21;
-            color: #e6e6e6;
-            border: 1px solid #2a2f3a;
-            border-radius: 6px;
+        }}
+        QMenu {{
+            background-color: {Theme.SIDEBAR_BG};
+            color: {Theme.TEXT};
+            border: 1px solid {Theme.BORDER};
             padding: 4px 0;
-        }
-        QMenu::item {
+        }}
+        QMenu::item {{
             padding: 4px 24px 4px 14px;
-        }
-        QMenu::item:selected {
-            background-color: rgba(255, 255, 255, 0.06);
-        }
-        QMenu::separator {
+        }}
+        QMenu::item:selected {{
+            background-color: rgba(255, 255, 255, 0.05);
+        }}
+        QMenu::separator {{
             height: 1px;
-            background: #2a2f3a;
+            background: {Theme.BORDER};
             margin: 4px 0;
-        }
+        }}
     """)
 
     # Ensure QStandardPaths.AppDataLocation resolves to a stable, app-specific dir.
