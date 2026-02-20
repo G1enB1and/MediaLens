@@ -91,8 +91,10 @@ class LightboxVideoOverlay(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setVisible(False)
 
-        # Optional close callback (set by owner)
+        # Optional close/nav callbacks (set by owner)
         self.on_close = None
+        self.on_prev = None
+        self.on_next = None
 
         self.player = QMediaPlayer(self)
         self.audio = QAudioOutput(self)
@@ -121,7 +123,9 @@ class LightboxVideoOverlay(QWidget):
         )
         self.controls.setVisible(False)
 
+        self.btn_prev = QPushButton("⏮", self.controls)
         self.btn_toggle_play = QPushButton("⏵", self.controls)
+        self.btn_next = QPushButton("⏭", self.controls)
         self.btn_mute = QPushButton("🔊", self.controls)
         self.lbl_time = QLabel("0:00 / 0:00", self.controls)
         self.lbl_dbg = QLabel("", self.controls)
@@ -129,6 +133,8 @@ class LightboxVideoOverlay(QWidget):
         self.btn_close = QPushButton("✕", self.controls)
 
         self.btn_close.setToolTip("Close (Esc)")
+        self.btn_prev.setToolTip("Previous (←)")
+        self.btn_next.setToolTip("Next (→)")
         self.btn_toggle_play.setToolTip("Play/Pause (Space)")
         self.btn_mute.setToolTip("Mute")
 
@@ -149,7 +155,7 @@ class LightboxVideoOverlay(QWidget):
             " border-radius: 10px;"
             " }"
         )
-        for b in (self.btn_toggle_play, self.btn_mute, self.btn_close):
+        for b in (self.btn_prev, self.btn_toggle_play, self.btn_next, self.btn_mute, self.btn_close):
             b.setStyleSheet(btn_css)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -167,6 +173,8 @@ class LightboxVideoOverlay(QWidget):
         )
 
         self.btn_toggle_play.clicked.connect(self._toggle_playback)
+        self.btn_prev.clicked.connect(self._on_prev_clicked)
+        self.btn_next.clicked.connect(self._on_next_clicked)
         self.btn_close.clicked.connect(self.close_overlay)
         self.btn_mute.clicked.connect(self._toggle_mute)
 
@@ -176,7 +184,9 @@ class LightboxVideoOverlay(QWidget):
         c_layout = QHBoxLayout(self.controls)
         c_layout.setContentsMargins(12, 8, 12, 8)
         c_layout.setSpacing(10)
+        c_layout.addWidget(self.btn_prev)
         c_layout.addWidget(self.btn_toggle_play)
+        c_layout.addWidget(self.btn_next)
         c_layout.addWidget(self.btn_mute)
         c_layout.addWidget(self.slider, 1)
         c_layout.addWidget(self.lbl_time)
@@ -340,16 +350,16 @@ class LightboxVideoOverlay(QWidget):
 
         self._show_controls()
 
-    def close_overlay(self) -> None:
+    def close_overlay(self, notify_web: bool = True) -> None:
         was_visible = self.isVisible()
         try:
             self.player.stop()
         except Exception:
             pass
         self.setVisible(False)
-        # Only notify the web layer if we were actually open; avoids closing
-        # image lightboxes when we "stop video" during navigation.
-        if was_visible and callable(self.on_close):
+        # Only notify the web layer if we were actually open and requested; 
+        # avoids closing image lightboxes when we "stop video" during navigation.
+        if was_visible and notify_web and callable(self.on_close):
             try:
                 self.on_close()
             except Exception:
@@ -477,6 +487,20 @@ class LightboxVideoOverlay(QWidget):
         self.controls.setVisible(True)
         self.controls.raise_()
         self._hide_timer.start()
+
+    def _on_prev_clicked(self) -> None:
+        if callable(self.on_prev):
+            try:
+                self.on_prev()
+            except Exception:
+                pass
+
+    def _on_next_clicked(self) -> None:
+        if callable(self.on_next):
+            try:
+                self.on_next()
+            except Exception:
+                pass
 
     def _hide_controls(self) -> None:
         # Don't hide while seeking.

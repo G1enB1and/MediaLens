@@ -1208,6 +1208,8 @@ class MainWindow(QMainWindow):
         self.video_overlay.setGeometry(self.web.rect())
         # When native overlay closes, also close the web lightbox chrome.
         self.video_overlay.on_close = self._close_web_lightbox
+        self.video_overlay.on_prev = self._on_video_prev
+        self.video_overlay.on_next = self._on_video_next
         self.video_overlay.raise_()
 
         # Prevent white flash while the first HTML/CSS loads.
@@ -1496,7 +1498,19 @@ class MainWindow(QMainWindow):
             pass
 
     def _close_video_overlay(self) -> None:
-        self.video_overlay.close_overlay()
+        self.video_overlay.close_overlay(notify_web=False)
+
+    def _on_video_prev(self) -> None:
+        try:
+            self.web.page().runJavaScript("try{ window.lightboxPrev && window.lightboxPrev(); }catch(e){}")
+        except Exception:
+            pass
+
+    def _on_video_next(self) -> None:
+        try:
+            self.web.page().runJavaScript("try{ window.lightboxNext && window.lightboxNext(); }catch(e){}")
+        except Exception:
+            pass
 
     def _set_web_loading(self, on: bool) -> None:
         try:

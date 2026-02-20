@@ -621,12 +621,14 @@ function lightboxPrev() {
   if (gIndex <= 0) return;
   openLightboxByIndex(gIndex - 1);
 }
+window.lightboxPrev = lightboxPrev;
 
 function lightboxNext() {
   if (gMedia && gIndex >= 0 && gIndex < gMedia.length - 1) {
     openLightboxByIndex(gIndex + 1);
   }
 }
+window.lightboxNext = lightboxNext;
 
 function wireLightbox() {
   const lb = document.getElementById('lightbox');
