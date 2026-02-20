@@ -121,8 +121,7 @@ class LightboxVideoOverlay(QWidget):
         )
         self.controls.setVisible(False)
 
-        self.btn_play = QPushButton("⏵", self.controls)
-        self.btn_pause = QPushButton("⏸", self.controls)
+        self.btn_toggle_play = QPushButton("⏵", self.controls)
         self.btn_mute = QPushButton("🔊", self.controls)
         self.lbl_time = QLabel("0:00 / 0:00", self.controls)
         self.lbl_dbg = QLabel("", self.controls)
@@ -130,8 +129,7 @@ class LightboxVideoOverlay(QWidget):
         self.btn_close = QPushButton("✕", self.controls)
 
         self.btn_close.setToolTip("Close (Esc)")
-        self.btn_play.setToolTip("Play")
-        self.btn_pause.setToolTip("Pause")
+        self.btn_toggle_play.setToolTip("Play/Pause (Space)")
         self.btn_mute.setToolTip("Mute")
 
         self.slider.setRange(0, 0)
@@ -151,7 +149,7 @@ class LightboxVideoOverlay(QWidget):
             " border-radius: 10px;"
             " }"
         )
-        for b in (self.btn_play, self.btn_pause, self.btn_mute, self.btn_close):
+        for b in (self.btn_toggle_play, self.btn_mute, self.btn_close):
             b.setStyleSheet(btn_css)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -168,8 +166,7 @@ class LightboxVideoOverlay(QWidget):
             "min-width: 320px;"
         )
 
-        self.btn_play.clicked.connect(self.player.play)
-        self.btn_pause.clicked.connect(self.player.pause)
+        self.btn_toggle_play.clicked.connect(self._toggle_playback)
         self.btn_close.clicked.connect(self.close_overlay)
         self.btn_mute.clicked.connect(self._toggle_mute)
 
@@ -179,8 +176,7 @@ class LightboxVideoOverlay(QWidget):
         c_layout = QHBoxLayout(self.controls)
         c_layout.setContentsMargins(12, 8, 12, 8)
         c_layout.setSpacing(10)
-        c_layout.addWidget(self.btn_play)
-        c_layout.addWidget(self.btn_pause)
+        c_layout.addWidget(self.btn_toggle_play)
         c_layout.addWidget(self.btn_mute)
         c_layout.addWidget(self.slider, 1)
         c_layout.addWidget(self.lbl_time)
@@ -208,7 +204,7 @@ class LightboxVideoOverlay(QWidget):
 
         self.player.positionChanged.connect(self._on_position)
         self.player.durationChanged.connect(self._on_duration)
-        self.player.playbackStateChanged.connect(lambda _s: self._show_controls())
+        self.player.playbackStateChanged.connect(self._on_playback_state_changed)
 
         # Track native video size (for aspect-ratio correct viewport)
         self._native_size: QSize | None = None
@@ -220,8 +216,9 @@ class LightboxVideoOverlay(QWidget):
         self.video_view.installEventFilter(self)
         self.controls.installEventFilter(self)
 
-        # ESC closes reliably
+        # Shortcuts
         QShortcut(QKeySequence("Escape"), self, activated=self.close_overlay)
+        QShortcut(QKeySequence("Space"), self, activated=self._toggle_playback)
 
         # Track looping
         self._loop = False
@@ -253,6 +250,10 @@ class LightboxVideoOverlay(QWidget):
         super().leaveEvent(event)
 
     def keyPressEvent(self, event) -> None:  # type: ignore[override]
+        if event.key() == Qt.Key.Key_Space:
+            self._toggle_playback()
+            event.accept()
+            return
         if event.key() == Qt.Key.Key_Escape:
             self.close_overlay()
             event.accept()
@@ -447,6 +448,24 @@ class LightboxVideoOverlay(QWidget):
             pass
         self._seeking = False
         self._show_controls()
+
+    def _on_playback_state_changed(self, state: QMediaPlayer.PlaybackState) -> None:
+        self._update_controls_ui(state)
+        self._show_controls()
+
+    def _toggle_playback(self) -> None:
+        if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.player.pause()
+        else:
+            self.player.play()
+
+    def _update_controls_ui(self, state: QMediaPlayer.PlaybackState) -> None:
+        if state == QMediaPlayer.PlaybackState.PlayingState:
+            self.btn_toggle_play.setText("⏸")
+            self.btn_toggle_play.setToolTip("Pause (Space)")
+        else:
+            self.btn_toggle_play.setText("⏵")
+            self.btn_toggle_play.setToolTip("Play (Space)")
 
     def _toggle_mute(self) -> None:
         m = not self.audio.isMuted()
