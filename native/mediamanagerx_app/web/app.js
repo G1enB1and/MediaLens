@@ -103,6 +103,7 @@ function hideCtx() {
   gCtxIndex = -1;
   gCtxFromLightbox = false;
 }
+window.hideCtx = hideCtx;
 
 function showCtx(x, y, item, idx, fromLightbox = false) {
   const ctx = document.getElementById('ctx');

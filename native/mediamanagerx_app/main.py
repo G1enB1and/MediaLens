@@ -22,6 +22,7 @@ from PySide6.QtCore import (
     QSettings,
     QPoint,
     QMimeData,
+    QEvent,
 )
 from PySide6.QtGui import QAction, QColor, QImageReader, QIcon
 from PySide6.QtGui import QMouseEvent
@@ -998,6 +999,13 @@ class MainWindow(QMainWindow):
 
         self._build_menu()
         self._build_layout()
+        
+        # Monitor top menu interactions to dismiss web context menu
+        for m in (self.menuBar().findChildren(QMenu)):
+             m.aboutToShow.connect(self._dismiss_web_menus)
+             
+        # Global listener to dismiss web menus when any native part of the app is clicked
+        QApplication.instance().installEventFilter(self)
 
     def _build_menu(self) -> None:
         menubar = self.menuBar()
@@ -1040,6 +1048,9 @@ class MainWindow(QMainWindow):
         about_action = QAction("&About", self)
         about_action.triggered.connect(self.about)
         help_menu.addAction(about_action)
+
+        for m in (file_menu, edit_menu, view_menu, help_menu):
+            m.aboutToShow.connect(self._dismiss_web_menus)
 
     def _build_layout(self) -> None:
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -1539,6 +1550,21 @@ class MainWindow(QMainWindow):
             self.web.page().runJavaScript(
                 "try{ window.__mmx_openSettings && window.__mmx_openSettings(); }catch(e){}"
             )
+        except Exception:
+            pass
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if event.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease):
+            # Only dismiss if the click is NOT on the web view itself or its descendants.
+            # This prevents the dismissal logic from interfering with the web menu's own lifecycle.
+            if watched != self.web and not self.web.isAncestorOf(watched):
+                self._dismiss_web_menus()
+        return super().eventFilter(watched, event)
+
+    def _dismiss_web_menus(self) -> None:
+        """Tell the web gallery to hide its custom context menu."""
+        try:
+            self.web.page().runJavaScript("window.hideCtx && window.hideCtx();")
         except Exception:
             pass
 
