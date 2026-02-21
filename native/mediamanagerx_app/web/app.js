@@ -881,6 +881,16 @@ function wireSettings() {
       });
     });
   }
+
+  const themeToggle = document.getElementById('toggleTheme');
+  if (themeToggle) {
+    themeToggle.addEventListener('change', () => {
+      if (!gBridge || !gBridge.set_setting_str) return;
+      const theme = themeToggle.checked ? 'light' : 'dark';
+      document.documentElement.classList.toggle('light-mode', theme === 'light');
+      gBridge.set_setting_str('ui.theme_mode', theme, function () { });
+    });
+  }
 }
 
 function updateSidebarButtonIcons(side, visible) {
@@ -1027,6 +1037,11 @@ async function main() {
       const v = (s && s['ui.accent_color']) || '#8ab4f8';
       document.documentElement.style.setProperty('--accent', v);
       if (ac) ac.value = v;
+
+      const theme = (s && s['ui.theme_mode']) || 'dark';
+      document.documentElement.classList.toggle('light-mode', theme === 'light');
+      const tt = document.getElementById('toggleTheme');
+      if (tt) tt.checked = theme === 'light';
 
       updateSidebarButtonIcons('left', !!(s && s['ui.show_left_panel']));
       updateSidebarButtonIcons('right', !!(s && s['ui.show_right_panel']));

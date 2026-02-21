@@ -1,26 +1,49 @@
 :root {
-  /* Base Neutral Palette */
-  --bg-dark: #111111;
-  --panel-dark: #191919;
-  --border-dark: #2d2d2d;
+  /* Default Dark Mode Constants (near-neutrals) */
+  --bg-neutral: #111111;
+  --panel-neutral: #191919;
+  --border-neutral: #2d2d2d;
+  --fg-neutral: #e6e6e6;
+  --muted-neutral: #9aa4b2;
+  --thumb-neutral: #0a0a0a;
+  --shadow-color: rgba(0, 0, 0, 0.5);
 
-  /* User Accent */
+  /* User Accent (Default) */
   --accent: #8ab4f8;
 
-  /* Dynamic Tinted Surfaces (using sRGB for maximum compatibility) */
-  --bg: color-mix(in srgb, var(--bg-dark), var(--accent) 7%);
-  --panel: color-mix(in srgb, var(--panel-dark), var(--accent) 10%);
-  --border: color-mix(in srgb, var(--border-dark), var(--accent) 18%);
-
-  /* UI Tokens */
-  --fg: #e6e6e6;
-  --muted: color-mix(in srgb, #9aa4b2, var(--accent) 15%);
+  /* Dynamic Tinted Surfaces */
+  --bg: color-mix(in srgb, var(--bg-neutral), var(--accent) 7%);
+  --panel: color-mix(in srgb, var(--panel-neutral), var(--accent) 10%);
+  --border: color-mix(in srgb, var(--border-neutral), var(--accent) 18%);
+  --fg: var(--fg-neutral);
+  --muted: color-mix(in srgb, var(--muted-neutral), var(--accent) 15%);
   --card-bg: color-mix(in srgb, var(--panel), white 2%);
   --input-bg: color-mix(in srgb, var(--panel), black 4%);
   --hover-bg: color-mix(in srgb, var(--accent), transparent 88%);
   --modal-bg: color-mix(in srgb, var(--panel), black 5%);
-  --shadow: rgba(0, 0, 0, 0.5);
-  --thumb-bg: color-mix(in srgb, var(--bg), black 8%);
+  --shadow: var(--shadow-color);
+  --thumb-bg: var(--thumb-neutral);
+}
+
+:root.light-mode {
+  /* Light Mode Constants (near-neutrals) */
+  --bg-neutral: #f5f5f5;
+  --panel-neutral: #eeeeee;
+  --border-neutral: #d5d5d5;
+  --fg-neutral: #202124;
+  --muted-neutral: #5f6368;
+  --thumb-neutral: #e0e0e0;
+  --shadow-color: rgba(0, 0, 0, 0.15);
+
+  /* Overrides for dynamic surfaces to feel "light" but still tinted */
+  --bg: color-mix(in srgb, var(--bg-neutral), var(--accent) 5%);
+  --panel: color-mix(in srgb, var(--panel-neutral), var(--accent) 8%);
+  --border: color-mix(in srgb, var(--border-neutral), var(--accent) 22%);
+  --card-bg: color-mix(in srgb, var(--panel), white 5%);
+  --input-bg: color-mix(in srgb, var(--panel), white 2%);
+  --hover-bg: color-mix(in srgb, var(--accent), transparent 90%);
+  --modal-bg: #ffffff;
+  --thumb-bg: var(--thumb-neutral);
 }
 
 *,
@@ -349,7 +372,7 @@ main {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  border: 3px solid rgba(255, 255, 255, 0.15);
+  border: 3px solid color-mix(in srgb, var(--fg), transparent 85%);
   border-top-color: var(--accent);
   animation: spin 1s linear infinite;
 }
@@ -364,7 +387,7 @@ main {
   margin-top: 10px;
   height: 8px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.10);
+  background: color-mix(in srgb, var(--fg), transparent 90%);
   overflow: hidden;
 }
 
@@ -383,7 +406,7 @@ main {
   align-items: center;
   gap: 12px;
   border-top: 1px solid var(--border);
-  background: var(--panel);
+  background: transparent;
   transform: translateZ(0);
 }
 
@@ -421,30 +444,38 @@ body.lightbox-open .toolbar {
   background: var(--input-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
-  color: var(--fg);
+  /* Dimmed base text for pop effect */
+  color: color-mix(in srgb, var(--fg), transparent 25%);
   font-size: 13px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.light-mode .tb-btn {
+  color: var(--fg);
 }
 
 .tb-btn:disabled {
-  color: rgba(255, 255, 255, 0.2);
-  /* Darkest grey for inactive */
-  border-color: rgba(255, 255, 255, 0.05);
+  color: color-mix(in srgb, var(--fg), transparent 80%);
+  border-color: color-mix(in srgb, var(--fg), transparent 95%);
   cursor: default;
 }
 
 .tb-btn:not(:disabled):hover {
-  color: #ffffff;
-  /* Brightest white on hover */
-  border-color: var(--accent);
-  background: var(--hover-bg);
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--accent), white 30%);
+  background: color-mix(in srgb, var(--hover-bg), white 10%);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent), transparent 70%);
+}
+
+.light-mode .tb-btn:hover {
+  box-shadow: none;
 }
 
 .tb-btn.highlight {
   background: color-mix(in oklch, var(--accent), transparent 85%);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--fg);
 }
 
 .tb-links {
@@ -461,25 +492,39 @@ body.lightbox-open .toolbar {
   border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--card-bg);
-  color: #eeeeee;
+  /* Slightly darker base text in dark mode for better hover pop */
+  color: color-mix(in srgb, var(--fg), transparent 25%);
   font-size: 13px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.light-mode .tb-page {
+  color: var(--fg);
 }
 
 .tb-page:hover {
-  color: #ffffff;
-  /* Brightest white on hover */
-  border-color: var(--accent);
-  background: var(--card-bg);
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--accent), white 30%);
+  background: color-mix(in srgb, var(--hover-bg), white 10%);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent), transparent 70%);
+}
+
+.light-mode .tb-page:hover {
+  box-shadow: none;
 }
 
 .tb-page[aria-current="page"] {
-  color: #ffffff;
-  /* Brightest white for current */
-  background: var(--accent);
+  color: #fff;
   border-color: var(--accent);
-  font-weight: 600;
+  background: var(--accent);
+  font-weight: bold;
+}
+
+.light-mode .tb-page[aria-current="page"] {
+  color: #000;
+  border-color: color-mix(in srgb, var(--accent), transparent 50%);
+  background: color-mix(in srgb, var(--accent), white 60%);
 }
 
 .tb-ellipsis {
@@ -563,7 +608,7 @@ body.lightbox-open main {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  border: 3px solid rgba(255, 255, 255, 0.12);
+  border: 3px solid color-mix(in srgb, var(--fg), transparent 88%);
   border-top-color: var(--accent);
   animation: spin 1s linear infinite;
 }
@@ -579,9 +624,9 @@ body.lightbox-open main {
   bottom: 8px;
   padding: 3px 6px;
   border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: rgba(0, 0, 0, 0.45);
-  color: rgba(255, 255, 255, 0.9);
+  border: 1px solid color-mix(in srgb, var(--fg), transparent 85%);
+  background: color-mix(in srgb, black, transparent 55%);
+  color: color-mix(in srgb, var(--fg), transparent 10%);
   font-size: 11px;
   letter-spacing: 0.5px;
 }
@@ -621,9 +666,9 @@ body.lightbox-open main {
   width: 38px;
   height: 38px;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: rgba(20, 20, 25, 0.65);
-  color: rgba(255, 255, 255, 0.9);
+  border: 1px solid color-mix(in srgb, var(--fg), transparent 85%);
+  background: color-mix(in srgb, var(--panel), transparent 35%);
+  color: var(--fg);
   font-size: 18px;
   cursor: pointer;
 }
@@ -703,7 +748,7 @@ body.lightbox-open main {
   border-radius: 6px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 13px;
-  color: #ffffff;
+  color: var(--fg);
   word-break: break-all;
 }
 
@@ -723,7 +768,7 @@ body.lightbox-open main {
   border: 1px solid var(--border);
   border-radius: 4px;
   font-size: 13px;
-  color: #eeeeee;
+  color: var(--fg);
   cursor: pointer;
   user-select: none;
   outline: none;
@@ -757,14 +802,14 @@ body.lightbox-open main {
   top: 100%;
   left: -1px;
   right: -1px;
-  background: var(--modal-bg);
+  background: var(--input-bg);
   border: 1px solid var(--border);
   border-top: none;
   border-radius: 0 0 4px 4px;
   z-index: 1000;
   max-height: 300px;
   overflow-y: auto;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 4px 12px var(--shadow);
 }
 
 .custom-select.open .select-options {

@@ -111,6 +111,10 @@ from native.mediamanagerx_app.video_overlay import LightboxVideoOverlay, VideoRe
 from PySide6.QtCore import QSortFilterProxyModel, QModelIndex
 
 
+import ctypes
+from ctypes import wintypes
+
+
 class Theme:
     """Centralized theme system for dynamic accent tinting."""
     @staticmethod
@@ -123,40 +127,64 @@ class Theme:
         return QColor(r, g, b).name()
 
     # Base Palette (Used as starting point for tinting)
-    BASE_BG = "#111111"
-    BASE_SIDEBAR_BG = "#191919"
-    BASE_BORDER = "#2d2d2d"
+    BASE_BG_DARK = "#111111"
+    BASE_SIDEBAR_BG_DARK = "#191919"
+    BASE_BORDER_DARK = "#2d2d2d"
+
+    BASE_BG_LIGHT = "#f5f5f5"
+    BASE_SIDEBAR_BG_LIGHT = "#eeeeee"
+    BASE_BORDER_LIGHT = "#d5d5d5"
     
     @staticmethod
+    def get_is_light() -> bool:
+        settings = QSettings("G1enB1and", "MediaManagerX")
+        return settings.value("ui/theme_mode", "dark") == "light"
+
+    @staticmethod
     def get_bg(accent: QColor) -> str:
-        return Theme.mix(Theme.BASE_BG, accent, 0.04)
+        base = Theme.BASE_BG_LIGHT if Theme.get_is_light() else Theme.BASE_BG_DARK
+        return Theme.mix(base, accent, 0.04)
 
     @staticmethod
     def get_sidebar_bg(accent: QColor) -> str:
-        return Theme.mix(Theme.BASE_SIDEBAR_BG, accent, 0.08)
+        base = Theme.BASE_SIDEBAR_BG_LIGHT if Theme.get_is_light() else Theme.BASE_SIDEBAR_BG_DARK
+        return Theme.mix(base, accent, 0.08)
 
     @staticmethod
     def get_border(accent: QColor) -> str:
-        return Theme.mix(Theme.BASE_BORDER, accent, 0.15)
+        base = Theme.BASE_BORDER_LIGHT if Theme.get_is_light() else Theme.BASE_BORDER_DARK
+        return Theme.mix(base, accent, 0.15)
 
     @staticmethod
     def get_scrollbar_track(accent: QColor) -> str:
-        return Theme.mix(Theme.BASE_SIDEBAR_BG, accent, 0.05)
+        base = Theme.BASE_SIDEBAR_BG_LIGHT if Theme.get_is_light() else Theme.BASE_SIDEBAR_BG_DARK
+        return Theme.mix(base, accent, 0.05)
 
     @staticmethod
     def get_scrollbar_thumb(accent: QColor) -> str:
-        return Theme.mix("#333333", accent, 0.20)
+        base = "#e0e0e0" if Theme.get_is_light() else "#333333"
+        return Theme.mix(base, accent, 0.20)
+
+    @staticmethod
+    def get_scrollbar_thumb_hover(accent: QColor) -> str:
+        base = "#d0d0d0" if Theme.get_is_light() else "#444444"
+        return Theme.mix(base, accent, 0.30)
 
     @staticmethod
     def get_splitter_idle(accent: QColor) -> str:
-        return Theme.mix("#444444", accent, 0.12)
+        base = "#cccccc" if Theme.get_is_light() else "#444444"
+        return Theme.mix(base, accent, 0.12)
 
     # UI constants
-    TEXT = "#ccc"
-    TEXT_MUTED = "#bbb"
+    @staticmethod
+    def get_text_color() -> str:
+        return "#202124" if Theme.get_is_light() else "#ccc"
+
+    @staticmethod
+    def get_text_muted() -> str:
+        return "#5f6368" if Theme.get_is_light() else "#bbb"
+
     ACCENT_DEFAULT = "#8ab4f8"
-    SPLITTER_IDLE = "#444"
-    HEADER_TEXT = "#ccc"
 
 
 class CustomSplitterHandle(QSplitterHandle):
@@ -169,9 +197,10 @@ class CustomSplitterHandle(QSplitterHandle):
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
-        # Use a slightly lighter/darker border to give it some depth if desired
-        # but for now, solid color per user request.
-        accent_str = getattr(self.window(), "_current_accent", Theme.ACCENT_DEFAULT)
+        try:
+            accent_str = getattr(self.window(), "_current_accent", Theme.ACCENT_DEFAULT)
+        except Exception:
+            accent_str = Theme.ACCENT_DEFAULT
         accent_q = QColor(accent_str)
         
         if self._hovered:
@@ -179,16 +208,17 @@ class CustomSplitterHandle(QSplitterHandle):
         else:
             color = QColor(Theme.get_splitter_idle(accent_q))
             
-        painter.fillRect(self.contentsRect(), color)
+        painter.fillRect(self.rect(), color)
 
-    def event(self, event: QEvent) -> bool:
-        if event.type() == QEvent.Type.HoverEnter:
-            self._hovered = True
-            self.update()
-        elif event.type() == QEvent.Type.HoverLeave:
-            self._hovered = False
-            self.update()
-        return super().event(event)
+    def enterEvent(self, event: QEnterEvent) -> None:
+        self._hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event: QEvent) -> None:
+        self._hovered = False
+        self.update()
+        super().leaveEvent(event)
 
 
 class CustomSplitter(QSplitter):
@@ -641,6 +671,7 @@ class Bridge(QObject):
                 "ui.accent_color": str(self.settings.value("ui/accent_color", "#8ab4f8", type=str) or "#8ab4f8"),
                 "ui.show_left_panel": bool(self.settings.value("ui/show_left_panel", True, type=bool)),
                 "ui.show_right_panel": bool(self.settings.value("ui/show_right_panel", True, type=bool)),
+                "ui.theme_mode": str(self.settings.value("ui/theme_mode", "dark", type=str) or "dark"),
             }
         except Exception:
             return {
@@ -651,6 +682,7 @@ class Bridge(QObject):
                 "ui.accent_color": "#8ab4f8",
                 "ui.show_left_panel": True,
                 "ui.show_right_panel": True,
+                "ui.theme_mode": "dark",
             }
 
     @Slot(str, bool, result=bool)
@@ -682,12 +714,15 @@ class Bridge(QObject):
     @Slot(str, str, result=bool)
     def set_setting_str(self, key: str, value: str) -> bool:
         try:
-            if key not in ("gallery.start_folder", "ui.accent_color"):
+            if key not in ("gallery.start_folder", "ui.accent_color", "ui.theme_mode"):
                 return False
             qkey = key.replace(".", "/")
             self.settings.setValue(qkey, str(value or ""))
             if key == "ui.accent_color":
                 self.accentColorChanged.emit(str(value or "#8ab4f8"))
+            elif key == "ui.theme_mode":
+                # Emit flag change for UI consistency if needed
+                self.uiFlagChanged.emit(key, value == "light")
             return True
         except Exception:
             return False
@@ -1547,6 +1582,7 @@ class MainWindow(QMainWindow):
         wl_layout.addStretch(1)
 
         self._update_native_styles(accent_val)
+        self._update_splitter_style(accent_val)
 
         self._devtools: QWebEngineView | None = None
         self.video_overlay = LightboxVideoOverlay(parent=self.web)
@@ -1669,6 +1705,10 @@ class MainWindow(QMainWindow):
                     w.setVisible(bool(value))
             except Exception:
                 pass
+
+        if key == "ui.theme_mode":
+            self._update_native_styles(self._current_accent)
+            self._update_splitter_style(self._current_accent)
 
     def _show_metadata_for_path(self, path: str) -> None:
         try:
@@ -1905,39 +1945,112 @@ class MainWindow(QMainWindow):
         if hasattr(self, "webview") and self.webview.page():
             self.webview.page().runJavaScript(js)
 
+    def _set_window_title_bar_theme(self, is_dark: bool, bg_color: QColor | None = None) -> None:
+        """Enable immersive dark mode and set custom caption color for the Windows title bar."""
+        if sys.platform != "win32":
+            return
+        try:
+            hwnd = int(self.winId())
+            # Immersive Dark Mode
+            DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+            # Some older win10 builds use 19
+            DWMWA_USE_IMMERSIVE_DARK_MODE_OLD = 19
+            value = ctypes.c_int(1 if is_dark else 0)
+            
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, 
+                ctypes.byref(value), ctypes.sizeof(value)
+            )
+            # Try 19 as fallback? Usually unnecessary on modern systems but safe.
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE_OLD, 
+                ctypes.byref(value), ctypes.sizeof(value)
+            )
+
+            # Windows 11+ Title Bar Colors
+            if bg_color:
+                DWMWA_CAPTION_COLOR = 35
+                DWMWA_TEXT_COLOR = 36
+                
+                # Background
+                bg_ref = (bg_color.blue() << 16) | (bg_color.green() << 8) | bg_color.red()
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd, DWMWA_CAPTION_COLOR,
+                    ctypes.byref(ctypes.c_int(bg_ref)),
+                    ctypes.sizeof(ctypes.c_int(bg_ref))
+                )
+                
+                # Text (Contrast)
+                fg_ref = 0x00000000 if not is_dark else 0x00FFFFFF
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd, DWMWA_TEXT_COLOR,
+                    ctypes.byref(ctypes.c_int(fg_ref)),
+                    ctypes.sizeof(ctypes.c_int(fg_ref))
+                )
+        except Exception:
+            pass
+
     def _update_native_styles(self, accent_str: str) -> None:
         """Apply tinted styles to sidebars, metadata, and global native elements."""
         accent = QColor(accent_str)
-        sb_bg = Theme.get_sidebar_bg(accent)
+        sb_bg_str = Theme.get_sidebar_bg(accent)
+        sb_bg = QColor(sb_bg_str)
         scrollbar_style = self._get_native_scrollbar_style(accent)
+        text = Theme.get_text_color()
+        text_muted = Theme.get_text_muted()
+        is_light = Theme.get_is_light()
+        
+        # Windows Title Bar
+        self._set_window_title_bar_theme(not is_light, sb_bg)
+        
+        # Loading Screen
+        load_fg = "rgba(0,0,0,200)" if is_light else "rgba(255,255,255,200)"
+        load_bg = "rgba(0,0,0,25)" if is_light else "rgba(255,255,255,25)"
+        self.web_loading_label.setStyleSheet(f"color: {load_fg}; font-size: 13px;")
+        self.web_loading_bar.setStyleSheet(
+            f"QProgressBar{{background: {load_bg}; border-radius: 5px;}}"
+            f"QProgressBar::chunk{{background: {accent_str}; border-radius: 5px;}}"
+        )
         
         # Left Panel (Folders)
         self.left_panel.setStyleSheet(f"""
-            QWidget {{ background-color: {sb_bg}; color: {Theme.TEXT}; }}
-            QTreeView {{ background-color: {sb_bg}; border: none; }}
-            QLabel {{ color: {Theme.HEADER_TEXT}; font-weight: bold; }}
+            QWidget {{ background-color: {sb_bg_str}; color: {text}; }}
+            QTreeView {{ background-color: {sb_bg_str}; border: none; color: {text}; }}
+            QLabel {{ color: {text}; font-weight: bold; background: transparent; }}
             {scrollbar_style}
         """)
         
         # Right Panel (Metadata)
         self.right_panel.setStyleSheet(f"""
-            QWidget {{ background-color: {sb_bg}; color: {Theme.TEXT}; }}
-            QTextEdit {{ background-color: {sb_bg}; border: none; color: {Theme.TEXT_MUTED}; font-family: 'Segoe UI', sans-serif; }}
-            QLabel {{ color: {Theme.HEADER_TEXT}; font-weight: bold; }}
+            QWidget {{ background-color: {sb_bg_str}; color: {text}; }}
+            QTextEdit {{ background-color: {sb_bg_str}; border: none; color: {text_muted}; font-family: 'Segoe UI', sans-serif; }}
+            QLabel {{ color: {text}; font-weight: bold; background: transparent; }}
             {scrollbar_style}
         """)
         
         self._update_app_style(accent)
 
+    def showEvent(self, event) -> None:
+        """Trigger native style update when window actually becomes visible to ensure valid winId for DWM."""
+        super().showEvent(event)
+        try:
+            accent = getattr(self, "_current_accent", Theme.ACCENT_DEFAULT)
+            self._update_native_styles(accent)
+        except Exception:
+            pass
+
     def _update_app_style(self, accent: QColor) -> None:
         """Update global application styles like tinted native menus."""
         sb_bg = Theme.get_sidebar_bg(accent)
         border = Theme.get_border(accent)
+        text = Theme.get_text_color()
+        is_light = Theme.get_is_light()
+        highlight_bg = "rgba(0, 0, 0, 0.05)" if is_light else "rgba(255, 255, 255, 0.05)"
         
         QApplication.instance().setStyleSheet(f"""
             QMenuBar {{
                 background-color: {sb_bg};
-                color: {Theme.TEXT};
+                color: {text};
                 border-bottom: 1px solid {border};
             }}
             QMenuBar::item {{
@@ -1945,11 +2058,11 @@ class MainWindow(QMainWindow):
                 padding: 4px 10px;
             }}
             QMenuBar::item:selected {{
-                background: rgba(255, 255, 255, 0.05);
+                background: {highlight_bg};
             }}
             QMenu {{
                 background-color: {sb_bg};
-                color: {Theme.TEXT};
+                color: {text};
                 border: 1px solid {border};
                 padding: 4px 0;
             }}
@@ -1957,7 +2070,7 @@ class MainWindow(QMainWindow):
                 padding: 4px 24px 4px 14px;
             }}
             QMenu::item:selected {{
-                background-color: rgba(255, 255, 255, 0.05);
+                background-color: {highlight_bg};
             }}
             QMenu::separator {{
                 height: 1px;
