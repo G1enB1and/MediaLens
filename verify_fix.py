@@ -2,21 +2,22 @@ from pathlib import Path
 
 def filter_logic(path_str, root_path):
     try:
-        # Mimic fixed RootFilterProxyModel logic
-        item_p = Path(path_str)
-        root_p = Path(root_path)
+        # Normalize for robust comparison (lowercase posix)
+        p_str = Path(path_str).as_posix().lower()
+        r_str = Path(root_path).as_posix().lower()
         
-        # Normalize for Windows case-insensitivity and slash consistency
-        item_p_str = str(item_p).lower().replace("\\", "/")
-        root_p_str = str(root_p).lower().replace("\\", "/")
-        
-        # 1. Accept the root folder itself or its descendants
-        if item_p_str == root_p_str or item_p_str.startswith(root_p_str + "/"):
+        # Case 1: Root itself
+        if p_str == r_str:
             return True
             
-        # 2. Accept ancestors of the root folder (so we can reach it from drive)
-        root_parents_lower = [str(p).lower().replace("\\", "/") for p in root_p.parents]
-        if item_p_str in root_parents_lower:
+        # Case 2: p is an ancestor of r
+        p_prefix = p_str if p_str.endswith("/") else p_str + "/"
+        if r_str.startswith(p_prefix):
+            return True
+            
+        # Case 3: p is a descendant of r
+        r_prefix = r_str if r_str.endswith("/") else r_str + "/"
+        if p_str.startswith(r_prefix):
             return True
             
         return False
@@ -32,8 +33,11 @@ tests = [
     ("C:\\My_Media\\Subfolder", True, "Direct child"),
     ("C:\\My_Media\\Symlink_To_External", True, "Symlink (apparent path within root)"),
     ("C:\\My_Media\\Subfolder\\Nested", True, "Deep descendant"),
-    ("C:\\", True, "Ancestor (Drive)"),
+    ("C:", True, "Ancestor (Drive letter)"),
+    ("C:\\", True, "Ancestor (Drive root)"),
+    ("C:\\Users", False, "External sibling in User dir"),
     ("C:\\Other_Folder", False, "External sibling"),
+    ("C:\\My_Media_Longer", False, "Partial name match (should fail)"),
 ]
 
 print(f"Verifying with root: {root}")

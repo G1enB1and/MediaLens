@@ -138,6 +138,10 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
   ctx.style.top = `${top}px`;
   ctx.hidden = false;
 
+  if (gBridge && gBridge.debug_log) {
+    gBridge.debug_log(`showCtx: item=${item ? item.path : 'null'} idx=${idx}`);
+  }
+
   // Enable/disable Paste
   const pasteBtn = document.getElementById('ctxPaste');
   if (pasteBtn && gBridge && gBridge.has_files_in_clipboard) {
@@ -167,13 +171,11 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
 
 function wireCtxMenu() {
   const ctx = document.getElementById('ctx');
-  const hideBtn = document.getElementById('ctxHide');
-  const unhideBtn = document.getElementById('ctxUnhide');
-  const renameBtn = document.getElementById('ctxRename');
-  const metaBtn = document.getElementById('ctxMeta');
-  const cancelBtn = document.getElementById('ctxCancel');
+  if (!ctx) return;
 
+  const cancelBtn = document.getElementById('ctxCancel');
   if (cancelBtn) cancelBtn.addEventListener('click', hideCtx);
+
   window.addEventListener('click', (e) => {
     if (ctx && !ctx.hidden && !ctx.contains(e.target)) hideCtx();
   });
@@ -181,124 +183,96 @@ function wireCtxMenu() {
     if (e.key === 'Escape') hideCtx();
   });
 
-  if (hideBtn) {
-    hideBtn.addEventListener('click', () => {
-      const item = gCtxItem;
-      const fromLb = gCtxFromLightbox;
-      hideCtx();
-      if (!item || !item.path || !gBridge || !gBridge.hide_by_renaming_dot_async) return;
-      if (fromLb) closeLightbox();
-      setGlobalLoading(true, 'Hiding…', 25);
-      gBridge.hide_by_renaming_dot_async(item.path, function () { });
-    });
-  }
+  // Consolidated mousedown listener for all context menu items
+  // Immediate response beats potential dismissal loops.
+  ctx.addEventListener('mousedown', (e) => {
+    const btn = e.target.closest('.ctx-item');
+    if (!btn) return;
 
-  if (unhideBtn) {
-    unhideBtn.addEventListener('click', () => {
-      const item = gCtxItem;
-      const fromLb = gCtxFromLightbox;
-      hideCtx();
-      if (!item || !item.path || !gBridge || !gBridge.unhide_by_renaming_dot_async) return;
-      if (fromLb) closeLightbox();
-      setGlobalLoading(true, 'Unhiding…', 25);
-      gBridge.unhide_by_renaming_dot_async(item.path, function () { });
-    });
-  }
+    e.preventDefault();
+    e.stopPropagation();
 
-  if (renameBtn) {
-    renameBtn.addEventListener('click', () => {
-      const item = gCtxItem;
-      const fromLb = gCtxFromLightbox;
-      hideCtx();
-      if (!item || !item.path || !gBridge || !gBridge.rename_path_async) return;
-      const curName = item.path.split(/[/\\]/).pop();
-      const next = prompt('Rename to:', curName);
-      if (!next || next === curName) return;
-      if (fromLb) closeLightbox();
-      setGlobalLoading(true, 'Renaming…', 25);
-      gBridge.rename_path_async(item.path, next, function () { });
-    });
-  }
+    const item = gCtxItem;
+    const fromLb = gCtxFromLightbox;
 
-  if (metaBtn) {
-    metaBtn.addEventListener('click', () => {
-      const item = gCtxItem;
-      hideCtx();
-      if (!item || !item.path || !gBridge || !gBridge.show_metadata) return;
-      gBridge.show_metadata(item.path, function () { });
-    });
-  }
+    if (gBridge && gBridge.debug_log) {
+      gBridge.debug_log(`ctx mousedown: id=${btn.id} path=${item ? item.path : 'null'}`);
+    }
 
-  const explorerBtn = document.getElementById('ctxExplorer');
-  if (explorerBtn) {
-    explorerBtn.addEventListener('click', () => {
-      const item = gCtxItem;
-      hideCtx();
-      if (!item || !item.path || !gBridge || !gBridge.open_in_explorer) return;
-      gBridge.open_in_explorer(item.path);
-    });
-  }
-
-  const cutBtn = document.getElementById('ctxCut');
-  if (cutBtn) {
-    cutBtn.addEventListener('click', () => {
-      const item = gCtxItem;
-      hideCtx();
-      if (!item || !item.path || !gBridge || !gBridge.cut_to_clipboard) return;
-      gBridge.cut_to_clipboard([item.path]);
-    });
-  }
-
-  const copyBtn = document.getElementById('ctxCopy');
-  if (copyBtn) {
-    copyBtn.addEventListener('click', () => {
-      const item = gCtxItem;
-      hideCtx();
-      if (!item || !item.path || !gBridge || !gBridge.copy_to_clipboard) return;
-      gBridge.copy_to_clipboard([item.path]);
-    });
-  }
-
-  const pasteBtn = document.getElementById('ctxPaste');
-  if (pasteBtn) {
-    pasteBtn.addEventListener('click', () => {
-      hideCtx();
-      if (!gBridge || !gBridge.paste_into_folder_async) return;
-      gBridge.get_selected_folder(function (folder) {
-        if (!folder) return;
-        setGlobalLoading(true, 'Pasting…', 25);
-        gBridge.paste_into_folder_async(folder);
-      });
-    });
-  }
-
-  const deleteBtn = document.getElementById('ctxDelete');
-  if (deleteBtn) {
-    deleteBtn.addEventListener('click', () => {
-      const item = gCtxItem;
-      hideCtx();
-      if (!item || !item.path || !gBridge || !gBridge.delete_path) return;
-      gBridge.delete_path(item.path, function (ok) {
-        if (ok) refreshFromBridge(gBridge);
-      });
-    });
-  }
-
-  const newFolderBtn = document.getElementById('ctxNewFolder');
-  if (newFolderBtn) {
-    newFolderBtn.addEventListener('click', () => {
-      hideCtx();
-      const name = prompt('New Folder Name:');
-      if (!name) return;
-      if (!gBridge || !gBridge.create_folder || !gBridge.get_selected_folder) return;
-      gBridge.get_selected_folder(function (folder) {
-        if (!folder) return;
-        gBridge.create_folder(folder, name, function (res) {
-          if (res) refreshFromBridge(gBridge);
-        });
-      });
-    });
-  }
+    switch (btn.id) {
+      case 'ctxExplorer':
+        if (item && item.path && gBridge && gBridge.open_in_explorer) {
+          gBridge.open_in_explorer(item.path);
+        }
+        break;
+      case 'ctxHide':
+        if (item && item.path && gBridge && gBridge.hide_by_renaming_dot_async) {
+          if (fromLb) closeLightbox();
+          setGlobalLoading(true, 'Hiding…', 25);
+          gBridge.hide_by_renaming_dot_async(item.path, () => { });
+        }
+        break;
+      case 'ctxUnhide':
+        if (item && item.path && gBridge && gBridge.unhide_by_renaming_dot_async) {
+          if (fromLb) closeLightbox();
+          setGlobalLoading(true, 'Unhiding…', 25);
+          gBridge.unhide_by_renaming_dot_async(item.path, () => { });
+        }
+        break;
+      case 'ctxRename':
+        if (item && item.path && gBridge && gBridge.rename_path_async) {
+          const curName = item.path.split(/[/\\]/).pop();
+          const next = prompt('Rename to:', curName);
+          if (next && next !== curName) {
+            if (fromLb) closeLightbox();
+            setGlobalLoading(true, 'Renaming…', 25);
+            gBridge.rename_path_async(item.path, next, () => { });
+          }
+        }
+        break;
+      case 'ctxMeta':
+        if (item && item.path && gBridge && gBridge.show_metadata) {
+          gBridge.show_metadata(item.path, () => { });
+        }
+        break;
+      case 'ctxDelete':
+        if (item && item.path && gBridge && gBridge.delete_path) {
+          gBridge.delete_path(item.path, (ok) => { if (ok) refreshFromBridge(gBridge); });
+        }
+        break;
+      case 'ctxCut':
+        if (item && item.path && gBridge && gBridge.cut_to_clipboard) {
+          gBridge.cut_to_clipboard([item.path]);
+        }
+        break;
+      case 'ctxCopy':
+        if (item && item.path && gBridge && gBridge.copy_to_clipboard) {
+          gBridge.copy_to_clipboard([item.path]);
+        }
+        break;
+      case 'ctxPaste':
+        if (gBridge && gBridge.paste_into_folder_async && gBridge.get_selected_folder) {
+          gBridge.get_selected_folder((folder) => {
+            if (folder) {
+              setGlobalLoading(true, 'Pasting…', 25);
+              gBridge.paste_into_folder_async(folder);
+            }
+          });
+        }
+        break;
+      case 'ctxNewFolder':
+        const name = prompt('New Folder Name:');
+        if (name && gBridge && gBridge.create_folder && gBridge.get_selected_folder) {
+          gBridge.get_selected_folder((folder) => {
+            if (folder) {
+              gBridge.create_folder(folder, name, (res) => { if (res) refreshFromBridge(gBridge); });
+            }
+          });
+        }
+        break;
+    }
+    hideCtx();
+  });
 }
 
 function applySearch(items) {
@@ -456,6 +430,15 @@ let gSort = 'name_asc';
 let gFilter = 'all';
 
 document.addEventListener('DOMContentLoaded', () => {
+  // Global error handler to route JS errors to the terminal diagnostics
+  window.onerror = function (msg, url, line, col, error) {
+    if (gBridge && gBridge.debug_log) {
+      gBridge.debug_log(`JS ERROR: ${msg} [at ${url}:${line}:${col}]`);
+    } else {
+      console.error('JS ERROR:', msg, url, line, col, error);
+    }
+  };
+
   // Hook up custom dropdowns
   function setupCustomSelect(id, onChange) {
     const el = document.getElementById(id);
@@ -745,24 +728,8 @@ function refreshFromBridge(bridge, resetPage = false) {
       gPage = 0;
     }
 
-    setGlobalLoading(true, 'Scanning media…', 15);
-
-    // Pass filter to count_media
-    bridge.count_media(folder, gFilter, function (count) {
-      gTotal = count || 0;
-      const tp = totalPages();
-      if (gPage >= tp) gPage = Math.max(0, tp - 1);
-
-      setGlobalLoading(true, `Loading page ${gPage + 1} of ${tp}…`, 55);
-
-      // Pass sort/filter to list_media
-      bridge.list_media(folder, PAGE_SIZE, gPage * PAGE_SIZE, gSort, gFilter, function (items) {
-        renderMediaList(items);
-        renderPager();
-        // Hide after containers are painted at least once.
-        requestAnimationFrame(() => setGlobalLoading(false));
-      });
-    });
+    // Start async scan. UI will refresh when gBridge.scanFinished fires.
+    bridge.start_scan(folder);
   });
 }
 
@@ -960,10 +927,8 @@ function wireSearch() {
 }
 
 async function main() {
-  wireLightbox();
   wirePager();
   wireSettings();
-  wireCtxMenu();
   wireSearch();
   wireSidebarToggles();
 
@@ -985,6 +950,13 @@ async function main() {
     }
 
     gBridge = bridge;
+    if (gBridge && gBridge.debug_log) {
+      gBridge.debug_log('Bridge Connected: QWebChannel is alive');
+      console.log('Bridge Connected');
+    }
+
+    wireLightbox();
+    wireCtxMenu();
 
     if (bridge.uiFlagChanged) {
       bridge.uiFlagChanged.connect(function (key, value) {
@@ -1003,6 +975,30 @@ async function main() {
         if (ok) {
           refreshFromBridge(bridge, false);
         }
+      });
+    }
+
+    if (bridge.scanStarted) {
+      bridge.scanStarted.connect(function (folder) {
+        setGlobalLoading(true, 'Scanning media…', 15);
+      });
+    }
+
+    if (bridge.scanFinished) {
+      bridge.scanFinished.connect(function (folder, count) {
+        gTotal = count || 0;
+        const tp = totalPages();
+        if (gPage >= tp) gPage = Math.max(0, tp - 1);
+
+        setGlobalLoading(true, `Loading page ${gPage + 1} of ${tp || 1}…`, 55);
+
+        // Pass sort/filter to list_media
+        bridge.list_media(folder, PAGE_SIZE, gPage * PAGE_SIZE, gSort, gFilter, function (items) {
+          renderMediaList(items);
+          renderPager();
+          // Hide after containers are painted at least once.
+          requestAnimationFrame(() => setGlobalLoading(false));
+        });
       });
     }
 

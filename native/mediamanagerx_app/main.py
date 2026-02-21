@@ -10,6 +10,63 @@ import threading
 import time
 from pathlib import Path
 
+
+def _install_stderr_filter() -> None:
+    """Suppress noisy C-level FFmpeg log lines written directly to stderr fd 2.
+
+    FFmpeg's av_log (used by libswscale, etc.) writes directly to the C file
+    descriptor 2, bypassing Python's sys.stderr entirely. The only reliable way
+    to filter it is to redirect fd 2 to a pipe and relay output on a thread,
+    dropping lines that match known noise patterns.
+
+    Known suppressions:
+    - "deprecated pixel format used, make sure you did set range correctly"
+      Fired once per swscale context when a video uses the legacy `yuvj420p`
+      full-range pixel format (common in MJPEG and some H.264 files). It is
+      informational only \u2014 playback is unaffected.
+    """
+    _SUPPRESS = (
+        b"deprecated pixel format used",
+    )
+
+    try:
+        read_fd, write_fd = os.pipe()
+        real_stderr_fd = os.dup(2)      # Save the original stderr fd
+        os.dup2(write_fd, 2)            # All C-level stderr now goes to the pipe
+        os.close(write_fd)
+
+        def _relay() -> None:
+            buf = b""
+            with (
+                os.fdopen(read_fd, "rb", buffering=0) as pipe_in,
+                os.fdopen(real_stderr_fd, "wb", buffering=0) as real_out,
+            ):
+                while True:
+                    chunk = pipe_in.read(4096)
+                    if not chunk:
+                        break
+                    buf += chunk
+                    # Process complete lines; hold back any partial trailing line.
+                    while b"\n" in buf:
+                        line, buf = buf.split(b"\n", 1)
+                        if not any(s in line for s in _SUPPRESS):
+                            real_out.write(line + b"\n")
+                            real_out.flush()
+                # Flush any remaining partial line.
+                if buf and not any(s in buf for s in _SUPPRESS):
+                    real_out.write(buf)
+                    real_out.flush()
+
+        t = threading.Thread(target=_relay, daemon=True, name="stderr-filter")
+        t.start()
+    except Exception:
+        # If anything goes wrong, leave stderr untouched rather than breaking logging.
+        pass
+
+
+_install_stderr_filter()
+
+
 from PySide6.QtCore import (
     QObject,
     Qt,
@@ -180,7 +237,10 @@ class RootFilterProxyModel(QSortFilterProxyModel):
         self._fallback_icon: QIcon | None = None
 
     def setRootPath(self, path: str) -> None:
-        self._root_path = str(Path(path).resolve())
+        # We NO LONGER use .resolve() here. QFileSystemModel reports the "apparent"
+        # path within the tree. If we resolve, symlinks pointing outside the
+        # root will be filtered out.
+        self._root_path = str(Path(path).absolute())
         self.invalidate()
 
     def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:
@@ -195,22 +255,24 @@ class RootFilterProxyModel(QSortFilterProxyModel):
             return True # Allow it to load
             
         try:
-            # DO NOT use .resolve() here, as it follows symlinks outside the root.
-            # QFileSystemModel already provides absolute apparent paths.
-            item_p = Path(path_str)
-            root_p = Path(self._root_path)
+            # Normalize for robust comparison (lowercase posix)
+            p_str = Path(path_str).as_posix().lower()
+            r_str = Path(self._root_path).as_posix().lower()
             
-            # Normalize for Windows case-insensitivity and slash consistency
-            item_p_str = str(item_p).lower().replace("\\", "/")
-            root_p_str = str(root_p).lower().replace("\\", "/")
-            
-            # 1. Accept the root folder itself or its descendants
-            if item_p_str == root_p_str or item_p_str.startswith(root_p_str + "/"):
+            # Case 1: Root itself
+            if p_str == r_str:
                 return True
                 
-            # 2. Accept ancestors of the root folder (so we can reach it from drive)
-            root_parents_lower = [str(p).lower().replace("\\", "/") for p in root_p.parents]
-            if item_p_str in root_parents_lower:
+            # Case 2: p is an ancestor of r (so we can drill down)
+            # We use a trailing slash to avoid matching partial folder names (e.g. /my vs /media)
+            # but we handle the drive root case where as_posix() already includes the slash.
+            p_prefix = p_str if p_str.endswith("/") else p_str + "/"
+            if r_str.startswith(p_prefix):
+                return True
+                
+            # Case 3: p is a descendant of r
+            r_prefix = r_str if r_str.endswith("/") else r_str + "/"
+            if p_str.startswith(r_prefix):
                 return True
                 
             return False
@@ -234,7 +296,8 @@ class RootFilterProxyModel(QSortFilterProxyModel):
 
 class Bridge(QObject):
     selectedFolderChanged = Signal(str)
-    openVideoRequested = Signal(str, bool, bool, bool, int, int)
+    openVideoRequested = Signal(str, bool, bool, bool, int, int)  # path, autoplay, loop, muted, w, h
+    videoPreprocessingStatus = Signal(str)  # status message (empty = done)
     closeVideoRequested = Signal()
 
     uiFlagChanged = Signal(str, bool)  # key, value
@@ -245,10 +308,18 @@ class Bridge(QObject):
     # Async file ops (so WebEngine UI doesn't freeze during rename)
     fileOpFinished = Signal(str, bool, str, str)  # op, ok, old_path, new_path
 
+    # Media scanning signals
+    scanStarted = Signal(str)
+    scanFinished = Signal(str, int)  # folder, count
+
     def __init__(self) -> None:
         super().__init__()
+        print("Bridge: Initializing...")
         self._selected_folder: str = ""
         self._media_cache: dict[str, list[Path]] = {}
+        self._scan_abort = False
+        self._scan_lock = threading.Lock()
+        
         appdata = Path(
             QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
         )
@@ -256,9 +327,13 @@ class Bridge(QObject):
         self._thumb_dir.mkdir(parents=True, exist_ok=True)
 
         self.settings = QSettings("G1enB1and", "MediaManagerX")
-        # Per-run seed so "randomize" changes every time you launch the app,
-        # while remaining stable for pagination within a session.
         self._session_shuffle_seed = random.getrandbits(32)
+        print(f"Bridge: Initialized (Session Seed: {self._session_shuffle_seed})")
+
+    @Slot(str)
+    def debug_log(self, msg: str) -> None:
+        """Helper to print logs from the JavaScript side to the terminal."""
+        print(f"JS Debug: {msg}")
 
     def _thumb_key(self, path: Path) -> str:
         # Stable across runs; normalize separators + lowercase for Windows.
@@ -383,14 +458,24 @@ class Bridge(QObject):
             return ""
 
     def _scan_media_paths(self, folder: str) -> list[Path]:
+        """Synchronous scan (called from UI thread). 
+        Optimized to use cached result if available.
+        """
         cache_key = f"{folder}|rand={int(self._randomize_enabled())}"
-        cached = self._media_cache.get(cache_key)
-        if cached is not None:
-            return cached
+        with self._scan_lock:
+            cached = self._media_cache.get(cache_key)
+            if cached is not None:
+                return cached
+        
+        # If not cached, we fallback to a synchronous scan (legacy behavior)
+        # but we add limits to prevent hangs.
+        return self._do_full_scan(folder, cache_key)
 
+    def _do_full_scan(self, folder: str, cache_key: str) -> list[Path]:
         root = Path(folder)
         if not root.exists() or not root.is_dir():
-            self._media_cache[cache_key] = []
+            with self._scan_lock:
+                self._media_cache[cache_key] = []
             return []
 
         image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
@@ -398,15 +483,17 @@ class Bridge(QObject):
         exts = image_exts | video_exts
 
         candidates: list[Path] = []
+        max_items = 20000  # Safety limit for UI thread scans
+        
         for root_dir, dirs, files in os.walk(folder, followlinks=True):
+            if self._scan_abort:
+                break
+            
             curr_root = Path(root_dir)
             
             # If hiding dots is enabled, filter out hidden directories
             if self._hide_dot_enabled():
-                # Modify dirs in-place to prevent os.walk from descending into them
                 dirs[:] = [d for d in dirs if not d.startswith(".")]
-                
-                # Also skip if the current root itself or its parents were hidden
                 try:
                     rel_parts = curr_root.relative_to(root).parts
                     if any(part.startswith(".") for part in rel_parts):
@@ -421,24 +508,52 @@ class Bridge(QObject):
                 p = curr_root / f
                 if p.suffix.lower() in exts:
                     candidates.append(p)
+                
+                if len(candidates) >= max_items:
+                    break
+            
+            if len(candidates) >= max_items:
+                break
 
         candidates.sort(key=lambda p: str(p).lower())
 
         if self._randomize_enabled():
-            # Stable ordering within a session (and doesn't reshuffle when items
-            # are added/removed): sort by per-item hash keyed by session seed.
             base = int(hashlib.sha1(folder.encode("utf-8")).hexdigest(), 16) % (2**32)
             seed = (base ^ int(self._session_shuffle_seed)) % (2**32)
 
             def _rank(p: Path) -> str:
-                # Use as_posix() to avoid backslash escaping issues on Windows.
                 s = f"{seed}:{p.as_posix().lower()}".encode("utf-8")
                 return hashlib.sha1(s).hexdigest()
 
             candidates.sort(key=_rank)
 
-        self._media_cache[cache_key] = candidates
+        with self._scan_lock:
+            self._media_cache[cache_key] = candidates
         return candidates
+
+    @Slot(str)
+    def start_scan(self, folder: str) -> None:
+        """Asynchronously scan a folder for media items."""
+        self._scan_abort = True  # Signal previous thread to stop
+        
+        def _work():
+            # Small delay to let previous thread stop
+            time.sleep(0.1)
+            self._scan_abort = False
+            self.scanStarted.emit(folder)
+            
+            cache_key = f"{folder}|rand={int(self._randomize_enabled())}"
+            # Check cache first
+            with self._scan_lock:
+                if cache_key in self._media_cache:
+                    time.sleep(0.1)  # Minimal delay so UI feels right
+                    self.scanFinished.emit(folder, len(self._media_cache[cache_key]))
+                    return
+
+            results = self._do_full_scan(folder, cache_key)
+            self.scanFinished.emit(folder, len(results))
+
+        threading.Thread(target=_work, daemon=True).start()
 
     @Slot(str, result=int)
     def count_media(self, folder: str) -> int:
@@ -742,19 +857,27 @@ class Bridge(QObject):
     def open_in_explorer(self, path: str) -> None:
         """Open Windows Explorer with the specified file selected or folder opened."""
         try:
-            p = Path(path).resolve()
-            if not p.exists():
+            print(f"Explorer Request: {path}")
+            # Ensure path is absolute and uses Windows backslashes
+            p_obj = Path(path).absolute()
+            p = str(p_obj).replace("/", "\\")
+            
+            if not p_obj.exists():
+                print(f"Explorer Error: Path does not exist: {p}")
                 return
             
-            if p.is_dir():
-                # Open the folder itself
-                subprocess.Popen(["explorer.exe", str(p)])
+            if p_obj.is_dir():
+                # Use os.startfile for directories (safest way to open a folder in Explorer)
+                import os
+                os.startfile(p)
             else:
-                # Select the file in its parent folder
-                # Standard Windows syntax: explorer /select,"C:\path\to\file"
-                # Using list is safer, but /select, must be followed immediately by path
-                subprocess.Popen(["explorer.exe", "/select,", str(p)])
-        except Exception:
+                # Use a string command with shell=True for the complex /select syntax.
+                # Quotes are critical here.
+                cmd = f'explorer.exe /select,"{p}"'
+                print(f"Explorer Executing: {cmd}")
+                subprocess.Popen(cmd, shell=True)
+        except Exception as e:
+            print(f"Explorer Exception: {e}")
             pass
 
     def _build_dropfiles_w(self, abs_paths: list[str]) -> bytes:
@@ -910,10 +1033,11 @@ class Bridge(QObject):
     @Slot(str, result=float)
     def get_video_duration_seconds(self, video_path: str) -> float:
         """Return duration seconds using ffprobe (0 on failure)."""
-
+        print(f"Duration Request: {video_path}")
         try:
             ffprobe = self._ffprobe_bin()
             if not ffprobe:
+                print("Duration Error: ffprobe not found")
                 return 0.0
 
             cmd = [
@@ -928,50 +1052,173 @@ class Bridge(QObject):
             ]
             r = subprocess.run(cmd, capture_output=True, text=True, check=True)
             s = (r.stdout or "").strip()
-            return float(s) if s else 0.0
-        except Exception:
+            dur = float(s) if s else 0.0
+            print(f"Duration Success: {dur}s")
+            return dur
+        except Exception as e:
+            print(f"Duration Error: {e}")
             return 0.0
 
-    def _probe_video_size(self, video_path: str) -> tuple[int, int]:
-        """Return (width,height) from ffprobe, or (0,0) if unknown."""
+    def _probe_video_size(self, video_path: str) -> tuple[int, int, bool]:
+        """
+        Return (display_width, display_height, is_malformed) for the first video stream.
 
+        is_malformed is True when either display dimension is odd after SAR adjustment.
+        Odd-dimensioned NV12 frames from H.264 HW-decoded sources crash Qt's swscaler
+        (coded_width=0 in the bitstream causes an impossible scale conversion). Videos
+        flagged here are transparently preprocessed to MJPEG/MKV before playback.
+        """
+        ffprobe = self._ffprobe_bin()
+        if not ffprobe:
+            return (0, 0, False)
+
+        cmd = [
+            ffprobe, "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height,sample_aspect_ratio:stream_tags=rotate",
+            "-of", "json",
+            str(video_path)
+        ]
         try:
-            ffprobe = self._ffprobe_bin()
-            if not ffprobe:
-                return (0, 0)
-            cmd = [
-                ffprobe,
-                "-v",
-                "error",
-                "-select_streams",
-                "v:0",
-                "-show_entries",
-                "stream=width,height",
-                "-of",
-                "csv=p=0:s=x",
-                str(video_path),
-            ]
-            r = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            s = (r.stdout or "").strip()
-            if not s or "x" not in s:
-                return (0, 0)
-            w_s, h_s = s.split("x", 1)
-            return (int(w_s), int(h_s))
-        except Exception:
-            return (0, 0)
+            import json
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            data = json.loads(r.stdout)
+            streams = data.get("streams", [])
+            if not streams:
+                return (0, 0, False)
+
+            s = streams[0]
+            w_raw = int(s.get("width", 0))
+            h_raw = int(s.get("height", 0))
+
+            w = w_raw
+            h = h_raw
+
+            # Apply SAR so the display size matches what the user sees.
+            sar = s.get("sample_aspect_ratio", "1:1")
+            parsed_sar = 1.0
+            if sar and ":" in sar and sar != "1:1":
+                try:
+                    num, den = sar.split(":", 1)
+                    parsed_sar = float(num) / float(den)
+                except Exception:
+                    pass
+
+            w = max(2, int(w_raw * parsed_sar))
+            h = max(2, h_raw)
+
+            # Swap dimensions for rotated videos (portrait-encoded landscape, etc.).
+            tags = s.get("tags", {})
+            rotate = tags.get("rotate", "0")
+            if rotate in ("90", "270", "-90", "-270"):
+                w, h = h, w
+
+            # Flag odd dimensions: these indicate a malformed codec header that will
+            # cause the Qt/FFmpeg HW decoder to crash during format conversion.
+            is_malformed = (w % 2 != 0 or h % 2 != 0)
+
+            return (w, h, is_malformed)
+        except subprocess.TimeoutExpired:
+            print(f"[Bridge] Probe timeout: {video_path}")
+            return (0, 0, False)
+        except Exception as e:
+            print(f"[Bridge] Probe error for {video_path}: {e}")
+            return (0, 0, False)
 
     @Slot(str, bool, bool, bool, result=bool)
     def open_native_video(self, video_path: str, autoplay: bool, loop: bool, muted: bool) -> bool:
-        """Ask the native layer to open a video player."""
+        """Open the native video overlay for the given file.
 
+        If the video has odd display dimensions (a sign of a malformed codec header
+        that crashes Qt's HW decoder), it is transparently preprocessed to an
+        MJPEG/MKV copy with corrected even dimensions before playback begins.
+        """
         try:
-            w, h = self._probe_video_size(video_path)
-            self.openVideoRequested.emit(
-                str(video_path), bool(autoplay), bool(loop), bool(muted), int(w), int(h)
-            )
+            w, h, is_malformed = self._probe_video_size(video_path)
+            if is_malformed:
+                # Odd dimensions signal a malformed H.264 codec header.
+                # Route through async ffmpeg preprocessing before playing.
+                print(f"[Bridge] Malformed video detected ({w}x{h}), preprocessing: {Path(video_path).name}")
+                self.videoPreprocessingStatus.emit("Preparing video...")
+
+                def preprocess_and_open():
+                    try:
+                        fixed_path = self._preprocess_to_even_dims(video_path, w, h)
+                    except Exception as e:
+                        print(f"[Bridge] Preprocess exception: {e}")
+                        fixed_path = None
+
+                    if fixed_path:
+                        pw, ph, _ = self._probe_video_size(fixed_path)
+                        self.videoPreprocessingStatus.emit("")  # Clear loading indicator
+                        self.openVideoRequested.emit(
+                            str(fixed_path), bool(autoplay), bool(loop), bool(muted), int(pw), int(ph)
+                        )
+                    else:
+                        print(f"[Bridge] Preprocess failed for {Path(video_path).name}")
+                        self.videoPreprocessingStatus.emit("Error: Could not prepare video.")
+
+                threading.Thread(target=preprocess_and_open, daemon=True).start()
+            else:
+                self.openVideoRequested.emit(
+                    str(video_path), bool(autoplay), bool(loop), bool(muted), int(w), int(h)
+                )
             return True
-        except Exception:
+        except Exception as e:
+            print(f"[Bridge] open_native_video error: {e}")
             return False
+
+    def _preprocess_to_even_dims(self, video_path: str, w: int, h: int) -> str | None:
+        """Use ffmpeg to create a corrected copy with even dimensions in the system temp dir.
+
+        Outputs MJPEG in MKV so Qt software-decodes it (delivers BGRA frames, not NV12),
+        completely avoiding the swscaler crash that affects H.264 HW-decoded NV12 frames.
+        """
+        import tempfile
+        ffmpeg = self._ffmpeg_bin()
+        if not ffmpeg:
+            print("Preprocess Error: ffmpeg not found")
+            return None
+
+        # Round down to nearest even dimensions (explicit safety)
+        even_w = w if w % 2 == 0 else w - 1
+        even_h = h if h % 2 == 0 else h - 1
+        if even_w <= 0 or even_h <= 0:
+            return None
+
+        # Always output .mkv (supports MJPEG + any audio codec)
+        tmp = tempfile.NamedTemporaryFile(
+            prefix="mmx_fixed_", suffix=".mkv", delete=False
+        )
+        tmp.close()
+        out_path = tmp.name
+
+        # Use MJPEG codec:
+        # - Qt decodes in software -> receives BGRA/RGB frames, NOT NV12
+        # - Avoids D3D11 HW decode and the swscaler 450x797->0x797 crash
+        # - scale + setsar=1 ensures clean even dimensions with no SAR adjustment
+        # - format=yuv420p avoids the "deprecated pixel format yuvj420p" warning
+        #   that MJPEG emits by default (yuvj420p is a deprecated full-range alias)
+        vf = f"scale={even_w}:{even_h},setsar=1,format=yuv420p"
+        cmd = [
+            ffmpeg, "-y", "-hide_banner", "-loglevel", "warning",
+            "-i", str(video_path),
+            "-vf", vf,
+            "-c:v", "mjpeg", "-q:v", "3",
+            "-c:a", "copy",
+            out_path,
+        ]
+        print(f"Preprocess CMD: {' '.join(cmd)}")
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            if r.returncode != 0 or not Path(out_path).exists():
+                print(f"Preprocess ffmpeg error: {r.stderr[:500]}")
+                return None
+            return out_path
+        except subprocess.TimeoutExpired:
+            print("Preprocess Error: ffmpeg timed out")
+            return None
+
 
     @Slot(result=bool)
     def close_native_video(self) -> bool:
@@ -1078,6 +1325,7 @@ class MainWindow(QMainWindow):
         self.bridge = Bridge()
         self.bridge.openVideoRequested.connect(self._open_video_overlay)
         self.bridge.closeVideoRequested.connect(self._close_video_overlay)
+        self.bridge.videoPreprocessingStatus.connect(self._on_video_preprocessing_status)
         self.bridge.uiFlagChanged.connect(self._apply_ui_flag)
         self.bridge.metadataRequested.connect(self._show_metadata_for_path)
         self.bridge.loadFolderRequested.connect(self._on_load_folder_requested)
@@ -1315,9 +1563,9 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-        channel = QWebChannel(self.web.page())
-        channel.registerObject("bridge", self.bridge)
-        self.web.page().setWebChannel(channel)
+        self.channel = QWebChannel(self.web.page())
+        self.channel.registerObject("bridge", self.bridge)
+        self.web.page().setWebChannel(self.channel)
 
         index_path = Path(__file__).with_name("web") / "index.html"
 
@@ -1372,12 +1620,13 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Invalid Folder", f"The folder does not exist:\n{folder_path}")
             return
             
-        path_str = str(p.resolve())
+        # Use apparent path (Path(p).absolute()) NOT resolved path.
+        path_str = str(p.absolute())
         # Update the proxy model's local filtering root
         self.proxy_model.setRootPath(path_str)
         
-        # The tree needs to show the root folder, so we set the tree-root to the PAparent
-        root_parent = p.resolve().parent
+        # The tree needs to show the root folder, so we set the tree-root to the parent
+        root_parent = p.parent
         parent_idx = self.fs_model.setRootPath(str(root_parent))
         
         self.tree.setRootIndex(self.proxy_model.mapFromSource(parent_idx))
@@ -1453,7 +1702,7 @@ class MainWindow(QMainWindow):
             # Video duration/resolution via ffprobe if it's a video
             if p.suffix.lower() in {'.mp4', '.webm', '.mov', '.mkv'}:
                 try:
-                    w, h = self.bridge._probe_video_size(str(p))
+                    w, h, _ = self.bridge._probe_video_size(str(p))
                     if w and h:
                         lines.append(f"Video size: {w} x {h}")
                     dur = self.bridge.get_video_duration_seconds(str(p))
@@ -1577,6 +1826,17 @@ class MainWindow(QMainWindow):
     def _open_video_overlay(
         self, path: str, autoplay: bool, loop: bool, muted: bool, width: int, height: int
     ) -> None:
+        # Track temp files created by preprocessing so we can delete on close
+        if not hasattr(self, "_temp_video_path"):
+            self._temp_video_path: str | None = None
+        import tempfile, pathlib
+        if pathlib.Path(path).parent == pathlib.Path(tempfile.gettempdir()) and path.startswith(
+            str(pathlib.Path(tempfile.gettempdir()) / "mmx_fixed_")
+        ):
+            self._temp_video_path = path
+        else:
+            self._cleanup_temp_video()
+
         self.video_overlay.setGeometry(self.web.rect())
         self.video_overlay.open_video(
             VideoRequest(
@@ -1588,6 +1848,24 @@ class MainWindow(QMainWindow):
                 height=int(height),
             )
         )
+
+    def _on_video_preprocessing_status(self, status: str) -> None:
+        """Show/clear the preprocessing status in the overlay."""
+        if status:
+            # Show overlay in loading state before the fixed video is ready
+            self.video_overlay.setGeometry(self.web.rect())
+            self.video_overlay.show_preprocessing_status(status)
+        # When status is empty, open_video will be called shortly which clears it
+
+    def _cleanup_temp_video(self) -> None:
+        """Delete any preprocessed temp file from a previous session."""
+        if hasattr(self, "_temp_video_path") and self._temp_video_path:
+            try:
+                Path(self._temp_video_path).unlink(missing_ok=True)
+                print(f"Preprocess Cleanup: Deleted {self._temp_video_path}")
+            except Exception:
+                pass
+            self._temp_video_path = None
 
     def _close_web_lightbox(self) -> None:
         # Ask the web UI to close its lightbox chrome without re-triggering native close.
@@ -1806,25 +2084,16 @@ class MainWindow(QMainWindow):
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         # Only handle MouseButtonPress to avoid duplicate triggers on release.
         if event.type() == QEvent.Type.MouseButtonPress:
-            # Check if the click is within the web view's internal hierarchy.
-            obj_name = watched.objectName() or watched.__class__.__name__
-            is_web = (watched == self.web) or ("WebEngine" in obj_name) or ("RenderWidget" in obj_name)
+            # Use a more robust geometric check instead of recursive object parent lookup.
+            # This is safer and avoids potential crashes in transient widget states.
+            from PySide6.QtGui import QCursor
+            from PySide6.QtWidgets import QWidget
+            rel_pos = self.web.mapFromGlobal(QCursor.pos())
+            is_web = self.web.rect().contains(rel_pos)
             
             if not is_web:
-                curr = watched
-                while curr:
-                    if curr == self.web:
-                        is_web = True
-                        break
-                    if hasattr(curr, "parent"):
-                        try:
-                            curr = QObject.parent(curr) if not isinstance(curr, QWidget) else curr.parent()
-                        except Exception:
-                            curr = None
-                    else:
-                        curr = None
-
-            if not is_web:
+                # ONLY dismiss if the click is truly outside the web area.
+                # This prevents the native filter from eating clicks destined for the context menu.
                 self._dismiss_web_menus()
                 self._deselect_web_items()
         return super().eventFilter(watched, event)
@@ -1871,9 +2140,20 @@ class MainWindow(QMainWindow):
         ff = "✓" if st.get("ffmpeg") else "×"
         fp = "✓" if st.get("ffprobe") else "×"
         
+        # Get active Qt Multimedia backendinfo
+        # In Qt 6, we can sometimes probe which service is active
+        try:
+            from PySide6.QtMultimedia import QMediaFormat
+            backend = "Qt6 Default"
+        except ImportError:
+            backend = "Unknown"
+
         info = (
             "MediaManagerX\n\n"
             "Windows native app (PySide6)\n\n"
+            "System Info:\n"
+            f"• Platform: {sys.platform}\n"
+            f"• Multimedia: {backend}\n\n"
             "Diagnostics:\n"
             f"• ffmpeg: {ff} ({st.get('ffmpeg_path', 'not found')})\n"
             f"• ffprobe: {fp} ({st.get('ffprobe_path', 'not found')})\n"

@@ -66,7 +66,8 @@ class VideoFrameWidget(QWidget):
         y = (target.height() - scaled.height()) // 2
         
         target_rect = QRect(x, y, scaled.width(), scaled.height())
-        p.drawImage(target_rect, self._img)
+        if not target_rect.isEmpty():
+            p.drawImage(target_rect, self._img)
 
 
 class LightboxVideoOverlay(QWidget):
@@ -215,6 +216,7 @@ class LightboxVideoOverlay(QWidget):
         self.player.positionChanged.connect(self._on_position)
         self.player.durationChanged.connect(self._on_duration)
         self.player.playbackStateChanged.connect(self._on_playback_state_changed)
+        self.player.errorOccurred.connect(self._on_player_error)
 
         # Track native video size (for aspect-ratio correct viewport)
         self._native_size: QSize | None = None
@@ -230,8 +232,8 @@ class LightboxVideoOverlay(QWidget):
         QShortcut(QKeySequence("Escape"), self, activated=self.close_overlay)
         QShortcut(QKeySequence("Space"), self, activated=self._toggle_playback)
 
-        # Track looping
         self._loop = False
+        self._current_source = ""
         self.player.mediaStatusChanged.connect(self._on_media_status)
 
     def eventFilter(self, obj, event) -> bool:  # type: ignore[override]
@@ -285,8 +287,8 @@ class LightboxVideoOverlay(QWidget):
 
         # Fit rect preserving aspect ratio
         scale = min(target_w / vw, target_h / vh)
-        w = int(vw * scale)
-        h = int(vh * scale)
+        w = max(1, int(vw * scale))
+        h = max(1, int(vh * scale))
 
         x = bounds.x() + (bounds.width() - w) // 2
         y = bounds.y() + (bounds.height() - h) // 2
@@ -312,6 +314,8 @@ class LightboxVideoOverlay(QWidget):
 
     def open_video(self, req: VideoRequest) -> None:
         path = str(Path(req.path))
+        print(f"Video Overlay Opening: {path} ({req.width}x{req.height})")
+        
         self._loop = bool(req.loop)
         self.audio.setMuted(bool(req.muted))
         self.btn_mute.setText("🔇" if req.muted else "🔊")
@@ -327,7 +331,16 @@ class LightboxVideoOverlay(QWidget):
                 self.player.setLoops(-1 if req.loop else 1)  # type: ignore[attr-defined]
             except Exception:
                 pass
+        
+        # Explicit cleanup for new session
+        self.video_view.set_image(None)
+        self.lbl_dbg.setText("")
+        self._current_source = path
 
+        try:
+            self.player.stop()
+        except Exception:
+            pass
         self.player.setSource(QUrl.fromLocalFile(path))
         self.setVisible(True)
         self.video_view.setVisible(True)
@@ -344,10 +357,33 @@ class LightboxVideoOverlay(QWidget):
         QTimer.singleShot(0, self.controls.raise_)
 
         # Kick the backend so we get the first frame even for non-autoplay.
+        self._first_frame_received = False
+        self._auto_pause_needed = not req.autoplay
         self.player.play()
-        if not req.autoplay:
-            QTimer.singleShot(50, self.player.pause)
+        
+        # We'll pause in _on_frame once the first frame actually arrives.
+        # But we still need a safety timeout in case the video is broken.
+        if self._auto_pause_needed:
+             QTimer.singleShot(2000, self._safety_auto_pause)
 
+        self._show_controls()
+
+    def _safety_auto_pause(self) -> None:
+        """Fallback pause if no frame arrived within timeout."""
+        if hasattr(self, "_auto_pause_needed") and self._auto_pause_needed:
+            if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+                self.player.pause()
+            self._auto_pause_needed = False
+
+    def show_preprocessing_status(self, message: str) -> None:
+        """Show the overlay with a status message while preprocessing is running."""
+        self.video_view.set_image(None)
+        self.lbl_dbg.setText(message)
+        self.lbl_dbg.setVisible(True)
+        self.setVisible(True)
+        self.video_view.setVisible(True)
+        self.backdrop.setVisible(True)
+        self.raise_()
         self._show_controls()
 
     def close_overlay(self, notify_web: bool = True) -> None:
@@ -366,61 +402,178 @@ class LightboxVideoOverlay(QWidget):
                 pass
 
     def _on_frame(self, frame: QVideoFrame) -> None:
-        """Convert QVideoFrame to QImage for painting."""
+        """
+        Convert each QVideoFrame into a QImage for painting on the VideoFrameWidget.
+
+        Frame rendering pipeline:
+          1. Safety gate: reject frames that would crash the Qt/FFmpeg backend.
+          2. Primary path: frame.toImage() — Qt's built-in conversion (fast, coloured).
+          3. Fallback path: manual frame.map() + QImage construction from raw bytes.
+             Used when toImage() returns null (e.g. for unusual pixel formats).
+          4. On success: push the QImage to the VideoFrameWidget for painting.
+        """
+        # Ignore frames while the media pipeline is not in a valid playing state.
+        st = self.player.mediaStatus()
+        if st in (
+            QMediaPlayer.MediaStatus.NoMedia,
+            QMediaPlayer.MediaStatus.LoadingMedia,
+            QMediaPlayer.MediaStatus.StalledMedia,
+        ):
+            return
+
+        if not frame.isValid():
+            return
 
         try:
             pf = frame.pixelFormat()
-            w = frame.width()
-            h = frame.height()
+            raw_w = int(frame.width())
+            raw_h = int(frame.height())
 
-            # Best case
+            # ── Safety gate ─────────────────────────────────────────────────────────
+            # NV12 frames with odd or zero dimensions trigger a swscaler crash deep
+            # inside Qt's FFmpeg backend — both toImage() AND map() are unsafe.
+            #
+            # Root cause: the source MP4 has a malformed codec header (coded_width=0
+            # even though the container reports the correct display width). Qt's
+            # D3D11 HW decoder reads the coded width, causing swscaler to attempt an
+            # impossible "450×797 → 0×797" conversion.
+            #
+            # Prevention: Bridge._probe_video_size() detects odd dims at open time
+            # and routes the video through _preprocess_to_even_dims(), which re-encodes
+            # to MJPEG/MKV (software-decoded, no NV12 in the frame pipeline). This
+            # guard therefore should never fire for normal usage, but remains as a
+            # last-resort safety net.
+            is_radioactive = False
+            if pf.name == "Format_NV12" and (raw_h % 2 != 0 or raw_w % 2 != 0):
+                is_radioactive = True
+            if raw_w <= 0 or raw_h <= 0:
+                is_radioactive = True
+
+            if is_radioactive:
+                # Update UI once, then keep returning silently.
+                if not self.lbl_dbg.isVisible():
+                    msg = f"Incompatible frame format ({pf.name} {raw_w}×{raw_h})"
+                    print(f"[VideoOverlay] Radioactive frame blocked: {msg}")
+                    self.lbl_dbg.setText(msg)
+                    self.lbl_dbg.setVisible(True)
+                return
+
+            # ── Working dimensions ───────────────────────────────────────────────────
+            # Start from what the frame reports, then apply fallbacks for edge cases.
+            w = raw_w
+            h = raw_h
             img = None
+
+            # If the frame reports zero dimensions (can happen transiently during
+            # pipeline setup), fall back to the probed size from open_video.
+            if w <= 0 or h <= 0:
+                if hasattr(self, "_native_size") and self._native_size:
+                    if w <= 0:
+                        w = self._native_size.width()
+                    if h <= 0:
+                        h = self._native_size.height()
+                if w <= 0 or h <= 0:
+                    return  # Nothing we can do without a size.
+
+            # NV12 chroma subsampling requires even dimensions; clamp to nearest even.
+            if pf.name == "Format_NV12":
+                if w % 2 != 0:
+                    w -= 1
+                if h % 2 != 0:
+                    h -= 1
+
+            self._frame_count = getattr(self, "_frame_count", 0) + 1
+
+            # ── Primary path: built-in conversion ───────────────────────────────────
+            # frame.toImage() asks Qt's FFmpeg backend to convert the frame to a
+            # QImage in a display-ready format (usually ARGB32 or RGB32). This is
+            # the fast, full-colour path used for the vast majority of videos.
             if hasattr(frame, "toImage"):
-                img = frame.toImage()  # type: ignore[attr-defined]
+                try:
+                    img = frame.toImage()  # type: ignore[attr-defined]
+                    if img is not None and img.isNull():
+                        img = None  # Treat null images as failure; fall through to map.
+                except Exception:
+                    img = None
+
+            # ── Fallback path: manual map ────────────────────────────────────────────
+            # Used when toImage() returns null (e.g. exotic pixel formats that Qt
+            # doesn't convert natively). We manually map the frame's memory and
+            # construct a QImage from plane 0 directly.
+            #
+            # For planar formats (NV12, YUV420P, …) plane 0 is always the luma (Y)
+            # channel, so the fallback produces a greyscale-only image. For packed
+            # BGRA/RGBA formats it produces a full-colour image.
+            if img is None or img.isNull():
+                if frame.map(QVideoFrame.MapMode.ReadOnly):
+                    try:
+                        stride = frame.bytesPerLine(0)
+                        real_w = w
+                        real_h = h
+                        # If stride is narrower than our computed width, trust the stride.
+                        if stride > 0 and real_w > stride:
+                            real_w = stride
+
+                        if real_w > 0 and real_h > 0:
+                            # Choose the QImage pixel format that best matches the frame.
+                            qfmt = {
+                                QVideoFrameFormat.PixelFormat.Format_BGRA8888: QImage.Format.Format_ARGB32,
+                                QVideoFrameFormat.PixelFormat.Format_RGBA8888: QImage.Format.Format_RGBA8888,
+                                QVideoFrameFormat.PixelFormat.Format_ARGB8888: QImage.Format.Format_ARGB32,
+                                QVideoFrameFormat.PixelFormat.Format_RGBX8888: QImage.Format.Format_RGB32,
+                            }.get(pf, QImage.Format.Format_Grayscale8)  # Y-plane fallback
+
+                            bits = frame.bits(0)
+                            if bits:
+                                # QImage does NOT take ownership of the bits pointer;
+                                # .copy() makes a safe owned copy.
+                                img = QImage(bits, real_w, real_h, stride, qfmt).copy()
+                    except Exception:
+                        pass
+                    finally:
+                        frame.unmap()
+
+            # ── Render ───────────────────────────────────────────────────────────────
             if img is not None and not img.isNull():
                 self.lbl_dbg.setText("")
+                self.lbl_dbg.setVisible(False)
                 self.video_view.set_image(img)
+
+                # Auto-pause after the first valid frame if the caller requested it
+                # (i.e. the video was opened in a non-autoplay state; we play briefly
+                # just to get a poster frame, then pause).
+                if hasattr(self, "_auto_pause_needed") and self._auto_pause_needed:
+                    self.player.pause()
+                    self._auto_pause_needed = False
                 return
 
-            # Fallback: map raw bytes for common packed RGB formats
-            if not frame.map(QVideoFrame.MapMode.ReadOnly):
-                self.lbl_dbg.setText(f"no-map pf={int(pf)}")
-                self.video_view.set_image(None)
-                return
+            # All conversion attempts failed — clear the frame widget.
+            self.video_view.set_image(None)
+            if not self.lbl_dbg.text():
+                self.lbl_dbg.setText(f"Unsupported format: {pf.name}")
+                self.lbl_dbg.setVisible(True)
 
-            try:
-                bpl = frame.bytesPerLine(0)
-                ptr = frame.bits(0)
-
-                qfmt = None
-                if pf == QVideoFrameFormat.PixelFormat.Format_BGRA8888:
-                    qfmt = QImage.Format.Format_ARGB32
-                elif pf == QVideoFrameFormat.PixelFormat.Format_RGBA8888:
-                    qfmt = QImage.Format.Format_RGBA8888
-                elif pf == QVideoFrameFormat.PixelFormat.Format_ARGB8888:
-                    qfmt = QImage.Format.Format_ARGB32
-
-                if qfmt is None:
-                    self.lbl_dbg.setText(f"unsupported pf={int(pf)} {w}x{h}")
-                    self.video_view.set_image(None)
-                    return
-
-                img2 = QImage(ptr, w, h, bpl, qfmt)
-                self.lbl_dbg.setText("")
-                self.video_view.set_image(img2.copy())
-            finally:
-                frame.unmap()
         except Exception as e:
-            self.lbl_dbg.setText(f"frame err: {type(e).__name__}")
+            print(f"[VideoOverlay] Frame processing error: {type(e).__name__}: {e}")
+            self.lbl_dbg.setText(f"Frame error: {type(e).__name__}")
+            self.lbl_dbg.setVisible(True)
             self.video_view.set_image(None)
 
-    def _on_media_status(self, status) -> None:
-        # Fallback looping if setLoops isn't available.
-        if not self._loop:
-            return
-        if status == QMediaPlayer.MediaStatus.EndOfMedia:
+    def _on_media_status(self, status: QMediaPlayer.MediaStatus) -> None:
+        # Show UI error for unplayable media; all other status transitions are silent.
+        if status == QMediaPlayer.MediaStatus.InvalidMedia:
+            self.lbl_dbg.setText("Error: Could not load media")
+            self.lbl_dbg.setVisible(True)
+
+        # Fallback looping when setLoops() isn't available (older Qt builds).
+        if self._loop and status == QMediaPlayer.MediaStatus.EndOfMedia:
             self.player.setPosition(0)
             self.player.play()
+
+    def _on_player_error(self, error: QMediaPlayer.Error, error_string: str) -> None:
+        self.lbl_dbg.setText(f"Player Error: {error_string}")
+        self.lbl_dbg.setVisible(True)
+        print(f"Video Overlay Player Error: {error_string} (code {error})")
 
     def _format_ms(self, ms: int) -> str:
         s = max(0, int(ms // 1000))
