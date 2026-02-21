@@ -327,6 +327,10 @@ function renderMediaList(items) {
       img.loading = 'lazy';
       img.src = item.url;
       img.alt = '';
+      if (item.is_animated) {
+        img.setAttribute('data-animated', 'true');
+        img.setAttribute('data-path', item.path || '');
+      }
       img.addEventListener('load', () => sk.remove());
       img.addEventListener('error', () => sk.remove());
       card.appendChild(img);
@@ -561,8 +565,52 @@ function openLightboxByIndex(idx) {
 
   lb.hidden = false;
 
+  const isGlass = !document.body.classList.contains('no-glass');
+  if (isGlass) {
+    suspendGalleryGifs();
+  }
+
   // prevent background scroll while open
   document.body.style.overflow = 'hidden';
+}
+
+function suspendGalleryGifs() {
+  const animated = document.querySelectorAll('img.thumb[data-animated="true"]');
+  animated.forEach(img => {
+    const path = img.getAttribute('data-path');
+    if (!path) return;
+
+    // Save current src if not already saved
+    if (!img.hasAttribute('data-original-src')) {
+      img.setAttribute('data-original-src', img.src);
+    }
+
+    const poster = img.getAttribute('data-poster-url');
+    if (poster) {
+      img.src = poster;
+    } else if (gBridge && gBridge.get_video_poster) {
+      gBridge.get_video_poster(path, (url) => {
+        if (url) {
+          img.setAttribute('data-poster-url', url);
+          // Only apply if we are still suspended
+          if (img.hasAttribute('data-original-src')) {
+            img.src = url;
+          }
+        }
+      });
+    }
+  });
+}
+
+function resumeGalleryGifs() {
+  const animated = document.querySelectorAll('img.thumb[data-animated="true"]');
+  animated.forEach(img => {
+    const original = img.getAttribute('data-original-src');
+    if (original) {
+      img.src = original;
+      img.removeAttribute('data-original-src');
+    }
+  });
 }
 
 let gClosingFromNative = false;
@@ -581,6 +629,8 @@ function closeLightbox() {
   vid.pause();
   vid.src = '';
   vid.style.display = 'none';
+
+  resumeGalleryGifs();
 
   if (!gClosingFromNative && gBridge && gBridge.close_native_video) {
     gBridge.close_native_video(function () { });
@@ -802,6 +852,16 @@ function wireSettings() {
   const browse = document.getElementById('browseStartFolder');
   const backdrop = document.getElementById('settingsBackdrop');
   const toggle = document.getElementById('toggleRandomize');
+  const glassToggle = document.getElementById('toggleGlass');
+  if (glassToggle) {
+    glassToggle.addEventListener('change', () => {
+      if (!gBridge || !gBridge.set_setting_bool) return;
+      document.body.classList.toggle('no-glass', !glassToggle.checked);
+      gBridge.set_setting_bool('ui.enable_glassmorphism', glassToggle.checked, function () { });
+    });
+  }
+
+  const themeToggle = document.getElementById('toggleTheme');
 
   if (openBtn) openBtn.addEventListener('click', openSettings);
   if (closeBtn) closeBtn.addEventListener('click', closeSettings);
@@ -1067,6 +1127,11 @@ async function main() {
       updateThemeAwareIcons(theme);
       const radio = document.getElementById(theme === 'light' ? 'themeLight' : 'themeDark');
       if (radio) radio.checked = true;
+
+      const glass = (s && s['ui.enable_glassmorphism']) !== false; // Default true
+      document.body.classList.toggle('no-glass', !glass);
+      const gt = document.getElementById('toggleGlass');
+      if (gt) gt.checked = glass;
 
       updateSidebarButtonIcons('left', !!(s && s['ui.show_left_panel']));
       updateSidebarButtonIcons('right', !!(s && s['ui.show_right_panel']));

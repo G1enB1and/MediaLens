@@ -672,6 +672,7 @@ class Bridge(QObject):
                 "ui.show_left_panel": bool(self.settings.value("ui/show_left_panel", True, type=bool)),
                 "ui.show_right_panel": bool(self.settings.value("ui/show_right_panel", True, type=bool)),
                 "ui.theme_mode": str(self.settings.value("ui/theme_mode", "dark", type=str) or "dark"),
+                "ui.enable_glassmorphism": bool(self.settings.value("ui/enable_glassmorphism", True, type=bool)),
             }
         except Exception:
             return {
@@ -1317,6 +1318,7 @@ class Bridge(QObject):
                         "path": str(p),
                         "url": QUrl.fromLocalFile(str(p)).toString(),
                         "media_type": media_type,
+                        "is_animated": self._is_animated(p),
                     }
                 )
 
