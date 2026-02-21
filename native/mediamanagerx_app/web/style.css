@@ -161,7 +161,11 @@ body.lightbox-open header {
   border: 1px solid var(--border);
   background: var(--input-bg);
   color: var(--fg);
-  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  line-height: 1;
 }
 
 .icon-btn:hover {
@@ -174,8 +178,7 @@ body.lightbox-open header {
   height: 18px;
   object-fit: contain;
   opacity: 0.85;
-  display: block;
-  margin: 0 auto;
+  flex-shrink: 0;
 }
 
 .icon-btn:hover img {
@@ -259,6 +262,64 @@ body.lightbox-open header {
   color: var(--fg);
   font-size: 13px;
   cursor: pointer;
+}
+
+.segmented-control {
+  display: flex;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.segmented-control input[type="radio"] {
+  display: none;
+}
+
+.segmented-control label {
+  flex: 1;
+  text-align: center;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  /* Dimmed base text in dark mode for better hover pop */
+  color: color-mix(in srgb, var(--fg), transparent 25%);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+  border: 1px solid transparent;
+}
+
+.light-mode .segmented-control label {
+  color: var(--fg);
+}
+
+.segmented-control label:hover {
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--accent), white 30%);
+  background: color-mix(in srgb, var(--hover-bg), white 10%);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent), transparent 70%);
+}
+
+.light-mode .segmented-control label:hover {
+  box-shadow: none;
+}
+
+.segmented-control input[type="radio"]:checked+label {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  border-color: var(--accent);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent), transparent 60%);
+}
+
+.light-mode .segmented-control input[type="radio"]:checked+label {
+  color: #000;
+  border-color: color-mix(in srgb, var(--accent), transparent 50%);
+  background: color-mix(in srgb, var(--accent), white 60%);
+  box-shadow: none;
 }
 
 .field {
