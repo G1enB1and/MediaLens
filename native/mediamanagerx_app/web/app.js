@@ -887,16 +887,41 @@ function wireSettings() {
       if (!gBridge || !gBridge.set_setting_str) return;
       const theme = radio.value;
       document.documentElement.classList.toggle('light-mode', theme === 'light');
+      updateThemeAwareIcons(theme);
       gBridge.set_setting_str('ui.theme_mode', theme, function () { });
     });
+  });
+}
+
+function updateThemeAwareIcons(theme) {
+  const isLight = theme === 'light';
+  const suffix = isLight ? '-black' : '';
+
+  // Update Logo
+  const logo = document.getElementById('mainLogo');
+  if (logo) {
+    logo.src = `media-manager-logo-64${suffix}.png`;
+  }
+
+  // Update Sidebar Icons
+  ['Left', 'Right'].forEach(side => {
+    const icon = document.getElementById('icon' + side + 'Panel');
+    if (icon) {
+      const isOpened = icon.src.includes('opened');
+      const sideKey = side.toLowerCase();
+      const state = isOpened ? 'opened' : 'closed';
+      icon.src = `${sideKey}-sidebar-${state}${suffix}.png`;
+    }
   });
 }
 
 function updateSidebarButtonIcons(side, visible) {
   const icon = document.getElementById('icon' + (side === 'left' ? 'Left' : 'Right') + 'Panel');
   if (!icon) return;
+  const isLight = document.documentElement.classList.contains('light-mode');
+  const suffix = isLight ? '-black' : '';
   const state = visible ? 'opened' : 'closed';
-  icon.src = `${side}-sidebar-${state}.png`;
+  icon.src = `${side}-sidebar-${state}${suffix}.png`;
 }
 
 function wireSidebarToggles() {
@@ -1039,6 +1064,7 @@ async function main() {
 
       const theme = (s && s['ui.theme_mode']) || 'dark';
       document.documentElement.classList.toggle('light-mode', theme === 'light');
+      updateThemeAwareIcons(theme);
       const radio = document.getElementById(theme === 'light' ? 'themeLight' : 'themeDark');
       if (radio) radio.checked = true;
 

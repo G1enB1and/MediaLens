@@ -2003,6 +2003,12 @@ class MainWindow(QMainWindow):
         # Windows Title Bar
         self._set_window_title_bar_theme(not is_light, sb_bg)
         
+        # Theme-aware Window Icon
+        icon_name = "favicon-black.png" if is_light else "favicon.png"
+        icon_path = Path(__file__).with_name("web") / icon_name
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
+        
         # Loading Screen
         load_fg = "rgba(0,0,0,200)" if is_light else "rgba(255,255,255,200)"
         load_bg = "rgba(0,0,0,25)" if is_light else "rgba(255,255,255,25)"
