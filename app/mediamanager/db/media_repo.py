@@ -165,21 +165,32 @@ def upsert_media_item(
 def list_media_in_scope(
     conn: sqlite3.Connection,
     selected_roots: list[str],
-    *,
-    limit: int | None = None,
-    offset: int | None = None,
-) -> List[dict]:
+) -> list[dict]:
     where_sql, params = build_scope_where(selected_roots)
 
-    sql = f"SELECT id, path, media_type, file_size_bytes, modified_time_utc FROM media_items WHERE {where_sql} ORDER BY path"
-    if limit is not None:
-        sql += " LIMIT ?"
-        params = [*params, int(limit)]
-    if offset is not None:
-        if limit is None:
-            sql += " LIMIT -1"
-        sql += " OFFSET ?"
-        params = [*params, int(offset)]
+    # We use a LEFT JOIN for metadata and a GROUP_CONCAT subquery for tags
+    # to keep it to one row per media item.
+    sql = f"""
+        SELECT 
+            m.id, 
+            m.path, 
+            m.media_type, 
+            m.file_size_bytes, 
+            m.modified_time_utc,
+            meta.title,
+            meta.description,
+            meta.notes,
+            (
+                SELECT GROUP_CONCAT(t.name, ', ')
+                FROM tags t
+                JOIN media_tags mt ON t.id = mt.tag_id
+                WHERE mt.media_id = m.id
+            ) as tags
+        FROM media_items m
+        LEFT JOIN media_metadata meta ON m.id = meta.media_id
+        WHERE {where_sql}
+        ORDER BY m.path
+    """
 
     rows = conn.execute(sql, params).fetchall()
     return [
@@ -189,6 +200,10 @@ def list_media_in_scope(
             "media_type": r[2],
             "file_size": r[3],
             "modified_time": r[4],
+            "title": r[5],
+            "description": r[6],
+            "notes": r[7],
+            "tags": r[8],
         }
         for r in rows
     ]

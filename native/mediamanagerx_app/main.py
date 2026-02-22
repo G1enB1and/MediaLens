@@ -1468,11 +1468,21 @@ class Bridge(QObject):
         elif filter_type == "animated":
             candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
         
-        # Search filtering (case-insensitive path match)
+        # Search filtering (multi-field match)
         if search_query:
             q = search_query.strip().lower()
             if q:
-                candidates = [r for r in candidates if q in r["path"].lower()]
+                def _matches(r):
+                    # Path/Filename (always present)
+                    if q in r["path"].lower(): return True
+                    # Database metadata
+                    if r.get("title") and q in r["title"].lower(): return True
+                    if r.get("description") and q in r["description"].lower(): return True
+                    if r.get("notes") and q in r["notes"].lower(): return True
+                    if r.get("tags") and q in r["tags"].lower(): return True
+                    return False
+                
+                candidates = [r for r in candidates if _matches(r)]
 
         return candidates
 
