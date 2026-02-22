@@ -101,6 +101,61 @@ function setGlobalLoading(on, text = 'Loading…', pct = null) {
   }, wait);
 }
 
+// Enable clicking to hide the loading overlay if it gets stuck
+document.addEventListener('DOMContentLoaded', () => {
+  const gl = document.getElementById('globalLoading');
+  if (gl) {
+    gl.style.cursor = 'pointer';
+    gl.onclick = () => {
+      gl.hidden = true;
+    };
+  }
+});
+
+function wireScanIndicator() {
+  const el = document.getElementById('scanIndicator');
+  const file = document.getElementById('scanFile');
+  const bar = document.getElementById('scanBar');
+  if (!el || !file || !bar) return;
+
+  el.onclick = () => {
+    // Single click minimizes, but we'll also allow double click to hide completely?
+    // User said "hideable by clicking", so let's toggle hidden if already minimized or just hide.
+    if (el.classList.contains('minimized')) {
+      el.hidden = true;
+    } else {
+      el.classList.add('minimized');
+    }
+  };
+
+  if (gBridge.scanProgress) {
+    gBridge.scanProgress.connect((fileName, percent) => {
+      el.hidden = false;
+      file.textContent = fileName;
+      bar.style.width = `${percent}%`;
+    });
+  }
+
+  if (gBridge.scanStarted) {
+    gBridge.scanStarted.connect(() => {
+      el.hidden = false;
+      bar.style.width = '0%';
+      file.textContent = 'Initializing...';
+    });
+  }
+
+  if (gBridge.scanFinished) {
+    gBridge.scanFinished.connect(() => {
+      // Keep it visible for a second then hide
+      file.textContent = 'Finished';
+      bar.style.width = '100%';
+      setTimeout(() => {
+        el.hidden = true;
+      }, 2000);
+    });
+  }
+}
+
 let gCtxItem = null;
 let gCtxIndex = -1;
 let gCtxFromLightbox = false;
@@ -791,7 +846,20 @@ function refreshFromBridge(bridge, resetPage = false) {
       gPage = 0;
     }
 
-    // Start async scan. UI will refresh when gBridge.scanFinished fires.
+    // ── 1. Fast Path Reconcile (Hybrid Load) ─────────────────────────────
+    // This loads the synthesized candidates from disk + DB without waiting for scan.
+    bridge.count_media(gSelectedFolders, gFilter, gSearchQuery || '', function (count) {
+      gTotal = count || 0;
+      bridge.list_media(gSelectedFolders, PAGE_SIZE, gPage * PAGE_SIZE, gSort, gFilter, gSearchQuery || '', function (items) {
+        renderMediaList(items);
+        renderPager();
+        // Hide the "Starting..." or "Loading..." overlay once we have the first batch of results.
+        setGlobalLoading(false);
+      });
+    });
+
+    // ── 2. Background Enrichment Scan ────────────────────────────────────
+    // This fills in hashes and metadata in the DB.
     bridge.start_scan(gSelectedFolders, gSearchQuery || '');
   });
 }
@@ -1112,7 +1180,7 @@ async function main() {
 
     if (bridge.scanStarted) {
       bridge.scanStarted.connect(function (folder) {
-        setGlobalLoading(true, 'Scanning media…', 15);
+        // Silent background scan now, non-blocking
       });
     }
 
@@ -1122,17 +1190,15 @@ async function main() {
         const tp = totalPages();
         if (gPage >= tp) gPage = Math.max(0, tp - 1);
 
-        setGlobalLoading(true, `Loading page ${gPage + 1} of ${tp || 1}…`, 55);
-
-        // Pass selection list to list_media
+        // Silent background refresh to pick up new metadata without blocking
         bridge.list_media(gSelectedFolders, PAGE_SIZE, gPage * PAGE_SIZE, gSort, gFilter, gSearchQuery || '', function (items) {
           renderMediaList(items);
           renderPager();
-          // Hide after containers are painted at least once.
-          requestAnimationFrame(() => setGlobalLoading(false));
         });
       });
     }
+
+    wireScanIndicator();
 
     bridge.get_tools_status(function (st) {
       // Diagnostic data moved to About popup.

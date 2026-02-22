@@ -343,6 +343,7 @@ class Bridge(QObject):
     scanStarted = Signal(str)
     scanFinished = Signal(str, int)  # folder, count
     selectionChanged = Signal(list)  # list of folder paths
+    scanProgress = Signal(str, int)  # file_path, percentage
 
     def __init__(self) -> None:
         super().__init__()
@@ -365,6 +366,11 @@ class Bridge(QObject):
 
         self.settings = QSettings("G1enB1and", "MediaManagerX")
         self._session_shuffle_seed = random.getrandbits(32)
+        
+        # Hybrid Fast-Load Cache
+        self._disk_cache: dict[str, Path] = {}
+        self._disk_cache_key: str = "" # Hash of selected folders list
+
         print(f"Bridge: Initialized (Session Seed: {self._session_shuffle_seed})")
 
     @Slot(str)
@@ -505,55 +511,47 @@ class Bridge(QObject):
         # list_media_in_scope handles recursion and normalization.
         return list_media_in_scope(self.conn, folders)
 
-    def _do_full_scan(self, folder: str, conn: sqlite3.Connection) -> int:
-        from app.mediamanager.db.media_repo import upsert_media_item
+    def _do_full_scan(self, paths: list[Path], conn: sqlite3.Connection) -> int:
+        from app.mediamanager.db.media_repo import upsert_media_item, get_media_by_path
         from app.mediamanager.utils.hashing import calculate_file_hash
-
-        root = Path(folder)
-        if not root.exists() or not root.is_dir():
-            return 0
+        from datetime import datetime, timezone
 
         image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
-        video_exts = {".mp4", ".webm", ".mov", ".mkv"}
-        exts = image_exts | video_exts
+        total_items = len(paths)
 
+        # ── Actual Scan with Smart Hashing ────────────────────────────────────
         count = 0
-        max_items = 20000 
-        
-        for root_dir, dirs, files in os.walk(folder, followlinks=True):
+        skips = 0
+        for i, p in enumerate(paths):
             if self._scan_abort:
                 break
             
-            curr_root = Path(root_dir)
-            
-            if self._hide_dot_enabled():
-                dirs[:] = [d for d in dirs if not d.startswith(".")]
-                try:
-                    rel_parts = curr_root.relative_to(root).parts
-                    if any(part.startswith(".") for part in rel_parts):
-                        continue
-                except Exception:
-                    pass
+            # Update progress
+            percent = int((i / total_items) * 100) if total_items > 0 else 100
+            self.scanProgress.emit(p.name, percent)
 
-            for f in files:
-                if self._hide_dot_enabled() and f.startswith("."):
-                    continue
+            try:
+                stat = p.stat()
+                media_type = "image" if p.suffix.lower() in image_exts else "video"
                 
-                p = curr_root / f
-                if p.suffix.lower() in exts:
-                    try:
-                        media_type = "image" if p.suffix.lower() in image_exts else "video"
-                        h = calculate_file_hash(p)
-                        upsert_media_item(conn, str(p), media_type, h)
-                        count += 1
-                    except Exception as e:
-                        print(f"Bridge Scan Error: {e} for {p}")
+                # Smart Check: Can we skip hashing?
+                skip_hash = False
+                existing = get_media_by_path(conn, str(p))
+                if existing:
+                    db_mtime = existing.get("modified_time")
+                    curr_mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat()
+                    if existing["file_size"] == stat.st_size and db_mtime == curr_mtime:
+                        skip_hash = True
                 
-                if count >= max_items:
-                    break
-            
-            if count >= max_items:
-                break
+                if skip_hash:
+                    skips += 1
+                else:
+                    h = calculate_file_hash(p)
+                    upsert_media_item(conn, str(p), media_type, h)
+                
+                count += 1
+            except Exception as e:
+                print(f"Bridge Scan Error: {e} for {p}")
 
         return count
 
@@ -562,26 +560,28 @@ class Bridge(QObject):
         """Asynchronously scan folders for media items."""
         self._scan_abort = True  # Signal previous thread to stop
         
+        # Use existing disk cache if available to avoid redundant walk
+        disk_paths = list(self._disk_cache.values())
+        
         def _work():
             time.sleep(0.1)
             self._scan_abort = False
             primary = folders[0] if folders else ""
             self.scanStarted.emit(primary)
             
-            # Use a separate connection for the background thread to avoid "API misuse" errors 
-            # when the UI thread also tries to use the shared connection concurrently.
             from app.mediamanager.db.connect import connect_db
             scan_conn = connect_db(str(self.db_path))
             try:
-                for folder in folders:
-                    if self._scan_abort:
-                        break
-                    self._do_full_scan(folder, scan_conn)
+                # If we don't have disk_paths yet (unlikely if called via flow), 
+                # we'd need to walk. But refreshFromBridge ensures we have them.
+                paths_to_scan = disk_paths
+                if not paths_to_scan:
+                    # Emergency fallback: pop cache manually or skip
+                    pass
+
+                self._do_full_scan(paths_to_scan, scan_conn)
                 
                 # Use the same reconciliation logic as list_media to get the final count
-                # Note: we need filter_type from the UI, but here we can just use "all" 
-                # or rely on the UI calling count_media if it needs more precision.
-                # Since start_scan is broad, we'll return the total reconciled count.
                 candidates = self._get_reconciled_candidates(folders, "all", search_query)
                 self.scanFinished.emit(primary, len(candidates))
             finally:
@@ -1403,22 +1403,30 @@ class Bridge(QObject):
             return []
 
         # ── 1. Walk disk (Recursive) ──────────────────────────────────────────
-        disk_files: dict[str, Path] = {}
-
-        for folder in folders:
-            folder_path = Path(folder)
-            if not folder_path.is_dir():
-                continue
-            try:
-                for root_dir, _, files in os.walk(str(folder_path), followlinks=True):
-                    curr_root = Path(root_dir)
-                    for f in files:
-                        p = curr_root / f
-                        if p.suffix.lower() in ALL_MEDIA_EXTS:
-                            norm = normalize_windows_path(str(p))
-                            disk_files[norm] = p
-            except Exception:
-                pass
+        # Use session-level cache to avoid repeated walks.
+        current_key = hashlib.sha1(",".join(sorted(folders)).encode()).hexdigest()
+        
+        if self._disk_cache and self._disk_cache_key == current_key:
+            disk_files = self._disk_cache
+        else:
+            disk_files: dict[str, Path] = {}
+            for folder in folders:
+                folder_path = Path(folder)
+                if not folder_path.is_dir():
+                    continue
+                try:
+                    for root_dir, _, files in os.walk(str(folder_path), followlinks=True):
+                        curr_root = Path(root_dir)
+                        for f in files:
+                            p = curr_root / f
+                            if p.suffix.lower() in ALL_MEDIA_EXTS:
+                                norm = normalize_windows_path(str(p))
+                                disk_files[norm] = p
+                except Exception:
+                    pass
+            # Update cache
+            self._disk_cache = disk_files
+            self._disk_cache_key = current_key
 
         # ── 2. Query DB candidates ────────────────────────────────────────────
         db_candidates = list_media_in_scope(self.conn, folders)

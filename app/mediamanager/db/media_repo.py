@@ -26,7 +26,7 @@ def add_media_item(
     # Simple stat collection for discovery
     p_obj = Path(path)
     size = p_obj.stat().st_size if p_obj.exists() else 0
-    mtime = datetime.fromtimestamp(p_obj.stat().st_mtime, tz=timezone.utc).isoformat() if p_obj.exists() else now
+    mtime = datetime.fromtimestamp(p_obj.stat().st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat() if p_obj.exists() else now
 
     conn.execute(
         """
@@ -102,16 +102,25 @@ def upsert_media_item(
     now = _utc_now_iso()
     normalized = normalize_windows_path(path)
 
+    # Collect current stats to keep DB in sync
+    p_obj = Path(path)
+    size = p_obj.stat().st_size if p_obj.exists() else 0
+    mtime = datetime.fromtimestamp(p_obj.stat().st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat() if p_obj.exists() else now
+
     # 1. Check if we already have this exact path
     existing_by_path = conn.execute(
         "SELECT id, content_hash FROM media_items WHERE path = ?", (normalized,)
     ).fetchone()
 
     if existing_by_path:
-        # Path exists. Update hash if it changed (unlikely but possible)
+        # Path exists. Update hash AND stats
         conn.execute(
-            "UPDATE media_items SET content_hash = ?, updated_at_utc = ? WHERE id = ?",
-            (content_hash, now, existing_by_path[0]),
+            """
+            UPDATE media_items 
+            SET content_hash = ?, file_size_bytes = ?, modified_time_utc = ?, updated_at_utc = ? 
+            WHERE id = ?
+            """,
+            (content_hash, size, mtime, now, existing_by_path[0]),
         )
         conn.commit()
         return int(existing_by_path[0])
@@ -133,10 +142,14 @@ def upsert_media_item(
                 (media_id, old_path, normalized, now),
             )
 
-            # Update path
+            # Update path AND stats
             conn.execute(
-                "UPDATE media_items SET path = ?, updated_at_utc = ? WHERE id = ?",
-                (normalized, now, media_id),
+                """
+                UPDATE media_items 
+                SET path = ?, file_size_bytes = ?, modified_time_utc = ?, updated_at_utc = ? 
+                WHERE id = ?
+                """,
+                (normalized, size, mtime, now, media_id),
             )
             conn.commit()
             return int(media_id)

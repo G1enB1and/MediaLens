@@ -1062,3 +1062,80 @@ body:not(.no-glass).light-mode .lightbox-backdrop {
   color: color-mix(in srgb, var(--fg), var(--accent) 65%);
   font-weight: 600;
 }
+/* Scanning Indicator */
+.scan-indicator {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9000;
+  width: min(400px, calc(100vw - 40px));
+  background: color-mix(in srgb, var(--panel) 75%, var(--accent) 15%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 16px;
+  box-shadow: 0 8px 32px var(--shadow);
+  cursor: pointer;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s linear;
+}
+
+.scan-indicator:hover {
+  background: color-mix(in srgb, var(--panel) 85%, var(--accent) 20%);
+}
+
+.scan-indicator[hidden] {
+  display: none;
+}
+
+.scan-indicator.minimized {
+  transform: translateX(-50%) translateY(calc(100% - 10px));
+  opacity: 0.6;
+}
+
+.scan-indicator.minimized:hover {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+}
+
+.scan-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.scan-text {
+  display: flex;
+  gap: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.scan-label {
+  font-weight: 700;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.scan-file {
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.scan-progress-container {
+  height: 4px;
+  background: color-mix(in srgb, var(--fg), transparent 90%);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.scan-bar {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
