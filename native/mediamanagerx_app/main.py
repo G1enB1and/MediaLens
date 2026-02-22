@@ -1339,7 +1339,10 @@ class Bridge(QObject):
             
             # --- Sort ---
             image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
-            if sort_by == "name_desc":
+            
+            if self._randomize_enabled() and sort_by == "name_asc":
+                random.Random(self._session_shuffle_seed).shuffle(candidates)
+            elif sort_by == "name_desc":
                 candidates.sort(key=lambda r: r["path"].lower(), reverse=True)
             elif sort_by == "date_desc":
                 candidates.sort(key=lambda r: r.get("modified_time") or "", reverse=True)
@@ -1423,7 +1426,6 @@ class Bridge(QObject):
         # ── 3. Filter to only files that actually exist on disk ───────────────
         surviving: list[dict] = []
         covered_norms: set[str] = set()
-        db_dropped = 0
         for r in db_candidates:
             norm = normalize_windows_path(r["path"])
             if norm in disk_files:
@@ -1432,11 +1434,8 @@ class Bridge(QObject):
             elif Path(r["path"]).exists():
                 surviving.append(r)
                 covered_norms.add(norm)
-            else:
-                db_dropped += 1
 
         # ── 4. Synthesize entries for on-disk files missing from DB ───────────
-        synth_count = 0
         for norm, p_obj in disk_files.items():
             if norm not in covered_norms:
                 ext = p_obj.suffix.lower()
@@ -1449,7 +1448,6 @@ class Bridge(QObject):
                     "modified_time": None,
                     "_real_path": p_obj,
                 })
-                synth_count += 1
         
         # ── 5. Filtering (Type & Search) ──────────────────────────────────────
         candidates = surviving
