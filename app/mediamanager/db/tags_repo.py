@@ -60,3 +60,9 @@ def set_media_tags(conn: sqlite3.Connection, media_id: int, tag_names: Iterable[
     conn.execute("DELETE FROM media_tags WHERE media_id = ?", (media_id,))
     attach_tags(conn, media_id, tag_names)
     conn.commit()
+
+
+def clear_all_media_tags(conn: sqlite3.Connection, media_id: int) -> None:
+    """Remove all tags from a media item."""
+    conn.execute("DELETE FROM media_tags WHERE media_id = ?", (media_id,))
+    conn.commit()

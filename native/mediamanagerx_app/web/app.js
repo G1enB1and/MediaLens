@@ -171,14 +171,34 @@ window.hideCtx = hideCtx;
 
 // The locked card retains its selection border even when clicking elsewhere (e.g. metadata panel).
 let gLockedCard = null;
+let gSelectedPaths = new Set();
+let gLastSelectionIdx = -1;
 
 function deselectAll() {
-  // Remove visual selection only - preserve the locked/active card's border.
-  document.querySelectorAll('.card.selected').forEach(c => {
-    if (c !== gLockedCard) c.classList.remove('selected');
-  });
+  document.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected'));
+  gSelectedPaths.clear();
+  gLockedCard = null;
+  gLastSelectionIdx = -1;
 }
 window.deselectAll = deselectAll;
+
+function selectAll() {
+  gSelectedPaths.clear();
+  document.querySelectorAll('.card').forEach(c => {
+    c.classList.add('selected');
+    const path = c.getAttribute('data-path');
+    if (path) gSelectedPaths.add(path);
+  });
+  syncMetadataToBridge();
+}
+window.selectAll = selectAll;
+
+function syncMetadataToBridge() {
+  if (gBridge && gBridge.show_metadata) {
+    const paths = Array.from(gSelectedPaths);
+    gBridge.show_metadata(paths);
+  }
+}
 
 function showCtx(x, y, item, idx, fromLightbox = false) {
   const ctx = document.getElementById('ctx');
@@ -224,6 +244,12 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
     if (el) el.style.display = hasItem ? 'block' : 'none';
   });
 
+  // Bulk actions
+  const selectAllBtn = document.getElementById('ctxSelectAll');
+  if (selectAllBtn) selectAllBtn.style.display = hasItem ? 'none' : 'block';
+  const clearSelectionBtn = document.getElementById('ctxSelectNone');
+  if (clearSelectionBtn) clearSelectionBtn.style.display = (gSelectedPaths.size > 0) ? 'block' : 'none';
+
   // New folder is shown only when right-clicking background (no item)
   const newFolderBtn = document.getElementById('ctxNewFolder');
   if (newFolderBtn) newFolderBtn.style.display = hasItem ? 'none' : 'block';
@@ -239,6 +265,19 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
 function wireCtxMenu() {
   const ctx = document.getElementById('ctx');
   if (!ctx) return;
+
+  const selectAllBtn = document.getElementById('ctxSelectAll');
+  if (selectAllBtn) selectAllBtn.addEventListener('click', () => {
+    selectAll();
+    hideCtx();
+  });
+
+  const clearSelectionBtn = document.getElementById('ctxSelectNone');
+  if (clearSelectionBtn) clearSelectionBtn.addEventListener('click', () => {
+    deselectAll();
+    syncMetadataToBridge();
+    hideCtx();
+  });
 
   const cancelBtn = document.getElementById('ctxCancel');
   if (cancelBtn) cancelBtn.addEventListener('click', hideCtx);
@@ -344,6 +383,13 @@ function wireCtxMenu() {
           gBridge.create_folder(folder, name, (res) => { if (res) refreshFromBridge(gBridge); });
         }
         break;
+      case 'ctxSelectAll':
+        selectAll();
+        break;
+      case 'ctxSelectNone':
+        deselectAll();
+        syncMetadataToBridge();
+        break;
     }
     hideCtx();
   });
@@ -405,10 +451,36 @@ function renderMediaList(items) {
 
       card.addEventListener('click', (e) => {
         e.stopPropagation();
-        document.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected'));
-        card.classList.add('selected');
+        const path = item.path || '';
+
+        if (e.ctrlKey || e.metaKey) {
+          if (card.classList.contains('selected')) {
+            card.classList.remove('selected');
+            gSelectedPaths.delete(path);
+          } else {
+            card.classList.add('selected');
+            gSelectedPaths.add(path);
+          }
+          gLastSelectionIdx = idx;
+        } else if (e.shiftKey && gLastSelectionIdx !== -1) {
+          const start = Math.min(gLastSelectionIdx, idx);
+          const end = Math.max(gLastSelectionIdx, idx);
+          const cards = document.querySelectorAll('.card');
+          for (let i = start; i <= end; i++) {
+            const c = cards[i];
+            const p = c.getAttribute('data-path');
+            c.classList.add('selected');
+            if (p) gSelectedPaths.add(p);
+          }
+        } else {
+          deselectAll();
+          card.classList.add('selected');
+          gSelectedPaths.add(path);
+          gLastSelectionIdx = idx;
+        }
+
         gLockedCard = card;
-        if (gBridge && gBridge.show_metadata) gBridge.show_metadata(item.path, () => { });
+        syncMetadataToBridge();
       });
       card.addEventListener('dblclick', () => openLightboxByIndex(idx));
       card.addEventListener('keydown', (e) => {
@@ -445,10 +517,36 @@ function renderMediaList(items) {
 
       card.addEventListener('click', (e) => {
         e.stopPropagation();
-        document.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected'));
-        card.classList.add('selected');
+        const path = item.path || '';
+
+        if (e.ctrlKey || e.metaKey) {
+          if (card.classList.contains('selected')) {
+            card.classList.remove('selected');
+            gSelectedPaths.delete(path);
+          } else {
+            card.classList.add('selected');
+            gSelectedPaths.add(path);
+          }
+          gLastSelectionIdx = idx;
+        } else if (e.shiftKey && gLastSelectionIdx !== -1) {
+          const start = Math.min(gLastSelectionIdx, idx);
+          const end = Math.max(gLastSelectionIdx, idx);
+          const cards = document.querySelectorAll('.card');
+          for (let i = start; i <= end; i++) {
+            const c = cards[i];
+            const p = c.getAttribute('data-path');
+            c.classList.add('selected');
+            if (p) gSelectedPaths.add(p);
+          }
+        } else {
+          deselectAll();
+          card.classList.add('selected');
+          gSelectedPaths.add(path);
+          gLastSelectionIdx = idx;
+        }
+
         gLockedCard = card;
-        if (gBridge && gBridge.show_metadata) gBridge.show_metadata(item.path, () => { });
+        syncMetadataToBridge();
       });
       card.addEventListener('dblclick', () => openLightboxByIndex(idx));
       card.addEventListener('keydown', (e) => {

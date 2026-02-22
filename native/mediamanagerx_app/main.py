@@ -332,7 +332,7 @@ class Bridge(QObject):
     closeVideoRequested = Signal()
 
     uiFlagChanged = Signal(str, bool)  # key, value
-    metadataRequested = Signal(str)
+    metadataRequested = Signal(list)
     loadFolderRequested = Signal(str)
 
     accentColorChanged = Signal(str)
@@ -888,10 +888,10 @@ class Bridge(QObject):
         except Exception:
             return ""
 
-    @Slot(str, result=bool)
-    def show_metadata(self, path: str) -> bool:
+    @Slot(list, result=bool)
+    def show_metadata(self, paths: list) -> bool:
         try:
-            self.metadataRequested.emit(str(path))
+            self.metadataRequested.emit(paths)
             return True
         except Exception:
             return False
@@ -1312,7 +1312,7 @@ class Bridge(QObject):
 
     @Slot(str, list)
     def set_media_tags(self, path: str, tags: list) -> None:
-        """Update the set of tags for a media path."""
+        """Update the set of tags for a media path (replaces existing)."""
         from app.mediamanager.db.media_repo import get_media_by_path
         from app.mediamanager.db.tags_repo import set_media_tags
         
@@ -1322,6 +1322,32 @@ class Bridge(QObject):
                 set_media_tags(self.conn, m["id"], tags)
         except Exception as e:
             print(f"Bridge Set Tags Error: {e}")
+
+    @Slot(str, list)
+    def attach_media_tags(self, path: str, tags: list) -> None:
+        """Append tags to a media path (additive)."""
+        from app.mediamanager.db.media_repo import get_media_by_path
+        from app.mediamanager.db.tags_repo import attach_tags
+        
+        try:
+            m = get_media_by_path(self.conn, path)
+            if m:
+                attach_tags(self.conn, m["id"], tags)
+        except Exception as e:
+            print(f"Bridge Attach Tags Error: {e}")
+
+    @Slot(str)
+    def clear_media_tags(self, path: str) -> None:
+        """Remove all tags from a media path."""
+        from app.mediamanager.db.media_repo import get_media_by_path
+        from app.mediamanager.db.tags_repo import clear_all_media_tags
+        
+        try:
+            m = get_media_by_path(self.conn, path)
+            if m:
+                clear_all_media_tags(self.conn, m["id"])
+        except Exception as e:
+            print(f"Bridge Clear Tags Error: {e}")
 
     @Slot(list, int, int, str, str, str, result=list)
     def list_media(
@@ -1721,8 +1747,8 @@ class MainWindow(QMainWindow):
         right_layout.setSpacing(6)
 
         # --- Filename (editable, triggers rename) ---
-        lbl_fn_cap = QLabel("Filename:")
-        right_layout.addWidget(lbl_fn_cap)
+        self.lbl_fn_cap = QLabel("Filename:")
+        right_layout.addWidget(self.lbl_fn_cap)
         self.meta_filename_edit = QLineEdit()
         self.meta_filename_edit.setPlaceholderText("filename.ext")
         self.meta_filename_edit.setObjectName("metaFilenameEdit")
@@ -1744,31 +1770,42 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(self.meta_res_lbl)
 
         from PySide6.QtWidgets import QFrame
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setObjectName("metaSeparator")
-        right_layout.addWidget(sep)
+        self.meta_sep = QFrame()
+        self.meta_sep.setFrameShape(QFrame.Shape.HLine)
+        self.meta_sep.setObjectName("metaSeparator")
+        right_layout.addWidget(self.meta_sep)
 
         # --- Editable metadata ---
-        right_layout.addWidget(QLabel("Description:"))
+        self.lbl_desc_cap = QLabel("Description:")
+        right_layout.addWidget(self.lbl_desc_cap)
         self.meta_desc = QTextEdit()
         self.meta_desc.setPlaceholderText("Add a description...")
         self.meta_desc.setMaximumHeight(90)
         right_layout.addWidget(self.meta_desc)
 
-        right_layout.addWidget(QLabel("Tags (comma separated):"))
+        self.lbl_tags_cap = QLabel("Tags (comma separated):")
+        right_layout.addWidget(self.lbl_tags_cap)
         self.meta_tags = QLineEdit()
         self.meta_tags.setPlaceholderText("tag1, tag2...")
         self.meta_tags.editingFinished.connect(self._save_native_tags)
         right_layout.addWidget(self.meta_tags)
 
-        right_layout.addWidget(QLabel("Notes:"))
+        self.lbl_notes_cap = QLabel("Notes:")
+        right_layout.addWidget(self.lbl_notes_cap)
         self.meta_notes = QTextEdit()
         self.meta_notes.setPlaceholderText("Personal notes...")
         self.meta_notes.setMaximumHeight(90)
         right_layout.addWidget(self.meta_notes)
 
         right_layout.addStretch(1)
+
+        self.btn_clear_bulk_tags = QPushButton("Clear All Tags")
+        self.btn_clear_bulk_tags.setObjectName("btnClearBulkTags")
+        self.btn_clear_bulk_tags.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_clear_bulk_tags.clicked.connect(self._clear_bulk_tags)
+        self.btn_clear_bulk_tags.setStyleSheet("QPushButton { color: #f28b82; }") # Subtle red
+        right_layout.addWidget(self.btn_clear_bulk_tags)
+        self.btn_clear_bulk_tags.setVisible(False)
 
         self.btn_save_meta = QPushButton("Save Changes")
         self.btn_save_meta.setObjectName("btnSaveMeta")
@@ -1935,98 +1972,165 @@ class MainWindow(QMainWindow):
 
     def _save_native_metadata(self) -> None:
         """Save rename (if changed) + description/tags/notes, then show confirmation."""
-        if not hasattr(self, "_current_path") or not self._current_path:
+        # Use paths list if available, else fallback to current_path
+        paths = getattr(self, "_current_paths", [])
+        if not paths and hasattr(self, "_current_path") and self._current_path:
+            paths = [self._current_path]
+            
+        if not paths:
             return
 
-        # --- Rename if the filename was changed ---
-        new_name = self.meta_filename_edit.text().strip()
-        p = Path(self._current_path)
-        if new_name and new_name != p.name:
-            new_path = p.parent / new_name
+        is_bulk = len(paths) > 1
+        tags_str = self.meta_tags.text()
+        tags = [t.strip() for t in tags_str.split(",") if t.strip()]
+
+        if not is_bulk:
+            path = paths[0]
+            # --- Rename if the filename was changed ---
+            new_name = self.meta_filename_edit.text().strip()
+            p = Path(path)
+            if new_name and new_name != p.name:
+                new_path = p.parent / new_name
+                try:
+                    self.bridge.rename_path_async(path, new_name)
+                    path = str(new_path)
+                    self._current_path = path
+                    self._current_paths = [path]
+                except Exception:
+                    pass
+
+            # --- Save metadata fields ---
+            desc = self.meta_desc.toPlainText()
+            notes = self.meta_notes.toPlainText()
             try:
-                self.bridge.rename_path_async(self._current_path, new_name)
-                self._current_path = str(new_path)
+                self.bridge.update_media_metadata(path, "", desc, notes)
+                self.bridge.set_media_tags(path, tags)
+            except Exception:
+                pass
+        else:
+            # Bulk mode: Append tags to all
+            if tags:
+                for p in paths:
+                    try:
+                        self.bridge.attach_media_tags(p, tags)
+                    except Exception:
+                        pass
+
+        # --- Show confirmation then auto-clear after 3s ---
+        self.meta_status_lbl.setText(f"✓ {'Tags' if is_bulk else 'Changes'} saved")
+        QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
+
+    def _clear_bulk_tags(self) -> None:
+        """Remove all tags from currently selected files with warning."""
+        paths = getattr(self, "_current_paths", [])
+        if not paths:
+            return
+
+        from PySide6.QtWidgets import QMessageBox
+        msg = f"Are you sure you want to remove ALL tags from {len(paths)} selected files?"
+        ret = QMessageBox.warning(
+            self, "Clear All Tags", msg, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if ret != QMessageBox.StandardButton.Yes:
+            return
+
+        for p in paths:
+            try:
+                self.bridge.clear_media_tags(p)
             except Exception:
                 pass
 
-        # --- Save metadata fields ---
-        desc = self.meta_desc.toPlainText()
-        notes = self.meta_notes.toPlainText()
-        tags_str = self.meta_tags.text()
-        tags = [t.strip() for t in tags_str.split(",") if t.strip()]
-        try:
-            self.bridge.update_media_metadata(self._current_path, "", desc, notes)
-            self.bridge.set_media_tags(self._current_path, tags)
-        except Exception:
-            pass
-
-        # --- Show confirmation then auto-clear after 3s ---
-        self.meta_status_lbl.setText("✓ Changes saved")
+        self.meta_status_lbl.setText(f"✓ Tags cleared for {len(paths)} items")
         QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
+        
+        # Clear the UI text box
+        self.meta_tags.setText("")
 
     def _save_native_tags(self) -> None:
-        if not hasattr(self, "_current_path") or not self._current_path:
-            return
-        tags_str = self.meta_tags.text()
-        tags = [t.strip() for t in tags_str.split(",") if t.strip()]
-        try:
-            self.bridge.set_media_tags(self._current_path, tags)
-        except Exception:
-            pass
+        # We delegate to the main metadata saver to avoid logic duplication
+        # (Editing tags triggers a soft save).
+        self._save_native_metadata()
 
-    def _show_metadata_for_path(self, path: str) -> None:
-        # Ignore empty-path signals (e.g. from background clicks that deselect cards).
-        # The panel is sticky - it keeps showing the last selected item.
-        if not path:
+    def _show_metadata_for_path(self, paths: list[str]) -> None:
+        # Ignore empty lists (e.g. from background clicks that deselect cards).
+        if not paths:
             return
 
-        self._current_path = path
+        is_bulk = len(paths) > 1
+        self._current_paths = paths # Store list for bulk save
+        self._current_path = paths[0] if not is_bulk else None
 
+        # Toggle UI for bulk mode
+        self.lbl_fn_cap.setVisible(not is_bulk)
+        self.meta_filename_edit.setVisible(not is_bulk)
+        self.meta_path_lbl.setVisible(not is_bulk)
+        self.meta_size_lbl.setVisible(not is_bulk)
+        self.meta_res_lbl.setVisible(not is_bulk)
+        self.meta_sep.setVisible(not is_bulk)
+        self.lbl_desc_cap.setVisible(not is_bulk)
+        self.meta_desc.setVisible(not is_bulk)
+        self.lbl_notes_cap.setVisible(not is_bulk)
+        self.meta_notes.setVisible(not is_bulk)
+        
+        # Tags stay visible
+        self.lbl_tags_cap.setVisible(True)
+        self.meta_tags.setVisible(True)
+        self.btn_clear_bulk_tags.setVisible(is_bulk)
+        
         self.meta_filename_edit.blockSignals(True)
         self.meta_desc.blockSignals(True)
         self.meta_tags.blockSignals(True)
         self.meta_notes.blockSignals(True)
 
-        p = Path(path)
-        self.meta_filename_edit.setText(p.name)
-        self.meta_path_lbl.setText(f"Folder: {p.parent}")
+        if not is_bulk:
+            path = paths[0]
+            p = Path(path)
+            self.meta_filename_edit.setText(p.name)
+            self.meta_path_lbl.setText(f"Folder: {p.parent}")
 
-        # File size
-        try:
-            size_bytes = p.stat().st_size
-            if size_bytes >= 1048576:
-                size_str = f"{size_bytes / 1048576:.1f} MB"
-            elif size_bytes >= 1024:
-                size_str = f"{size_bytes / 1024:.0f} KB"
-            else:
-                size_str = f"{size_bytes} B"
-            self.meta_size_lbl.setText(f"File Size: {size_str}")
-        except Exception:
-            self.meta_size_lbl.setText("File Size:")
-
-        # Resolution (images only)
-        ext = p.suffix.lower()
-        if ext in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}:
+            # File size
             try:
-                reader = QImageReader(str(p))
-                sz = reader.size()
-                if sz.isValid():
-                    self.meta_res_lbl.setText(f"Resolution: {sz.width()} × {sz.height()} px")
+                size_bytes = p.stat().st_size
+                if size_bytes >= 1048576:
+                    size_str = f"{size_bytes / 1048576:.1f} MB"
+                elif size_bytes >= 1024:
+                    size_str = f"{size_bytes / 1024:.0f} KB"
                 else:
-                    self.meta_res_lbl.setText("")
+                    size_str = f"{size_bytes} B"
+                self.meta_size_lbl.setText(f"File Size: {size_str}")
             except Exception:
-                self.meta_res_lbl.setText("")
-        else:
-            self.meta_res_lbl.setText("")
+                self.meta_size_lbl.setText("File Size:")
 
-        # Metadata from DB
-        try:
-            data = self.bridge.get_media_metadata(path)
-            self.meta_desc.setPlainText(data.get("description", ""))
-            self.meta_notes.setPlainText(data.get("notes", ""))
-            self.meta_tags.setText(", ".join(data.get("tags", [])))
-        except Exception:
-            pass
+            # Resolution (images only)
+            ext = p.suffix.lower()
+            if ext in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}:
+                try:
+                    reader = QImageReader(str(p))
+                    sz = reader.size()
+                    if sz.isValid():
+                        self.meta_res_lbl.setText(f"Resolution: {sz.width()} × {sz.height()} px")
+                    else:
+                        self.meta_res_lbl.setText("")
+                except Exception:
+                    self.meta_res_lbl.setText("")
+            else:
+                self.meta_res_lbl.setText("")
+
+            # Metadata from DB
+            try:
+                data = self.bridge.get_media_metadata(path)
+                self.meta_desc.setPlainText(data.get("description", ""))
+                self.meta_notes.setPlainText(data.get("notes", ""))
+                self.meta_tags.setText(", ".join(data.get("tags", [])))
+            except Exception:
+                pass
+            
+            self.btn_save_meta.setText("Save Changes")
+        else:
+            # Bulk mode
+            self.meta_tags.setText("")
+            self.meta_tags.setPlaceholderText("Add tags to all selected...")
+            self.btn_save_meta.setText(f"Add Tags to {len(paths)} Items")
 
         self.meta_filename_edit.blockSignals(False)
         self.meta_desc.blockSignals(False)
@@ -2081,6 +2185,9 @@ class MainWindow(QMainWindow):
         act_copy = menu.addAction("Copy")
         act_paste = menu.addAction("Paste")
         
+        menu.addSeparator()
+        act_select_all = menu.addAction("Select All Files in Folder")
+        
         # Disable paste if no files in clipboard
         if not self.bridge.has_files_in_clipboard():
             act_paste.setEnabled(False)
@@ -2100,6 +2207,9 @@ class MainWindow(QMainWindow):
                 parent = str(Path(new_path).parent)
                 self.tree.setCurrentIndex(self.proxy_model.mapFromSource(self.fs_model.index(parent)))
                 self._set_selected_folders([parent])
+
+        if chosen == act_select_all:
+             self.web.page().runJavaScript("if(window.selectAll) window.selectAll();")
 
         if chosen == act_rename:
             cur = Path(folder_path).name
