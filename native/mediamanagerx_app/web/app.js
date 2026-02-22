@@ -5,9 +5,18 @@ function setStatus(text) {
   if (el) el.textContent = text;
 }
 
-function setSelectedFolder(text) {
+function setSelectedFolder(paths) {
   const el = document.getElementById('selectedFolder');
-  if (el) el.textContent = text || '(none)';
+  if (!el) return;
+  if (!paths || paths.length === 0) {
+    el.textContent = '(none)';
+    return;
+  }
+  if (paths.length === 1) {
+    el.textContent = paths[0].split(/[/\\]/).pop();
+  } else {
+    el.textContent = `${paths.length} folders selected`;
+  }
 }
 
 function ensurePosterObserver() {
@@ -105,11 +114,14 @@ function hideCtx() {
 }
 window.hideCtx = hideCtx;
 
+// The locked card retains its selection border even when clicking elsewhere (e.g. metadata panel).
+let gLockedCard = null;
+
 function deselectAll() {
-  document.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected'));
-  if (gBridge && gBridge.show_metadata) {
-    gBridge.show_metadata("");
-  }
+  // Remove visual selection only - preserve the locked/active card's border.
+  document.querySelectorAll('.card.selected').forEach(c => {
+    if (c !== gLockedCard) c.classList.remove('selected');
+  });
 }
 window.deselectAll = deselectAll;
 
@@ -232,7 +244,20 @@ function wireCtxMenu() {
         break;
       case 'ctxMeta':
         if (item && item.path && gBridge && gBridge.show_metadata) {
-          gBridge.show_metadata(item.path, () => { });
+          const pathForMeta = item.path;
+          hideCtx();
+          // Ensure the right panel is visible (void slot - no callback)
+          if (gBridge.set_setting_bool) {
+            gBridge.set_setting_bool('ui.show_right_panel', true);
+          }
+          // Select the card in the gallery
+          document.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected'));
+          const metaCard = document.querySelector(`.card[data-path="${CSS.escape(pathForMeta)}"]`);
+          if (metaCard) { metaCard.classList.add('selected'); gLockedCard = metaCard; }
+          // Small delay lets any click-triggered deselects process first before we request metadata
+          setTimeout(() => {
+            gBridge.show_metadata(pathForMeta, () => { });
+          }, 60);
         }
         break;
       case 'ctxDelete':
@@ -251,23 +276,17 @@ function wireCtxMenu() {
         }
         break;
       case 'ctxPaste':
-        if (gBridge && gBridge.paste_into_folder_async && gBridge.get_selected_folder) {
-          gBridge.get_selected_folder((folder) => {
-            if (folder) {
-              setGlobalLoading(true, 'Pasting…', 25);
-              gBridge.paste_into_folder_async(folder);
-            }
-          });
+        if (gBridge && gBridge.paste_into_folder_async && gSelectedFolders.length > 0) {
+          const folder = gSelectedFolders[0];
+          setGlobalLoading(true, 'Pasting…', 25);
+          gBridge.paste_into_folder_async(folder);
         }
         break;
       case 'ctxNewFolder':
         const name = prompt('New Folder Name:');
-        if (name && gBridge && gBridge.create_folder && gBridge.get_selected_folder) {
-          gBridge.get_selected_folder((folder) => {
-            if (folder) {
-              gBridge.create_folder(folder, name, (res) => { if (res) refreshFromBridge(gBridge); });
-            }
-          });
+        if (name && gBridge && gBridge.create_folder && gSelectedFolders.length > 0) {
+          const folder = gSelectedFolders[0];
+          gBridge.create_folder(folder, name, (res) => { if (res) refreshFromBridge(gBridge); });
         }
         break;
     }
@@ -275,14 +294,7 @@ function wireCtxMenu() {
   });
 }
 
-function applySearch(items) {
-  const q = (gSearchQuery || '').trim().toLowerCase();
-  if (!q) return items;
-  return items.filter((it) => {
-    const p = (it.path || '').toLowerCase();
-    return p.includes(q);
-  });
-}
+// applySearch is no longer used for local filtering.
 
 function renderMediaList(items) {
   const el = document.getElementById('mediaList');
@@ -290,8 +302,7 @@ function renderMediaList(items) {
 
   el.innerHTML = '';
   gMedia = Array.isArray(items) ? items : [];
-
-  const viewItems = applySearch(gMedia);
+  const viewItems = gMedia;
 
   resetPosterState();
   ensurePosterObserver();
@@ -335,15 +346,14 @@ function renderMediaList(items) {
       img.addEventListener('error', () => sk.remove());
       card.appendChild(img);
 
+      card.setAttribute('data-path', item.path || '');
+
       card.addEventListener('click', (e) => {
         e.stopPropagation();
-        // Selection logic
         document.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected'));
         card.classList.add('selected');
-        // Update metadata panel
-        if (gBridge && gBridge.show_metadata) {
-          gBridge.show_metadata(item.path);
-        }
+        gLockedCard = card;
+        if (gBridge && gBridge.show_metadata) gBridge.show_metadata(item.path, () => { });
       });
       card.addEventListener('dblclick', () => openLightboxByIndex(idx));
       card.addEventListener('keydown', (e) => {
@@ -376,15 +386,14 @@ function renderMediaList(items) {
 
       if (item.path) gPosterObserver.observe(img);
 
+      card.setAttribute('data-path', item.path || '');
+
       card.addEventListener('click', (e) => {
         e.stopPropagation();
-        // Selection logic
         document.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected'));
         card.classList.add('selected');
-        // Update metadata panel
-        if (gBridge && gBridge.show_metadata) {
-          gBridge.show_metadata(item.path);
-        }
+        gLockedCard = card;
+        if (gBridge && gBridge.show_metadata) gBridge.show_metadata(item.path, () => { });
       });
       card.addEventListener('dblclick', () => openLightboxByIndex(idx));
       card.addEventListener('keydown', (e) => {
@@ -426,6 +435,7 @@ let gPage = 0;
 const PAGE_SIZE = 100;
 let gTotal = 0;
 let gMedia = []; // Current page items
+let gSelectedFolders = [];
 let gBridge = null;
 let gPosterTx = null; // db transaction?
 let gPosterRequested = new Set();
@@ -764,9 +774,12 @@ function renderPager() {
 }
 
 function refreshFromBridge(bridge, resetPage = false) {
-  bridge.get_selected_folder(function (folder) {
-    setSelectedFolder(folder);
-    if (!folder) {
+  if (!bridge) return;
+  bridge.get_selected_folders(function (folders) {
+    gSelectedFolders = folders || [];
+    setSelectedFolder(gSelectedFolders);
+
+    if (gSelectedFolders.length === 0) {
       gTotal = 0;
       setGlobalLoading(false);
       renderMediaList([]);
@@ -779,7 +792,7 @@ function refreshFromBridge(bridge, resetPage = false) {
     }
 
     // Start async scan. UI will refresh when gBridge.scanFinished fires.
-    bridge.start_scan(folder);
+    bridge.start_scan(gSelectedFolders, gSearchQuery || '');
   });
 }
 
@@ -1015,8 +1028,8 @@ function wireSearch() {
 
   inp.addEventListener('input', () => {
     gSearchQuery = inp.value || '';
-    // Re-render current page with filter applied.
-    renderMediaList(gMedia);
+    gPage = 0; // Reset to page 1 on search
+    refreshFromBridge(gBridge);
   });
 }
 
@@ -1025,6 +1038,7 @@ async function main() {
   wireSettings();
   wireSearch();
   wireSidebarToggles();
+
 
   // Show immediately on first paint (prevents "nothing then overlay" behavior)
   setGlobalLoading(true, 'Starting…', 10);
@@ -1062,13 +1076,37 @@ async function main() {
       });
     }
 
+
+
     if (bridge.fileOpFinished) {
       bridge.fileOpFinished.connect(function (op, ok, oldPath, newPath) {
-        // hide overlay regardless; refresh handles the rest.
         setGlobalLoading(false);
-        if (ok) {
-          refreshFromBridge(bridge, false);
+        if (!ok) return;
+
+        if (op === 'rename' && oldPath && newPath) {
+          // ── In-place patch: update the card's data-path without reordering the gallery ──
+          const oldCard = document.querySelector(`.card[data-path="${CSS.escape(oldPath)}"]`);
+          if (oldCard) {
+            oldCard.setAttribute('data-path', newPath);
+            // Keep gLockedCard reference valid
+            if (gLockedCard === oldCard) {
+              // card element is the same object, no change needed
+            }
+          }
+          // Patch gMedia in-place so card click closures (which capture 'item' by reference)
+          // see the updated path immediately — Object.assign would create a new object and break closures.
+          for (let i = 0; i < gMedia.length; i++) {
+            if (gMedia[i].path === oldPath) {
+              gMedia[i].path = newPath;
+              break;
+            }
+          }
+          // No full refresh needed — gallery order is preserved
+          return;
         }
+
+        // For all other ops (delete, hide, unhide, move, etc.) do a full refresh
+        refreshFromBridge(bridge, false);
       });
     }
 
@@ -1086,8 +1124,8 @@ async function main() {
 
         setGlobalLoading(true, `Loading page ${gPage + 1} of ${tp || 1}…`, 55);
 
-        // Pass sort/filter to list_media
-        bridge.list_media(folder, PAGE_SIZE, gPage * PAGE_SIZE, gSort, gFilter, function (items) {
+        // Pass selection list to list_media
+        bridge.list_media(gSelectedFolders, PAGE_SIZE, gPage * PAGE_SIZE, gSort, gFilter, gSearchQuery || '', function (items) {
           renderMediaList(items);
           renderPager();
           // Hide after containers are painted at least once.
@@ -1141,8 +1179,9 @@ async function main() {
     refreshFromBridge(bridge);
 
     // React to future changes
-    if (bridge.selectedFolderChanged) {
-      bridge.selectedFolderChanged.connect(function () {
+    if (bridge.selectionChanged) {
+      bridge.selectionChanged.connect(function (folders) {
+        gSelectedFolders = folders || [];
         gPage = 0;
         refreshFromBridge(bridge);
       });

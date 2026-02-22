@@ -6,7 +6,24 @@ from app.mediamanager.utils.pathing import normalize_windows_path
 
 
 def normalize_roots(selected_roots: Iterable[str]) -> list[str]:
-    return sorted({normalize_windows_path(r).rstrip("/") for r in selected_roots if r.strip()})
+    # 1. Normalize and deduplicate
+    unique = sorted({normalize_windows_path(r).rstrip("/") for r in selected_roots if r.strip()})
+    
+    # 2. Prune redundant subfolders (e.g. if A and A/B are both present, keep only A)
+    pruned = []
+    for i, root in enumerate(unique):
+        is_sub = False
+        for other in unique:
+            if root == other:
+                continue
+            # If 'other' is a prefix of 'root' followed by a slash, 'root' is redundant
+            if root.startswith(other + "/"):
+                is_sub = True
+                break
+        if not is_sub:
+            pruned.append(root)
+            
+    return sorted(pruned)
 
 
 def build_scope_where(selected_roots: Iterable[str]) -> Tuple[str, List[str]]:

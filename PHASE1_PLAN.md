@@ -1,7 +1,9 @@
 # MediaManager — Phase 1 Plan (Viewer + Folder Scope + Persistence)
 
 ## Phase 1 Goal
+
 Deliver a stable local Windows app with:
+
 - native shell + embedded web masonry gallery,
 - correct folder-selection behavior (Explorer-like multi-select),
 - and persistent metadata storage that is independent of current gallery selection.
@@ -11,6 +13,7 @@ Deliver a stable local Windows app with:
 ## Locked UX Rules (from Glen)
 
 ### A) Gallery
+
 - Masonry/Pinterest layout (not fixed grid)
 - Responsive resizing
 - Lazy loading + near-viewport precache
@@ -21,6 +24,7 @@ Deliver a stable local Windows app with:
 - Click image/video: open larger shadowbox overlay
 
 ### B) Left Folder Tree (critical)
+
 - Explorer-like folder selection behavior:
   - Ctrl-click to add/remove individual folders from selection
   - Shift-click for range selection among visible sibling items
@@ -29,6 +33,7 @@ Deliver a stable local Windows app with:
 - Selecting a parent folder includes subfolders by default
 
 ### C) Metadata persistence (critical)
+
 - Tags/descriptions/notes must persist regardless of whether folders are currently selected/open in gallery.
 - Selection scope controls only what is displayed, never what metadata exists.
 
@@ -37,6 +42,7 @@ Deliver a stable local Windows app with:
 ## Architecture Split (Phase 1)
 
 ### Native (PySide6)
+
 - Main app shell/window
 - Left folder tree panel
 - Selection state manager
@@ -44,6 +50,7 @@ Deliver a stable local Windows app with:
 - Local DB read/write services
 
 ### Web (embedded view)
+
 - Masonry renderer
 - Media playback behavior rules
 - Lazy loading + prefetch
@@ -55,19 +62,22 @@ Deliver a stable local Windows app with:
 ## Data Model Rules (Phase 1)
 
 ## 1) Persistent Catalog (never flushed due to UI selection)
+
 - `media_items` (id, path, file stats, media type, duration, thumb/previews, etc.)
 - `media_metadata` (media_id, title, description, notes, optional json)
 - `tags` + `media_tags`
 - Optional: `media_paths_history` for rename/move resilience
 
 ## 2) Workspace/Selection State (safe to change)
+
 - `folder_index` (known folders)
 - `folder_selection_state` (currently selected roots/nodes)
 - Optional cache table for current page results
 
 ### Hard rule
-Closing/unselecting folders must not delete metadata rows.
 
+Closing/unselecting folders must not delete metadata rows.
+Even completely replacing which root folder the file tree starts in must still not reset or lose any data from previous file roots
 ---
 
 ## File Tree Selection Implementation Notes
@@ -86,7 +96,9 @@ Closing/unselecting folders must not delete metadata rows.
 ---
 
 ## Gallery Scope Query Contract
+
 Given selected folders S:
+
 - Return only media whose path is under at least one folder in S
 - Exclude all media outside S
 - If S is empty: show empty gallery state (or configured default)
@@ -104,6 +116,7 @@ Given selected folders S:
 7. **Validate persistence across selection changes and app restarts**
 
 ### Layout stabilization rule (locked)
+
 - Render fixed-size/responsive **media containers first** and compute masonry placement from container dimensions before media bytes load.
 - Resize/reflow containers first, then stream image/video into prepositioned containers.
 - Goal: prevent layout jumping while assets load.

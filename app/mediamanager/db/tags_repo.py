@@ -53,3 +53,10 @@ def list_media_tags(conn: sqlite3.Connection, media_id: int) -> List[str]:
         (media_id,),
     ).fetchall()
     return [r[0] for r in rows]
+
+
+def set_media_tags(conn: sqlite3.Connection, media_id: int, tag_names: Iterable[str]) -> None:
+    """Clear existing tags and set the new ones."""
+    conn.execute("DELETE FROM media_tags WHERE media_id = ?", (media_id,))
+    attach_tags(conn, media_id, tag_names)
+    conn.commit()

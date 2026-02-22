@@ -1,7 +1,8 @@
 CREATE TABLE IF NOT EXISTS media_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   path TEXT NOT NULL UNIQUE,
-  media_type TEXT NOT NULL,
+  content_hash TEXT,                         -- SHA-256 for identity/dedupe
+  media_type TEXT NOT NULL,                -- image|gif|video
   file_size_bytes INTEGER,
   modified_time_utc TEXT,
   width INTEGER,
@@ -14,7 +15,19 @@ CREATE TABLE IF NOT EXISTS media_items (
 );
 
 CREATE INDEX IF NOT EXISTS idx_media_items_path ON media_items(path);
+CREATE INDEX IF NOT EXISTS idx_media_items_hash ON media_items(content_hash);
 CREATE INDEX IF NOT EXISTS idx_media_items_type ON media_items(media_type);
+
+CREATE TABLE IF NOT EXISTS media_paths_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  media_id INTEGER NOT NULL,
+  old_path TEXT NOT NULL,
+  new_path TEXT NOT NULL,
+  moved_at_utc TEXT NOT NULL,
+  FOREIGN KEY(media_id) REFERENCES media_items(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_paths_history_media ON media_paths_history(media_id);
 
 CREATE TABLE IF NOT EXISTS media_metadata (
   media_id INTEGER PRIMARY KEY,

@@ -16,6 +16,9 @@ def connect_db(db_path: str) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     init_db(str(path))
 
-    conn = sqlite3.connect(path)
+    # check_same_thread=False allows sharing the connection across threads (e.g. GUI and background scan).
+    # sqlite3 is thread-safe for the file itself, but Python's wrapper defaults to strict thread checks.
+    conn = sqlite3.connect(path, check_same_thread=False)
     conn.execute("PRAGMA foreign_keys=ON;")
+    conn.execute("PRAGMA journal_mode=WAL;")  # Better concurrency
     return conn

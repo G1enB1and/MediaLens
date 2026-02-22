@@ -10,7 +10,6 @@ import threading
 import time
 from pathlib import Path
 
-
 def _install_stderr_filter() -> None:
     """Suppress noisy C-level FFmpeg log lines written directly to stderr fd 2.
 
@@ -80,6 +79,7 @@ from PySide6.QtCore import (
     QPoint,
     QMimeData,
     QEvent,
+    QTimer,
 )
 from PySide6.QtGui import QAction, QColor, QImageReader, QIcon, QPainter
 from PySide6.QtGui import QMouseEvent, QPen
@@ -103,6 +103,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QInputDialog,
     QTextEdit,
+    QLineEdit,
 )
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -341,12 +342,12 @@ class Bridge(QObject):
     # Media scanning signals
     scanStarted = Signal(str)
     scanFinished = Signal(str, int)  # folder, count
+    selectionChanged = Signal(list)  # list of folder paths
 
     def __init__(self) -> None:
         super().__init__()
         print("Bridge: Initializing...")
-        self._selected_folder: str = ""
-        self._media_cache: dict[str, list[Path]] = {}
+        self._selected_folders: list[str] = []
         self._scan_abort = False
         self._scan_lock = threading.Lock()
         
@@ -355,6 +356,12 @@ class Bridge(QObject):
         )
         self._thumb_dir = appdata / "thumbs"
         self._thumb_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Initialize Database
+        from app.mediamanager.db.connect import connect_db
+        self.db_path = appdata / "mediamanagerx.db"
+        print(f"DEBUG: DB Path = {self.db_path}")
+        self.conn = connect_db(str(self.db_path))
 
         self.settings = QSettings("G1enB1and", "MediaManagerX")
         self._session_shuffle_seed = random.getrandbits(32)
@@ -440,22 +447,22 @@ class Bridge(QObject):
                 pass
         return False
 
-    def set_selected_folder(self, folder: str) -> None:
-        folder = folder or ""
-        if folder == self._selected_folder:
+    def set_selected_folders(self, folders: list[str]) -> None:
+        if folders == self._selected_folders:
             return
-        self._selected_folder = folder
+        self._selected_folders = folders
         try:
-            self.settings.setValue("gallery/last_folder", self._selected_folder)
+            # Save the primary selection for restoration on next launch
+            primary = folders[0] if folders else ""
+            self.settings.setValue("gallery/last_folder", primary)
         except Exception:
             pass
-        # Simple cache invalidation: folder change => new scan.
-        self._media_cache.clear()
-        self.selectedFolderChanged.emit(self._selected_folder)
+        # Database handles persistence; next scan will pick up any changes.
+        self.selectionChanged.emit(self._selected_folders)
 
-    @Slot(result=str)
-    def get_selected_folder(self) -> str:
-        return self._selected_folder
+    @Slot(result=list)
+    def get_selected_folders(self) -> list:
+        return self._selected_folders
 
     def _randomize_enabled(self) -> bool:
         try:
@@ -487,33 +494,31 @@ class Bridge(QObject):
         except Exception:
             return ""
 
-    def _scan_media_paths(self, folder: str) -> list[Path]:
-        """Synchronous scan (called from UI thread). 
-        Optimized to use cached result if available.
-        """
-        cache_key = f"{folder}|rand={int(self._randomize_enabled())}"
-        with self._scan_lock:
-            cached = self._media_cache.get(cache_key)
-            if cached is not None:
-                return cached
+    def _scan_media_paths(self, folders: list[str]) -> list[dict]:
+        """Query the database for media items under the specified folders.
         
-        # If not cached, we fallback to a synchronous scan (legacy behavior)
-        # but we add limits to prevent hangs.
-        return self._do_full_scan(folder, cache_key)
+        This replaces the old in-memory scan/cache. Results are now pulled
+        directly from the persistent database based on the current folders list.
+        """
+        from app.mediamanager.db.media_repo import list_media_in_scope
+        
+        # list_media_in_scope handles recursion and normalization.
+        return list_media_in_scope(self.conn, folders)
 
-    def _do_full_scan(self, folder: str, cache_key: str) -> list[Path]:
+    def _do_full_scan(self, folder: str, conn: sqlite3.Connection) -> int:
+        from app.mediamanager.db.media_repo import upsert_media_item
+        from app.mediamanager.utils.hashing import calculate_file_hash
+
         root = Path(folder)
         if not root.exists() or not root.is_dir():
-            with self._scan_lock:
-                self._media_cache[cache_key] = []
-            return []
+            return 0
 
         image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
         video_exts = {".mp4", ".webm", ".mov", ".mkv"}
         exts = image_exts | video_exts
 
-        candidates: list[Path] = []
-        max_items = 20000  # Safety limit for UI thread scans
+        count = 0
+        max_items = 20000 
         
         for root_dir, dirs, files in os.walk(folder, followlinks=True):
             if self._scan_abort:
@@ -521,7 +526,6 @@ class Bridge(QObject):
             
             curr_root = Path(root_dir)
             
-            # If hiding dots is enabled, filter out hidden directories
             if self._hide_dot_enabled():
                 dirs[:] = [d for d in dirs if not d.startswith(".")]
                 try:
@@ -537,60 +541,59 @@ class Bridge(QObject):
                 
                 p = curr_root / f
                 if p.suffix.lower() in exts:
-                    candidates.append(p)
+                    try:
+                        media_type = "image" if p.suffix.lower() in image_exts else "video"
+                        h = calculate_file_hash(p)
+                        upsert_media_item(conn, str(p), media_type, h)
+                        count += 1
+                    except Exception as e:
+                        print(f"Bridge Scan Error: {e} for {p}")
                 
-                if len(candidates) >= max_items:
+                if count >= max_items:
                     break
             
-            if len(candidates) >= max_items:
+            if count >= max_items:
                 break
 
-        candidates.sort(key=lambda p: str(p).lower())
+        return count
 
-        if self._randomize_enabled():
-            base = int(hashlib.sha1(folder.encode("utf-8")).hexdigest(), 16) % (2**32)
-            seed = (base ^ int(self._session_shuffle_seed)) % (2**32)
-
-            def _rank(p: Path) -> str:
-                s = f"{seed}:{p.as_posix().lower()}".encode("utf-8")
-                return hashlib.sha1(s).hexdigest()
-
-            candidates.sort(key=_rank)
-
-        with self._scan_lock:
-            self._media_cache[cache_key] = candidates
-        return candidates
-
-    @Slot(str)
-    def start_scan(self, folder: str) -> None:
-        """Asynchronously scan a folder for media items."""
+    @Slot(list, str)
+    def start_scan(self, folders: list, search_query: str = "") -> None:
+        """Asynchronously scan folders for media items."""
         self._scan_abort = True  # Signal previous thread to stop
         
         def _work():
-            # Small delay to let previous thread stop
             time.sleep(0.1)
             self._scan_abort = False
-            self.scanStarted.emit(folder)
+            primary = folders[0] if folders else ""
+            self.scanStarted.emit(primary)
             
-            cache_key = f"{folder}|rand={int(self._randomize_enabled())}"
-            # Check cache first
-            with self._scan_lock:
-                if cache_key in self._media_cache:
-                    time.sleep(0.1)  # Minimal delay so UI feels right
-                    self.scanFinished.emit(folder, len(self._media_cache[cache_key]))
-                    return
-
-            results = self._do_full_scan(folder, cache_key)
-            self.scanFinished.emit(folder, len(results))
+            # Use a separate connection for the background thread to avoid "API misuse" errors 
+            # when the UI thread also tries to use the shared connection concurrently.
+            from app.mediamanager.db.connect import connect_db
+            scan_conn = connect_db(str(self.db_path))
+            try:
+                for folder in folders:
+                    if self._scan_abort:
+                        break
+                    self._do_full_scan(folder, scan_conn)
+                
+                # Use the same reconciliation logic as list_media to get the final count
+                # Note: we need filter_type from the UI, but here we can just use "all" 
+                # or rely on the UI calling count_media if it needs more precision.
+                # Since start_scan is broad, we'll return the total reconciled count.
+                candidates = self._get_reconciled_candidates(folders, "all", search_query)
+                self.scanFinished.emit(primary, len(candidates))
+            finally:
+                scan_conn.close()
 
         threading.Thread(target=_work, daemon=True).start()
 
-    @Slot(str, result=int)
-    def count_media(self, folder: str) -> int:
-        """Return total number of discoverable media items under folder."""
-
+    @Slot(list, result=int)
+    def count_media(self, folders: list) -> int:
+        """Return total number of discoverable media items under folders."""
         try:
-            return len(self._scan_media_paths(folder))
+            return len(self._scan_media_paths(folders))
         except Exception:
             return 0
 
@@ -769,7 +772,6 @@ class Bridge(QObject):
         target = p.with_name(f".{name}")
         target = self._unique_path(target)
         p.rename(target)
-        self._media_cache.clear()
         return str(target)
 
     @Slot(str, result=str)
@@ -809,7 +811,6 @@ class Bridge(QObject):
         target = p.with_name(name[1:])
         target = self._unique_path(target)
         p.rename(target)
-        self._media_cache.clear()
         return str(target)
 
     @Slot(str, result=str)
@@ -846,7 +847,6 @@ class Bridge(QObject):
         target = p.with_name(new_name)
         target = self._unique_path(target)
         p.rename(target)
-        self._media_cache.clear()
         return str(target)
 
     @Slot(str, str, result=str)
@@ -867,6 +867,13 @@ class Bridge(QObject):
             try:
                 newp = self._rename_path(old, newn)
                 ok = bool(newp)
+                if ok:
+                    # Update the DB so the renamed file keeps its metadata and stays visible after refresh
+                    from app.mediamanager.db.media_repo import rename_media_path
+                    try:
+                        rename_media_path(self.conn, old, newp)
+                    except Exception as db_err:
+                        print(f"Bridge Rename DB Update Error: {db_err}")
             except Exception:
                 ok = False
             self.fileOpFinished.emit("rename", ok, old, newp)
@@ -994,7 +1001,10 @@ class Bridge(QObject):
             else:
                 p.unlink()
             
-            self._media_cache.clear()
+            # Also remove from database
+            normalized = normalize_windows_path(path_str)
+            self.conn.execute("DELETE FROM media_items WHERE path = ?", (normalized,))
+            self.conn.commit()
             return True
         except Exception:
             return False
@@ -1005,7 +1015,6 @@ class Bridge(QObject):
         try:
             p = Path(parent_path) / name
             p.mkdir(parents=True, exist_ok=True)
-            self._media_cache.clear()
             return str(p)
         except Exception:
             return ""
@@ -1057,7 +1066,6 @@ class Bridge(QObject):
                         else:
                             shutil.copy2(str(src), str(dst))
                 
-                self._media_cache.clear()
                 self.fileOpFinished.emit("paste", True, "", str(target_dir))
             except Exception:
                 self.fileOpFinished.emit("paste", False, "", "")
@@ -1264,88 +1272,203 @@ class Bridge(QObject):
         except Exception:
             return False
 
-    @Slot(str, int, int, str, str, result=list)
+    @Slot(str, result=dict)
+    def get_media_metadata(self, path: str) -> dict:
+        """Fetch persistent metadata and tags for a media path."""
+        from app.mediamanager.db.media_repo import get_media_by_path
+        from app.mediamanager.db.metadata_repo import get_media_metadata
+        from app.mediamanager.db.tags_repo import list_media_tags
+        
+        try:
+            m = get_media_by_path(self.conn, path)
+            if not m:
+                return {}
+            
+            meta = get_media_metadata(self.conn, m["id"]) or {}
+            tags = list_media_tags(self.conn, m["id"])
+            
+            return {
+                "title": meta.get("title") or "",
+                "description": meta.get("description") or "",
+                "notes": meta.get("notes") or "",
+                "tags": tags
+            }
+        except Exception as e:
+            print(f"Bridge Get Metadata Error: {e}")
+            return {}
+
+    @Slot(str, str, str, str)
+    def update_media_metadata(self, path: str, title: str, description: str, notes: str) -> None:
+        """Update persistent metadata for a media path."""
+        from app.mediamanager.db.media_repo import get_media_by_path
+        from app.mediamanager.db.metadata_repo import upsert_media_metadata
+        
+        try:
+            m = get_media_by_path(self.conn, path)
+            if m:
+                upsert_media_metadata(self.conn, m["id"], title, description, notes)
+        except Exception as e:
+            print(f"Bridge Update Metadata Error: {e}")
+
+    @Slot(str, list)
+    def set_media_tags(self, path: str, tags: list) -> None:
+        """Update the set of tags for a media path."""
+        from app.mediamanager.db.media_repo import get_media_by_path
+        from app.mediamanager.db.tags_repo import set_media_tags
+        
+        try:
+            m = get_media_by_path(self.conn, path)
+            if m:
+                set_media_tags(self.conn, m["id"], tags)
+        except Exception as e:
+            print(f"Bridge Set Tags Error: {e}")
+
+    @Slot(list, int, int, str, str, str, result=list)
     def list_media(
         self,
-        folder: str,
+        folders: list,
         limit: int = 100,
         offset: int = 0,
         sort_by: str = "name_asc",
         filter_type: str = "all",
+        search_query: str = "",
     ) -> list[dict]:
-        """Return a list of media entries under folder with sorting and filtering."""
-
+        """Return gallery entries for the selected folders, always in sync with disk."""
         try:
+            candidates = self._get_reconciled_candidates(folders, filter_type, search_query)
+            
+            # --- Sort ---
             image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
-            video_exts = {".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}
-
-            # Get all candidates (already hides dots if enabled)
-            candidates = self._scan_media_paths(folder)
-
-            # 1. Filter
-            if filter_type == "image":
-                candidates = [p for p in candidates if p.suffix.lower() in image_exts and not self._is_animated(p)]
-            elif filter_type == "video":
-                candidates = [p for p in candidates if p.suffix.lower() in video_exts]
-            elif filter_type == "animated":
-                candidates = [p for p in candidates if self._is_animated(p)]
-            
-            # 2. Sort
-            # "name_asc" is default from _scan_media_paths
             if sort_by == "name_desc":
-                candidates.sort(key=lambda p: str(p).lower(), reverse=True)
+                candidates.sort(key=lambda r: r["path"].lower(), reverse=True)
             elif sort_by == "date_desc":
-                # sort by mtime descending
-                candidates.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
+                candidates.sort(key=lambda r: r.get("modified_time") or "", reverse=True)
             elif sort_by == "date_asc":
-                candidates.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0)
+                candidates.sort(key=lambda r: r.get("modified_time") or "")
             elif sort_by == "size_desc":
-                candidates.sort(key=lambda p: p.stat().st_size if p.exists() else 0, reverse=True)
+                candidates.sort(key=lambda r: r.get("file_size") or 0, reverse=True)
             elif sort_by == "size_asc":
-                candidates.sort(key=lambda p: p.stat().st_size if p.exists() else 0)
-            # name_asc is default
-            
-            # 3. Paginate
+                candidates.sort(key=lambda r: r.get("file_size") or 0)
+            elif sort_by == "name_asc":
+                candidates.sort(key=lambda r: r["path"].lower())
+
+            # --- Paginate ---
             start = max(0, int(offset))
             end = start + max(0, int(limit))
             page = candidates[start:end]
 
             out: list[dict] = []
-            for p in page:
-                media_type = "image" if p.suffix.lower() in image_exts else "video"
-                out.append(
-                    {
-                        "path": str(p),
-                        "url": QUrl.fromLocalFile(str(p)).toString(),
-                        "media_type": media_type,
-                        "is_animated": self._is_animated(p),
-                    }
-                )
-
+            for r in page:
+                real = r.get("_real_path")
+                p = real if isinstance(real, Path) else Path(r["path"])
+                out.append({
+                    "path": str(p),
+                    "url": QUrl.fromLocalFile(str(p)).toString(),
+                    "media_type": r["media_type"],
+                    "is_animated": self._is_animated(p),
+                })
             return out
-        except Exception:
+        except Exception as e:
+            print(f"Bridge list_media error: {e}")
+            import traceback
+            traceback.print_exc()
             return []
 
-    @Slot(str, str, result=int)
-    def count_media(self, folder: str, filter_type: str = "all") -> int:
-        """Return total number of discoverable media items under folder, filtered."""
 
+    @Slot(list, str, str, result=int)
+    def count_media(self, folders: list, filter_type: str = "all", search_query: str = "") -> int:
+        """Return total number of discoverable media items under folders, filtered."""
         try:
-            candidates = self._scan_media_paths(folder)
-            
-            image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
-            video_exts = {".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}
-
-            if filter_type == "image":
-                candidates = [p for p in candidates if p.suffix.lower() in image_exts and not self._is_animated(p)]
-            elif filter_type == "video":
-                candidates = [p for p in candidates if p.suffix.lower() in video_exts]
-            elif filter_type == "animated":
-                candidates = [p for p in candidates if self._is_animated(p)]
-
+            candidates = self._get_reconciled_candidates(folders, filter_type, search_query)
             return len(candidates)
-        except Exception:
+        except Exception as e:
+            print(f"Bridge count_media error: {e}")
             return 0
+
+    def _get_reconciled_candidates(self, folders: list, filter_type: str = "all", search_query: str = "") -> list[dict]:
+        from app.mediamanager.db.media_repo import list_media_in_scope
+        from app.mediamanager.utils.pathing import normalize_windows_path
+
+        ALL_MEDIA_EXTS = {
+            ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp",
+            ".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv",
+        }
+        image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+        video_exts = {".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}
+
+        if not folders:
+            return []
+
+        # ── 1. Walk disk (Recursive) ──────────────────────────────────────────
+        disk_files: dict[str, Path] = {}
+
+        for folder in folders:
+            folder_path = Path(folder)
+            if not folder_path.is_dir():
+                continue
+            try:
+                for root_dir, _, files in os.walk(str(folder_path), followlinks=True):
+                    curr_root = Path(root_dir)
+                    for f in files:
+                        p = curr_root / f
+                        if p.suffix.lower() in ALL_MEDIA_EXTS:
+                            norm = normalize_windows_path(str(p))
+                            disk_files[norm] = p
+            except Exception:
+                pass
+
+        # ── 2. Query DB candidates ────────────────────────────────────────────
+        db_candidates = list_media_in_scope(self.conn, folders)
+
+        # ── 3. Filter to only files that actually exist on disk ───────────────
+        surviving: list[dict] = []
+        covered_norms: set[str] = set()
+        db_dropped = 0
+        for r in db_candidates:
+            norm = normalize_windows_path(r["path"])
+            if norm in disk_files:
+                surviving.append(r)
+                covered_norms.add(norm)
+            elif Path(r["path"]).exists():
+                surviving.append(r)
+                covered_norms.add(norm)
+            else:
+                db_dropped += 1
+
+        # ── 4. Synthesize entries for on-disk files missing from DB ───────────
+        synth_count = 0
+        for norm, p_obj in disk_files.items():
+            if norm not in covered_norms:
+                ext = p_obj.suffix.lower()
+                mtype = "image" if ext in image_exts else "video"
+                surviving.append({
+                    "id": -1,
+                    "path": norm,
+                    "media_type": mtype,
+                    "file_size": None,
+                    "modified_time": None,
+                    "_real_path": p_obj,
+                })
+                synth_count += 1
+        
+        # ── 5. Filtering (Type & Search) ──────────────────────────────────────
+        candidates = surviving
+        
+        # Type filtering
+        if filter_type == "image":
+            candidates = [r for r in candidates if r["path"].lower().endswith(tuple(image_exts)) and not self._is_animated(Path(r["path"]))]
+        elif filter_type == "video":
+            candidates = [r for r in candidates if r["path"].lower().endswith(tuple(video_exts))]
+        elif filter_type == "animated":
+            candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
+        
+        # Search filtering (case-insensitive path match)
+        if search_query:
+            q = search_query.strip().lower()
+            if q:
+                candidates = [r for r in candidates if q in r["path"].lower()]
+
+        return candidates
 
 
 class MainWindow(QMainWindow):
@@ -1501,6 +1624,8 @@ class MainWindow(QMainWindow):
         self.tree.setAnimated(True)
         self.tree.setIndentation(14)
         self.tree.setExpandsOnDoubleClick(True)
+        from PySide6.QtWidgets import QAbstractItemView
+        self.tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
 
         # Hide columns: keep only name (indices are on the proxy model)
         for col in range(1, self.proxy_model.columnCount()):
@@ -1515,7 +1640,7 @@ class MainWindow(QMainWindow):
 
         left_layout.addWidget(self.tree, 1)
 
-        self._set_selected_folder(str(default_root))
+        self._set_selected_folders([str(default_root)])
 
         # Apply UI flags from settings
         try:
@@ -1531,17 +1656,6 @@ class MainWindow(QMainWindow):
 
         self.web = QWebEngineView()
         center_layout.addWidget(self.web)
-
-        # Right: metadata panel placeholder
-        self.right_panel = QWidget()
-        meta_layout = QVBoxLayout(self.right_panel)
-        meta_layout.setContentsMargins(10, 10, 10, 10)
-        meta_layout.setSpacing(8)
-        meta_layout.addWidget(QLabel("Metadata"))
-        self.meta_text = QTextEdit()
-        self.meta_text.setReadOnly(True)
-        self.meta_text.setText("Select a file to show details here.")
-        meta_layout.addWidget(self.meta_text, 1)
 
         # Native loading overlay shown while the WebEngine page itself is loading.
         self.web_loading = QWidget(self.web)
@@ -1583,6 +1697,74 @@ class MainWindow(QMainWindow):
         wl_layout.addWidget(loading_center, 0, Qt.AlignmentFlag.AlignCenter)
         wl_layout.addStretch(1)
 
+        # Right: Metadata Panel
+        self.right_panel = QWidget()
+        self.right_panel.setObjectName("rightPanel")
+        right_layout = QVBoxLayout(self.right_panel)
+        right_layout.setContentsMargins(12, 12, 12, 12)
+        right_layout.setSpacing(6)
+
+        # --- Filename (editable, triggers rename) ---
+        lbl_fn_cap = QLabel("Filename:")
+        right_layout.addWidget(lbl_fn_cap)
+        self.meta_filename_edit = QLineEdit()
+        self.meta_filename_edit.setPlaceholderText("filename.ext")
+        self.meta_filename_edit.setObjectName("metaFilenameEdit")
+        self.meta_filename_edit.editingFinished.connect(self._rename_from_panel)
+        right_layout.addWidget(self.meta_filename_edit)
+
+        # --- Read-only file info (single label per field, label + value inline) ---
+        self.meta_path_lbl = QLabel("Folder:")
+        self.meta_path_lbl.setObjectName("metaPathLabel")
+        self.meta_path_lbl.setWordWrap(True)
+        right_layout.addWidget(self.meta_path_lbl)
+
+        self.meta_size_lbl = QLabel("File Size:")
+        self.meta_size_lbl.setObjectName("metaSizeLabel")
+        right_layout.addWidget(self.meta_size_lbl)
+
+        self.meta_res_lbl = QLabel("")
+        self.meta_res_lbl.setObjectName("metaResLabel")
+        right_layout.addWidget(self.meta_res_lbl)
+
+        from PySide6.QtWidgets import QFrame
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setObjectName("metaSeparator")
+        right_layout.addWidget(sep)
+
+        # --- Editable metadata ---
+        right_layout.addWidget(QLabel("Description:"))
+        self.meta_desc = QTextEdit()
+        self.meta_desc.setPlaceholderText("Add a description...")
+        self.meta_desc.setMaximumHeight(90)
+        right_layout.addWidget(self.meta_desc)
+
+        right_layout.addWidget(QLabel("Tags (comma separated):"))
+        self.meta_tags = QLineEdit()
+        self.meta_tags.setPlaceholderText("tag1, tag2...")
+        self.meta_tags.editingFinished.connect(self._save_native_tags)
+        right_layout.addWidget(self.meta_tags)
+
+        right_layout.addWidget(QLabel("Notes:"))
+        self.meta_notes = QTextEdit()
+        self.meta_notes.setPlaceholderText("Personal notes...")
+        self.meta_notes.setMaximumHeight(90)
+        right_layout.addWidget(self.meta_notes)
+
+        right_layout.addStretch(1)
+
+        self.btn_save_meta = QPushButton("Save Changes")
+        self.btn_save_meta.setObjectName("btnSaveMeta")
+        self.btn_save_meta.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_save_meta.clicked.connect(self._save_native_metadata)
+        right_layout.addWidget(self.btn_save_meta)
+
+        self.meta_status_lbl = QLabel("")
+        self.meta_status_lbl.setObjectName("metaStatusLabel")
+        self.meta_status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        right_layout.addWidget(self.meta_status_lbl)
+
         self._update_native_styles(accent_val)
         self._update_splitter_style(accent_val)
 
@@ -1618,8 +1800,9 @@ class MainWindow(QMainWindow):
 
         splitter.addWidget(self.left_panel)
         splitter.addWidget(center)
+
         splitter.addWidget(self.right_panel)
-        splitter.setStretchFactor(2, 0)
+        splitter.setStretchFactor(1, 1)
         splitter.setObjectName("mainSplitter")
         splitter.setMouseTracking(True)
         splitter.setHandleWidth(7)
@@ -1631,9 +1814,9 @@ class MainWindow(QMainWindow):
         else:
             # Side panels fixed (0 stretch), Gallery expands (1 stretch)
             # Default to 200px left, 300px right sidebars if no saved state
-            splitter.setSizes([200, 700, 300])
+            splitter.setSizes([200, 800])
 
-        splitter.splitterMoved.connect(lambda *args: self._save_splitter_state())
+        splitter.splitterMoved.connect(lambda *args: self._on_splitter_moved())
 
         self.setCentralWidget(splitter)
 
@@ -1647,8 +1830,8 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-    def _set_selected_folder(self, folder_path: str) -> None:
-        self.bridge.set_selected_folder(folder_path)
+    def _set_selected_folders(self, folder_paths: list[str]) -> None:
+        self.bridge.set_selected_folders(folder_paths)
 
     def _on_load_folder_requested(self, folder_path: str) -> None:
         if not folder_path:
@@ -1674,7 +1857,7 @@ class MainWindow(QMainWindow):
         if root_idx.isValid():
             self.tree.expand(root_idx)
             
-        self._set_selected_folder(path_str)
+        self._set_selected_folders([path_str])
 
     def _on_directory_loaded(self, path: str) -> None:
         """Triggered when QFileSystemModel finishes loading a directory's contents."""
@@ -1682,14 +1865,19 @@ class MainWindow(QMainWindow):
         self.proxy_model.invalidate()
 
     def _on_tree_selection(self, *_args) -> None:
-        idx = self.tree.currentIndex()
-        if not idx.isValid():
-            return
-        # mapFromProxy
-        source_idx = self.proxy_model.mapToSource(idx)
-        path = self.fs_model.filePath(source_idx)
-        if path:
-            self._set_selected_folder(path)
+        selection_model = self.tree.selectionModel()
+        selected_indices = selection_model.selectedRows()
+        
+        paths = []
+        for idx in selected_indices:
+            if idx.isValid():
+                source_idx = self.proxy_model.mapToSource(idx)
+                path = self.fs_model.filePath(source_idx)
+                if path:
+                    paths.append(path)
+        
+        if paths:
+            self._set_selected_folders(paths)
 
     def _apply_ui_flag(self, key: str, value: bool) -> None:
         if key == "ui.show_left_panel":
@@ -1712,50 +1900,136 @@ class MainWindow(QMainWindow):
             self._update_native_styles(self._current_accent)
             self._update_splitter_style(self._current_accent)
 
-    def _show_metadata_for_path(self, path: str) -> None:
+    def _rename_from_panel(self) -> None:
+        """Rename the current file using the filename field in the metadata panel."""
+        if not hasattr(self, "_current_path") or not self._current_path:
+            return
+        new_name = self.meta_filename_edit.text().strip()
+        if not new_name:
+            return
+        p = Path(self._current_path)
+        if new_name == p.name:
+            return
+        new_path = p.parent / new_name
         try:
-            if not path:
-                self.meta_text.setText("Select a file to show details here.")
-                return
+            self.bridge.rename_path_async(self._current_path, new_name)
+            self._current_path = str(new_path)
+        except Exception:
+            pass
 
-            p = Path(path)
-            if not p.exists() or not p.is_file():
-                self.meta_text.setText("Select a file to show details here.")
-                return
+    def _save_native_metadata(self) -> None:
+        """Save rename (if changed) + description/tags/notes, then show confirmation."""
+        if not hasattr(self, "_current_path") or not self._current_path:
+            return
 
-            st = p.stat()
-
-            lines = [
-                f"Name: {p.name}",
-                f"Path: {p}",
-                f"Size: {st.st_size:,} bytes",
-                f"Modified: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(st.st_mtime))}",
-            ]
-
-            # Try to add dimensions without fully decoding
+        # --- Rename if the filename was changed ---
+        new_name = self.meta_filename_edit.text().strip()
+        p = Path(self._current_path)
+        if new_name and new_name != p.name:
+            new_path = p.parent / new_name
             try:
-                reader = QImageReader(str(p))
-                sz = reader.size()
-                if sz.isValid() and sz.width() > 0 and sz.height() > 0:
-                    lines.append(f"Resolution: {sz.width()} x {sz.height()}")
+                self.bridge.rename_path_async(self._current_path, new_name)
+                self._current_path = str(new_path)
             except Exception:
                 pass
 
-            # Video duration/resolution via ffprobe if it's a video
-            if p.suffix.lower() in {'.mp4', '.webm', '.mov', '.mkv'}:
-                try:
-                    w, h, _ = self.bridge._probe_video_size(str(p))
-                    if w and h:
-                        lines.append(f"Video size: {w} x {h}")
-                    dur = self.bridge.get_video_duration_seconds(str(p))
-                    if dur:
-                        lines.append(f"Duration: {dur:.2f}s")
-                except Exception:
-                    pass
-
-            self.meta_text.setText("\n".join(lines))
+        # --- Save metadata fields ---
+        desc = self.meta_desc.toPlainText()
+        notes = self.meta_notes.toPlainText()
+        tags_str = self.meta_tags.text()
+        tags = [t.strip() for t in tags_str.split(",") if t.strip()]
+        try:
+            self.bridge.update_media_metadata(self._current_path, "", desc, notes)
+            self.bridge.set_media_tags(self._current_path, tags)
         except Exception:
             pass
+
+        # --- Show confirmation then auto-clear after 3s ---
+        self.meta_status_lbl.setText("✓ Changes saved")
+        QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
+
+    def _save_native_tags(self) -> None:
+        if not hasattr(self, "_current_path") or not self._current_path:
+            return
+        tags_str = self.meta_tags.text()
+        tags = [t.strip() for t in tags_str.split(",") if t.strip()]
+        try:
+            self.bridge.set_media_tags(self._current_path, tags)
+        except Exception:
+            pass
+
+    def _show_metadata_for_path(self, path: str) -> None:
+        # Ignore empty-path signals (e.g. from background clicks that deselect cards).
+        # The panel is sticky - it keeps showing the last selected item.
+        if not path:
+            return
+
+        self._current_path = path
+
+        self.meta_filename_edit.blockSignals(True)
+        self.meta_desc.blockSignals(True)
+        self.meta_tags.blockSignals(True)
+        self.meta_notes.blockSignals(True)
+
+        p = Path(path)
+        self.meta_filename_edit.setText(p.name)
+        self.meta_path_lbl.setText(f"Folder: {p.parent}")
+
+        # File size
+        try:
+            size_bytes = p.stat().st_size
+            if size_bytes >= 1048576:
+                size_str = f"{size_bytes / 1048576:.1f} MB"
+            elif size_bytes >= 1024:
+                size_str = f"{size_bytes / 1024:.0f} KB"
+            else:
+                size_str = f"{size_bytes} B"
+            self.meta_size_lbl.setText(f"File Size: {size_str}")
+        except Exception:
+            self.meta_size_lbl.setText("File Size:")
+
+        # Resolution (images only)
+        ext = p.suffix.lower()
+        if ext in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}:
+            try:
+                reader = QImageReader(str(p))
+                sz = reader.size()
+                if sz.isValid():
+                    self.meta_res_lbl.setText(f"Resolution: {sz.width()} × {sz.height()} px")
+                else:
+                    self.meta_res_lbl.setText("")
+            except Exception:
+                self.meta_res_lbl.setText("")
+        else:
+            self.meta_res_lbl.setText("")
+
+        # Metadata from DB
+        try:
+            data = self.bridge.get_media_metadata(path)
+            self.meta_desc.setPlainText(data.get("description", ""))
+            self.meta_notes.setPlainText(data.get("notes", ""))
+            self.meta_tags.setText(", ".join(data.get("tags", [])))
+        except Exception:
+            pass
+
+        self.meta_filename_edit.blockSignals(False)
+        self.meta_desc.blockSignals(False)
+        self.meta_tags.blockSignals(False)
+        self.meta_notes.blockSignals(False)
+
+    def _on_splitter_moved(self) -> None:
+        """Save splitter state and re-apply card selection if the resize caused a deselect."""
+        self._save_splitter_state()
+        # Re-apply card selection via JS so resize doesn't visually deselect the last item
+        if hasattr(self, "_current_path") and self._current_path:
+            escaped = self._current_path.replace("\\", "\\\\").replace('"', '\\"')
+            self.web.page().runJavaScript(
+                f'(function(){{'  
+                f'  var c = document.querySelector(\'.card[data-path="{escaped}"]\')'  
+                f'  if (c) {{ document.querySelectorAll(\'.card.selected\').forEach(function(x){{x.classList.remove(\'selected\')}});'  
+                f'    c.classList.add(\'selected\'); }}'
+                f'}})();'
+            )
 
     def _on_tree_context_menu(self, pos: QPoint) -> None:
         idx = self.tree.indexAt(pos)
@@ -1802,14 +2076,14 @@ class MainWindow(QMainWindow):
             if new_path:
                 parent = str(Path(folder_path).parent)
                 self.tree.setCurrentIndex(self.proxy_model.mapFromSource(self.fs_model.index(parent)))
-                self._set_selected_folder(parent)
+                self._set_selected_folders([parent])
 
         if chosen == act_unhide:
             new_path = self.bridge.unhide_by_renaming_dot(folder_path)
             if new_path:
                 parent = str(Path(new_path).parent)
                 self.tree.setCurrentIndex(self.proxy_model.mapFromSource(self.fs_model.index(parent)))
-                self._set_selected_folder(parent)
+                self._set_selected_folders([parent])
 
         if chosen == act_rename:
             cur = Path(folder_path).name
@@ -1819,7 +2093,7 @@ class MainWindow(QMainWindow):
                 if new_path:
                     parent = str(Path(new_path).parent)
                     self.tree.setCurrentIndex(self.proxy_model.mapFromSource(self.fs_model.index(parent)))
-                    self._set_selected_folder(parent)
+                    self._set_selected_folders([parent])
 
         if chosen == act_explorer:
             self.bridge.open_in_explorer(folder_path)
@@ -2030,9 +2304,28 @@ class MainWindow(QMainWindow):
         
         # Right Panel (Metadata)
         self.right_panel.setStyleSheet(f"""
-            QWidget {{ background-color: {sb_bg_str}; color: {text}; }}
-            QTextEdit {{ background-color: {sb_bg_str}; border: none; color: {text_muted}; font-family: 'Segoe UI', sans-serif; }}
-            QLabel {{ color: {text}; font-weight: bold; background: transparent; }}
+            QWidget#rightPanel {{ background-color: {sb_bg_str}; color: {text}; border-left: 1px solid {Theme.get_border(accent)}; }}
+            QLabel {{ color: {text}; background: transparent; }}
+            QLineEdit, QTextEdit {{
+                background-color: rgba(255,255,255,10);
+                border: 1px solid {Theme.get_border(accent)};
+                border-radius: 4px;
+                padding: 4px;
+                color: {text};
+            }}
+            QPushButton#btnSaveMeta {{
+                background-color: {sb_bg_str};
+                color: {text};
+                border: 1px solid {Theme.get_border(accent)};
+                border-radius: 4px;
+                padding: 5px 10px;
+                font-size: 13px;
+            }}
+            QPushButton#btnSaveMeta:hover {{
+                background-color: {accent_str};
+                color: {"#000" if is_light else "#fff"};
+                border-color: {accent_str};
+            }}
             {scrollbar_style}
         """)
         
