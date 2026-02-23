@@ -8,6 +8,8 @@ import shutil
 import random
 import threading
 import time
+import re
+import json
 from pathlib import Path
 
 def _install_stderr_filter() -> None:
@@ -382,6 +384,29 @@ class Bridge(QObject):
         print(f"DEBUG: DB Path = {self.db_path}")
         self.conn = connect_db(str(self.db_path))
 
+        # Migration for AI EXIF fields -> Embedded
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("PRAGMA table_info(media_metadata)")
+            cols = [c[1] for c in cursor.fetchall()]
+            if "exif_tags" in cols:
+                cursor.execute("ALTER TABLE media_metadata RENAME COLUMN exif_tags TO embedded_tags")
+            elif "embedded_tags" not in cols:
+                cursor.execute("ALTER TABLE media_metadata ADD COLUMN embedded_tags TEXT")
+
+            if "exif_comments" in cols:
+                cursor.execute("ALTER TABLE media_metadata RENAME COLUMN exif_comments TO embedded_comments")
+            elif "embedded_comments" not in cols:
+                cursor.execute("ALTER TABLE media_metadata ADD COLUMN embedded_comments TEXT")
+
+            if "embedded_ai_prompt" not in cols:
+                cursor.execute("ALTER TABLE media_metadata ADD COLUMN embedded_ai_prompt TEXT")
+            if "embedded_ai_params" not in cols:
+                cursor.execute("ALTER TABLE media_metadata ADD COLUMN embedded_ai_params TEXT")
+            self.conn.commit()
+        except Exception as e:
+            print(f"Migration Error: {e}")
+
         self.settings = QSettings("G1enB1and", "MediaManagerX")
         self._session_shuffle_seed = random.getrandbits(32)
         
@@ -694,6 +719,18 @@ class Bridge(QObject):
                 "ui.show_right_panel": bool(self.settings.value("ui/show_right_panel", True, type=bool)),
                 "ui.theme_mode": str(self.settings.value("ui/theme_mode", "dark", type=str) or "dark"),
                 "ui.enable_glassmorphism": bool(self.settings.value("ui/enable_glassmorphism", True, type=bool)),
+                "metadata.display.res": bool(self.settings.value("metadata/display/res", True, type=bool)),
+                "metadata.display.size": bool(self.settings.value("metadata/display/size", True, type=bool)),
+                "metadata.display.camera": bool(self.settings.value("metadata/display/camera", False, type=bool)),
+                "metadata.display.location": bool(self.settings.value("metadata/display/location", False, type=bool)),
+                "metadata.display.iso": bool(self.settings.value("metadata/display/iso", False, type=bool)),
+                "metadata.display.shutter": bool(self.settings.value("metadata/display/shutter", False, type=bool)),
+                "metadata.display.aperture": bool(self.settings.value("metadata/display/aperture", False, type=bool)),
+                "metadata.display.software": bool(self.settings.value("metadata/display/software", False, type=bool)),
+                "metadata.display.lens": bool(self.settings.value("metadata/display/lens", False, type=bool)),
+                "metadata.display.dpi": bool(self.settings.value("metadata/display/dpi", False, type=bool)),
+                "metadata.display.exiftags": bool(self.settings.value("metadata/display/exiftags", False, type=bool)),
+                "metadata.display.exifcomments": bool(self.settings.value("metadata/display/exifcomments", False, type=bool)),
             }
         except Exception:
             return {
@@ -726,7 +763,8 @@ class Bridge(QObject):
                 self._media_cache.clear()
 
             # UI flags should apply immediately.
-            if key.startswith("ui."):
+            if key.startswith("ui.") or key.startswith("metadata.display."):
+                self.settings.sync()
                 self.uiFlagChanged.emit(key, bool(value))
 
             return True
@@ -1309,14 +1347,20 @@ class Bridge(QObject):
                 "title": meta.get("title") or "",
                 "description": meta.get("description") or "",
                 "notes": meta.get("notes") or "",
+                "embedded_tags": meta.get("embedded_tags") or "",
+                "embedded_comments": meta.get("embedded_comments") or "",
+                "embedded_ai_prompt": meta.get("embedded_ai_prompt") or "",
+                "embedded_ai_params": meta.get("embedded_ai_params") or "",
                 "tags": tags
             }
         except Exception as e:
             print(f"Bridge Get Metadata Error: {e}")
             return {}
 
-    @Slot(str, str, str, str)
-    def update_media_metadata(self, path: str, title: str, description: str, notes: str) -> None:
+    @Slot(str, str, str, str, str, str, str, str)
+    def update_media_metadata(self, path: str, title: str, description: str, notes: str, 
+                              embedded_tags: str = "", embedded_comments: str = "",
+                              embedded_ai_prompt: str = "", embedded_ai_params: str = "") -> None:
         """Update persistent metadata for a media path."""
         from app.mediamanager.db.media_repo import get_media_by_path
         from app.mediamanager.db.metadata_repo import upsert_media_metadata
@@ -1324,7 +1368,9 @@ class Bridge(QObject):
         try:
             m = get_media_by_path(self.conn, path)
             if m:
-                upsert_media_metadata(self.conn, m["id"], title, description, notes)
+                upsert_media_metadata(self.conn, m["id"], title, description, notes, 
+                                      embedded_tags, embedded_comments, 
+                                      embedded_ai_prompt, embedded_ai_params)
         except Exception as e:
             print(f"Bridge Update Metadata Error: {e}")
 
@@ -1815,6 +1861,30 @@ class MainWindow(QMainWindow):
         self.meta_lens_lbl.setObjectName("metaLensLabel")
         right_layout.addWidget(self.meta_lens_lbl)
 
+        self.meta_dpi_lbl = QLabel("")
+        self.meta_dpi_lbl.setObjectName("metaDPILabel")
+        right_layout.addWidget(self.meta_dpi_lbl)
+
+        self.meta_embedded_tags_lbl = QLabel("")
+        self.meta_embedded_tags_lbl.setObjectName("metaEmbeddedTagsLabel")
+        self.meta_embedded_tags_lbl.setWordWrap(True)
+        right_layout.addWidget(self.meta_embedded_tags_lbl)
+
+        self.meta_embedded_comments_lbl = QLabel("")
+        self.meta_embedded_comments_lbl.setObjectName("metaEmbeddedCommentsLabel")
+        self.meta_embedded_comments_lbl.setWordWrap(True)
+        right_layout.addWidget(self.meta_embedded_comments_lbl)
+
+        self.meta_embedded_ai_prompt_lbl = QLabel("")
+        self.meta_embedded_ai_prompt_lbl.setObjectName("metaEmbeddedAIPromptLabel")
+        self.meta_embedded_ai_prompt_lbl.setWordWrap(True)
+        right_layout.addWidget(self.meta_embedded_ai_prompt_lbl)
+
+        self.meta_embedded_ai_params_lbl = QLabel("")
+        self.meta_embedded_ai_params_lbl.setObjectName("metaEmbeddedAIParamsLabel")
+        self.meta_embedded_ai_params_lbl.setWordWrap(True)
+        right_layout.addWidget(self.meta_embedded_ai_params_lbl)
+
         self.meta_sep = QWidget()
         self.meta_sep.setFixedHeight(1)
         self.meta_sep.setObjectName("metaSeparator")
@@ -1857,6 +1927,21 @@ class MainWindow(QMainWindow):
         self.btn_save_meta.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_save_meta.clicked.connect(self._save_native_metadata)
         right_layout.addWidget(self.btn_save_meta)
+
+        # AI/EXIF Actions
+        action_layout = QHBoxLayout()
+        self.btn_import_exif = QPushButton("Import Metadata")
+        self.btn_import_exif.setToolTip("Append tags/comments from file to database")
+        self.btn_import_exif.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_import_exif.clicked.connect(self._import_exif_to_db)
+        action_layout.addWidget(self.btn_import_exif)
+
+        self.btn_save_to_exif = QPushButton("Save to EXIF")
+        self.btn_save_to_exif.setToolTip("Append database metadata to file EXIF (safely)")
+        self.btn_save_to_exif.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_save_to_exif.clicked.connect(self._save_to_exif_cmd)
+        action_layout.addWidget(self.btn_save_to_exif)
+        right_layout.addLayout(action_layout)
 
         self.meta_status_lbl = QLabel("")
         self.meta_status_lbl.setObjectName("metaStatusLabel")
@@ -1927,6 +2012,10 @@ class MainWindow(QMainWindow):
             self._apply_ui_flag("ui.show_right_panel", show_right)
         except Exception:
             pass
+
+        # Initial clear/hide based on default settings
+        # Must be at the very end to ensure all UI attributes (meta_desc, etc.) are initialized.
+        self._clear_metadata_panel()
 
     def _set_selected_folders(self, folder_paths: list[str]) -> None:
         self.bridge.set_selected_folders(folder_paths)
@@ -2002,6 +2091,8 @@ class MainWindow(QMainWindow):
             # Refresh current metadata display to apply visibility
             if hasattr(self, "_current_paths") and self._current_paths:
                 self._show_metadata_for_path(self._current_paths)
+            else:
+                self._clear_metadata_panel()
 
     def _rename_from_panel(self) -> None:
         """Rename the current file using the filename field in the metadata panel."""
@@ -2052,8 +2143,16 @@ class MainWindow(QMainWindow):
             # --- Save metadata fields ---
             desc = self.meta_desc.toPlainText()
             notes = self.meta_notes.toPlainText()
+            
+            # We don't have direct edits for these in the UI yet (they are labels),
+            # but they might have been changed by 'Import Metadata'. 
+            e_tags = self.meta_embedded_tags_lbl.text().replace("Embedded-Tags: ", "")
+            e_comments = self.meta_embedded_comments_lbl.text().replace("Embedded-Comments: ", "")
+            e_prompt = self.meta_embedded_ai_prompt_lbl.text().replace("Embedded-AI-Prompt: ", "")
+            e_params = self.meta_embedded_ai_params_lbl.text().replace("Embedded-AI-Params: ", "")
+
             try:
-                self.bridge.update_media_metadata(path, "", desc, notes)
+                self.bridge.update_media_metadata(path, "", desc, notes, e_tags, e_comments, e_prompt, e_params)
                 self.bridge.set_media_tags(path, tags)
             except Exception:
                 pass
@@ -2069,6 +2168,197 @@ class MainWindow(QMainWindow):
         # --- Show confirmation then auto-clear after 3s ---
         self.meta_status_lbl.setText(f"✓ {'Tags' if is_bulk else 'Changes'} saved")
         QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
+
+    def _harvest_universal_metadata(self, img) -> dict:
+        """Systematically extract tags/comments from XMP, IPTC, and all EXIF IFDs."""
+        from PIL import ExifTags, IptcImagePlugin
+        res = {"tags": [], "comment": "", "ai_prompt": "", "ai_params": ""}
+
+        def add_comment(val):
+            if val and str(val).strip():
+                c = str(val).strip()
+                if not res["comment"]: res["comment"] = c
+                elif c not in res["comment"]: res["comment"] = f"{res['comment']}\n{c}"
+
+        def add_tags(val):
+            if not val: return
+            if isinstance(val, str):
+                parts = [t.strip() for t in val.replace(";", ",").split(",") if t.strip()]
+                for p in parts:
+                    if p not in res["tags"]: res["tags"].append(p)
+            elif isinstance(val, (list, tuple)):
+                for v in val: add_tags(v)
+
+        # 1. Standard Info & PNG Text
+        if hasattr(img, "info"):
+            for k, v in img.info.items():
+                if k in ("parameters", "comment", "Description", "UserComment"):
+                    # Check for prompt/params split (often in Automatic1111)
+                    if k == "parameters" and "\nNegative prompt:" in str(v):
+                        parts = v.split("\n", 1)
+                        res["ai_prompt"] = parts[0].strip()
+                        res["ai_params"] = parts[1].strip()
+                    else:
+                        add_comment(v)
+                elif k in ("Subject", "Keywords"):
+                    add_tags(v)
+                elif k == "Civitai metadata" and isinstance(v, str):
+                    try:
+                        data = json.loads(v)
+                        if "tags" in data: add_tags(data["tags"])
+                        # Might have resources or other info
+                    except: pass
+                elif k == "xmp" and isinstance(v, (bytes, str)):
+                    txt = v.decode(errors="replace") if isinstance(v, bytes) else v
+                    subj_match = re.search(r"<dc:subject>(.*?)</dc:subject>", txt, re.DOTALL)
+                    if subj_match:
+                        tags = re.findall(r"<rdf:li>(.*?)</rdf:li>", subj_match.group(1))
+                        add_tags(tags)
+                    desc_match = re.search(r"<dc:description>(.*?)</dc:description>", txt, re.DOTALL)
+                    if desc_match:
+                        descs = re.findall(r"<rdf:li>(.*?)</rdf:li>", desc_match.group(1))
+                        for d in descs: add_comment(d)
+                    # UserComment in XMP
+                    uc_match = re.search(r"<exif:UserComment>(.*?)</exif:UserComment>", txt, re.DOTALL)
+                    if uc_match: add_comment(uc_match.group(1))
+
+        # 2. IPTC
+        try:
+            iptc = IptcImagePlugin.getiptcinfo(img)
+            if iptc:
+                for k, v in iptc.items():
+                    if k == (2, 120): # Caption
+                        add_comment(v.decode(errors="replace") if isinstance(v, bytes) else v)
+                    elif k == (2, 25): # Keywords
+                        words = v if isinstance(v, list) else [v]
+                        for w in words:
+                            add_tags(w.decode(errors="replace") if isinstance(w, bytes) else w)
+        except: pass
+
+        # 3. EXIF (Root & Sub-IFDs)
+        exif = img.getexif()
+        if exif:
+            def scan_ifd(ifd_obj):
+                if not ifd_obj: return
+                for tid, val in ifd_obj.items():
+                    name = ExifTags.TAGS.get(tid, tid)
+                    
+                    # Robust Decoding of UserComment (Tag 37510)
+                    if tid == 37510 and isinstance(val, (bytes, bytearray)):
+                        try:
+                            # First 8 bytes define encoding
+                            prefix = val[:8]
+                            raw_val = val[8:]
+                            if b"UNICODE\x00" in prefix:
+                                val = raw_val.decode("utf-16le", errors="replace").rstrip("\x00")
+                            elif b"ASCII\x00" in prefix:
+                                val = raw_val.decode("ascii", errors="replace").rstrip("\x00")
+                            else:
+                                val = val.decode(errors="replace").rstrip("\x00")
+                        except: pass
+
+                    # Handle Windows UTF-16 tags (XP*)
+                    if str(name).startswith("XP") and isinstance(val, (bytes, bytearray)):
+                        try:
+                            val = val.decode("utf-16le").rstrip("\x00")
+                        except: pass
+                    
+                    if name in ("UserComment", "Comment", "XPComment", "ImageDescription", "XPTitle"):
+                        add_comment(val)
+                    elif name in ("XPKeywords", "Subject"):
+                        add_tags(val)
+
+            scan_ifd(exif)
+            for ifd_id in [ExifTags.IFD.Exif, ExifTags.IFD.GPSInfo, ExifTags.IFD.Interop]:
+                try: scan_ifd(exif.get_ifd(ifd_id))
+                except: pass
+
+        return res
+
+    @Slot()
+    def _import_exif_to_db(self) -> None:
+        """Import EXIF/PNG-info data and append to DB tags/notes."""
+        if not self._current_path: return
+        p = Path(self._current_path)
+        if not p.exists(): return
+
+        try:
+            from PIL import Image
+            with Image.open(str(p)) as img:
+                res = self._harvest_universal_metadata(img)
+
+            if not res["comment"] and not res["tags"] and not res["ai_prompt"]:
+                self.meta_status_lbl.setText("No new metadata found in file.")
+                return
+
+            # Update UI main fields (for user to review/adjust before manual save, but we'll trigger save)
+            if res["comment"]:
+                curr_notes = self.meta_notes.toPlainText()
+                prefix = "\n\n[Imported Metadata]:\n"
+                if prefix in curr_notes:
+                    new_notes = curr_notes.replace(prefix, f"{prefix}{res['comment']}\n")
+                else:
+                    new_notes = f"{curr_notes}{prefix}{res['comment']}".strip()
+                self.meta_notes.setPlainText(new_notes)
+            
+            if res["tags"]:
+                curr_tags = self.meta_tags.text().strip()
+                all_tags = set([t.strip() for t in curr_tags.split(",") if t.strip()])
+                all_tags.update(res["tags"])
+                self.meta_tags.setText(", ".join(sorted(list(all_tags))))
+
+            # AI Prompt/Params are always updated in DB but also labels
+            if res["ai_prompt"]:
+                self.meta_embedded_ai_prompt_lbl.setText(f"Embedded-AI-Prompt: {res['ai_prompt'][:300]}")
+            if res["ai_params"]:
+                self.meta_embedded_ai_params_lbl.setText(f"Embedded-AI-Params: {res['ai_params'][:300]}")
+
+            # Auto-save to DB
+            self.btn_save_meta.click()
+            self.meta_status_lbl.setText("Metadata imported & saved to DB.")
+        except Exception as e:
+            self.meta_status_lbl.setText(f"Harvest Error: {e}")
+
+    @Slot()
+    def _save_to_exif_cmd(self) -> None:
+        """Save DB metadata back to file EXIF/PNG (SAFE strategy)."""
+        if not self._current_path: return
+        p = Path(self._current_path)
+        if not p.exists(): return
+
+        try:
+            from PIL import Image
+            import tempfile
+            import os
+
+            # 1. Read current metadata from UI
+            notes = self.meta_notes.toPlainText()
+
+            # 2. Open image and prepare to write
+            with Image.open(str(p)) as img:
+                # We want to preserve existing info but append/overwrite comments
+                metadata = img.info.copy()
+                
+                if p.suffix.lower() == ".png":
+                    metadata["comment"] = notes
+                elif p.suffix.lower() in (".jpg", ".jpeg"):
+                    # Writing back to JPEG EXIF is complex with PIL (often requires piexif)
+                    # For now, let's at least handle PNG which is what AI users use most
+                    pass
+                
+                # Safe Write Strategy: Save to temp, then replace
+                with tempfile.NamedTemporaryFile(delete=False, suffix=p.suffix, dir=p.parent) as tmp:
+                    tmp_path = Path(tmp.name)
+                
+                try:
+                    img.save(tmp_path, **metadata)
+                    os.replace(tmp_path, str(p))
+                    self.meta_status_lbl.setText("Saved to EXIF successfully.")
+                except Exception as e:
+                    if tmp_path.exists(): tmp_path.unlink()
+                    raise e
+        except Exception as e:
+            self.meta_status_lbl.setText(f"Save EXIF Error: {e}")
 
     def _clear_bulk_tags(self) -> None:
         """Remove all tags from currently selected files with warning."""
@@ -2104,6 +2394,7 @@ class MainWindow(QMainWindow):
     def _show_metadata_for_path(self, paths: list[str]) -> None:
         # Ignore empty lists (e.g. from background clicks that deselect cards).
         if not paths:
+            self._clear_metadata_panel()
             return
 
         is_bulk = len(paths) > 1
@@ -2116,23 +2407,51 @@ class MainWindow(QMainWindow):
         self.meta_path_lbl.setVisible(not is_bulk)
         self.meta_sep.setVisible(not is_bulk)
 
-        # Visibility based on settings
-        def is_visible(k, default=True):
-            try:
-                val = self.bridge.settings.value(f"metadata/display/{k}")
-                if val is None: return default
-                return bool(val)
-            except Exception: return default
+        show_res = self._is_metadata_enabled("res", True)
+        show_size = self._is_metadata_enabled("size", True)
+        show_camera = self._is_metadata_enabled("camera", False)
+        show_location = self._is_metadata_enabled("location", False)
+        show_iso = self._is_metadata_enabled("iso", False)
+        show_shutter = self._is_metadata_enabled("shutter", False)
+        show_aperture = self._is_metadata_enabled("aperture", False)
+        show_software = self._is_metadata_enabled("software", False)
+        show_lens = self._is_metadata_enabled("lens", False)
+        show_dpi = self._is_metadata_enabled("dpi", False)
+        show_embedded_tags = self._is_metadata_enabled("embeddedtags", False)
+        show_embedded_comments = self._is_metadata_enabled("embeddedcomments", False)
+        show_ai_prompt = self._is_metadata_enabled("aiprompt", False)
+        show_ai_params = self._is_metadata_enabled("aiparams", False)
 
-        self.meta_res_lbl.setVisible(not is_bulk and is_visible("res"))
-        self.meta_size_lbl.setVisible(not is_bulk and is_visible("size"))
-        self.meta_camera_lbl.setVisible(not is_bulk and is_visible("camera", False))
-        self.meta_location_lbl.setVisible(not is_bulk and is_visible("location", False))
-        self.meta_iso_lbl.setVisible(not is_bulk and is_visible("iso", False))
-        self.meta_shutter_lbl.setVisible(not is_bulk and is_visible("shutter", False))
-        self.meta_aperture_lbl.setVisible(not is_bulk and is_visible("aperture", False))
-        self.meta_software_lbl.setVisible(not is_bulk and is_visible("software", False))
-        self.meta_lens_lbl.setVisible(not is_bulk and is_visible("lens", False))
+        self.meta_res_lbl.setVisible(not is_bulk and show_res)
+        self.meta_size_lbl.setVisible(not is_bulk and show_size)
+        self.meta_camera_lbl.setVisible(not is_bulk and show_camera)
+        self.meta_location_lbl.setVisible(not is_bulk and show_location)
+        self.meta_iso_lbl.setVisible(not is_bulk and show_iso)
+        self.meta_shutter_lbl.setVisible(not is_bulk and show_shutter)
+        self.meta_aperture_lbl.setVisible(not is_bulk and show_aperture)
+        self.meta_software_lbl.setVisible(not is_bulk and show_software)
+        self.meta_lens_lbl.setVisible(not is_bulk and show_lens)
+        self.meta_dpi_lbl.setVisible(not is_bulk and show_dpi)
+        self.meta_embedded_tags_lbl.setVisible(not is_bulk and show_embedded_tags)
+        self.meta_embedded_comments_lbl.setVisible(not is_bulk and show_embedded_comments)
+        self.meta_embedded_ai_prompt_lbl.setVisible(not is_bulk and show_ai_prompt)
+        self.meta_embedded_ai_params_lbl.setVisible(not is_bulk and show_ai_params)
+
+        # Set default text prefixes so they show even if blank
+        self.meta_res_lbl.setText("Resolution: ")
+        self.meta_size_lbl.setText("File Size: ")
+        self.meta_camera_lbl.setText("Camera: ")
+        self.meta_location_lbl.setText("Location: ")
+        self.meta_iso_lbl.setText("ISO: ")
+        self.meta_shutter_lbl.setText("Shutter: ")
+        self.meta_aperture_lbl.setText("Aperture: ")
+        self.meta_software_lbl.setText("Software: ")
+        self.meta_lens_lbl.setText("Lens: ")
+        self.meta_dpi_lbl.setText("DPI: ")
+        self.meta_embedded_tags_lbl.setText("Embedded-Tags: ")
+        self.meta_embedded_comments_lbl.setText("Embedded-Comments: ")
+        self.meta_embedded_ai_prompt_lbl.setText("Embedded-AI-Prompt: ")
+        self.meta_embedded_ai_params_lbl.setText("Embedded-AI-Params: ")
 
         self.lbl_desc_cap.setVisible(not is_bulk)
         self.meta_desc.setVisible(not is_bulk)
@@ -2177,69 +2496,89 @@ class MainWindow(QMainWindow):
                     if sz.isValid():
                         self.meta_res_lbl.setText(f"Resolution: {sz.width()} × {sz.height()} px")
                     else:
-                        self.meta_res_lbl.setText("")
+                        self.meta_res_lbl.setText("Resolution: ")
                 except Exception:
-                    self.meta_res_lbl.setText("")
+                    self.meta_res_lbl.setText("Resolution: ")
 
-                # EXIF Data (JPEG/WebP)
-                if ext in {".jpg", ".jpeg", ".webp"}:
+                # DPI & Extra info via Pillow
+                try:
+                    from PIL import Image
+                    with Image.open(str(p)) as pil_img:
+                        if hasattr(pil_img, "info"):
+                            dpi = pil_img.info.get("dpi")
+                            if dpi:
+                                self.meta_dpi_lbl.setText(f"DPI: {dpi[0]} × {dpi[1]}")
+                except: pass
+
+                # EXIF/Metadata Data (JPEG/WebP/PNG)
+                if ext in {".jpg", ".jpeg", ".webp", ".png"}:
                     try:
                         from PIL import Image, ExifTags
-                        img = Image.open(str(p))
-                        exif = img._getexif()
-                        if exif:
-                            # Map tags
-                            data = {ExifTags.TAGS.get(k, k): v for k, v in exif.items()}
-                            
-                            # Camera
-                            model = data.get("Model")
-                            self.meta_camera_lbl.setText(f"Camera: {model}" if model else "")
-                            
-                            # ISO
-                            iso = data.get("ISOSpeedRatings")
-                            self.meta_iso_lbl.setText(f"ISO: {iso}" if iso else "")
-                            
-                            # Shutter Speed
-                            exp = data.get("ExposureTime")
-                            if exp:
-                                if exp < 1:
-                                    shutter = f"1/{int(1/exp)}s" if exp > 0 else f"{exp}s"
-                                else:
-                                    shutter = f"{exp}s"
-                                self.meta_shutter_lbl.setText(f"Shutter: {shutter}")
-                            else:
-                                self.meta_shutter_lbl.setText("")
+                        with Image.open(str(p)) as img:
+                            exif_obj = img.getexif()
+                            if exif_obj:
+                                # Standard EXIF Tags
+                                data = {ExifTags.TAGS.get(tag_id, tag_id): value for tag_id, value in exif_obj.items()}
                                 
-                            # Aperture
-                            fnum = data.get("FNumber")
-                            self.meta_aperture_lbl.setText(f"Aperture: f/{fnum}" if fnum else "")
+                                # Camera
+                                model = data.get("Model")
+                                if model: self.meta_camera_lbl.setText(f"Camera: {model}")
                             
-                            # Software
-                            sw = data.get("Software")
-                            self.meta_software_lbl.setText(f"Software: {sw}" if sw else "")
-                            
-                            # Lens (sometimes nested or in different tags)
-                            lens = data.get("LensModel")
-                            self.meta_lens_lbl.setText(f"Lens: {lens}" if lens else "")
-                            
-                            # Location (Simplistic check)
-                            gps = data.get("GPSInfo")
-                            self.meta_location_lbl.setText("Location: Available" if gps else "")
-                        else:
-                            self._clear_exif_labels()
-                    except Exception:
-                        self._clear_exif_labels()
-                else:
-                    self._clear_exif_labels()
+                                # ISO
+                                iso = data.get("ISOSpeedRatings")
+                                if iso: self.meta_iso_lbl.setText(f"ISO: {iso}")
+                                
+                                # Shutter Speed
+                                exp = data.get("ExposureTime")
+                                if exp:
+                                    try:
+                                        # ExposureTime is often a Fraction or float
+                                        f_exp = float(exp)
+                                        if f_exp < 1 and f_exp > 0:
+                                            # Round to nearest integer for 1/X
+                                            shutter = f"1/{int(round(1/f_exp))}s"
+                                        else:
+                                            shutter = f"{f_exp}s"
+                                        self.meta_shutter_lbl.setText(f"Shutter: {shutter}")
+                                    except: pass
+                                    
+                                # Aperture (FNumber)
+                                fnum = data.get("FNumber")
+                                if fnum:
+                                    try:
+                                        self.meta_aperture_lbl.setText(f"Aperture: f/{float(fnum):.1f}")
+                                    except: pass
+                                
+                                # Software
+                                sw = data.get("Software")
+                                if sw: self.meta_software_lbl.setText(f"Software: {sw}")
+
+                            # 2. Universal Harvest for Tags/Comments labels (Automatic)
+                            harvested = self._harvest_universal_metadata(img)
+                            if harvested["tags"]:
+                                self.meta_embedded_tags_lbl.setText(f"Embedded-Tags: {', '.join(harvested['tags'])}")
+                            if harvested["comment"]:
+                                self.meta_embedded_comments_lbl.setText(f"Embedded-Comments: {harvested['comment'][:200]}")
+                            if harvested["ai_prompt"]:
+                                self.meta_embedded_ai_prompt_lbl.setText(f"Embedded-AI-Prompt: {harvested['ai_prompt'][:200]}")
+                            if harvested["ai_params"]:
+                                self.meta_embedded_ai_params_lbl.setText(f"Embedded-AI-Params: {harvested['ai_params'][:200]}")
+                                
+                    except Exception as e:
+                        print(f"EXIF Read Error for {p.name}: {e}")
             else:
                 self.meta_res_lbl.setText("")
-                self._clear_exif_labels()
+                self._clear_embedded_labels()
 
             # Metadata from DB
             try:
                 data = self.bridge.get_media_metadata(path)
                 self.meta_desc.setPlainText(data.get("description", ""))
                 self.meta_notes.setPlainText(data.get("notes", ""))
+                self.meta_embedded_tags_lbl.setText(f"Embedded-Tags: {data.get('embedded_tags', '')}")
+                self.meta_embedded_comments_lbl.setText(f"Embedded-Comments: {data.get('embedded_comments', '')}")
+                self.meta_embedded_ai_prompt_lbl.setText(f"Embedded-AI-Prompt: {data.get('embedded_ai_prompt', '')}")
+                self.meta_embedded_ai_params_lbl.setText(f"Embedded-AI-Params: {data.get('embedded_ai_params', '')}")
                 self.meta_tags.setText(", ".join(data.get("tags", [])))
             except Exception:
                 pass
@@ -2256,14 +2595,71 @@ class MainWindow(QMainWindow):
         self.meta_tags.blockSignals(False)
         self.meta_notes.blockSignals(False)
 
-    def _clear_exif_labels(self):
-        self.meta_camera_lbl.setText("")
-        self.meta_location_lbl.setText("")
-        self.meta_iso_lbl.setText("")
-        self.meta_shutter_lbl.setText("")
-        self.meta_aperture_lbl.setText("")
-        self.meta_software_lbl.setText("")
-        self.meta_lens_lbl.setText("")
+    def _clear_embedded_labels(self):
+        self.meta_camera_lbl.setText("Camera: ")
+        self.meta_location_lbl.setText("Location: ")
+        self.meta_iso_lbl.setText("ISO: ")
+        self.meta_shutter_lbl.setText("Shutter: ")
+        self.meta_aperture_lbl.setText("Aperture: ")
+        self.meta_software_lbl.setText("Software: ")
+        self.meta_lens_lbl.setText("Lens: ")
+        self.meta_dpi_lbl.setText("DPI: ")
+        self.meta_embedded_tags_lbl.setText("Embedded-Tags: ")
+        self.meta_embedded_comments_lbl.setText("Embedded-Comments: ")
+        self.meta_embedded_ai_prompt_lbl.setText("Embedded-AI-Prompt: ")
+        self.meta_embedded_ai_params_lbl.setText("Embedded-AI-Params: ")
+
+    def _is_metadata_enabled(self, key: str, default: bool = True) -> bool:
+        """Read metadata visibility setting with robust boolean conversion."""
+        try:
+            qkey = f"metadata/display/{key}"
+            # Ensure we have the latest from disk
+            self.bridge.settings.sync()
+            val = self.bridge.settings.value(qkey)
+            if val is None:
+                return default
+            # Handle PySide6/Qt behavior on different platforms
+            if isinstance(val, str):
+                return val.lower() in ("true", "1")
+            return bool(val)
+        except Exception:
+            return default
+
+    def _clear_metadata_panel(self):
+        """Reset all labels and hide/show them based on current settings."""
+        self._current_path = None
+        self._current_paths = []
+        
+        self.meta_filename_edit.setText("")
+        self.meta_path_lbl.setText("Folder: ")
+        self.meta_size_lbl.setText("File Size: ")
+        self.meta_res_lbl.setText("Resolution: ")
+        self._clear_embedded_labels()
+        
+        # UI visibility logic
+        self.meta_res_lbl.setVisible(self._is_metadata_enabled("res", True))
+        self.meta_size_lbl.setVisible(self._is_metadata_enabled("size", True))
+        self.meta_camera_lbl.setVisible(self._is_metadata_enabled("camera", False))
+        self.meta_location_lbl.setVisible(self._is_metadata_enabled("location", False))
+        self.meta_iso_lbl.setVisible(self._is_metadata_enabled("iso", False))
+        self.meta_shutter_lbl.setVisible(self._is_metadata_enabled("shutter", False))
+        self.meta_aperture_lbl.setVisible(self._is_metadata_enabled("aperture", False))
+        self.meta_software_lbl.setVisible(self._is_metadata_enabled("software", False))
+        self.meta_lens_lbl.setVisible(self._is_metadata_enabled("lens", False))
+        self.meta_dpi_lbl.setVisible(self._is_metadata_enabled("dpi", False))
+        self.meta_embedded_tags_lbl.setVisible(self._is_metadata_enabled("embeddedtags", False))
+        self.meta_embedded_comments_lbl.setVisible(self._is_metadata_enabled("embeddedcomments", False))
+        self.meta_embedded_ai_prompt_lbl.setVisible(self._is_metadata_enabled("aiprompt", False))
+        self.meta_embedded_ai_params_lbl.setVisible(self._is_metadata_enabled("aiparams", False))
+        
+        self.meta_filename_edit.setVisible(True)
+        self.meta_path_lbl.setVisible(True)
+        self.meta_sep.setVisible(True)
+        
+        self.meta_desc.setPlainText("")
+        self.meta_notes.setPlainText("")
+        self.meta_tags.setText("")
+        self.meta_status_lbl.setText("")
 
     def _on_splitter_moved(self) -> None:
         """Save splitter state and re-apply card selection if the resize caused a deselect."""

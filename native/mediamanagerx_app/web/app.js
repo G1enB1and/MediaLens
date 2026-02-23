@@ -1146,7 +1146,9 @@ function wireSettings() {
   const metaToggles = [
     'metaShowRes', 'metaShowSize',
     'metaShowCamera', 'metaShowLocation', 'metaShowISO',
-    'metaShowShutter', 'metaShowAperture', 'metaShowSoftware', 'metaShowLens'
+    'metaShowShutter', 'metaShowAperture', 'metaShowSoftware', 'metaShowLens',
+    'metaShowDPI', 'metaShowEmbeddedTags', 'metaShowEmbeddedComments',
+    'metaShowAIPrompt', 'metaShowAIParams'
   ];
   metaToggles.forEach(id => {
     const el = document.getElementById(id);
@@ -1372,7 +1374,9 @@ async function main() {
       const metaToggles = [
         'metaShowRes', 'metaShowSize',
         'metaShowCamera', 'metaShowLocation', 'metaShowISO',
-        'metaShowShutter', 'metaShowAperture', 'metaShowSoftware', 'metaShowLens'
+        'metaShowShutter', 'metaShowAperture', 'metaShowSoftware', 'metaShowLens',
+        'metaShowDPI', 'metaShowEmbeddedTags', 'metaShowEmbeddedComments',
+        'metaShowAIPrompt', 'metaShowAIParams'
       ];
       metaToggles.forEach(id => {
         const el = document.getElementById(id);
