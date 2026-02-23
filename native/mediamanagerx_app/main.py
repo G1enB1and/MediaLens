@@ -1872,19 +1872,31 @@ class MainWindow(QMainWindow):
         self.meta_embedded_tags_lbl.setWordWrap(True)
         right_layout.addWidget(self.meta_embedded_tags_lbl)
 
-        self.meta_embedded_comments_lbl = QLabel("")
-        self.meta_embedded_comments_lbl.setObjectName("metaEmbeddedCommentsLabel")
-        self.meta_embedded_comments_lbl.setWordWrap(True)
+        self.lbl_embedded_comments_cap = QLabel("Embedded-Comments:")
+        self.lbl_embedded_comments_cap.setObjectName("metaEmbeddedCommentsCaption")
+        right_layout.addWidget(self.lbl_embedded_comments_cap)
+        self.meta_embedded_comments_lbl = QTextEdit()
+        self.meta_embedded_comments_lbl.setObjectName("metaEmbeddedCommentsEdit")
+        self.meta_embedded_comments_lbl.setPlaceholderText("Embedded comments...")
+        self.meta_embedded_comments_lbl.setMaximumHeight(70)
         right_layout.addWidget(self.meta_embedded_comments_lbl)
 
-        self.meta_embedded_ai_prompt_lbl = QLabel("")
-        self.meta_embedded_ai_prompt_lbl.setObjectName("metaEmbeddedAIPromptLabel")
-        self.meta_embedded_ai_prompt_lbl.setWordWrap(True)
+        self.lbl_embedded_ai_prompt_cap = QLabel("Embedded-AI-Prompt:")
+        self.lbl_embedded_ai_prompt_cap.setObjectName("metaEmbeddedAIPromptCaption")
+        right_layout.addWidget(self.lbl_embedded_ai_prompt_cap)
+        self.meta_embedded_ai_prompt_lbl = QTextEdit()
+        self.meta_embedded_ai_prompt_lbl.setObjectName("metaEmbeddedAIPromptEdit")
+        self.meta_embedded_ai_prompt_lbl.setPlaceholderText("AI prompt...")
+        self.meta_embedded_ai_prompt_lbl.setMaximumHeight(70)
         right_layout.addWidget(self.meta_embedded_ai_prompt_lbl)
 
-        self.meta_embedded_ai_params_lbl = QLabel("")
-        self.meta_embedded_ai_params_lbl.setObjectName("metaEmbeddedAIParamsLabel")
-        self.meta_embedded_ai_params_lbl.setWordWrap(True)
+        self.lbl_embedded_ai_params_cap = QLabel("Embedded-AI-Params:")
+        self.lbl_embedded_ai_params_cap.setObjectName("metaEmbeddedAIParamsCaption")
+        right_layout.addWidget(self.lbl_embedded_ai_params_cap)
+        self.meta_embedded_ai_params_lbl = QTextEdit()
+        self.meta_embedded_ai_params_lbl.setObjectName("metaEmbeddedAIParamsEdit")
+        self.meta_embedded_ai_params_lbl.setPlaceholderText("AI parameters...")
+        self.meta_embedded_ai_params_lbl.setMaximumHeight(70)
         right_layout.addWidget(self.meta_embedded_ai_params_lbl)
 
         self.meta_sep = QWidget()
@@ -1938,8 +1950,8 @@ class MainWindow(QMainWindow):
         self.btn_import_exif.clicked.connect(self._import_exif_to_db)
         action_layout.addWidget(self.btn_import_exif)
 
-        self.btn_save_to_exif = QPushButton("Save to EXIF")
-        self.btn_save_to_exif.setToolTip("Append database metadata to file EXIF (safely)")
+        self.btn_save_to_exif = QPushButton("Embed Data in File")
+        self.btn_save_to_exif.setToolTip("Write tags and comments from these fields into the file's embedded metadata")
         self.btn_save_to_exif.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_save_to_exif.clicked.connect(self._save_to_exif_cmd)
         action_layout.addWidget(self.btn_save_to_exif)
@@ -2139,9 +2151,9 @@ class MainWindow(QMainWindow):
             # We don't have direct edits for these in the UI yet (they are labels),
             # but they might have been changed by 'Import Metadata'. 
             e_tags = self.meta_embedded_tags_lbl.text().replace("Embedded-Tags: ", "")
-            e_notes = self.meta_embedded_comments_lbl.text().replace("Embedded-Comments: ", "")
-            e_prompt = self.meta_embedded_ai_prompt_lbl.text().replace("Embedded-AI-Prompt: ", "")
-            e_params = self.meta_embedded_ai_params_lbl.text().replace("Embedded-AI-Params: ", "")
+            e_notes = self.meta_embedded_comments_lbl.toPlainText()
+            e_prompt = self.meta_embedded_ai_prompt_lbl.toPlainText()
+            e_params = self.meta_embedded_ai_params_lbl.toPlainText()
 
             try:
                 self.bridge.update_media_metadata(path, "", desc, notes, e_tags, e_notes, e_prompt, e_params)
@@ -2295,15 +2307,15 @@ class MainWindow(QMainWindow):
                 all_tags.update(res["tags"])
                 self.meta_tags.setText(", ".join(sorted(list(all_tags))))
 
-            # AI Prompt/Params are always updated in DB but also labels
+            # AI Prompt/Params are always updated in DB but also fields
             if res["ai_prompt"]:
-                self.meta_embedded_ai_prompt_lbl.setText(f"Embedded-AI-Prompt: {res['ai_prompt'][:300]}")
+                self.meta_embedded_ai_prompt_lbl.setPlainText(res['ai_prompt'])
             if res["ai_params"]:
-                self.meta_embedded_ai_params_lbl.setText(f"Embedded-AI-Params: {res['ai_params'][:300]}")
+                self.meta_embedded_ai_params_lbl.setPlainText(res['ai_params'])
             
-            # Sync the Comments label too (so it updates in real-time)
+            # Sync the Comments field too (so it updates in real-time)
             if res["comment"]:
-                self.meta_embedded_comments_lbl.setText(f"Embedded-Comments: {res['comment'][:200]}")
+                self.meta_embedded_comments_lbl.setPlainText(res['comment'])
 
             # Auto-save to DB
             self.btn_save_meta.click()
@@ -2313,44 +2325,94 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def _save_to_exif_cmd(self) -> None:
-        """Save DB metadata back to file EXIF/PNG (SAFE strategy)."""
+        """Embed tags, comments, and AI data from the UI fields into the file's metadata."""
         if not self._current_path: return
         p = Path(self._current_path)
         if not p.exists(): return
 
+        ext = p.suffix.lower()
+        if ext not in {".jpg", ".jpeg", ".png", ".webp"}:
+            self.meta_status_lbl.setText("Embed not supported for this file type.")
+            return
+
         try:
-            from PIL import Image
+            from PIL import Image, PngImagePlugin, ExifTags
             import tempfile
             import os
 
-            # 1. Read current metadata from UI
-            notes = self.meta_notes.toPlainText()
+            # Read values from the UI fields
+            comments = self.meta_embedded_comments_lbl.toPlainText().strip()
+            ai_prompt = self.meta_embedded_ai_prompt_lbl.toPlainText().strip()
+            ai_params = self.meta_embedded_ai_params_lbl.toPlainText().strip()
+            tags_raw = self.meta_embedded_tags_lbl.text().replace("Embedded-Tags: ", "").strip()
 
-            # 2. Open image and prepare to write
+            # Build a combined comment / parameters text
+            combined_text = comments
+            if ai_prompt:
+                combined_text = ai_prompt
+                if ai_params:
+                    combined_text += f"\n{ai_params}"
+
             with Image.open(str(p)) as img:
-                # We want to preserve existing info but append/overwrite comments
-                metadata = img.info.copy()
-                
-                if p.suffix.lower() == ".png":
-                    metadata["comment"] = notes
-                elif p.suffix.lower() in (".jpg", ".jpeg"):
-                    # Writing back to JPEG EXIF is complex with PIL (often requires piexif)
-                    # For now, let's at least handle PNG which is what AI users use most
-                    pass
-                
-                # Safe Write Strategy: Save to temp, then replace
-                with tempfile.NamedTemporaryFile(delete=False, suffix=p.suffix, dir=p.parent) as tmp:
-                    tmp_path = Path(tmp.name)
-                
-                try:
-                    img.save(tmp_path, **metadata)
-                    os.replace(tmp_path, str(p))
-                    self.meta_status_lbl.setText("Saved to EXIF successfully.")
-                except Exception as e:
-                    if tmp_path.exists(): tmp_path.unlink()
-                    raise e
+                if ext == ".png":
+                    pnginfo = PngImagePlugin.PngInfo()
+                    # Preserve existing tEXt chunks (except ones we'll overwrite)
+                    overwrite_keys = {"parameters", "comment", "Keywords", "Subject"}
+                    for k, v in img.info.items():
+                        if isinstance(k, str) and isinstance(v, str) and k not in overwrite_keys:
+                            try: pnginfo.add_text(k, v)
+                            except: pass
+                    if combined_text:
+                        pnginfo.add_text("parameters" if ai_prompt else "comment", combined_text)
+                    if tags_raw:
+                        pnginfo.add_text("Keywords", tags_raw)
+
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".png", dir=p.parent) as tmp:
+                        tmp_path = Path(tmp.name)
+                    try:
+                        img.save(tmp_path, "PNG", pnginfo=pnginfo)
+                        os.replace(tmp_path, str(p))
+                    except Exception as e:
+                        if tmp_path.exists(): tmp_path.unlink()
+                        raise e
+
+                elif ext in (".jpg", ".jpeg"):
+                    exif = img.getexif()
+                    # Write ImageDescription (tag 270)
+                    if combined_text:
+                        exif[270] = combined_text
+                    # Write XPKeywords (tag 0x9C9E) as UTF-16LE bytes
+                    if tags_raw:
+                        exif[0x9C9E] = tags_raw.encode("utf-16le")
+                    exif_bytes = exif.tobytes()
+
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg", dir=p.parent) as tmp:
+                        tmp_path = Path(tmp.name)
+                    try:
+                        img.save(tmp_path, "JPEG", exif=exif_bytes, quality="keep")
+                        os.replace(tmp_path, str(p))
+                    except Exception as e:
+                        if tmp_path.exists(): tmp_path.unlink()
+                        raise e
+
+                elif ext == ".webp":
+                    exif = img.getexif()
+                    if combined_text:
+                        exif[270] = combined_text
+                    exif_bytes = exif.tobytes()
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".webp", dir=p.parent) as tmp:
+                        tmp_path = Path(tmp.name)
+                    try:
+                        img.save(tmp_path, "WEBP", exif=exif_bytes)
+                        os.replace(tmp_path, str(p))
+                    except Exception as e:
+                        if tmp_path.exists(): tmp_path.unlink()
+                        raise e
+
+            self.meta_status_lbl.setText("✓ Data embedded in file successfully.")
+            QTimer.singleShot(4000, lambda: self.meta_status_lbl.setText(""))
         except Exception as e:
-            self.meta_status_lbl.setText(f"Save EXIF Error: {e}")
+            self.meta_status_lbl.setText(f"Embed Error: {e}")
 
     def _clear_bulk_tags(self) -> None:
         """Remove all tags from currently selected files with warning."""
@@ -2426,8 +2488,11 @@ class MainWindow(QMainWindow):
         self.meta_dpi_lbl.setVisible(not is_bulk and show_dpi)
         self.meta_embedded_tags_lbl.setVisible(not is_bulk and show_embedded_tags)
         self.meta_embedded_comments_lbl.setVisible(not is_bulk and show_embedded_comments)
+        self.lbl_embedded_comments_cap.setVisible(not is_bulk and show_embedded_comments)
         self.meta_embedded_ai_prompt_lbl.setVisible(not is_bulk and show_ai_prompt)
+        self.lbl_embedded_ai_prompt_cap.setVisible(not is_bulk and show_ai_prompt)
         self.meta_embedded_ai_params_lbl.setVisible(not is_bulk and show_ai_params)
+        self.lbl_embedded_ai_params_cap.setVisible(not is_bulk and show_ai_params)
 
         # Set default text prefixes so they show even if blank
         self.meta_res_lbl.setText("Resolution: ")
@@ -2441,9 +2506,10 @@ class MainWindow(QMainWindow):
         self.meta_lens_lbl.setText("Lens: ")
         self.meta_dpi_lbl.setText("DPI: ")
         self.meta_embedded_tags_lbl.setText("Embedded-Tags: ")
-        self.meta_embedded_comments_lbl.setText("Embedded-Comments: ")
-        self.meta_embedded_ai_prompt_lbl.setText("Embedded-AI-Prompt: ")
-        self.meta_embedded_ai_params_lbl.setText("Embedded-AI-Params: ")
+        # Clear the three editable QTextEdits (not prefixed labels anymore)
+        self.meta_embedded_comments_lbl.setPlainText("")
+        self.meta_embedded_ai_prompt_lbl.setPlainText("")
+        self.meta_embedded_ai_params_lbl.setPlainText("")
 
         self.lbl_desc_cap.setVisible(not is_bulk)
         self.meta_desc.setVisible(not is_bulk)
@@ -2477,13 +2543,13 @@ class MainWindow(QMainWindow):
                 if db_tags: self.meta_embedded_tags_lbl.setText(f"Embedded-Tags: {db_tags}")
                 
                 db_comm = data.get('embedded_comments', '')
-                if db_comm: self.meta_embedded_comments_lbl.setText(f"Embedded-Comments: {db_comm}")
+                if db_comm: self.meta_embedded_comments_lbl.setPlainText(db_comm)
                 
                 db_prompt = data.get('embedded_ai_prompt', '')
-                if db_prompt: self.meta_embedded_ai_prompt_lbl.setText(f"Embedded-AI-Prompt: {db_prompt}")
+                if db_prompt: self.meta_embedded_ai_prompt_lbl.setPlainText(db_prompt)
                 
                 db_params = data.get('embedded_ai_params', '')
-                if db_params: self.meta_embedded_ai_params_lbl.setText(f"Embedded-AI-Params: {db_params}")
+                if db_params: self.meta_embedded_ai_params_lbl.setPlainText(db_params)
                 
                 self.meta_tags.setText(", ".join(data.get("tags", [])))
             except Exception:
@@ -2530,11 +2596,11 @@ class MainWindow(QMainWindow):
                         if harvested["tags"]:
                             self.meta_embedded_tags_lbl.setText(f"Embedded-Tags: {', '.join(harvested['tags'])}")
                         if harvested["comment"]:
-                            self.meta_embedded_comments_lbl.setText(f"Embedded-Comments: {harvested['comment'][:200]}")
+                            self.meta_embedded_comments_lbl.setPlainText(harvested['comment'])
                         if harvested["ai_prompt"]:
-                            self.meta_embedded_ai_prompt_lbl.setText(f"Embedded-AI-Prompt: {harvested['ai_prompt'][:200]}")
+                            self.meta_embedded_ai_prompt_lbl.setPlainText(harvested['ai_prompt'])
                         if harvested["ai_params"]:
-                            self.meta_embedded_ai_params_lbl.setText(f"Embedded-AI-Params: {harvested['ai_params'][:200]}")
+                            self.meta_embedded_ai_params_lbl.setPlainText(harvested['ai_params'])
                         
                         # Technical EXIF
                         exif = img.getexif()
@@ -2603,9 +2669,9 @@ class MainWindow(QMainWindow):
         self.meta_lens_lbl.setText("Lens: ")
         self.meta_dpi_lbl.setText("DPI: ")
         self.meta_embedded_tags_lbl.setText("Embedded-Tags: ")
-        self.meta_embedded_comments_lbl.setText("Embedded-Comments: ")
-        self.meta_embedded_ai_prompt_lbl.setText("Embedded-AI-Prompt: ")
-        self.meta_embedded_ai_params_lbl.setText("Embedded-AI-Params: ")
+        self.meta_embedded_comments_lbl.setPlainText("")
+        self.meta_embedded_ai_prompt_lbl.setPlainText("")
+        self.meta_embedded_ai_params_lbl.setPlainText("")
 
     def _is_metadata_enabled(self, key: str, default: bool = True) -> bool:
         """Read metadata visibility setting with robust boolean conversion."""
@@ -2647,8 +2713,11 @@ class MainWindow(QMainWindow):
         self.meta_dpi_lbl.setVisible(self._is_metadata_enabled("dpi", False))
         self.meta_embedded_tags_lbl.setVisible(self._is_metadata_enabled("embeddedtags", True))
         self.meta_embedded_comments_lbl.setVisible(self._is_metadata_enabled("embeddedcomments", True))
+        self.lbl_embedded_comments_cap.setVisible(self._is_metadata_enabled("embeddedcomments", True))
         self.meta_embedded_ai_prompt_lbl.setVisible(self._is_metadata_enabled("aiprompt", True))
+        self.lbl_embedded_ai_prompt_cap.setVisible(self._is_metadata_enabled("aiprompt", True))
         self.meta_embedded_ai_params_lbl.setVisible(self._is_metadata_enabled("aiparams", True))
+        self.lbl_embedded_ai_params_cap.setVisible(self._is_metadata_enabled("aiparams", True))
         
         self.meta_filename_edit.setVisible(True)
         self.meta_path_lbl.setVisible(True)
