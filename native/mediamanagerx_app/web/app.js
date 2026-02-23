@@ -1032,6 +1032,20 @@ function wireSettings() {
   const backdrop = document.getElementById('settingsBackdrop');
   const toggle = document.getElementById('toggleRandomize');
   const glassToggle = document.getElementById('toggleGlass');
+
+  // Pane switching logic
+  const navItems = document.querySelectorAll('.settings-nav-item');
+  const panes = document.querySelectorAll('.settings-pane');
+  navItems.forEach(item => {
+    item.addEventListener('click', () => {
+      const targetPane = item.getAttribute('data-pane');
+      navItems.forEach(i => i.classList.toggle('active', i === item));
+      panes.forEach(p => {
+        p.hidden = p.id !== `pane-${targetPane}`;
+      });
+    });
+  });
+
   if (glassToggle) {
     glassToggle.addEventListener('change', () => {
       if (!gBridge || !gBridge.set_setting_bool) return;
@@ -1039,8 +1053,6 @@ function wireSettings() {
       gBridge.set_setting_bool('ui.enable_glassmorphism', glassToggle.checked, function () { });
     });
   }
-
-  const themeToggle = document.getElementById('toggleTheme');
 
   if (openBtn) openBtn.addEventListener('click', openSettings);
   if (closeBtn) closeBtn.addEventListener('click', closeSettings);
@@ -1100,7 +1112,6 @@ function wireSettings() {
     });
   }
 
-
   if (accentInput) {
     accentInput.addEventListener('input', () => {
       const v = accentInput.value || '#8ab4f8';
@@ -1129,6 +1140,25 @@ function wireSettings() {
       updateThemeAwareIcons(theme);
       gBridge.set_setting_str('ui.theme_mode', theme, function () { });
     });
+  });
+
+  // Wire up Metadata toggles
+  const metaToggles = [
+    'metaShowRes', 'metaShowSize',
+    'metaShowCamera', 'metaShowLocation', 'metaShowISO',
+    'metaShowShutter', 'metaShowAperture', 'metaShowSoftware', 'metaShowLens'
+  ];
+  metaToggles.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('change', () => {
+        if (!gBridge || !gBridge.set_setting_bool) return;
+        const key = `metadata.display.${id.replace('metaShow', '').toLowerCase()}`;
+        gBridge.set_setting_bool(key, el.checked, function () {
+          // Future: trigger metadata panel refresh if open
+        });
+      });
+    }
   });
 }
 
@@ -1337,6 +1367,24 @@ async function main() {
 
       updateSidebarButtonIcons('left', !!(s && s['ui.show_left_panel']));
       updateSidebarButtonIcons('right', !!(s && s['ui.show_right_panel']));
+
+      // Init new metadata toggles
+      const metaToggles = [
+        'metaShowRes', 'metaShowSize',
+        'metaShowCamera', 'metaShowLocation', 'metaShowISO',
+        'metaShowShutter', 'metaShowAperture', 'metaShowSoftware', 'metaShowLens'
+      ];
+      metaToggles.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+          const key = `metadata.display.${id.replace('metaShow', '').toLowerCase()}`;
+          // Default to checked if not set yet (optional, based on user preference)
+          const val = s && s[key];
+          if (val !== undefined) {
+            el.checked = !!val;
+          }
+        }
+      });
     });
 
     // Initial sync

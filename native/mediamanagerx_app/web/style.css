@@ -252,16 +252,138 @@ body.no-glass header {
   background: var(--shadow);
 }
 
+.settings-modal-card {
+  width: min(840px, calc(100vw - 40px));
+  max-height: calc(100vh - 80px);
+  padding: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.settings-sidebar {
+  width: 180px;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.settings-sidebar .modal-title {
+  padding: 16px;
+  margin-bottom: 0;
+  font-size: 16px;
+}
+
+.settings-nav {
+  flex: 1;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-nav-item {
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: var(--fg);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.settings-nav-item:hover {
+  background: var(--hover-bg);
+}
+
+.settings-nav-item.active {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.light-mode .settings-nav-item.active {
+  color: #000;
+  background: color-mix(in srgb, var(--accent), white 60%);
+}
+
+.modal-actions-sidebar {
+  padding: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-content {
+  flex: 1;
+  padding: 24px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--modal-bg);
+}
+
+.settings-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 100%;
+}
+
+.settings-pane[hidden] {
+  display: none;
+}
+
+.pane-title {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.pane-subtitle {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.metadata-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.coming-soon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 0;
+  color: var(--muted);
+  text-align: center;
+}
+
+.coming-soon-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.field-actions {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-start;
+}
+
 .modal-card {
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: min(520px, calc(100vw - 40px));
+  width: min(840px, calc(100vw - 40px));
+  overflow-x: hidden;
   border: 1px solid var(--border);
   border-radius: 14px;
   background: var(--modal-bg);
-  padding: 16px;
 }
 
 .modal-title {
@@ -1062,6 +1184,7 @@ body:not(.no-glass).light-mode .lightbox-backdrop {
   color: color-mix(in srgb, var(--fg), var(--accent) 65%);
   font-weight: 600;
 }
+
 /* Scanning Indicator */
 .scan-indicator {
   position: fixed;

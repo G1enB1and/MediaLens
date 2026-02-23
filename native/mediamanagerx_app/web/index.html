@@ -119,57 +119,126 @@
 
     <div class="modal" id="settingsModal" hidden>
       <div class="modal-backdrop" id="settingsBackdrop"></div>
-      <div class="modal-card">
-        <div class="modal-title">Settings</div>
-        <label class="toggle">
-          <input type="checkbox" id="toggleRandomize" />
-          <span>Randomize gallery order</span>
-        </label>
-        <div class="field">
-          <div class="field-label">Starting folder</div>
-          <div class="field-row">
-            <input class="text" id="startFolder" placeholder="(not set)" />
-            <button class="tb-btn" id="browseStartFolder">Browse…</button>
-            <button class="tb-btn highlight" id="loadStartFolderNow" title="Load this folder now without restart">Load
-              Now</button>
+      <div class="modal-card settings-modal-card">
+        <div class="settings-sidebar">
+          <div class="modal-title">Settings</div>
+          <div class="settings-nav">
+            <button class="settings-nav-item active" data-pane="general">General</button>
+            <button class="settings-nav-item" data-pane="appearance">Appearance</button>
+            <button class="settings-nav-item" data-pane="metadata">Metadata</button>
+            <button class="settings-nav-item" data-pane="ai">AI</button>
+          </div>
+          <div class="modal-actions-sidebar">
+            <button class="tb-btn" id="closeSettings">Close</button>
           </div>
         </div>
 
-        <label class="toggle">
-          <input type="checkbox" id="toggleRestoreLast" />
-          <span>Restore previous folder on launch</span>
-        </label>
-
-        <label class="toggle">
-          <input type="checkbox" id="toggleHideDot" />
-          <span>Hide dot folders/files (start with “.”)</span>
-        </label>
-
-        <label class="toggle">
-          <input type="checkbox" id="toggleGlass" checked />
-          <span>Enable glassmorphism</span>
-        </label>
-
-        <div class="field">
-          <div class="field-label">Theme</div>
-          <div class="segmented-control" id="themeRadioGroup">
-            <input type="radio" name="theme_mode" value="dark" id="themeDark" checked />
-            <label for="themeDark">Dark Mode</label>
-            <input type="radio" name="theme_mode" value="light" id="themeLight" />
-            <label for="themeLight">Light Mode</label>
+        <div class="settings-content">
+          <!-- General Pane -->
+          <div class="settings-pane" id="pane-general">
+            <div class="pane-title">General</div>
+            <label class="toggle">
+              <input type="checkbox" id="toggleRandomize" />
+              <span>Randomize gallery order</span>
+            </label>
+            <div class="field">
+              <div class="field-label">Starting folder</div>
+              <div class="field-row">
+                <input class="text" id="startFolder" placeholder="(not set)" />
+                <button class="tb-btn" id="browseStartFolder">Browse…</button>
+              </div>
+              <div class="field-actions">
+                <button class="tb-btn highlight" id="loadStartFolderNow"
+                  title="Load this folder now without restart">Load Now</button>
+              </div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="toggleRestoreLast" />
+              <span>Restore previous folder on launch</span>
+            </label>
+            <label class="toggle">
+              <input type="checkbox" id="toggleHideDot" />
+              <span>Hide dot folders/files (starts with “.”)</span>
+            </label>
           </div>
-        </div>
 
-        <div class="field">
-          <div class="field-label">Accent color</div>
-          <div class="field-row">
-            <input class="color" type="color" id="accentColor" />
-            <div class="hint">Used for progress, links, and highlights.</div>
+          <!-- Appearance Pane -->
+          <div class="settings-pane" id="pane-appearance" hidden>
+            <div class="pane-title">Appearance</div>
+            <label class="toggle">
+              <input type="checkbox" id="toggleGlass" checked />
+              <span>Enable glassmorphism</span>
+            </label>
+            <div class="field">
+              <div class="field-label">Theme</div>
+              <div class="segmented-control" id="themeRadioGroup">
+                <input type="radio" name="theme_mode" value="dark" id="themeDark" checked />
+                <label for="themeDark">Dark Mode</label>
+                <input type="radio" name="theme_mode" value="light" id="themeLight" />
+                <label for="themeLight">Light Mode</label>
+              </div>
+            </div>
+            <div class="field">
+              <div class="field-label">Accent color</div>
+              <div class="field-row">
+                <input class="color" type="color" id="accentColor" />
+                <div class="hint">Applied to progress bars, links, and UI highlights.</div>
+              </div>
+            </div>
           </div>
-        </div>
 
-        <div class="modal-actions">
-          <button class="tb-btn" id="closeSettings">Close</button>
+          <!-- Metadata Pane -->
+          <div class="settings-pane" id="pane-metadata" hidden>
+            <div class="pane-title">Metadata</div>
+            <div class="pane-subtitle">Choose which information to display in the metadata panel.</div>
+            <div class="metadata-toggles">
+              <label class="toggle">
+                <input type="checkbox" id="metaShowRes" checked />
+                <span>Resolution</span>
+              </label>
+              <label class="toggle">
+                <input type="checkbox" id="metaShowSize" checked />
+                <span>File Size</span>
+              </label>
+              <label class="toggle">
+                <input type="checkbox" id="metaShowCamera" />
+                <span>Camera Model</span>
+              </label>
+              <label class="toggle">
+                <input type="checkbox" id="metaShowLocation" />
+                <span>Location (GPS)</span>
+              </label>
+              <label class="toggle">
+                <input type="checkbox" id="metaShowISO" />
+                <span>ISO Speed</span>
+              </label>
+              <label class="toggle">
+                <input type="checkbox" id="metaShowShutter" />
+                <span>Shutter Speed</span>
+              </label>
+              <label class="toggle">
+                <input type="checkbox" id="metaShowAperture" />
+                <span>Aperture</span>
+              </label>
+              <label class="toggle">
+                <input type="checkbox" id="metaShowSoftware" />
+                <span>Software / Editor</span>
+              </label>
+              <label class="toggle">
+                <input type="checkbox" id="metaShowLens" />
+                <span>Lens Info</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- AI Pane -->
+          <div class="settings-pane" id="pane-ai" hidden>
+            <div class="pane-title">AI</div>
+            <div class="coming-soon">
+              <div class="coming-soon-icon">🤖</div>
+              <p>AI-powered features like auto-tagging and face detection are coming soon!</p>
+            </div>
+          </div>
         </div>
       </div>
     </div>

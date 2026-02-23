@@ -716,7 +716,7 @@ class Bridge(QObject):
                 "gallery.hide_dot",
                 "ui.show_left_panel",
                 "ui.show_right_panel",
-            ):
+            ) and not key.startswith("metadata.display."):
                 return False
             qkey = key.replace(".", "/")
             self.settings.setValue(qkey, bool(value))
@@ -1787,6 +1787,34 @@ class MainWindow(QMainWindow):
         self.meta_res_lbl.setObjectName("metaResLabel")
         right_layout.addWidget(self.meta_res_lbl)
 
+        self.meta_camera_lbl = QLabel("")
+        self.meta_camera_lbl.setObjectName("metaCameraLabel")
+        right_layout.addWidget(self.meta_camera_lbl)
+
+        self.meta_location_lbl = QLabel("")
+        self.meta_location_lbl.setObjectName("metaLocationLabel")
+        right_layout.addWidget(self.meta_location_lbl)
+
+        self.meta_iso_lbl = QLabel("")
+        self.meta_iso_lbl.setObjectName("metaISOLabel")
+        right_layout.addWidget(self.meta_iso_lbl)
+
+        self.meta_shutter_lbl = QLabel("")
+        self.meta_shutter_lbl.setObjectName("metaShutterLabel")
+        right_layout.addWidget(self.meta_shutter_lbl)
+
+        self.meta_aperture_lbl = QLabel("")
+        self.meta_aperture_lbl.setObjectName("metaApertureLabel")
+        right_layout.addWidget(self.meta_aperture_lbl)
+
+        self.meta_software_lbl = QLabel("")
+        self.meta_software_lbl.setObjectName("metaSoftwareLabel")
+        right_layout.addWidget(self.meta_software_lbl)
+
+        self.meta_lens_lbl = QLabel("")
+        self.meta_lens_lbl.setObjectName("metaLensLabel")
+        right_layout.addWidget(self.meta_lens_lbl)
+
         self.meta_sep = QWidget()
         self.meta_sep.setFixedHeight(1)
         self.meta_sep.setObjectName("metaSeparator")
@@ -1970,6 +1998,11 @@ class MainWindow(QMainWindow):
             self._update_native_styles(self._current_accent)
             self._update_splitter_style(self._current_accent)
 
+        if key.startswith("metadata.display."):
+            # Refresh current metadata display to apply visibility
+            if hasattr(self, "_current_paths") and self._current_paths:
+                self._show_metadata_for_path(self._current_paths)
+
     def _rename_from_panel(self) -> None:
         """Rename the current file using the filename field in the metadata panel."""
         if not hasattr(self, "_current_path") or not self._current_path:
@@ -2081,9 +2114,26 @@ class MainWindow(QMainWindow):
         self.lbl_fn_cap.setVisible(not is_bulk)
         self.meta_filename_edit.setVisible(not is_bulk)
         self.meta_path_lbl.setVisible(not is_bulk)
-        self.meta_size_lbl.setVisible(not is_bulk)
-        self.meta_res_lbl.setVisible(not is_bulk)
         self.meta_sep.setVisible(not is_bulk)
+
+        # Visibility based on settings
+        def is_visible(k, default=True):
+            try:
+                val = self.bridge.settings.value(f"metadata/display/{k}")
+                if val is None: return default
+                return bool(val)
+            except Exception: return default
+
+        self.meta_res_lbl.setVisible(not is_bulk and is_visible("res"))
+        self.meta_size_lbl.setVisible(not is_bulk and is_visible("size"))
+        self.meta_camera_lbl.setVisible(not is_bulk and is_visible("camera", False))
+        self.meta_location_lbl.setVisible(not is_bulk and is_visible("location", False))
+        self.meta_iso_lbl.setVisible(not is_bulk and is_visible("iso", False))
+        self.meta_shutter_lbl.setVisible(not is_bulk and is_visible("shutter", False))
+        self.meta_aperture_lbl.setVisible(not is_bulk and is_visible("aperture", False))
+        self.meta_software_lbl.setVisible(not is_bulk and is_visible("software", False))
+        self.meta_lens_lbl.setVisible(not is_bulk and is_visible("lens", False))
+
         self.lbl_desc_cap.setVisible(not is_bulk)
         self.meta_desc.setVisible(not is_bulk)
         self.lbl_notes_cap.setVisible(not is_bulk)
@@ -2130,8 +2180,60 @@ class MainWindow(QMainWindow):
                         self.meta_res_lbl.setText("")
                 except Exception:
                     self.meta_res_lbl.setText("")
+
+                # EXIF Data (JPEG/WebP)
+                if ext in {".jpg", ".jpeg", ".webp"}:
+                    try:
+                        from PIL import Image, ExifTags
+                        img = Image.open(str(p))
+                        exif = img._getexif()
+                        if exif:
+                            # Map tags
+                            data = {ExifTags.TAGS.get(k, k): v for k, v in exif.items()}
+                            
+                            # Camera
+                            model = data.get("Model")
+                            self.meta_camera_lbl.setText(f"Camera: {model}" if model else "")
+                            
+                            # ISO
+                            iso = data.get("ISOSpeedRatings")
+                            self.meta_iso_lbl.setText(f"ISO: {iso}" if iso else "")
+                            
+                            # Shutter Speed
+                            exp = data.get("ExposureTime")
+                            if exp:
+                                if exp < 1:
+                                    shutter = f"1/{int(1/exp)}s" if exp > 0 else f"{exp}s"
+                                else:
+                                    shutter = f"{exp}s"
+                                self.meta_shutter_lbl.setText(f"Shutter: {shutter}")
+                            else:
+                                self.meta_shutter_lbl.setText("")
+                                
+                            # Aperture
+                            fnum = data.get("FNumber")
+                            self.meta_aperture_lbl.setText(f"Aperture: f/{fnum}" if fnum else "")
+                            
+                            # Software
+                            sw = data.get("Software")
+                            self.meta_software_lbl.setText(f"Software: {sw}" if sw else "")
+                            
+                            # Lens (sometimes nested or in different tags)
+                            lens = data.get("LensModel")
+                            self.meta_lens_lbl.setText(f"Lens: {lens}" if lens else "")
+                            
+                            # Location (Simplistic check)
+                            gps = data.get("GPSInfo")
+                            self.meta_location_lbl.setText("Location: Available" if gps else "")
+                        else:
+                            self._clear_exif_labels()
+                    except Exception:
+                        self._clear_exif_labels()
+                else:
+                    self._clear_exif_labels()
             else:
                 self.meta_res_lbl.setText("")
+                self._clear_exif_labels()
 
             # Metadata from DB
             try:
@@ -2153,6 +2255,15 @@ class MainWindow(QMainWindow):
         self.meta_desc.blockSignals(False)
         self.meta_tags.blockSignals(False)
         self.meta_notes.blockSignals(False)
+
+    def _clear_exif_labels(self):
+        self.meta_camera_lbl.setText("")
+        self.meta_location_lbl.setText("")
+        self.meta_iso_lbl.setText("")
+        self.meta_shutter_lbl.setText("")
+        self.meta_aperture_lbl.setText("")
+        self.meta_software_lbl.setText("")
+        self.meta_lens_lbl.setText("")
 
     def _on_splitter_moved(self) -> None:
         """Save splitter state and re-apply card selection if the resize caused a deselect."""
