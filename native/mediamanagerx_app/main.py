@@ -104,6 +104,7 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QTextEdit,
     QLineEdit,
+    QFrame,
 )
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -184,6 +185,23 @@ class Theme:
     @staticmethod
     def get_text_muted() -> str:
         return "#5f6368" if Theme.get_is_light() else "#bbb"
+
+    @staticmethod
+    def get_btn_save_bg(accent: QColor) -> str:
+        """Matched to .tb-page:hover (faint tinted ghost style)"""
+        sb_bg = Theme.get_sidebar_bg(accent)
+        # Use a slightly stronger tint than sidebar bg (8%)
+        return Theme.mix(sb_bg, accent, 0.12)
+
+    @staticmethod
+    def get_btn_save_hover(accent: QColor) -> str:
+        """Matched to active pagination page (accent-themed)"""
+        if Theme.get_is_light():
+            # Match CSS: color-mix(in srgb, var(--accent), white 60%)
+            return Theme.mix("#ffffff", accent, 0.40)
+        else:
+            # Match CSS: var(--accent) but slightly muted/balanced if 'pure' is unreadable
+            return Theme.mix(Theme.get_sidebar_bg(accent), accent, 0.85)
 
     ACCENT_DEFAULT = "#8ab4f8"
 
@@ -1769,9 +1787,8 @@ class MainWindow(QMainWindow):
         self.meta_res_lbl.setObjectName("metaResLabel")
         right_layout.addWidget(self.meta_res_lbl)
 
-        from PySide6.QtWidgets import QFrame
-        self.meta_sep = QFrame()
-        self.meta_sep.setFrameShape(QFrame.Shape.HLine)
+        self.meta_sep = QWidget()
+        self.meta_sep.setFixedHeight(1)
         self.meta_sep.setObjectName("metaSeparator")
         right_layout.addWidget(self.meta_sep)
 
@@ -2440,17 +2457,26 @@ class MainWindow(QMainWindow):
                 color: {text};
             }}
             QPushButton#btnSaveMeta {{
-                background-color: {sb_bg_str};
+                background-color: {Theme.get_btn_save_bg(accent)};
                 color: {text};
                 border: 1px solid {Theme.get_border(accent)};
                 border-radius: 4px;
                 padding: 5px 10px;
                 font-size: 13px;
+                font-weight: 500;
             }}
             QPushButton#btnSaveMeta:hover {{
-                background-color: {accent_str};
+                background-color: {Theme.get_btn_save_hover(accent)};
                 color: {"#000" if is_light else "#fff"};
                 border-color: {accent_str};
+            }}
+            QWidget#metaSeparator {{
+                background-color: {text};
+                height: 1px;
+                max-height: 1px;
+                min-height: 1px;
+                border: none;
+                margin: 4px 0;
             }}
             {scrollbar_style}
         """)
