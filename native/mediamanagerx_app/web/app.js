@@ -1155,6 +1155,7 @@ function wireSettings() {
     if (el) {
       el.addEventListener('change', () => {
         if (!gBridge || !gBridge.set_setting_bool) return;
+        // Use lowercase for key compatibility with bridge (e.g. metaShowRes -> res)
         const key = `metadata.display.${id.replace('metaShow', '').toLowerCase()}`;
         gBridge.set_setting_bool(key, el.checked, function () {
           // Future: trigger metadata panel refresh if open
