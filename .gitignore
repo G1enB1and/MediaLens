@@ -12,3 +12,10 @@ data/
 .venv/
 .env
 .DS_Store
+
+# Build artifacts
+/build/
+/dist/
+*.spec
+app.ico
+MediaManagerX_Setup.exe
