@@ -648,8 +648,13 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.custom-select').forEach(s => s.classList.remove('open'));
 
     // If we clicked something that is NOT a card or a descendant of a card,
-    // and not a menu item or other interactive element that should keep selection.
-    if (!e.target.closest('.card') && !e.target.closest('.ctx') && !e.target.closest('.select-trigger') && !e.target.closest('.select-options')) {
+    // and not a menu item or other interactive element that should keep selection,
+    // and not within the right side panels (metadata/bulk tag editor).
+    if (!e.target.closest('.card') &&
+      !e.target.closest('.ctx') &&
+      !e.target.closest('.select-trigger') &&
+      !e.target.closest('.select-options') &&
+      !e.target.closest('.pane-right')) {
       deselectAll();
     }
   });

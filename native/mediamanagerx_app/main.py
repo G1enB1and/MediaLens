@@ -2026,7 +2026,7 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(self.btn_clear_bulk_tags)
         self.btn_clear_bulk_tags.setVisible(False)
 
-        self.btn_save_meta = QPushButton("Save Changes")
+        self.btn_save_meta = QPushButton("Save Changes to Database")
         self.btn_save_meta.setObjectName("btnSaveMeta")
         self.btn_save_meta.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_save_meta.clicked.connect(self._save_native_metadata)
@@ -2975,7 +2975,7 @@ class MainWindow(QMainWindow):
             else:
                 self.meta_res_lbl.setText("Resolution: ")
         
-            self.btn_save_meta.setText("Save Changes")
+            self.btn_save_meta.setText("Save Changes to Database")
         else:
             # Bulk mode
             self.meta_tags.setText("")
@@ -3710,20 +3710,26 @@ class MainWindow(QMainWindow):
             pass
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
-        # Only handle MouseButtonPress to avoid duplicate triggers on release.
         if event.type() == QEvent.Type.MouseButtonPress:
             # Use a more robust geometric check instead of recursive object parent lookup.
             # This is safer and avoids potential crashes in transient widget states.
             from PySide6.QtGui import QCursor
-            from PySide6.QtWidgets import QWidget
             rel_pos = self.web.mapFromGlobal(QCursor.pos())
             is_web = self.web.rect().contains(rel_pos)
             
             if not is_web:
-                # ONLY dismiss if the click is truly outside the web area.
-                # This prevents the native filter from eating clicks destined for the context menu.
+                # ONLY dismiss menus if the click is outside the web area.
                 self._dismiss_web_menus()
-                self._deselect_web_items()
+                
+                # Deselect web items, UNLESS the click was in the right metadata/tags pane
+                is_right_pane = False
+                if self.right_pane.isVisible():
+                    rp_pos = self.right_pane.mapFromGlobal(QCursor.pos())
+                    is_right_pane = self.right_pane.rect().contains(rp_pos)
+                    
+                if not is_right_pane:
+                    self._deselect_web_items()
+                    
         return super().eventFilter(watched, event)
 
     def _dismiss_web_menus(self) -> None:
