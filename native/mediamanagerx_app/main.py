@@ -745,6 +745,8 @@ class Bridge(QObject):
                 "ui.enable_glassmorphism": bool(self.settings.value("ui/enable_glassmorphism", True, type=bool)),
                 "metadata.display.res": bool(self.settings.value("metadata/display/res", True, type=bool)),
                 "metadata.display.size": bool(self.settings.value("metadata/display/size", True, type=bool)),
+                "metadata.display.description": bool(self.settings.value("metadata/display/description", True, type=bool)),
+                "metadata.display.notes": bool(self.settings.value("metadata/display/notes", True, type=bool)),
                 "metadata.display.camera": bool(self.settings.value("metadata/display/camera", False, type=bool)),
                 "metadata.display.location": bool(self.settings.value("metadata/display/location", False, type=bool)),
                 "metadata.display.iso": bool(self.settings.value("metadata/display/iso", False, type=bool)),
@@ -755,6 +757,8 @@ class Bridge(QObject):
                 "metadata.display.dpi": bool(self.settings.value("metadata/display/dpi", False, type=bool)),
                 "metadata.display.embeddedtags": bool(self.settings.value("metadata/display/embeddedtags", True, type=bool)),
                 "metadata.display.embeddedcomments": bool(self.settings.value("metadata/display/embeddedcomments", True, type=bool)),
+                "metadata.display.embeddedtool": bool(self.settings.value("metadata/display/embeddedtool", True, type=bool)),
+                "metadata.display.combineddb": bool(self.settings.value("metadata/display/combineddb", True, type=bool)),
                 "metadata.display.aiprompt": bool(self.settings.value("metadata/display/aiprompt", True, type=bool)),
                 "metadata.display.ainegprompt": bool(self.settings.value("metadata/display/ainegprompt", True, type=bool)),
                 "metadata.display.aiparams": bool(self.settings.value("metadata/display/aiparams", True, type=bool)),
@@ -2739,6 +2743,8 @@ class MainWindow(QMainWindow):
 
         show_res = self._is_metadata_enabled("res", True)
         show_size = self._is_metadata_enabled("size", True)
+        show_description = self._is_metadata_enabled("description", True)
+        show_notes = self._is_metadata_enabled("notes", True)
         show_camera = self._is_metadata_enabled("camera", False)
         show_location = self._is_metadata_enabled("location", False)
         show_iso = self._is_metadata_enabled("iso", False)
@@ -2749,6 +2755,8 @@ class MainWindow(QMainWindow):
         show_dpi = self._is_metadata_enabled("dpi", False)
         show_embedded_tags = self._is_metadata_enabled("embeddedtags", True)
         show_embedded_comments = self._is_metadata_enabled("embeddedcomments", True)
+        show_embedded_tool = self._is_metadata_enabled("embeddedtool", True)
+        show_combined_db = self._is_metadata_enabled("combineddb", True)
         show_ai_prompt = self._is_metadata_enabled("aiprompt", True)
         show_ai_neg_prompt = self._is_metadata_enabled("ainegprompt", True)
         show_ai_params = self._is_metadata_enabled("aiparams", True)
@@ -2774,10 +2782,10 @@ class MainWindow(QMainWindow):
         self.lbl_ai_negative_prompt_cap.setVisible(not is_bulk and show_ai_neg_prompt)
         self.meta_ai_params_edit.setVisible(not is_bulk and show_ai_params)
         self.lbl_ai_params_cap.setVisible(not is_bulk and show_ai_params)
-        self.meta_embedded_tool_edit.setVisible(not is_bulk)
-        self.lbl_embedded_tool_cap.setVisible(not is_bulk)
-        self.meta_combined_db.setVisible(not is_bulk)
-        self.lbl_combined_db_cap.setVisible(not is_bulk)
+        self.meta_embedded_tool_edit.setVisible(not is_bulk and show_embedded_tool)
+        self.lbl_embedded_tool_cap.setVisible(not is_bulk and show_embedded_tool)
+        self.meta_combined_db.setVisible(not is_bulk and show_combined_db)
+        self.lbl_combined_db_cap.setVisible(not is_bulk and show_combined_db)
 
         # Set default text prefixes so they show even if blank
         self.meta_res_lbl.setText("Resolution: ")
@@ -2798,10 +2806,10 @@ class MainWindow(QMainWindow):
         self.meta_ai_negative_prompt_edit.setPlainText("")
         self.meta_ai_params_edit.setPlainText("")
 
-        self.lbl_desc_cap.setVisible(not is_bulk)
-        self.meta_desc.setVisible(not is_bulk)
-        self.lbl_notes_cap.setVisible(not is_bulk)
-        self.meta_notes.setVisible(not is_bulk)
+        self.lbl_desc_cap.setVisible(not is_bulk and show_description)
+        self.meta_desc.setVisible(not is_bulk and show_description)
+        self.lbl_notes_cap.setVisible(not is_bulk and show_notes)
+        self.meta_notes.setVisible(not is_bulk and show_notes)
         
         # Tags stay visible
         self.lbl_tags_cap.setVisible(True)
@@ -3025,14 +3033,19 @@ class MainWindow(QMainWindow):
         self.meta_ai_params_edit.setVisible(self._is_metadata_enabled("aiparams", True))
         self.lbl_ai_params_cap.setVisible(self._is_metadata_enabled("aiparams", True))
         
-        self.meta_embedded_tool_edit.setVisible(True)
-        self.lbl_embedded_tool_cap.setVisible(True)
-        self.meta_combined_db.setVisible(True)
-        self.lbl_combined_db_cap.setVisible(True)
+        self.meta_embedded_tool_edit.setVisible(self._is_metadata_enabled("embeddedtool", True))
+        self.lbl_embedded_tool_cap.setVisible(self._is_metadata_enabled("embeddedtool", True))
+        self.meta_combined_db.setVisible(self._is_metadata_enabled("combineddb", True))
+        self.lbl_combined_db_cap.setVisible(self._is_metadata_enabled("combineddb", True))
         
         self.meta_filename_edit.setVisible(True)
         self.meta_path_lbl.setVisible(True)
         self.meta_sep.setVisible(True)
+        
+        self.meta_desc.setVisible(self._is_metadata_enabled("description", True))
+        self.lbl_desc_cap.setVisible(self._is_metadata_enabled("description", True))
+        self.meta_notes.setVisible(self._is_metadata_enabled("notes", True))
+        self.lbl_notes_cap.setVisible(self._is_metadata_enabled("notes", True))
         
         self.meta_desc.setPlainText("")
         self.meta_notes.setPlainText("")

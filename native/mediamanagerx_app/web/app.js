@@ -1148,10 +1148,11 @@ function wireSettings() {
 
   // Wire up Metadata toggles
   const metaToggles = [
-    'metaShowRes', 'metaShowSize',
+    'metaShowRes', 'metaShowSize', 'metaShowDescription', 'metaShowNotes',
     'metaShowCamera', 'metaShowLocation', 'metaShowISO',
     'metaShowShutter', 'metaShowAperture', 'metaShowSoftware', 'metaShowLens',
     'metaShowDPI', 'metaShowEmbeddedTags', 'metaShowEmbeddedComments',
+    'metaShowEmbeddedTool', 'metaShowCombinedDB',
     'metaShowAIPrompt', 'metaShowAINegPrompt', 'metaShowAIParams'
   ];
   metaToggles.forEach(id => {
@@ -1377,10 +1378,11 @@ async function main() {
 
       // Init new metadata toggles
       const metaToggles = [
-        'metaShowRes', 'metaShowSize',
+        'metaShowRes', 'metaShowSize', 'metaShowDescription', 'metaShowNotes',
         'metaShowCamera', 'metaShowLocation', 'metaShowISO',
         'metaShowShutter', 'metaShowAperture', 'metaShowSoftware', 'metaShowLens',
         'metaShowDPI', 'metaShowEmbeddedTags', 'metaShowEmbeddedComments',
+        'metaShowEmbeddedTool', 'metaShowCombinedDB',
         'metaShowAIPrompt', 'metaShowAINegPrompt', 'metaShowAIParams'
       ];
       metaToggles.forEach(id => {
