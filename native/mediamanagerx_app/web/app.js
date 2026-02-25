@@ -986,17 +986,21 @@ function wirePager() {
   const scrollBtn = document.getElementById('scrollTop');
   if (scrollBtn) {
     scrollBtn.addEventListener('click', () => {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      const main = document.querySelector('main');
+      if (main) main.scrollTo({ top: 0, behavior: 'smooth' });
     });
   }
 
   const scrollBottomBtn = document.getElementById('scrollBottom');
   if (scrollBottomBtn) {
     scrollBottomBtn.addEventListener('click', () => {
-      window.scrollTo({
-        top: document.documentElement.scrollHeight,
-        behavior: 'smooth'
-      });
+      const main = document.querySelector('main');
+      if (main) {
+        main.scrollTo({
+          top: main.scrollHeight,
+          behavior: 'smooth'
+        });
+      }
     });
   }
 
