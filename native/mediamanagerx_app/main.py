@@ -164,8 +164,8 @@ class Theme:
 
     @staticmethod
     def get_scrollbar_track(accent: QColor) -> str:
-        base = Theme.BASE_SIDEBAR_BG_LIGHT if Theme.get_is_light() else Theme.BASE_SIDEBAR_BG_DARK
-        return Theme.mix(base, accent, 0.05)
+        # User requested very dark grey (dark) and very light offwhite (light)
+        return "#080808" if not Theme.get_is_light() else "#fcfcfc"
 
     @staticmethod
     def get_scrollbar_thumb(accent: QColor) -> str:
@@ -3438,45 +3438,100 @@ class MainWindow(QMainWindow):
         """)
 
     def _get_native_scrollbar_style(self, accent: QColor) -> str:
-        """Generate a QSS string for tinted native scrollbars."""
+        """Generate a QSS string for tinted native scrollbars that match the web gallery aesthetics exactly."""
         track = Theme.get_scrollbar_track(accent)
-        thumb = Theme.get_scrollbar_thumb(accent)
-        hover = Theme.mix(thumb, accent, 0.1)
+        is_light = Theme.get_is_light()
+        
+        # We use physical SVG files for maximum compatibility with Qt's QSS engine,
+        # which often fails to render SVG data URIs.
+        base_svg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "scrollbar_arrows").replace("\\", "/")
+        mode = "light" if is_light else "dark"
+        
+        up_path = f"{base_svg_path}/{mode}_up.svg"
+        dn_path = f"{base_svg_path}/{mode}_down.svg"
+        lt_path = f"{base_svg_path}/{mode}_left.svg"
+        rt_path = f"{base_svg_path}/{mode}_right.svg"
+
+        # Thumb handle background matched to web's var(--border)
+        thumb_bg = Theme.get_border(accent)
         
         return f"""
             QScrollBar:vertical {{
                 background: {track};
-                width: 10px;
-                margin: 0px;
+                width: 12px;
+                margin: 12px 0 12px 0;
             }}
             QScrollBar::handle:vertical {{
-                background: {thumb};
+                background: {thumb_bg};
                 min-height: 20px;
-                border-radius: 5px;
-                margin: 2px;
+                border-radius: 10px;
+                border: 2px solid {track};
             }}
-            QScrollBar::handle:vertical:hover {{
-                background: {hover};
+            QScrollBar::handle:vertical:hover, QScrollBar::handle:vertical:pressed {{
+                /* Gallery uses no hover on thumb; matching that for parity */
+                background: {thumb_bg};
             }}
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-                height: 0px;
+            QScrollBar::add-line:vertical {{
+                background: {track};
+                height: 12px;
+                subcontrol-position: bottom;
+                subcontrol-origin: margin;
             }}
+            QScrollBar::sub-line:vertical {{
+                background: {track};
+                height: 12px;
+                subcontrol-position: top;
+                subcontrol-origin: margin;
+            }}
+            QScrollBar::up-arrow:vertical {{
+                image: url("{up_path}");
+                width: 8px;
+                height: 8px;
+            }}
+            QScrollBar::down-arrow:vertical {{
+                image: url("{dn_path}");
+                width: 8px;
+                height: 8px;
+            }}
+            
             QScrollBar:horizontal {{
                 background: {track};
-                height: 10px;
-                margin: 0px;
+                height: 12px;
+                margin: 0 12px 0 12px;
             }}
             QScrollBar::handle:horizontal {{
-                background: {thumb};
+                background: {thumb_bg};
                 min-width: 20px;
-                border-radius: 5px;
-                margin: 2px;
+                border-radius: 10px;
+                border: 2px solid {track};
             }}
-            QScrollBar::handle:horizontal:hover {{
-                background: {hover};
+            QScrollBar::handle:horizontal:hover, QScrollBar::handle:horizontal:pressed {{
+                background: {thumb_bg};
             }}
-            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
-                width: 0px;
+            QScrollBar::add-line:horizontal {{
+                background: {track};
+                width: 12px;
+                subcontrol-position: right;
+                subcontrol-origin: margin;
+            }}
+            QScrollBar::sub-line:horizontal {{
+                background: {track};
+                width: 12px;
+                subcontrol-position: left;
+                subcontrol-origin: margin;
+            }}
+            QScrollBar::left-arrow:horizontal {{
+                image: url("{lt_path}");
+                width: 8px;
+                height: 8px;
+            }}
+            QScrollBar::right-arrow:horizontal {{
+                image: url("{rt_path}");
+                width: 8px;
+                height: 8px;
+            }}
+            QScrollBar::add-page, QScrollBar::sub-page {{
+                background: none;
             }}
         """
 

@@ -23,6 +23,8 @@
   --modal-bg: color-mix(in srgb, var(--panel), black 5%);
   --shadow: var(--shadow-color);
   --thumb-bg: var(--thumb-neutral);
+  --scrollbar-track: #080808;
+  --scrollbar-arrow: #999;
 }
 
 :root.light-mode {
@@ -44,6 +46,8 @@
   --hover-bg: color-mix(in srgb, var(--accent), transparent 90%);
   --modal-bg: #ffffff;
   --thumb-bg: var(--thumb-neutral);
+  --scrollbar-track: #fcfcfc;
+  --scrollbar-arrow: #666;
 }
 
 *,
@@ -66,28 +70,72 @@ body {
 
 /* Custom Scrollbars */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--bg);
+  background: var(--scrollbar-track);
 }
 
 ::-webkit-scrollbar-thumb {
   background: var(--border);
   border-radius: 10px;
-  border: 2px solid var(--bg);
+  border: 2px solid var(--scrollbar-track);
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--muted);
 }
 
-/* Firefox support */
+::-webkit-scrollbar-button {
+  background-color: var(--scrollbar-track);
+  background-repeat: no-repeat;
+  background-position: center;
+  height: 12px;
+  width: 12px;
+}
+
+/* Up Arrow */
+::-webkit-scrollbar-button:vertical:decrement {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' fill='none'><path d='M50 35L25 65H75L50 35Z' fill='%23999'/></svg>");
+}
+
+.light-mode ::-webkit-scrollbar-button:vertical:decrement {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' fill='none'><path d='M50 35L25 65H75L50 35Z' fill='%23666'/></svg>");
+}
+
+/* Down Arrow */
+::-webkit-scrollbar-button:vertical:increment {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' fill='none'><path d='M50 65L75 35H25L50 65Z' fill='%23999'/></svg>");
+}
+
+.light-mode ::-webkit-scrollbar-button:vertical:increment {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' fill='none'><path d='M50 65L75 35H25L50 65Z' fill='%23666'/></svg>");
+}
+
+/* Left Arrow */
+::-webkit-scrollbar-button:horizontal:decrement {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' fill='none'><path d='M35 50L65 25V75L35 50Z' fill='%23999'/></svg>");
+}
+
+.light-mode ::-webkit-scrollbar-button:horizontal:decrement {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' fill='none'><path d='M35 50L65 25V75L35 50Z' fill='%23666'/></svg>");
+}
+
+/* Right Arrow */
+::-webkit-scrollbar-button:horizontal:increment {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' fill='none'><path d='M65 50L35 75V25L65 50Z' fill='%23999'/></svg>");
+}
+
+.light-mode ::-webkit-scrollbar-button:horizontal:increment {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' fill='none'><path d='M65 50L35 75V25L65 50Z' fill='%23666'/></svg>");
+}
+
+/* Firefox support (arrows not supported in standard CSS properties) */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--border) var(--bg);
+  scrollbar-color: var(--border) var(--scrollbar-track);
 }
 
 /* Prevent a white flash while the page/app initializes */
