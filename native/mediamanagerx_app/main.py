@@ -746,6 +746,7 @@ class Bridge(QObject):
                 "metadata.display.res": bool(self.settings.value("metadata/display/res", True, type=bool)),
                 "metadata.display.size": bool(self.settings.value("metadata/display/size", True, type=bool)),
                 "metadata.display.description": bool(self.settings.value("metadata/display/description", True, type=bool)),
+                "metadata.display.tags": bool(self.settings.value("metadata/display/tags", True, type=bool)),
                 "metadata.display.notes": bool(self.settings.value("metadata/display/notes", True, type=bool)),
                 "metadata.display.camera": bool(self.settings.value("metadata/display/camera", False, type=bool)),
                 "metadata.display.location": bool(self.settings.value("metadata/display/location", False, type=bool)),
@@ -1955,11 +1956,9 @@ class MainWindow(QMainWindow):
         self.meta_desc.setMaximumHeight(90)
 
         self.lbl_tags_cap = QLabel("Tags (comma separated):")
-        right_layout.addWidget(self.lbl_tags_cap)
         self.meta_tags = QLineEdit()
         self.meta_tags.setPlaceholderText("tag1, tag2...")
         self.meta_tags.editingFinished.connect(self._save_native_tags)
-        right_layout.addWidget(self.meta_tags)
 
         self.lbl_ai_prompt_cap = QLabel("AI Prompt:")
         self.lbl_ai_prompt_cap.setObjectName("metaAIPromptCaption")
@@ -2996,6 +2995,7 @@ class MainWindow(QMainWindow):
             "res": [self.meta_res_lbl],
             "size": [self.meta_size_lbl],
             "description": [self.lbl_desc_cap, self.meta_desc],
+            "tags": [self.lbl_tags_cap, self.meta_tags],
             "notes": [self.lbl_notes_cap, self.meta_notes],
             "camera": [self.meta_camera_lbl],
             "location": [self.meta_location_lbl],
@@ -3015,7 +3015,7 @@ class MainWindow(QMainWindow):
         }
         
         # Default fallback order
-        default_order = ["res", "size", "description", "notes", "camera", "location", "iso", "shutter", 
+        default_order = ["res", "size", "description", "tags", "notes", "camera", "location", "iso", "shutter", 
                          "aperture", "software", "lens", "dpi", "embeddedtags", "embeddedcomments", 
                          "embeddedtool", "combineddb", "aiprompt", "ainegprompt", "aiparams"]
         
@@ -3089,6 +3089,8 @@ class MainWindow(QMainWindow):
         
         self.meta_desc.setVisible(self._is_metadata_enabled("description", True))
         self.lbl_desc_cap.setVisible(self._is_metadata_enabled("description", True))
+        self.meta_tags.setVisible(self._is_metadata_enabled("tags", True))
+        self.lbl_tags_cap.setVisible(self._is_metadata_enabled("tags", True))
         self.meta_notes.setVisible(self._is_metadata_enabled("notes", True))
         self.lbl_notes_cap.setVisible(self._is_metadata_enabled("notes", True))
         

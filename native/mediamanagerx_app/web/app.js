@@ -1148,7 +1148,7 @@ function wireSettings() {
 
   // Wire up Metadata toggles
   const metaToggles = [
-    'metaShowRes', 'metaShowSize', 'metaShowDescription', 'metaShowNotes',
+    'metaShowRes', 'metaShowSize', 'metaShowDescription', 'metaShowTags', 'metaShowNotes',
     'metaShowCamera', 'metaShowLocation', 'metaShowISO',
     'metaShowShutter', 'metaShowAperture', 'metaShowSoftware', 'metaShowLens',
     'metaShowDPI', 'metaShowEmbeddedTags', 'metaShowEmbeddedComments',
@@ -1457,7 +1457,7 @@ async function main() {
 
       // Init new metadata toggles
       const metaToggles = [
-        'metaShowRes', 'metaShowSize', 'metaShowDescription', 'metaShowNotes',
+        'metaShowRes', 'metaShowSize', 'metaShowDescription', 'metaShowTags', 'metaShowNotes',
         'metaShowCamera', 'metaShowLocation', 'metaShowISO',
         'metaShowShutter', 'metaShowAperture', 'metaShowSoftware', 'metaShowLens',
         'metaShowDPI', 'metaShowEmbeddedTags', 'metaShowEmbeddedComments',
