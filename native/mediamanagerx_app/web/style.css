@@ -398,7 +398,55 @@ body.no-glass header {
 .metadata-toggles {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 2px;
+}
+
+.sortable-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: transparent;
+  transition: background 0.2s ease, transform 0.1s ease;
+  user-select: none;
+}
+
+.sortable-item:hover {
+  background: var(--hover-bg);
+}
+
+.drag-handle {
+  cursor: grab;
+  color: var(--muted);
+  font-size: 14px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.drag-handle:hover {
+  color: var(--fg);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.sortable-item.dragging {
+  opacity: 0.4;
+  background: var(--accent);
+  color: #fff;
+}
+
+.sortable-item.drag-over {
+  background: color-mix(in srgb, var(--accent), transparent 90%);
+  outline: 1px dashed var(--accent);
 }
 
 .coming-soon {

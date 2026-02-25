@@ -762,6 +762,7 @@ class Bridge(QObject):
                 "metadata.display.aiprompt": bool(self.settings.value("metadata/display/aiprompt", True, type=bool)),
                 "metadata.display.ainegprompt": bool(self.settings.value("metadata/display/ainegprompt", True, type=bool)),
                 "metadata.display.aiparams": bool(self.settings.value("metadata/display/aiparams", True, type=bool)),
+                "metadata.display.order": self.settings.value("metadata/display/order", "[]", type=str),
             }
         except Exception:
             return {
@@ -805,7 +806,7 @@ class Bridge(QObject):
     @Slot(str, str, result=bool)
     def set_setting_str(self, key: str, value: str) -> bool:
         try:
-            if key not in ("gallery.start_folder", "ui.accent_color", "ui.theme_mode"):
+            if key not in ("gallery.start_folder", "ui.accent_color", "ui.theme_mode", "metadata.display.order"):
                 return False
             qkey = key.replace(".", "/")
             self.settings.setValue(qkey, str(value or ""))
@@ -815,6 +816,9 @@ class Bridge(QObject):
                 # Emit flag change for UI consistency if needed
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, value == "light")
+            elif key == "metadata.display.order":
+                self.settings.sync()
+                self.uiFlagChanged.emit(key, True) # Value is for refreshing layout
             return True
         except Exception:
             return False
@@ -1878,80 +1882,66 @@ class MainWindow(QMainWindow):
 
         self.meta_size_lbl = QLabel("File Size:")
         self.meta_size_lbl.setObjectName("metaSizeLabel")
-        right_layout.addWidget(self.meta_size_lbl)
 
         self.meta_res_lbl = QLabel("")
         self.meta_res_lbl.setObjectName("metaResLabel")
-        right_layout.addWidget(self.meta_res_lbl)
+        
+        self.meta_fields_layout = QVBoxLayout()
+        self.meta_fields_layout.setSpacing(6)
+        right_layout.addLayout(self.meta_fields_layout)
 
         self.meta_camera_lbl = QLabel("")
         self.meta_camera_lbl.setObjectName("metaCameraLabel")
-        right_layout.addWidget(self.meta_camera_lbl)
 
         self.meta_location_lbl = QLabel("")
         self.meta_location_lbl.setObjectName("metaLocationLabel")
-        right_layout.addWidget(self.meta_location_lbl)
 
         self.meta_iso_lbl = QLabel("")
         self.meta_iso_lbl.setObjectName("metaISOLabel")
-        right_layout.addWidget(self.meta_iso_lbl)
 
         self.meta_shutter_lbl = QLabel("")
         self.meta_shutter_lbl.setObjectName("metaShutterLabel")
-        right_layout.addWidget(self.meta_shutter_lbl)
 
         self.meta_aperture_lbl = QLabel("")
         self.meta_aperture_lbl.setObjectName("metaApertureLabel")
-        right_layout.addWidget(self.meta_aperture_lbl)
 
         self.meta_software_lbl = QLabel("")
         self.meta_software_lbl.setObjectName("metaSoftwareLabel")
-        right_layout.addWidget(self.meta_software_lbl)
 
         self.meta_lens_lbl = QLabel("")
         self.meta_lens_lbl.setObjectName("metaLensLabel")
-        right_layout.addWidget(self.meta_lens_lbl)
 
         self.meta_dpi_lbl = QLabel("")
         self.meta_dpi_lbl.setObjectName("metaDPILabel")
-        right_layout.addWidget(self.meta_dpi_lbl)
 
         self.lbl_embedded_tags_cap = QLabel("Embedded-Tags (semicolon separated):")
         self.lbl_embedded_tags_cap.setObjectName("metaEmbeddedTagsCaption")
-        right_layout.addWidget(self.lbl_embedded_tags_cap)
         self.meta_embedded_tags_edit = QLineEdit()
         self.meta_embedded_tags_edit.setObjectName("metaEmbeddedTagsEdit")
         self.meta_embedded_tags_edit.setPlaceholderText("keyword1; keyword2; keyword3")
-        right_layout.addWidget(self.meta_embedded_tags_edit)
 
         self.lbl_embedded_comments_cap = QLabel("Embedded-Comments:")
         self.lbl_embedded_comments_cap.setObjectName("metaEmbeddedCommentsCaption")
-        right_layout.addWidget(self.lbl_embedded_comments_cap)
         self.meta_embedded_comments_edit = QTextEdit()
         self.meta_embedded_comments_edit.setObjectName("metaEmbeddedCommentsEdit")
         self.meta_embedded_comments_edit.setPlaceholderText("Embedded comments...")
         self.meta_embedded_comments_edit.setMaximumHeight(70)
-        right_layout.addWidget(self.meta_embedded_comments_edit)
 
         self.lbl_embedded_tool_cap = QLabel("Embedded-Tool-Metadata:")
         self.lbl_embedded_tool_cap.setObjectName("metaEmbeddedToolCaption")
-        right_layout.addWidget(self.lbl_embedded_tool_cap)
         self.meta_embedded_tool_edit = QTextEdit()
         self.meta_embedded_tool_edit.setObjectName("metaEmbeddedToolEdit")
         self.meta_embedded_tool_edit.setReadOnly(True)
         self.meta_embedded_tool_edit.setPlaceholderText("AI parameters/Tool info...")
         self.meta_embedded_tool_edit.setMaximumHeight(70)
-        right_layout.addWidget(self.meta_embedded_tool_edit)
 
         self.lbl_combined_db_cap = QLabel("Combined-From-DB (Read-Only):")
         self.lbl_combined_db_cap.setObjectName("metaCombinedDBCaption")
-        right_layout.addWidget(self.lbl_combined_db_cap)
         self.meta_combined_db = QTextEdit()
         self.meta_combined_db.setObjectName("metaCombinedDBEdit")
         self.meta_combined_db.setReadOnly(True)
         self.meta_combined_db.setPlaceholderText("Combined DB notes/AI info...")
         self.meta_combined_db.setMaximumHeight(100)
-        right_layout.addWidget(self.meta_combined_db)
 
         self.meta_sep = QWidget()
         self.meta_sep.setFixedHeight(1)
@@ -1960,11 +1950,9 @@ class MainWindow(QMainWindow):
 
         # --- Editable metadata ---
         self.lbl_desc_cap = QLabel("Description:")
-        right_layout.addWidget(self.lbl_desc_cap)
         self.meta_desc = QTextEdit()
         self.meta_desc.setPlaceholderText("Add a description...")
         self.meta_desc.setMaximumHeight(90)
-        right_layout.addWidget(self.meta_desc)
 
         self.lbl_tags_cap = QLabel("Tags (comma separated):")
         right_layout.addWidget(self.lbl_tags_cap)
@@ -1975,37 +1963,29 @@ class MainWindow(QMainWindow):
 
         self.lbl_ai_prompt_cap = QLabel("AI Prompt:")
         self.lbl_ai_prompt_cap.setObjectName("metaAIPromptCaption")
-        right_layout.addWidget(self.lbl_ai_prompt_cap)
         self.meta_ai_prompt_edit = QTextEdit()
         self.meta_ai_prompt_edit.setObjectName("metaAIPromptEdit")
         self.meta_ai_prompt_edit.setPlaceholderText("AI prompt...")
         self.meta_ai_prompt_edit.setMaximumHeight(70)
-        right_layout.addWidget(self.meta_ai_prompt_edit)
 
         self.lbl_ai_negative_prompt_cap = QLabel("AI Negative Prompt:")
         self.lbl_ai_negative_prompt_cap.setObjectName("metaAINegativePromptCaption")
-        right_layout.addWidget(self.lbl_ai_negative_prompt_cap)
         self.meta_ai_negative_prompt_edit = QTextEdit()
         self.meta_ai_negative_prompt_edit.setObjectName("metaAINegativePromptEdit")
         self.meta_ai_negative_prompt_edit.setPlaceholderText("AI negative prompt...")
         self.meta_ai_negative_prompt_edit.setMaximumHeight(70)
-        right_layout.addWidget(self.meta_ai_negative_prompt_edit)
 
         self.lbl_ai_params_cap = QLabel("AI Parameters:")
         self.lbl_ai_params_cap.setObjectName("metaAIParamsCaption")
-        right_layout.addWidget(self.lbl_ai_params_cap)
         self.meta_ai_params_edit = QTextEdit()
         self.meta_ai_params_edit.setObjectName("metaAIParamsEdit")
         self.meta_ai_params_edit.setPlaceholderText("AI parameters...")
         self.meta_ai_params_edit.setMaximumHeight(70)
-        right_layout.addWidget(self.meta_ai_params_edit)
 
         self.lbl_notes_cap = QLabel("Notes:")
-        right_layout.addWidget(self.lbl_notes_cap)
         self.meta_notes = QTextEdit()
         self.meta_notes.setPlaceholderText("Personal notes...")
         self.meta_notes.setMaximumHeight(90)
-        right_layout.addWidget(self.meta_notes)
 
         right_layout.addStretch(1)
 
@@ -2112,6 +2092,7 @@ class MainWindow(QMainWindow):
 
         # Initial clear/hide based on default settings
         # Must be at the very end to ensure all UI attributes (meta_desc, etc.) are initialized.
+        self._setup_metadata_layout()
         self._clear_metadata_panel()
 
     def _set_selected_folders(self, folder_paths: list[str]) -> None:
@@ -2172,6 +2153,12 @@ class MainWindow(QMainWindow):
             elif key == "ui.theme_mode":
                 self._update_native_styles(self._current_accent)
                 self._update_splitter_style(self._current_accent)
+            elif key == "metadata.display.order":
+                self._setup_metadata_layout()
+                if hasattr(self, "_current_paths") and self._current_paths:
+                    self._show_metadata_for_path(self._current_paths)
+                else:
+                    self._clear_metadata_panel()
             elif key.startswith("metadata.display."):
                 # Refresh current metadata display to apply visibility
                 if hasattr(self, "_current_paths") and self._current_paths:
@@ -2999,6 +2986,64 @@ class MainWindow(QMainWindow):
             return bool(val)
         except Exception:
             return default
+
+    def _setup_metadata_layout(self):
+        """Group metadata widgets and apply the saved display order."""
+        import json
+        
+        # 1. Define all reorderable groups
+        self._meta_groups = {
+            "res": [self.meta_res_lbl],
+            "size": [self.meta_size_lbl],
+            "description": [self.lbl_desc_cap, self.meta_desc],
+            "notes": [self.lbl_notes_cap, self.meta_notes],
+            "camera": [self.meta_camera_lbl],
+            "location": [self.meta_location_lbl],
+            "iso": [self.meta_iso_lbl],
+            "shutter": [self.meta_shutter_lbl],
+            "aperture": [self.meta_aperture_lbl],
+            "software": [self.meta_software_lbl],
+            "lens": [self.meta_lens_lbl],
+            "dpi": [self.meta_dpi_lbl],
+            "embeddedtags": [self.lbl_embedded_tags_cap, self.meta_embedded_tags_edit],
+            "embeddedcomments": [self.lbl_embedded_comments_cap, self.meta_embedded_comments_edit],
+            "embeddedtool": [self.lbl_embedded_tool_cap, self.meta_embedded_tool_edit],
+            "combineddb": [self.lbl_combined_db_cap, self.meta_combined_db],
+            "aiprompt": [self.lbl_ai_prompt_cap, self.meta_ai_prompt_edit],
+            "ainegprompt": [self.lbl_ai_negative_prompt_cap, self.meta_ai_negative_prompt_edit],
+            "aiparams": [self.lbl_ai_params_cap, self.meta_ai_params_edit],
+        }
+        
+        # Default fallback order
+        default_order = ["res", "size", "description", "notes", "camera", "location", "iso", "shutter", 
+                         "aperture", "software", "lens", "dpi", "embeddedtags", "embeddedcomments", 
+                         "embeddedtool", "combineddb", "aiprompt", "ainegprompt", "aiparams"]
+        
+        # 2. Get saved order
+        saved_order_json = self.bridge.settings.value("metadata/display/order", "[]", type=str)
+        try:
+            order = json.loads(saved_order_json)
+        except Exception:
+            order = []
+            
+        # Ensure all keys are present
+        if not order:
+            order = default_order
+        else:
+            # Append missing keys
+            for k in default_order:
+                if k not in order:
+                    order.append(k)
+
+        # 3. Clear existing layout items
+        while self.meta_fields_layout.count():
+            self.meta_fields_layout.takeAt(0)
+            
+        # 4. Add widgets in the specified order
+        for key in order:
+            widgets = self._meta_groups.get(key, [])
+            for w in widgets:
+                self.meta_fields_layout.addWidget(w)
 
     def _clear_metadata_panel(self):
         """Reset all labels and hide/show them based on current settings."""

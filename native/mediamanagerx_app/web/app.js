@@ -1168,6 +1168,85 @@ function wireSettings() {
       });
     }
   });
+
+  wireSortableMetadata();
+}
+
+function wireSortableMetadata() {
+  const list = document.getElementById('metaSortableList');
+  if (!list) return;
+
+  let dragItem = null;
+
+  list.addEventListener('dragstart', (e) => {
+    // Only allow dragging from the handle or if user clicks near it (to be simpler let's allow the whole item but handles look better)
+    dragItem = e.target.closest('.sortable-item');
+    if (dragItem) {
+      dragItem.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    }
+  });
+
+  list.addEventListener('dragend', (e) => {
+    if (dragItem) {
+      dragItem.classList.remove('dragging');
+    }
+    dragItem = null;
+    document.querySelectorAll('.sortable-item').forEach(i => i.classList.remove('drag-over'));
+    saveMetadataOrder();
+  });
+
+  list.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    const target = e.target.closest('.sortable-item');
+    if (target && target !== dragItem) {
+      target.classList.add('drag-over');
+    }
+  });
+
+  list.addEventListener('dragleave', (e) => {
+    const target = e.target.closest('.sortable-item');
+    if (target) {
+      target.classList.remove('drag-over');
+    }
+  });
+
+  list.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const target = e.target.closest('.sortable-item');
+    if (target && target !== dragItem) {
+      const rect = target.getBoundingClientRect();
+      const next = (e.clientY - rect.top) > (rect.height / 2);
+      list.insertBefore(dragItem, next ? target.nextSibling : target);
+    }
+  });
+}
+
+function saveMetadataOrder() {
+  const items = document.querySelectorAll('#metaSortableList .sortable-item');
+  const order = Array.from(items).map(i => i.getAttribute('data-key'));
+  if (gBridge && gBridge.set_setting_str) {
+    gBridge.set_setting_str('metadata.display.order', JSON.stringify(order), () => { });
+  }
+}
+
+function applyMetadataOrder(orderJson) {
+  if (!orderJson) return;
+  let order = [];
+  try {
+    order = typeof orderJson === 'string' ? JSON.parse(orderJson) : orderJson;
+  } catch (e) { return; }
+
+  if (!Array.isArray(order)) return;
+  const list = document.getElementById('metaSortableList');
+  if (!list) return;
+
+  order.forEach(key => {
+    const item = list.querySelector(`.sortable-item[data-key="${key}"]`);
+    if (item) {
+      list.appendChild(item);
+    }
+  });
 }
 
 function updateThemeAwareIcons(theme) {
@@ -1396,6 +1475,12 @@ async function main() {
           }
         }
       });
+
+      // Load metadata order
+      const order = s && s['metadata.display.order'];
+      if (order) {
+        applyMetadataOrder(order);
+      }
     });
 
     // Initial sync

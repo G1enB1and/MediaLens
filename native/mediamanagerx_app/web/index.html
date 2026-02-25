@@ -191,83 +191,140 @@
           <div class="settings-pane" id="pane-metadata" hidden>
             <div class="pane-title">Metadata</div>
             <div class="pane-subtitle">Choose which information to display in the metadata panel.</div>
-            <div class="metadata-toggles">
-              <label class="toggle">
-                <input type="checkbox" id="metaShowRes" checked />
-                <span>Resolution</span>
-              </label>
-              <label class="toggle">
-                <input type="checkbox" id="metaShowSize" checked />
-                <span>File Size</span>
-              </label>
-              <label class="toggle">
-                <input type="checkbox" id="metaShowDescription" checked />
-                <span>Description</span>
-              </label>
-              <label class="toggle">
-                <input type="checkbox" id="metaShowNotes" checked />
-                <span>Notes</span>
-              </label>
-              <label class="toggle">
-                <input type="checkbox" id="metaShowCamera" />
-                <span>Camera Model</span>
-              </label>
-              <label class="toggle">
-                <input type="checkbox" id="metaShowLocation" />
-                <span>Location (GPS)</span>
-              </label>
-              <label class="toggle">
-                <input type="checkbox" id="metaShowISO" />
-                <span>ISO Speed</span>
-              </label>
-              <label class="toggle">
-                <input type="checkbox" id="metaShowShutter" />
-                <span>Shutter Speed</span>
-              </label>
-              <label class="toggle">
-                <input type="checkbox" id="metaShowAperture" />
-                <span>Aperture</span>
-              </label>
-              <label class="toggle">
-                <input type="checkbox" id="metaShowSoftware" />
-                <span>Software / Editor</span>
-              </label>
-              <label class="toggle">
-                <input type="checkbox" id="metaShowLens" />
-                <span>Lens Info</span>
-              </label>
-              <label class="toggle">
-                <input type="checkbox" id="metaShowDPI" />
-                <span>DPI</span>
-              </label>
-              <label class="toggle">
-                <input type="checkbox" id="metaShowEmbeddedTags" checked />
-                <span>Embedded-Tags</span>
-              </label>
-              <label class="toggle">
-                <input type="checkbox" id="metaShowEmbeddedComments" checked />
-                <span>Embedded-Comments</span>
-              </label>
-              <label class="toggle">
-                <input type="checkbox" id="metaShowEmbeddedTool" checked />
-                <span>Embedded Tool Metadata</span>
-              </label>
-              <label class="toggle">
-                <input type="checkbox" id="metaShowCombinedDB" checked />
-                <span>Combined From DB</span>
-              </label>
-              <label class="toggle">
-                <input type="checkbox" id="metaShowAIPrompt" checked />
-                <span>AI Prompt</span>
-              </label>
-              <label class="toggle">
-                <input type="checkbox" id="metaShowAINegPrompt" checked />
-                <span>AI Negative Prompt</span>
-              </label>
-              <label class="toggle">
-                <input type="checkbox" id="metaShowAIParams" checked />
-                <span>AI Parameters</span>
-              </label>
+            <div class="metadata-toggles" id="metaSortableList">
+              <div class="sortable-item" draggable="true" data-key="res">
+                <div class="drag-handle">☰</div>
+                <label class="toggle">
+                  <input type="checkbox" id="metaShowRes" checked />
+                  <span>Resolution</span>
+                </label>
+              </div>
+              <div class="sortable-item" draggable="true" data-key="size">
+                <div class="drag-handle">☰</div>
+                <label class="toggle">
+                  <input type="checkbox" id="metaShowSize" checked />
+                  <span>File Size</span>
+                </label>
+              </div>
+              <div class="sortable-item" draggable="true" data-key="description">
+                <div class="drag-handle">☰</div>
+                <label class="toggle">
+                  <input type="checkbox" id="metaShowDescription" checked />
+                  <span>Description</span>
+                </label>
+              </div>
+              <div class="sortable-item" draggable="true" data-key="notes">
+                <div class="drag-handle">☰</div>
+                <label class="toggle">
+                  <input type="checkbox" id="metaShowNotes" checked />
+                  <span>Notes</span>
+                </label>
+              </div>
+              <div class="sortable-item" draggable="true" data-key="camera">
+                <div class="drag-handle">☰</div>
+                <label class="toggle">
+                  <input type="checkbox" id="metaShowCamera" />
+                  <span>Camera Model</span>
+                </label>
+              </div>
+              <div class="sortable-item" draggable="true" data-key="location">
+                <div class="drag-handle">☰</div>
+                <label class="toggle">
+                  <input type="checkbox" id="metaShowLocation" />
+                  <span>Location (GPS)</span>
+                </label>
+              </div>
+              <div class="sortable-item" draggable="true" data-key="iso">
+                <div class="drag-handle">☰</div>
+                <label class="toggle">
+                  <input type="checkbox" id="metaShowISO" />
+                  <span>ISO Speed</span>
+                </label>
+              </div>
+              <div class="sortable-item" draggable="true" data-key="shutter">
+                <div class="drag-handle">☰</div>
+                <label class="toggle">
+                  <input type="checkbox" id="metaShowShutter" />
+                  <span>Shutter Speed</span>
+                </label>
+              </div>
+              <div class="sortable-item" draggable="true" data-key="aperture">
+                <div class="drag-handle">☰</div>
+                <label class="toggle">
+                  <input type="checkbox" id="metaShowAperture" />
+                  <span>Aperture</span>
+                </label>
+              </div>
+              <div class="sortable-item" draggable="true" data-key="software">
+                <div class="drag-handle">☰</div>
+                <label class="toggle">
+                  <input type="checkbox" id="metaShowSoftware" />
+                  <span>Software / Editor</span>
+                </label>
+              </div>
+              <div class="sortable-item" draggable="true" data-key="lens">
+                <div class="drag-handle">☰</div>
+                <label class="toggle">
+                  <input type="checkbox" id="metaShowLens" />
+                  <span>Lens Info</span>
+                </label>
+              </div>
+              <div class="sortable-item" draggable="true" data-key="dpi">
+                <div class="drag-handle">☰</div>
+                <label class="toggle">
+                  <input type="checkbox" id="metaShowDPI" />
+                  <span>DPI</span>
+                </label>
+              </div>
+              <div class="sortable-item" draggable="true" data-key="embeddedtags">
+                <div class="drag-handle">☰</div>
+                <label class="toggle">
+                  <input type="checkbox" id="metaShowEmbeddedTags" checked />
+                  <span>Embedded-Tags</span>
+                </label>
+              </div>
+              <div class="sortable-item" draggable="true" data-key="embeddedcomments">
+                <div class="drag-handle">☰</div>
+                <label class="toggle">
+                  <input type="checkbox" id="metaShowEmbeddedComments" checked />
+                  <span>Embedded-Comments</span>
+                </label>
+              </div>
+              <div class="sortable-item" draggable="true" data-key="embeddedtool">
+                <div class="drag-handle">☰</div>
+                <label class="toggle">
+                  <input type="checkbox" id="metaShowEmbeddedTool" checked />
+                  <span>Embedded Tool Metadata</span>
+                </label>
+              </div>
+              <div class="sortable-item" draggable="true" data-key="combineddb">
+                <div class="drag-handle">☰</div>
+                <label class="toggle">
+                  <input type="checkbox" id="metaShowCombinedDB" checked />
+                  <span>Combined From DB</span>
+                </label>
+              </div>
+              <div class="sortable-item" draggable="true" data-key="aiprompt">
+                <div class="drag-handle">☰</div>
+                <label class="toggle">
+                  <input type="checkbox" id="metaShowAIPrompt" checked />
+                  <span>AI Prompt</span>
+                </label>
+              </div>
+              <div class="sortable-item" draggable="true" data-key="ainegprompt">
+                <div class="drag-handle">☰</div>
+                <label class="toggle">
+                  <input type="checkbox" id="metaShowAINegPrompt" checked />
+                  <span>AI Negative Prompt</span>
+                </label>
+              </div>
+              <div class="sortable-item" draggable="true" data-key="aiparams">
+                <div class="drag-handle">☰</div>
+                <label class="toggle">
+                  <input type="checkbox" id="metaShowAIParams" checked />
+                  <span>AI Parameters</span>
+                </label>
+              </div>
             </div>
           </div>
 
