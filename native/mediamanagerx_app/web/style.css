@@ -12,8 +12,8 @@
   --accent: #3a257d;
 
   /* Dynamic Tinted Surfaces */
-  --bg: color-mix(in srgb, var(--bg-neutral), var(--accent) 7%);
-  --panel: color-mix(in srgb, var(--panel-neutral), var(--accent) 10%);
+  --bg: color-mix(in srgb, var(--bg-neutral), var(--accent) 10%);
+  --panel: color-mix(in srgb, var(--panel-neutral), var(--accent) 15%);
   --border: color-mix(in srgb, var(--border-neutral), var(--accent) 18%);
   --fg: var(--fg-neutral);
   --muted: color-mix(in srgb, var(--muted-neutral), var(--accent) 15%);
@@ -36,8 +36,8 @@
   --shadow-color: rgba(0, 0, 0, 0.15);
 
   /* Overrides for dynamic surfaces to feel "light" but still tinted */
-  --bg: color-mix(in srgb, var(--bg-neutral), var(--accent) 5%);
-  --panel: color-mix(in srgb, var(--panel-neutral), var(--accent) 8%);
+  --bg: color-mix(in srgb, var(--bg-neutral), var(--accent) 8%);
+  --panel: color-mix(in srgb, var(--panel-neutral), var(--accent) 15%);
   --border: color-mix(in srgb, var(--border-neutral), var(--accent) 22%);
   --card-bg: color-mix(in srgb, var(--panel), white 5%);
   --input-bg: color-mix(in srgb, var(--panel), white 2%);
@@ -297,7 +297,7 @@ body.no-glass header {
 }
 
 .settings-nav-item:hover {
-  background: var(--hover-bg);
+  background: color-mix(in srgb, var(--panel), var(--accent) 15%);
 }
 
 .settings-nav-item.active {

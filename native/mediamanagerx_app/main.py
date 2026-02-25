@@ -143,7 +143,9 @@ class Theme:
     @staticmethod
     def get_is_light() -> bool:
         settings = QSettings("G1enB1and", "MediaManagerX")
-        return settings.value("ui/theme_mode", "dark") == "light"
+        val = settings.value("ui/theme_mode", "dark")
+        # Ensure we handle both string and potential type-wrapped values cleanly
+        return str(val).lower() == "light"
 
     @staticmethod
     def get_bg(accent: QColor) -> str:
@@ -153,7 +155,7 @@ class Theme:
     @staticmethod
     def get_sidebar_bg(accent: QColor) -> str:
         base = Theme.BASE_SIDEBAR_BG_LIGHT if Theme.get_is_light() else Theme.BASE_SIDEBAR_BG_DARK
-        return Theme.mix(base, accent, 0.08)
+        return Theme.mix(base, accent, 0.15) # Increased from 0.10 for visibility
 
     @staticmethod
     def get_border(accent: QColor) -> str:
@@ -205,6 +207,19 @@ class Theme:
         else:
             # Match CSS: var(--accent) but slightly muted/balanced if 'pure' is unreadable
             return Theme.mix(Theme.get_sidebar_bg(accent), accent, 0.85)
+
+    @staticmethod
+    def get_input_bg(accent: QColor) -> str:
+        if Theme.get_is_light():
+            # Very faint dark tint for white-ish backgrounds
+            return "rgba(0, 0, 0, 15)"
+        else:
+            # Very faint white tint for dark backgrounds
+            return "rgba(255, 255, 255, 10)"
+
+    @staticmethod
+    def get_input_border(accent: QColor) -> str:
+        return Theme.get_border(accent)
 
     ACCENT_DEFAULT = "#8ab4f8"
 
@@ -794,6 +809,7 @@ class Bridge(QObject):
                 self.accentColorChanged.emit(str(value or "#8ab4f8"))
             elif key == "ui.theme_mode":
                 # Emit flag change for UI consistency if needed
+                self.settings.sync()
                 self.uiFlagChanged.emit(key, value == "light")
             return True
         except Exception:
@@ -1795,7 +1811,7 @@ class MainWindow(QMainWindow):
         center_layout_loading.setSpacing(10)
 
         self.web_loading_label = QLabel("Loading gallery UI…")
-        self.web_loading_label.setStyleSheet("color: rgba(255,255,255,200); font-size: 13px;")
+        self.web_loading_label.setObjectName("webLoadingLabel")
         self.web_loading_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         center_layout_loading.addWidget(self.web_loading_label)
 
@@ -1921,7 +1937,6 @@ class MainWindow(QMainWindow):
         self.meta_embedded_tool_edit.setReadOnly(True)
         self.meta_embedded_tool_edit.setPlaceholderText("AI parameters/Tool info...")
         self.meta_embedded_tool_edit.setMaximumHeight(70)
-        self.meta_embedded_tool_edit.setStyleSheet("background: rgba(255, 255, 255, 0.05);")
         right_layout.addWidget(self.meta_embedded_tool_edit)
 
         self.lbl_combined_db_cap = QLabel("Combined-From-DB (Read-Only):")
@@ -1932,7 +1947,6 @@ class MainWindow(QMainWindow):
         self.meta_combined_db.setReadOnly(True)
         self.meta_combined_db.setPlaceholderText("Combined DB notes/AI info...")
         self.meta_combined_db.setMaximumHeight(100)
-        self.meta_combined_db.setStyleSheet("background: rgba(255, 255, 255, 0.05);")
         right_layout.addWidget(self.meta_combined_db)
 
         self.meta_sep = QWidget()
@@ -2008,12 +2022,14 @@ class MainWindow(QMainWindow):
         # AI/EXIF Actions
         action_layout = QHBoxLayout()
         self.btn_import_exif = QPushButton("Import Metadata")
+        self.btn_import_exif.setObjectName("btnImportExif")
         self.btn_import_exif.setToolTip("Append tags/comments from file to database")
         self.btn_import_exif.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_import_exif.clicked.connect(self._import_exif_to_db)
         action_layout.addWidget(self.btn_import_exif)
 
         self.btn_save_to_exif = QPushButton("Embed Data in File")
+        self.btn_save_to_exif.setObjectName("btnSaveToExif")
         self.btn_save_to_exif.setToolTip("Write tags and comments from these fields into the file's embedded metadata")
         self.btn_save_to_exif.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_save_to_exif.clicked.connect(self._save_to_exif_cmd)
@@ -2758,6 +2774,10 @@ class MainWindow(QMainWindow):
         self.lbl_ai_negative_prompt_cap.setVisible(not is_bulk and show_ai_neg_prompt)
         self.meta_ai_params_edit.setVisible(not is_bulk and show_ai_params)
         self.lbl_ai_params_cap.setVisible(not is_bulk and show_ai_params)
+        self.meta_embedded_tool_edit.setVisible(not is_bulk)
+        self.lbl_embedded_tool_cap.setVisible(not is_bulk)
+        self.meta_combined_db.setVisible(not is_bulk)
+        self.lbl_combined_db_cap.setVisible(not is_bulk)
 
         # Set default text prefixes so they show even if blank
         self.meta_res_lbl.setText("Resolution: ")
@@ -3004,6 +3024,11 @@ class MainWindow(QMainWindow):
         self.lbl_ai_negative_prompt_cap.setVisible(self._is_metadata_enabled("ainegprompt", True))
         self.meta_ai_params_edit.setVisible(self._is_metadata_enabled("aiparams", True))
         self.lbl_ai_params_cap.setVisible(self._is_metadata_enabled("aiparams", True))
+        
+        self.meta_embedded_tool_edit.setVisible(True)
+        self.lbl_embedded_tool_cap.setVisible(True)
+        self.meta_combined_db.setVisible(True)
+        self.lbl_combined_db_cap.setVisible(True)
         
         self.meta_filename_edit.setVisible(True)
         self.meta_path_lbl.setVisible(True)
@@ -3305,18 +3330,26 @@ class MainWindow(QMainWindow):
             {scrollbar_style}
         """)
         
-        # Right Panel (Metadata)
-        self.right_panel.setStyleSheet(f"""
-            QWidget#rightPanel {{ background-color: {sb_bg_str}; color: {text}; border-left: 1px solid {Theme.get_border(accent)}; }}
+        # Right Panel (Metadata) - Mirroring Left Panel Background precisely
+        self.right_panel.setStyleSheet(f"background-color: {sb_bg_str}; border-left: 1px solid {Theme.get_border(accent)};")
+        
+        self.scroll_area.setStyleSheet(f"""
+            QScrollArea {{ background-color: {sb_bg_str}; border: none; }}
+            QWidget#rightPanelScrollContainer {{ background-color: {sb_bg_str}; }}
+            {scrollbar_style}
+        """)
+
+        self.scroll_container.setStyleSheet(f"""
+            QWidget#rightPanelScrollContainer {{ background-color: {sb_bg_str}; color: {text}; }}
             QLabel {{ color: {text}; background: transparent; }}
             QLineEdit, QTextEdit {{
-                background-color: rgba(255,255,255,10);
-                border: 1px solid {Theme.get_border(accent)};
+                background-color: {Theme.get_input_bg(accent)};
+                border: 1px solid {Theme.get_input_border(accent)};
                 border-radius: 4px;
                 padding: 4px;
                 color: {text};
             }}
-            QPushButton#btnSaveMeta {{
+            QPushButton#btnSaveMeta, QPushButton#btnImportExif, QPushButton#btnSaveToExif {{
                 background-color: {Theme.get_btn_save_bg(accent)};
                 color: {text};
                 border: 1px solid {Theme.get_border(accent)};
@@ -3325,7 +3358,20 @@ class MainWindow(QMainWindow):
                 font-size: 13px;
                 font-weight: 500;
             }}
-            QPushButton#btnSaveMeta:hover {{
+            QPushButton#btnSaveMeta:hover, QPushButton#btnImportExif:hover, QPushButton#btnSaveToExif:hover {{
+                background-color: {Theme.get_btn_save_hover(accent)};
+                color: {"#000" if is_light else "#fff"};
+                border-color: {accent_str};
+            }}
+            QPushButton#btnClearBulkTags {{
+                background-color: transparent;
+                color: {text};
+                border: 1px solid {Theme.get_border(accent)};
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 12px;
+            }}
+            QPushButton#btnClearBulkTags:hover {{
                 background-color: {Theme.get_btn_save_hover(accent)};
                 color: {"#000" if is_light else "#fff"};
                 border-color: {accent_str};
@@ -3338,7 +3384,6 @@ class MainWindow(QMainWindow):
                 border: none;
                 margin: 4px 0;
             }}
-            {scrollbar_style}
         """)
         
         self._update_app_style(accent)
