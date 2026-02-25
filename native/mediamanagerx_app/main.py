@@ -95,6 +95,7 @@ from PySide6.QtWidgets import (
     QSplitterHandle,
     QWidget,
     QVBoxLayout,
+    QSizePolicy,
     QTreeView,
     QFileIconProvider,
     QFileSystemModel,
@@ -763,6 +764,9 @@ class Bridge(QObject):
                 "metadata.display.aiprompt": bool(self.settings.value("metadata/display/aiprompt", True, type=bool)),
                 "metadata.display.ainegprompt": bool(self.settings.value("metadata/display/ainegprompt", True, type=bool)),
                 "metadata.display.aiparams": bool(self.settings.value("metadata/display/aiparams", True, type=bool)),
+                "metadata.display.sep1": bool(self.settings.value("metadata/display/sep1", True, type=bool)),
+                "metadata.display.sep2": bool(self.settings.value("metadata/display/sep2", False, type=bool)),
+                "metadata.display.sep3": bool(self.settings.value("metadata/display/sep3", False, type=bool)),
                 "metadata.display.order": self.settings.value("metadata/display/order", "[]", type=str),
             }
         except Exception:
@@ -1618,6 +1622,31 @@ class Bridge(QObject):
         return candidates
 
 
+class NativeSeparator(QWidget):
+    """A custom separator that guarantees exactly 1 physical pixel thickness,
+    immune to High DPI subpixel antialiasing and layout fractional coordinates.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # 10px margin top + 1px line + 10px margin bottom
+        self.setFixedHeight(21)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        
+        text_color_str = Theme.get_text_color()
+        pen = QPen(QColor(text_color_str))
+        pen.setWidth(1)
+        pen.setCosmetic(True)  # Force exactly 1 physical pixel width
+        painter.setPen(pen)
+        
+        # Draw horizontal line exactly in the middle
+        y = self.height() // 2
+        painter.drawLine(0, y, self.width(), y)
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -1944,10 +1973,11 @@ class MainWindow(QMainWindow):
         self.meta_combined_db.setPlaceholderText("Combined DB notes/AI info...")
         self.meta_combined_db.setMaximumHeight(100)
 
-        self.meta_sep = QWidget()
-        self.meta_sep.setFixedHeight(1)
-        self.meta_sep.setObjectName("metaSeparator")
-        right_layout.addWidget(self.meta_sep)
+        # --- Separators ---
+        self.meta_sep1 = self._add_sep("meta_sep1_line")
+        self.meta_sep2 = self._add_sep("meta_sep2_line")
+        self.meta_sep3 = self._add_sep("meta_sep3_line")
+        # --- Separators (Container + Line pattern for perfect 1px rendering) ---
 
         # --- Editable metadata ---
         self.lbl_desc_cap = QLabel("Description:")
@@ -2725,7 +2755,6 @@ class MainWindow(QMainWindow):
         self.lbl_fn_cap.setVisible(not is_bulk)
         self.meta_filename_edit.setVisible(not is_bulk)
         self.meta_path_lbl.setVisible(not is_bulk)
-        self.meta_sep.setVisible(not is_bulk)
 
         show_res = self._is_metadata_enabled("res", True)
         show_size = self._is_metadata_enabled("size", True)
@@ -2772,6 +2801,11 @@ class MainWindow(QMainWindow):
         self.lbl_embedded_tool_cap.setVisible(not is_bulk and show_embedded_tool)
         self.meta_combined_db.setVisible(not is_bulk and show_combined_db)
         self.lbl_combined_db_cap.setVisible(not is_bulk and show_combined_db)
+
+        # Separator visibility in show/bulk mode
+        self.meta_sep1.setVisible(not is_bulk and self._is_metadata_enabled("sep1", True))
+        self.meta_sep2.setVisible(not is_bulk and self._is_metadata_enabled("sep2", False))
+        self.meta_sep3.setVisible(not is_bulk and self._is_metadata_enabled("sep3", False))
 
         # Set default text prefixes so they show even if blank
         self.meta_res_lbl.setText("Resolution: ")
@@ -3012,12 +3046,15 @@ class MainWindow(QMainWindow):
             "aiprompt": [self.lbl_ai_prompt_cap, self.meta_ai_prompt_edit],
             "ainegprompt": [self.lbl_ai_negative_prompt_cap, self.meta_ai_negative_prompt_edit],
             "aiparams": [self.lbl_ai_params_cap, self.meta_ai_params_edit],
+            "sep1": [self.meta_sep1],
+            "sep2": [self.meta_sep2],
+            "sep3": [self.meta_sep3],
         }
         
         # Default fallback order
-        default_order = ["res", "size", "description", "tags", "notes", "camera", "location", "iso", "shutter", 
+        default_order = ["res", "size", "sep1", "description", "tags", "notes", "sep2", "camera", "location", "iso", "shutter", 
                          "aperture", "software", "lens", "dpi", "embeddedtags", "embeddedcomments", 
-                         "embeddedtool", "combineddb", "aiprompt", "ainegprompt", "aiparams"]
+                         "embeddedtool", "combineddb", "sep3", "aiprompt", "ainegprompt", "aiparams"]
         
         # 2. Get saved order
         saved_order_json = self.bridge.settings.value("metadata/display/order", "[]", type=str)
@@ -3035,9 +3072,11 @@ class MainWindow(QMainWindow):
                 if k not in order:
                     order.append(k)
 
-        # 3. Clear existing layout items
+        # 3. Clear existing layout items AND HIDE THEM to prevent visual duplication
         while self.meta_fields_layout.count():
-            self.meta_fields_layout.takeAt(0)
+            item = self.meta_fields_layout.takeAt(0)
+            if item.widget():
+                item.widget().hide()
             
         # 4. Add widgets in the specified order
         for key in order:
@@ -3085,7 +3124,11 @@ class MainWindow(QMainWindow):
         
         self.meta_filename_edit.setVisible(True)
         self.meta_path_lbl.setVisible(True)
-        self.meta_sep.setVisible(True)
+        
+        self.meta_sep1.setVisible(self._is_metadata_enabled("sep1", True))
+        self.meta_sep2.setVisible(self._is_metadata_enabled("sep2", False))
+        self.meta_sep3.setVisible(self._is_metadata_enabled("sep3", False))
+        
         
         self.meta_desc.setVisible(self._is_metadata_enabled("description", True))
         self.lbl_desc_cap.setVisible(self._is_metadata_enabled("description", True))
@@ -3436,17 +3479,16 @@ class MainWindow(QMainWindow):
                 color: {"#000" if is_light else "#fff"};
                 border-color: {accent_str};
             }}
-            QWidget#metaSeparator {{
-                background-color: {text};
-                height: 1px;
-                max-height: 1px;
-                min-height: 1px;
-                border: none;
-                margin: 4px 0;
-            }}
         """)
         
         self._update_app_style(accent)
+
+    def _add_sep(self, obj_name: str) -> NativeSeparator:
+        """Create a 1 physical-pixel robust separator widget."""
+        sep = NativeSeparator()
+        sep.setObjectName(obj_name)
+        return sep
+
 
     def showEvent(self, event) -> None:
         """Trigger native style update when window actually becomes visible to ensure valid winId for DWM."""
