@@ -23,9 +23,6 @@ def create_icon():
 
 def build_exe():
     print("Building standalone executable with PyInstaller...")
-    # Add native directory (which includes web) to PyInstaller
-    # In PyInstaller, data format is 'source_path;destination_folder' on Windows
-    add_data = "native;native"
     
     cmd = [
         "pyinstaller",
@@ -33,7 +30,8 @@ def build_exe():
         "--onedir",
         "--windowed", # Don't open a console window for the GUI app
         "--icon=app.ico",
-        f"--add-data={add_data}",
+        "--add-data=native;native",
+        "--add-data=app;app",
         "--name=MediaManagerX",
         "run.py"
     ]
