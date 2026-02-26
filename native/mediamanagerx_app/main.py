@@ -2104,7 +2104,7 @@ class MainWindow(QMainWindow):
         else:
             # Side panels fixed (0 stretch), Gallery expands (1 stretch)
             # Default to 200px left, 300px right sidebars if no saved state
-            splitter.setSizes([200, 800])
+            splitter.setSizes([200, 700, 300])
 
         splitter.splitterMoved.connect(lambda *args: self._on_splitter_moved())
 
