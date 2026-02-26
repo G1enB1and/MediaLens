@@ -940,3 +940,198 @@ Unfortunately I was using Gemini 3 Flash to make other smaller changes and somew
 More accurately, .png files are not showing embeded data in windows, but jpg files are. It's possibly that it never worked for png and I previously only tested jpg.
 
 Please fix this again and thoroughly document how it works and what doesn't work and why so Gemini stops breaking it with it's faulty logic.
+
+---
+
+• Implemented a PNG metadata embedding fix and added a hardening doc so this behavior is less
+  likely to get broken again.
+
+  What changed
+
+- Added PNG XMP writing (XML:com.adobe.xmp) during embed in native/mediamanagerx_app/main.py:2586    (inside_save_to_exif_cmd), in addition to existing PNG tEXt + EXIF fallback tags.
+- Added a helper to build PNG XMP with:
+  - dc:subject (tags)
+  - dc:description, dc:title, exif:UserComment (comment fallbacks)
+        in native/mediamanagerx_app/main.py:2434.
+- Expanded file-import harvesting to parse PNG XMP for tags/comments (fallbacks) in native/
+    mediamanagerx_app/main.py:2480 (_harvest_windows_visible_metadata).
+
+  Why this was needed
+
+- The prior PNG embed path wrote metadata Pillow could read, but Windows Shell/Explorer did not  
+    recognize it.
+- Local repro showed Windows was ignoring PNG tEXt + EXIF XP tags for PNG.
+- Windows Shell did recognize PNG tags when written to XMP dc:subject.
+
+  What I verified locally
+
+- Syntax parse of native/mediamanagerx_app/main.py succeeded.
+- Generated PNG with the new XMP-style write path:
+  - Windows Shell API (Shell.Application) reads tags in System.Keywords.
+  - Comment text appears as System.Title on this machine, not System.Comment (PNG limitation/  
+        handler inconsistency).
+
+  Documentation added
+
+- docs/metadata-embedding-windows.md
+- It documents:
+  - DB vs file metadata separation rules
+  - required PNG embed strategy (don’t remove XMP path)
+  - import behavior rules
+  - observed Windows PNG limitations and regression checklist
+
+  Important limitation (documented)
+
+- PNG comment visibility in Windows is inconsistent. On this machine, comment text written to XMP    is exposed as Title rather than Comment. Tags are the reliable part (dc:subject ->
+  
+    System.Keywords).
+
+  If you want, next I can add a small automated regression test script (non-GUI) that writes a PNG
+  and checks the Windows Shell properties for tags so future changes can’t silently break PNG
+  again.
+
+---
+
+I can confirm that this fixed embedding tags to tags in png, but it is embedding comments to      title in png. That's better than nothing, but far less than ideal because title is meant to be comments to comments not title for png. It might not be called comments exactly, but windows
+
+---
+
+• I found the exact Windows mapping: for PNG XMP, System.Comment is populated by exif:UserComment  
+  only when it is written as an rdf:Alt localized string. dc:description maps to Title, which is
+  why the app was putting comments in the wrong place. I’m patching the XMP writer now.
+  
+• I’ve changed the PNG XMP comment field to the Windows-compatible exif:UserComment rdf:Alt form
+  and removed the dc:description/dc:title writes that were polluting Title. Next I’ll validate this
+  exact variant against the Windows Shell property API and update the docs.
+
+• Confirmed. The rdf:Alt form of exif:UserComment fixes PNG comments for Windows: Comment now
+  populates System.Comment, and Title stays empty. I’m updating the documentation to record the
+  exact requirement and the reason.
+  
+• Fixed. PNG comments should now embed to Windows Comments instead of Title.
+
+  What changed:
+
+- native/mediamanagerx_app/main.py:2434
+  - PNG XMP comment writer now uses exif:UserComment as an rdf:Alt localized string (the format        Windows expects for PNG System.Comment).
+  - Removed writing comment text to dc:description / dc:title in app-authored PNG XMP to avoid
+        polluting Title.
+- docs/metadata-embedding-windows.md
+  - Documented the exact Windows PNG mapping and the required XMP shape.
+
+  What I verified locally:
+
+- PNG tags still show in Windows (System.Keywords)
+- PNG comment now shows in Windows System.Comment
+- Windows System.Title stays empty for the embedded comment
+
+  Root cause (confirmed):
+
+- dc:description in PNG XMP maps to Windows Title
+- exif:UserComment only maps to Windows Comments when encoded as rdf:Alt (not plain text)
+  If you want, next I can add a small regression script that writes a PNG and checks
+  System.Comment / System.Keywords via Shell.Application so this doesn’t get broken again.
+
+---
+
+# Windows Metadata Embedding Notes (PNG/JPG)
+
+Last validated: 2026-02-26
+
+## Purpose
+
+This document records the current metadata behavior and constraints so future edits do not re-break PNG embedding/import.
+
+## UI/Data Contracts (Do Not Blur These)
+
+- `Save Changes to Database` = UI DB fields -> database only
+- `Import Metadata` = file -> Embedded UI fields only (must not read DB)
+- `Embed Data in File` = Embedded UI fields -> file only (must not read DB)
+
+### Database fields (editable, persisted in SQLite)
+
+- `Tags` (DB tags)
+- `Description`
+- `Notes`
+- `AI Prompt`
+- `AI Negative Prompt`
+- `AI Parameters`
+
+### File-embedded fields (editable for file writing)
+
+- `Embedded Tags`
+- `Embedded Comments`
+- `Embedded Tool Metadata` (display/import only; not the main DB fields)
+
+## Why PNG Is Different (Windows)
+
+`JPG` metadata is generally visible in Windows Explorer when written to EXIF (`XPComment`, `XPKeywords`, etc.).
+
+`PNG` is inconsistent:
+
+- Writing only PNG `tEXt` chunks (`Comment`, `Keywords`) was readable by Pillow, but not by Windows Explorer on this machine.
+- Writing only EXIF `XP*` tags inside PNG also did not show in Windows Explorer on this machine.
+- Writing PNG XMP (`XML:com.adobe.xmp`) with `dc:subject` _does_ show tags in Windows Explorer (`System.Keywords`) on this machine.
+- PNG comments require a specific XMP shape: `exif:UserComment` encoded as an `rdf:Alt` localized string.
+
+## Current PNG Embed Strategy (Required)
+
+When embedding PNG metadata, write **all** of the following:
+
+- PNG text chunks (`tEXt`) for compatibility with tools:
+  - `Comment`, `Comments`, `Description`, `Subject`, `Title`
+  - `Keywords`, `Tags`
+- PNG XMP (`XML:com.adobe.xmp`) for Windows Explorer compatibility:
+  - `dc:subject` (tags)
+  - `exif:UserComment` as `rdf:Alt` (comments; required for Windows PNG `System.Comment`)
+- PNG EXIF fallback (`XPComment`, `XPKeywords`, etc.) for tool compatibility
+
+Do not remove the XMP write path from `native/mediamanagerx_app/main.py` (`_save_to_exif_cmd`) unless you re-test Windows PNG behavior.
+
+## Current Import Strategy (Required)
+
+`Import Metadata` must read from the file only and replace Embedded UI fields.
+
+For Windows-visible PNG data, the import harvester must check:
+
+1. PNG text chunk keys (`Comment`, `Comments`, `Description`, `Keywords`, `Tags`)
+2. PNG XMP (`xmp` / `XML:com.adobe.xmp`) fields:
+   - `dc:subject` -> Embedded Tags
+   - `exif:UserComment` / `dc:description` / `dc:title` -> Embedded Comments (first match wins)
+3. EXIF fallback (`XPComment`, `XPKeywords`, `ImageDescription`, `UserComment`)
+
+## Important Observed Mapping (Windows PNG Comments)
+
+On this Windows machine (tested via `Shell.Application` property API):
+
+- PNG tags from XMP `dc:subject` appear in `System.Keywords`
+- PNG comments appear in `System.Comment` when XMP uses:
+  - `<exif:UserComment><rdf:Alt><rdf:li xml:lang="x-default">...</rdf:li></rdf:Alt></exif:UserComment>`
+- If comment text is written to XMP `dc:description`, Windows maps it to `System.Title` instead
+
+Practical rule:
+
+- For app-authored PNG comments targeting Windows Explorer "Comments", write `exif:UserComment` as `rdf:Alt`
+- Do not write the same long comment into `dc:title` / `dc:description` unless you intentionally want it to appear in `Title`
+
+## Code Paths To Preserve
+
+- `native/mediamanagerx_app/main.py:_save_to_exif_cmd`
+- `native/mediamanagerx_app/main.py:_harvest_windows_visible_metadata`
+- `native/mediamanagerx_app/main.py:_import_exif_to_db`
+- `native/mediamanagerx_app/main.py:_show_metadata_for_path`
+
+## Regression Checklist (PNG)
+
+After changing metadata code:
+
+1. Test a fresh `.png` and a fresh `.jpg`
+2. In app, set `Embedded Tags` / `Embedded Comments`, click `Embed Data in File`
+3. In Windows Explorer Properties -> Details:
+   - Verify JPG tags/comments
+   - Verify PNG tags at minimum
+   - Check PNG `Title` as well if "Comments" appears blank
+4. Back in app, click `Import Metadata`
+5. Confirm only Embedded fields change (DB fields should not be overwritten)
+
+---
