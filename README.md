@@ -70,6 +70,18 @@ We are rapidly expanding MediaManagerX with advanced AI and utility features:
 
 ---
 
+## 🧪 Tests / Validation
+
+Run the test suite to ensure everything is working correctly:
+
+```bash
+python tests/dev_check.py
+```
+
+---
+
 ## License
 
-Created by G1enB1and. Internal/Private project for Phase 1.
+MIT License
+
+Created by Glen Bland.

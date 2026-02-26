@@ -19,3 +19,8 @@ data/
 *.spec
 app.ico
 MediaManagerX_Setup.exe
+
+# Tests and Logs
+/tests/
+.tmp-tests*
+*.log
