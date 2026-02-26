@@ -1,83 +1,75 @@
-# MediaManager
+# MediaManagerX
 
-Local-first media asset manager (Phase 1 foundation).
+A powerful, local-first media asset manager designed for privacy, speed, and premium aesthetics.
 
-## Current focus
-Phase 1: stable viewer + folder scope + persistent metadata.
+## 🚀 Getting Started
 
-## Repo layout
-- `app/mediamanager/` — Python package code
-- `native/` — PySide6 shell integration (planned)
-- `server/` — embedded web gallery assets/services (planned)
-- `docs/` — architecture + implementation notes
-- `scripts/` — dev utilities
-- `tests/` — test suite
+### Recommended (Windows)
 
-## Status
-This repo is currently **Phase 1 foundation** (DB + repository layer + tests + a tiny CLI smoke runner).
+The easiest way to get started is to download the latest **MediaManagerX_Setup.exe** from the [Releases](https://github.com/G1enB1and/MediaManagerX/releases) page. This will handle all dependencies and create a desktop shortcut for you.
 
-There is **no GUI you can “open” yet**—that comes later when we wire in the native shell + viewer.
+### Power Users (Run from Source)
 
-## Quick start (no `make` required)
-```bash
-git clone https://github.com/G1enB1and/MediaManagerX.git
-cd MediaManagerX
-```
+If you prefer to run from source or contribute to development:
 
-### Windows (PowerShell)
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -U pip
-python -m pip install -e .
-python scripts\setup.py
-```
+1. **Clone the Repo**
 
-### Windows (cmd.exe)
-```bat
-python -m venv .venv
-.\.venv\Scripts\activate.bat
-python -m pip install -U pip
-python -m pip install -e .
-python scripts\setup.py
-```
+   ```bash
+   git clone https://github.com/G1enB1and/MediaManagerX.git
+   cd MediaManagerX
+   ```
 
-### macOS / Linux
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -U pip
-python -m pip install -e .
-python3 scripts/setup.py
-```
+2. **Setup Environment**
 
-## Run (current UI shell)
-After installing + running setup, launch the (very early) native UI shell:
+   ```powershell
+   python -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   python -m pip install -U pip
+   python -m pip install -e .
+   python scripts\setup.py
+   ```
 
-### Windows
-```powershell
-python -m native.mediamanagerx_app.main
-```
+3. **Launch**
 
-### macOS / Linux
-```bash
-python3 -m native.mediamanagerx_app.main
-```
+   ```powershell
+   python -m native.mediamanagerx_app.main
+   ```
 
-(There’s also a backend smoke runner at `python3 -m app.mediamanager.main`.)
+---
 
-## If you *do* want `make`
-On Ubuntu/Debian:
-```bash
-sudo apt update
-sudo apt install make
-```
-Then these convenience targets work:
-- `make setup` → runs `python3 scripts/setup.py`
-- `make run` → runs the smoke CLI
-- `make test` → runs `python3 scripts/dev_check.py`
+## ✨ Current Features
 
-## Tests / validation (no `make` required)
-```bash
-python3 scripts/dev_check.py
-```
+MediaManagerX is currently a fully functional media browser and metadata editor in its Phase 1 "Foundation" stage.
+
+- **Immersive Viewing**: Browse Images, GIFs, and Videos in a high-performance gallery. Includes a smooth Lightbox mode for focused viewing.
+- **Smart Organization**: Search, sort, and filter your entire library with ease.
+- **Advanced Metadata Management**:
+  - **Dual Logic**: Manage metadata in a local high-speed database or embed it directly into the files.
+  - **Bulk Editing**: Multi-select files or folders to edit tags and notes in bulk.
+  - **Custom Views**: Toggle and sort exactly which metadata fields you want to see.
+- **Premium Aesthetics**:
+  - Beautiful Light and Dark modes.
+  - Dynamic Accent Color tinting.
+  - Optional **Glassmorphism** effects for a modern, premium feel.
+- **Privacy & Persistence**:
+  - **Hidden Assets**: Quickly hide sensitive files and folders from the UI.
+  - **File Hashing**: Metadata and tags stay persistent even if you rename or move files across your disk, thanks to unique file fingerprinting.
+
+---
+
+## 🗺️ Roadmap (Coming Soon)
+
+We are rapidly expanding MediaManagerX with advanced AI and utility features:
+
+- **Library Utilities**: Duplicate file finder and automated library cleanup.
+- **Advanced Recognition**: Integrated Facial Recognition and person grouping.
+- **AI Automation**:
+  - Auto-tagging and AI-generated image descriptions.
+  - AI Image editing and generation directly via chat.
+- **Intelligent Interaction**: "Chat with your images" using advanced models (SAM 2, Nanobanana) for segmenting, box labeling, and deep visual understanding.
+
+---
+
+## License
+
+Created by G1enB1and. Internal/Private project for Phase 1.
