@@ -36,6 +36,7 @@ This document records the current metadata behavior and constraints so future ed
 - Writing only PNG `tEXt` chunks (`Comment`, `Keywords`) was readable by Pillow, but not by Windows Explorer on this machine.
 - Writing only EXIF `XP*` tags inside PNG also did not show in Windows Explorer on this machine.
 - Writing PNG XMP (`XML:com.adobe.xmp`) with `dc:subject` *does* show tags in Windows Explorer (`System.Keywords`) on this machine.
+- PNG comments require a specific XMP shape: `exif:UserComment` encoded as an `rdf:Alt` localized string.
 
 ## Current PNG Embed Strategy (Required)
 
@@ -46,9 +47,7 @@ When embedding PNG metadata, write **all** of the following:
   - `Keywords`, `Tags`
 - PNG XMP (`XML:com.adobe.xmp`) for Windows Explorer compatibility:
   - `dc:subject` (tags)
-  - `dc:description` (comment)
-  - `dc:title` (comment duplicate/fallback)
-  - `exif:UserComment` (comment fallback)
+  - `exif:UserComment` as `rdf:Alt` (comments; required for Windows PNG `System.Comment`)
 - PNG EXIF fallback (`XPComment`, `XPKeywords`, etc.) for tool compatibility
 
 Do not remove the XMP write path from `native/mediamanagerx_app/main.py` (`_save_to_exif_cmd`) unless you re-test Windows PNG behavior.
@@ -65,17 +64,19 @@ For Windows-visible PNG data, the import harvester must check:
    - `exif:UserComment` / `dc:description` / `dc:title` -> Embedded Comments (first match wins)
 3. EXIF fallback (`XPComment`, `XPKeywords`, `ImageDescription`, `UserComment`)
 
-## Important Observed Limitation (Windows PNG Comments)
+## Important Observed Mapping (Windows PNG Comments)
 
-On this Windows machine (tested via `Shell.Application` property API), PNG comment text written in XMP may appear as `System.Title` rather than `System.Comment`.
+On this Windows machine (tested via `Shell.Application` property API):
 
-What was empirically confirmed:
+- PNG tags from XMP `dc:subject` appear in `System.Keywords`
+- PNG comments appear in `System.Comment` when XMP uses:
+  - `<exif:UserComment><rdf:Alt><rdf:li xml:lang="x-default">...</rdf:li></rdf:Alt></exif:UserComment>`
+- If comment text is written to XMP `dc:description`, Windows maps it to `System.Title` instead
 
-- PNG tags from XMP `dc:subject` were visible in `System.Keywords`
-- PNG comment text was not visible in `System.Comment` with the tested PNG write methods
-- The same comment text appeared in `System.Title` when written to XMP `dc:description` / `dc:title`
+Practical rule:
 
-This means Windows PNG "comment" display can vary by handler/version and is less reliable than JPG.
+- For app-authored PNG comments targeting Windows Explorer "Comments", write `exif:UserComment` as `rdf:Alt`
+- Do not write the same long comment into `dc:title` / `dc:description` unless you intentionally want it to appear in `Title`
 
 ## Code Paths To Preserve
 
@@ -96,4 +97,3 @@ After changing metadata code:
    - Check PNG `Title` as well if "Comments" appears blank
 4. Back in app, click `Import Metadata`
 5. Confirm only Embedded fields change (DB fields should not be overwritten)
-

@@ -2435,7 +2435,8 @@ class MainWindow(QMainWindow):
         """Build a minimal XMP packet for PNG that Windows/tools can parse.
 
         Windows Explorer reliably reads PNG tags from XMP dc:subject on many systems.
-        Comment support is inconsistent, so we emit multiple comment-like fields.
+        For PNG comments, Windows maps System.Comment from exif:UserComment only when
+        encoded as an rdf:Alt localized string (not a plain text node).
         """
         safe_comment = html.escape(comment or "", quote=False)
         safe_tags = [html.escape(t, quote=False) for t in (tags or []) if str(t).strip()]
@@ -2443,19 +2444,14 @@ class MainWindow(QMainWindow):
 
         parts = []
         if safe_comment:
-            # Some handlers map dc:description to Title for PNG; we write both so
-            # importers and Windows variants have something to latch onto.
+            # Avoid writing dc:description/dc:title here because Windows can map
+            # those to System.Title for PNG, which causes long comments to appear in
+            # the Title field instead of Comments.
             parts.append(
-                "<dc:description><rdf:Alt>"
+                "<exif:UserComment><rdf:Alt>"
                 f"<rdf:li xml:lang=\"x-default\">{safe_comment}</rdf:li>"
-                "</rdf:Alt></dc:description>"
+                "</rdf:Alt></exif:UserComment>"
             )
-            parts.append(
-                "<dc:title><rdf:Alt>"
-                f"<rdf:li xml:lang=\"x-default\">{safe_comment}</rdf:li>"
-                "</rdf:Alt></dc:title>"
-            )
-            parts.append(f"<exif:UserComment>{safe_comment}</exif:UserComment>")
         if tag_items:
             parts.append(f"<dc:subject><rdf:Bag>{tag_items}</rdf:Bag></dc:subject>")
 
