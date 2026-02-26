@@ -10,6 +10,7 @@ import threading
 import time
 import re
 import json
+import html
 from pathlib import Path
 
 def _install_stderr_filter() -> None:
@@ -2429,6 +2430,53 @@ class MainWindow(QMainWindow):
                 return str(val).strip()
         return str(val).strip()
 
+    @staticmethod
+    def _build_png_xmp_packet(comment: str, tags: list[str]) -> str:
+        """Build a minimal XMP packet for PNG that Windows/tools can parse.
+
+        Windows Explorer reliably reads PNG tags from XMP dc:subject on many systems.
+        Comment support is inconsistent, so we emit multiple comment-like fields.
+        """
+        safe_comment = html.escape(comment or "", quote=False)
+        safe_tags = [html.escape(t, quote=False) for t in (tags or []) if str(t).strip()]
+        tag_items = "".join(f"<rdf:li>{t}</rdf:li>" for t in safe_tags)
+
+        parts = []
+        if safe_comment:
+            # Some handlers map dc:description to Title for PNG; we write both so
+            # importers and Windows variants have something to latch onto.
+            parts.append(
+                "<dc:description><rdf:Alt>"
+                f"<rdf:li xml:lang=\"x-default\">{safe_comment}</rdf:li>"
+                "</rdf:Alt></dc:description>"
+            )
+            parts.append(
+                "<dc:title><rdf:Alt>"
+                f"<rdf:li xml:lang=\"x-default\">{safe_comment}</rdf:li>"
+                "</rdf:Alt></dc:title>"
+            )
+            parts.append(f"<exif:UserComment>{safe_comment}</exif:UserComment>")
+        if tag_items:
+            parts.append(f"<dc:subject><rdf:Bag>{tag_items}</rdf:Bag></dc:subject>")
+
+        if not parts:
+            return ""
+
+        body = "".join(parts)
+        return (
+            "<?xpacket begin=\"\ufeff\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>"
+            "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">"
+            "<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">"
+            "<rdf:Description rdf:about=\"\" "
+            "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" "
+            "xmlns:exif=\"http://ns.adobe.com/exif/1.0/\">"
+            f"{body}"
+            "</rdf:Description>"
+            "</rdf:RDF>"
+            "</x:xmpmeta>"
+            "<?xpacket end=\"w\"?>"
+        )
+
     def _harvest_windows_visible_metadata(self, img) -> dict:
         """Return only fields meant to mirror Windows Explorer Tags/Comments."""
         result = {"tags": [], "comment": ""}
@@ -2463,6 +2511,31 @@ class MainWindow(QMainWindow):
                     add_comment(v)
                 elif key in {"keywords", "tags"}:
                     add_tags(v)
+                elif key in {"xmp", "xml:com.adobe.xmp"}:
+                    try:
+                        xmp_txt = v.decode(errors="replace") if isinstance(v, (bytes, bytearray)) else str(v)
+                    except Exception:
+                        xmp_txt = str(v)
+                    # Windows/tool PNG metadata commonly lives in XMP.
+                    for m in re.findall(r"<dc:subject>(.*?)</dc:subject>", xmp_txt, re.DOTALL | re.IGNORECASE):
+                        for li in re.findall(r"<rdf:li[^>]*>(.*?)</rdf:li>", m, re.DOTALL | re.IGNORECASE):
+                            add_tags(re.sub(r"<[^>]+>", "", li))
+                    if not result["comment"]:
+                        m = re.search(r"<exif:UserComment[^>]*>(.*?)</exif:UserComment>", xmp_txt, re.DOTALL | re.IGNORECASE)
+                        if m:
+                            add_comment(re.sub(r"<[^>]+>", "", m.group(1)))
+                    if not result["comment"]:
+                        m = re.search(r"<dc:description>(.*?)</dc:description>", xmp_txt, re.DOTALL | re.IGNORECASE)
+                        if m:
+                            vals = re.findall(r"<rdf:li[^>]*>(.*?)</rdf:li>", m.group(1), re.DOTALL | re.IGNORECASE)
+                            if vals:
+                                add_comment(re.sub(r"<[^>]+>", "", vals[0]))
+                    if not result["comment"]:
+                        m = re.search(r"<dc:title>(.*?)</dc:title>", xmp_txt, re.DOTALL | re.IGNORECASE)
+                        if m:
+                            vals = re.findall(r"<rdf:li[^>]*>(.*?)</rdf:li>", m.group(1), re.DOTALL | re.IGNORECASE)
+                            if vals:
+                                add_comment(re.sub(r"<[^>]+>", "", vals[0]))
 
         try:
             exif = img.getexif()
@@ -2631,6 +2704,20 @@ class MainWindow(QMainWindow):
                         pnginfo.add_text("Tags", win_tags)
                         if not comm_raw:
                             pnginfo.add_text("Subject", win_tags)
+
+                    # PNG + Windows Explorer: tags are often read from XMP dc:subject
+                    # rather than PNG tEXt or EXIF XP* fields. Emit XMP in addition to
+                    # legacy keys for maximum compatibility.
+                    parsed_tags = [t.strip() for t in win_tags.split(";") if t.strip()]
+                    xmp_packet = self._build_png_xmp_packet(comm_raw, parsed_tags)
+                    if xmp_packet:
+                        try:
+                            pnginfo.add_itxt("XML:com.adobe.xmp", xmp_packet)
+                        except Exception:
+                            try:
+                                pnginfo.add_text("XML:com.adobe.xmp", xmp_packet)
+                            except Exception:
+                                pass
 
                     # EXIF for Windows 10/11 Explorer compatibility
                     exif = img.getexif()
