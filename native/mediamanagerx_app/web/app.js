@@ -1,3 +1,24 @@
+// Drag Tooltip
+let gDragTooltip = null;
+function ensureDragTooltip() {
+  if (gDragTooltip) return gDragTooltip;
+  gDragTooltip = document.createElement('div');
+  gDragTooltip.id = 'mmxDragTooltip';
+  gDragTooltip.style.position = 'fixed';
+  gDragTooltip.style.pointerEvents = 'none';
+  gDragTooltip.style.zIndex = '9999';
+  gDragTooltip.style.padding = '4px 8px';
+  gDragTooltip.style.background = 'rgba(0,0,0,0.8)';
+  gDragTooltip.style.color = '#fff';
+  gDragTooltip.style.borderRadius = '4px';
+  gDragTooltip.style.fontSize = '12px';
+  gDragTooltip.style.display = 'none';
+  gDragTooltip.style.whiteSpace = 'nowrap';
+  gDragTooltip.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
+  document.body.appendChild(gDragTooltip);
+  return gDragTooltip;
+}
+
 // Globals for state
 let gSearchQuery = '';
 let gPage = 0;
@@ -590,12 +611,32 @@ function renderMediaList(items, scrollToTop = true) {
           gBridge.set_drag_paths(paths);
         }
 
-        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.effectAllowed = 'copyMove';
 
+        // Smaller Drag Thumbnail (64x64) offset to bottom-right of cursor
         const img = card.querySelector('img');
-        if (img) e.dataTransfer.setDragImage(img, 20, 20);
+        if (img) {
+          const canvas = document.createElement('canvas');
+          canvas.width = 64;
+          canvas.height = 64;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, 64, 64);
+          // -10, -10 offset means the cursor is at roughly top-left of the 64x64 thumbnail
+          e.dataTransfer.setDragImage(canvas, -10, -10);
+        }
+      });
+      card.addEventListener('drag', (e) => {
+        const tooltip = ensureDragTooltip();
+        if (e.clientX > 0 && e.clientY > 0) {
+          tooltip.style.left = (e.clientX + 15) + 'px';
+          tooltip.style.top = (e.clientY + 15) + 'px';
+          tooltip.style.display = 'block';
+          const isCopy = e.ctrlKey || e.metaKey;
+          tooltip.innerHTML = (isCopy ? '<span style="color:#00ff00;font-weight:bold;">+</span> Copy' : '<span style="color:#0088ff;font-weight:bold;">→</span> Move') + ' ' + (paths.length > 1 ? paths.length + ' items' : 'item');
+        }
       });
       card.addEventListener('dragend', (e) => {
+        if (gDragTooltip) gDragTooltip.style.display = 'none';
         if (window.qt && gBridge && gBridge.set_drag_paths) {
           gBridge.set_drag_paths([]);
         }
@@ -696,12 +737,29 @@ function renderMediaList(items, scrollToTop = true) {
           gBridge.set_drag_paths(paths);
         }
 
-        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.effectAllowed = 'copyMove';
 
-        const img = card.querySelector('img');
-        if (img) e.dataTransfer.setDragImage(img, 20, 20);
+        if (img) {
+          const canvas = document.createElement('canvas');
+          canvas.width = 64;
+          canvas.height = 64;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, 64, 64);
+          e.dataTransfer.setDragImage(canvas, -10, -10);
+        }
+      });
+      card.addEventListener('drag', (e) => {
+        const tooltip = ensureDragTooltip();
+        if (e.clientX > 0 && e.clientY > 0) {
+          tooltip.style.left = (e.clientX + 15) + 'px';
+          tooltip.style.top = (e.clientY + 15) + 'px';
+          tooltip.style.display = 'block';
+          const isCopy = e.ctrlKey || e.metaKey;
+          tooltip.innerHTML = (isCopy ? '<span style="color:#00ff00;font-weight:bold;">+</span> Copy' : '<span style="color:#0088ff;font-weight:bold;">→</span> Move') + ' ' + (paths.length > 1 ? paths.length + ' items' : 'item');
+        }
       });
       card.addEventListener('dragend', (e) => {
+        if (gDragTooltip) gDragTooltip.style.display = 'none';
         if (window.qt && gBridge && gBridge.set_drag_paths) {
           gBridge.set_drag_paths([]);
         }

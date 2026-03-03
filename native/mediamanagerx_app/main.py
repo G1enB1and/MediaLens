@@ -309,14 +309,20 @@ class FolderTreeView(QTreeView):
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls() or event.mimeData().hasFormat("application/x-mmx-path") or event.mimeData().hasFormat("web/mmx-paths"):
-            event.setDropAction(Qt.DropAction.MoveAction)
+            if event.modifiers() & Qt.ControlModifier:
+                event.setDropAction(Qt.DropAction.CopyAction)
+            else:
+                event.setDropAction(Qt.DropAction.MoveAction)
             event.acceptProposedAction()
         else:
             super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event) -> None:
         if event.mimeData().hasUrls() or event.mimeData().hasFormat("application/x-mmx-path") or event.mimeData().hasFormat("web/mmx-paths"):
-            event.setDropAction(Qt.DropAction.MoveAction)
+            if event.modifiers() & Qt.ControlModifier:
+                event.setDropAction(Qt.DropAction.CopyAction)
+            else:
+                event.setDropAction(Qt.DropAction.MoveAction)
             event.acceptProposedAction()
         else:
             super().dragMoveEvent(event)
@@ -395,10 +401,14 @@ class FolderTreeView(QTreeView):
             event.ignore()
             return
 
-        # Trigger move via Bridge
+        # Trigger move or copy via Bridge
         if bridge:
-            event.setDropAction(Qt.DropAction.MoveAction)
-            bridge.move_paths_async(src_paths, target_path)
+            if event.modifiers() & Qt.ControlModifier:
+                event.setDropAction(Qt.DropAction.CopyAction)
+                bridge.copy_paths_async(src_paths, target_path)
+            else:
+                event.setDropAction(Qt.DropAction.MoveAction)
+                bridge.move_paths_async(src_paths, target_path)
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -825,6 +835,8 @@ class Bridge(QObject):
             try: newp = self._hide_by_renaming_dot(old)
             except Exception: pass
             self.fileOpFinished.emit("hide", bool(newp), old, newp)
+            self._disk_cache = {}
+            self._disk_cache_key = ""
         threading.Thread(target=work, daemon=True).start()
         return True
 
@@ -848,6 +860,8 @@ class Bridge(QObject):
             try: newp = self._unhide_by_renaming_dot(old)
             except Exception: pass
             self.fileOpFinished.emit("unhide", bool(newp), old, newp)
+            self._disk_cache = {}
+            self._disk_cache_key = ""
         threading.Thread(target=work, daemon=True).start()
         return True
 
@@ -877,6 +891,8 @@ class Bridge(QObject):
                     except Exception: pass
             except Exception: pass
             self.fileOpFinished.emit("rename", ok, old, newp)
+            self._disk_cache = {}
+            self._disk_cache_key = ""
         threading.Thread(target=work, daemon=True).start()
         return True
 
@@ -934,9 +950,59 @@ class Bridge(QObject):
                         print(f"Move Error for {src_str}: {e}")
                 
                 self.fileOpFinished.emit("move", any_ok, "", str(target_dir))
+                self._disk_cache = {}
+                self._disk_cache_key = ""
             except Exception as e:
                 print(f"Move Background Error: {e}")
                 self.fileOpFinished.emit("move", False, "", "")
+        
+        threading.Thread(target=work, daemon=True).start()
+
+    @Slot(list, str)
+    def copy_paths_async(self, src_paths: list[str], target_folder: str) -> None:
+        print(f"DEBUG: copy_paths_async: count={len(src_paths)} target={target_folder}")
+        target_dir = Path(target_folder)
+        if not target_dir.exists() or not target_dir.is_dir():
+             self.fileOpFinished.emit("copy", False, "", "")
+             return
+        
+        def work():
+            try:
+                from app.mediamanager.db.media_repo import add_media_item
+                any_ok = False
+                for src_str in src_paths:
+                    try:
+                        src = Path(src_str)
+                        if not src.exists(): continue
+                        
+                        dst = self._unique_path(target_dir / src.name)
+                        print(f"DEBUG: Copying {src} -> {dst}")
+                        
+                        if src.is_dir():
+                            shutil.copytree(str(src), str(dst))
+                            # For now, we don't have a recursive DB adder in this context,
+                            # but the next folder scan will pick it up. 
+                            # We could trigger a scan of the target folder.
+                        else:
+                            shutil.copy2(str(src), str(dst))
+                            # Add to DB
+                            try:
+                                # We need media_type. 
+                                ext = dst.suffix.lower()
+                                mtype = "image" if ext in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"} else "video"
+                                add_media_item(self.conn, str(dst), mtype)
+                            except Exception as e:
+                                print(f"DB Add Error: {e}")
+                        any_ok = True
+                    except Exception as e:
+                        print(f"Copy Error for {src_str}: {e}")
+                
+                self.fileOpFinished.emit("copy", any_ok, "", str(target_dir))
+                self._disk_cache = {}
+                self._disk_cache_key = ""
+            except Exception as e:
+                print(f"Copy Background Error: {e}")
+                self.fileOpFinished.emit("copy", False, "", "")
         
         threading.Thread(target=work, daemon=True).start()
 
@@ -1000,6 +1066,8 @@ class Bridge(QObject):
             from app.mediamanager.utils.pathing import normalize_windows_path
             self.conn.execute("DELETE FROM media_items WHERE path = ?", (normalize_windows_path(path_str),))
             self.conn.commit()
+            self._disk_cache = {}
+            self._disk_cache_key = ""
             return True
         except Exception: return False
 
@@ -1037,6 +1105,8 @@ class Bridge(QObject):
                         if src.is_dir(): shutil.copytree(str(src), str(dst))
                         else: shutil.copy2(str(src), str(dst))
                 self.fileOpFinished.emit("paste", True, "", str(target_dir))
+                self._disk_cache = {}
+                self._disk_cache_key = ""
             except Exception: self.fileOpFinished.emit("paste", False, "", "")
         threading.Thread(target=work, daemon=True).start()
 
