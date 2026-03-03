@@ -478,8 +478,11 @@ function renderMediaList(items, scrollToTop = true) {
 
   viewItems.forEach((item, idx) => {
     const card = document.createElement('div');
-    card.className = 'card loading'; // Start hidden
+    card.className = 'card loading';
     card.tabIndex = 0;
+    if (item.width && item.height) {
+      card.style.aspectRatio = `${item.width} / ${item.height}`;
+    }
 
     gTotalOnPage++;
 

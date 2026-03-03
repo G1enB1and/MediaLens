@@ -19,6 +19,8 @@ def add_media_item(
     path: str,
     media_type: str,
     content_hash: Optional[str] = None,
+    width: Optional[int] = None,
+    height: Optional[int] = None,
 ) -> int:
     now = _utc_now_iso()
     normalized = normalize_windows_path(path)
@@ -30,16 +32,18 @@ def add_media_item(
 
     conn.execute(
         """
-        INSERT INTO media_items(path, content_hash, media_type, file_size_bytes, modified_time_utc, created_at_utc, updated_at_utc)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO media_items(path, content_hash, media_type, file_size_bytes, modified_time_utc, width, height, created_at_utc, updated_at_utc)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(path) DO UPDATE SET
           content_hash=COALESCE(excluded.content_hash, content_hash),
           media_type=excluded.media_type,
           file_size_bytes=excluded.file_size_bytes,
           modified_time_utc=excluded.modified_time_utc,
+          width=COALESCE(excluded.width, width),
+          height=COALESCE(excluded.height, height),
           updated_at_utc=excluded.updated_at_utc
         """,
-        (normalized, content_hash, media_type, size, mtime, now, now),
+        (normalized, content_hash, media_type, size, mtime, width, height, now, now),
     )
     row = conn.execute("SELECT id FROM media_items WHERE path = ?", (normalized,)).fetchone()
     if not row:
@@ -51,7 +55,7 @@ def add_media_item(
 def get_media_by_path(conn: sqlite3.Connection, path: str) -> Optional[dict]:
     normalized = normalize_windows_path(path)
     row = conn.execute(
-        "SELECT id, path, media_type, file_size_bytes, modified_time_utc FROM media_items WHERE path = ?",
+        "SELECT id, path, media_type, file_size_bytes, modified_time_utc, width, height FROM media_items WHERE path = ?",
         (normalized,),
     ).fetchone()
     if not row:
@@ -62,6 +66,8 @@ def get_media_by_path(conn: sqlite3.Connection, path: str) -> Optional[dict]:
         "media_type": row[2],
         "file_size": row[3],
         "modified_time": row[4],
+        "width": row[5],
+        "height": row[6],
     }
 
 
@@ -97,6 +103,8 @@ def upsert_media_item(
     path: str,
     media_type: str,
     content_hash: str,
+    width: Optional[int] = None,
+    height: Optional[int] = None,
 ) -> int:
     """Upsert media item, handling renames/moves via content hash."""
     now = _utc_now_iso()
@@ -117,10 +125,10 @@ def upsert_media_item(
         conn.execute(
             """
             UPDATE media_items 
-            SET content_hash = ?, file_size_bytes = ?, modified_time_utc = ?, updated_at_utc = ? 
+            SET content_hash = ?, file_size_bytes = ?, modified_time_utc = ?, width = ?, height = ?, updated_at_utc = ? 
             WHERE id = ?
             """,
-            (content_hash, size, mtime, now, existing_by_path[0]),
+            (content_hash, size, mtime, width, height, now, existing_by_path[0]),
         )
         conn.commit()
         return int(existing_by_path[0])
@@ -146,10 +154,10 @@ def upsert_media_item(
             conn.execute(
                 """
                 UPDATE media_items 
-                SET path = ?, file_size_bytes = ?, modified_time_utc = ?, updated_at_utc = ? 
+                SET path = ?, file_size_bytes = ?, modified_time_utc = ?, width = ?, height = ?, updated_at_utc = ? 
                 WHERE id = ?
                 """,
-                (normalized, size, mtime, now, media_id),
+                (normalized, size, mtime, width, height, now, media_id),
             )
             conn.commit()
             return int(media_id)
@@ -159,7 +167,7 @@ def upsert_media_item(
             pass
 
     # 3. Brand new item (or duplicate content at new path)
-    return add_media_item(conn, normalized, media_type, content_hash)
+    return add_media_item(conn, normalized, media_type, content_hash, width=width, height=height)
 
 
 def list_media_in_scope(
@@ -177,6 +185,8 @@ def list_media_in_scope(
             m.media_type, 
             m.file_size_bytes, 
             m.modified_time_utc,
+            m.width,
+            m.height,
             meta.title,
             meta.description,
             meta.notes,
@@ -200,10 +210,12 @@ def list_media_in_scope(
             "media_type": r[2],
             "file_size": r[3],
             "modified_time": r[4],
-            "title": r[5],
-            "description": r[6],
-            "notes": r[7],
-            "tags": r[8],
+            "width": r[5],
+            "height": r[6],
+            "title": r[7],
+            "description": r[8],
+            "notes": r[9],
+            "tags": r[10],
         }
         for r in rows
     ]
