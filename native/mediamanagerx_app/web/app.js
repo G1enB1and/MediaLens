@@ -438,11 +438,15 @@ function wireCtxMenu() {
 
 // applySearch is no longer used for local filtering.
 
-function renderMediaList(items) {
+function renderMediaList(items, scrollToTop = true) {
   const el = document.getElementById('mediaList');
   if (!el) return;
 
   el.innerHTML = '';
+  const main = document.querySelector('main');
+  if (scrollToTop && main) {
+    main.scrollTop = 0;
+  }
   gMedia = Array.isArray(items) ? items : [];
   const viewItems = gMedia;
 
@@ -953,7 +957,7 @@ function refreshFromBridge(bridge, resetPage = false) {
     bridge.count_media(gSelectedFolders, gFilter, gSearchQuery || '', function (count) {
       gTotal = count || 0;
       bridge.list_media(gSelectedFolders, PAGE_SIZE, gPage * PAGE_SIZE, gSort, gFilter, gSearchQuery || '', function (items) {
-        renderMediaList(items);
+        renderMediaList(items, true);
         renderPager();
         // Hide the "Starting..." or "Loading..." overlay once we have the first batch of results.
         setGlobalLoading(false);
@@ -1117,6 +1121,24 @@ function wireSettings() {
         gPage = 0;
         refreshFromBridge(gBridge);
       });
+    });
+  }
+
+  const autoUpdateToggle = document.getElementById('toggleAutoUpdate');
+  if (autoUpdateToggle) {
+    autoUpdateToggle.addEventListener('change', () => {
+      if (!gBridge || !gBridge.set_setting_bool) return;
+      gBridge.set_setting_bool('updates.check_on_launch', !!autoUpdateToggle.checked, function () { });
+    });
+  }
+
+  const btnCheckUpdate = document.getElementById('btnCheckUpdate');
+  if (btnCheckUpdate) {
+    btnCheckUpdate.addEventListener('click', () => {
+      if (!gBridge || !gBridge.check_for_updates) return;
+      const statusText = document.getElementById('updateStatusText');
+      if (statusText) statusText.textContent = 'Checking...';
+      gBridge.check_for_updates(true); // manual=true
     });
   }
 
@@ -1354,13 +1376,53 @@ async function main() {
     wireLightbox();
     wireCtxMenu();
 
-    if (bridge.uiFlagChanged) {
-      bridge.uiFlagChanged.connect(function (key, value) {
-        if (key === 'ui.show_left_panel') {
-          updateSidebarButtonIcons('left', value);
-        } else if (key === 'ui.show_right_panel') {
-          updateSidebarButtonIcons('right', value);
+    if (bridge.updateAvailable) {
+      bridge.updateAvailable.connect(function (newVer, manual) {
+        const toast = document.getElementById('updateToast');
+        const text = document.getElementById('updateToastText');
+        const statusText = document.getElementById('updateStatusText');
+
+        if (newVer) {
+          if (text) text.textContent = `Version ${newVer} is available!`;
+          if (toast) toast.hidden = false;
+          if (statusText) statusText.textContent = `Version ${newVer} available!`;
+        } else if (manual) {
+          if (statusText) statusText.textContent = 'You are using the latest version.';
         }
+      });
+    }
+
+    const btnUpdateNow = document.getElementById('btnUpdateNow');
+    if (btnUpdateNow) {
+      btnUpdateNow.addEventListener('click', () => {
+        if (!gBridge || !gBridge.download_and_install_update) return;
+        setGlobalLoading(true, 'Downloading update...', 0);
+        const toast = document.getElementById('updateToast');
+        if (toast) toast.hidden = true;
+        gBridge.download_and_install_update();
+      });
+    }
+
+    const btnUpdateLater = document.getElementById('btnUpdateLater');
+    if (btnUpdateLater) {
+      btnUpdateLater.addEventListener('click', () => {
+        const toast = document.getElementById('updateToast');
+        if (toast) toast.hidden = true;
+      });
+    }
+
+    if (bridge.updateDownloadProgress) {
+      bridge.updateDownloadProgress.connect(function (pct) {
+        setGlobalLoading(true, 'Downloading update...', pct);
+      });
+    }
+
+    if (bridge.updateError) {
+      bridge.updateError.connect(function (msg) {
+        setGlobalLoading(false);
+        const st = document.getElementById('updateStatusText');
+        if (st) st.textContent = 'Update error: ' + msg;
+        alert('Update error: ' + msg);
       });
     }
 
@@ -1412,7 +1474,7 @@ async function main() {
 
         // Silent background refresh to pick up new metadata without blocking
         bridge.list_media(gSelectedFolders, PAGE_SIZE, gPage * PAGE_SIZE, gSort, gFilter, gSearchQuery || '', function (items) {
-          renderMediaList(items);
+          renderMediaList(items, false);
           renderPager();
         });
       });
@@ -1481,6 +1543,18 @@ async function main() {
           }
         }
       });
+
+      // Update settings
+      const autoUpdate = document.getElementById('toggleAutoUpdate');
+      if (autoUpdate) autoUpdate.checked = (s && s['updates.check_on_launch']) !== false;
+
+      // App version text (from bridge or static)
+      if (gBridge && gBridge.get_app_version) {
+        gBridge.get_app_version(function (v) {
+          const el = document.getElementById('currentVersionText');
+          if (el) el.textContent = v;
+        });
+      }
 
       // Load metadata order
       const order = s && s['metadata.display.order'];

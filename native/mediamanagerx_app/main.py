@@ -91,6 +91,7 @@ from PySide6.QtCore import (
     QEvent,
     QTimer,
 )
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 from PySide6.QtGui import QAction, QColor, QImageReader, QIcon, QPainter
 from PySide6.QtGui import QMouseEvent, QPen
 from PySide6.QtWidgets import (
@@ -389,6 +390,11 @@ class Bridge(QObject):
     scanFinished = Signal(str, int)  # folder, count
     selectionChanged = Signal(list)  # list of folder paths
     scanProgress = Signal(str, int)  # file_path, percentage
+    
+    # Update Signals
+    updateAvailable = Signal(str, bool)  # version, manual
+    updateDownloadProgress = Signal(int)
+    updateError = Signal(str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -441,6 +447,9 @@ class Bridge(QObject):
             print(f"Migration Error: {e}")
 
         self.settings = QSettings("G1enB1and", "MediaManagerX")
+        self.nam = QNetworkAccessManager(self)
+        self._update_reply = None
+        self._download_reply = None
         self._session_shuffle_seed = random.getrandbits(32)
         
         # Hybrid Fast-Load Cache
@@ -455,7 +464,6 @@ class Bridge(QObject):
         print(f"JS Debug: {msg}")
 
     def _thumb_key(self, path: Path) -> str:
-        # Stable across runs; normalize separators + lowercase for Windows.
         s = str(path).replace("\\", "/").lower().encode("utf-8")
         return hashlib.sha1(s).hexdigest()
 
@@ -470,45 +478,24 @@ class Bridge(QObject):
 
     def _ensure_video_poster(self, video_path: Path) -> Path | None:
         """Generate a poster jpg for a video using ffmpeg (if missing)."""
-
         out = self._video_poster_path(video_path)
         if out.exists():
             return out
-
         ffmpeg = self._ffmpeg_bin()
         if not ffmpeg:
             return None
-
         try:
             out.parent.mkdir(parents=True, exist_ok=True)
-            # Grab a representative frame; avoid black frame at t=0.
-            # NOTE: avoid shell-style quoting in -vf; Windows builds can treat
-            # quotes literally. Also escape the comma inside min().
             vf = "thumbnail,scale=min(640\\,iw):-2"
-
             cmd = [
-                ffmpeg,
-                "-y",
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-ss",
-                "0.5",
-                "-i",
-                str(video_path),
-                "-frames:v",
-                "1",
-                "-vf",
-                vf,
-                "-q:v",
-                "4",
-                str(out),
+                ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+                "-ss", "0.5", "-i", str(video_path),
+                "-frames:v", "1", "-vf", vf, "-q:v", "4", str(out),
             ]
             r = subprocess.run(cmd, capture_output=True, text=True)
             if r.returncode != 0:
                 return None
             return out if out.exists() else None
-
         except Exception:
             return None
 
@@ -521,10 +508,9 @@ class Bridge(QObject):
             try:
                 with open(path, "rb") as f:
                     header = f.read(32)
-                # RIFF....WEBPVP8X
                 if header[0:4] == b"RIFF" and header[8:12] == b"WEBP" and header[12:16] == b"VP8X":
                     flags = header[20]
-                    return bool(flags & 2)  # Bit 1 is Animation
+                    return bool(flags & 2)
             except Exception:
                 pass
         return False
@@ -534,12 +520,10 @@ class Bridge(QObject):
             return
         self._selected_folders = folders
         try:
-            # Save the primary selection for restoration on next launch
             primary = folders[0] if folders else ""
             self.settings.setValue("gallery/last_folder", primary)
         except Exception:
             pass
-        # Database handles persistence; next scan will pick up any changes.
         self.selectionChanged.emit(self._selected_folders)
 
     @Slot(result=list)
@@ -547,197 +531,19 @@ class Bridge(QObject):
         return self._selected_folders
 
     def _randomize_enabled(self) -> bool:
-        try:
-            return bool(self.settings.value("gallery/randomize", False, type=bool))
-        except Exception:
-            return False
+        return bool(self.settings.value("gallery/randomize", False, type=bool))
 
     def _restore_last_enabled(self) -> bool:
-        try:
-            return bool(self.settings.value("gallery/restore_last", False, type=bool))
-        except Exception:
-            return False
+        return bool(self.settings.value("gallery/restore_last", False, type=bool))
 
     def _hide_dot_enabled(self) -> bool:
-        try:
-            return bool(self.settings.value("gallery/hide_dot", True, type=bool))
-        except Exception:
-            return True
+        return bool(self.settings.value("gallery/hide_dot", True, type=bool))
 
     def _start_folder_setting(self) -> str:
-        try:
-            return str(self.settings.value("gallery/start_folder", "", type=str) or "")
-        except Exception:
-            return ""
+        return str(self.settings.value("gallery/start_folder", "", type=str) or "")
 
     def _last_folder(self) -> str:
-        try:
-            return str(self.settings.value("gallery/last_folder", "", type=str) or "")
-        except Exception:
-            return ""
-
-    def _scan_media_paths(self, folders: list[str]) -> list[dict]:
-        """Query the database for media items under the specified folders.
-        
-        This replaces the old in-memory scan/cache. Results are now pulled
-        directly from the persistent database based on the current folders list.
-        """
-        from app.mediamanager.db.media_repo import list_media_in_scope
-        
-        # list_media_in_scope handles recursion and normalization.
-        return list_media_in_scope(self.conn, folders)
-
-    def _do_full_scan(self, paths: list[Path], conn: sqlite3.Connection) -> int:
-        from app.mediamanager.db.media_repo import upsert_media_item, get_media_by_path
-        from app.mediamanager.utils.hashing import calculate_file_hash
-        from datetime import datetime, timezone
-
-        image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
-        total_items = len(paths)
-
-        # ── Actual Scan with Smart Hashing ────────────────────────────────────
-        count = 0
-        skips = 0
-        for i, p in enumerate(paths):
-            if self._scan_abort:
-                break
-            
-            # Update progress
-            percent = int((i / total_items) * 100) if total_items > 0 else 100
-            self.scanProgress.emit(p.name, percent)
-
-            try:
-                stat = p.stat()
-                media_type = "image" if p.suffix.lower() in image_exts else "video"
-                
-                # Smart Check: Can we skip hashing?
-                skip_hash = False
-                existing = get_media_by_path(conn, str(p))
-                if existing:
-                    db_mtime = existing.get("modified_time")
-                    curr_mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat()
-                    if existing["file_size"] == stat.st_size and db_mtime == curr_mtime:
-                        skip_hash = True
-                
-                if skip_hash:
-                    skips += 1
-                else:
-                    h = calculate_file_hash(p)
-                    upsert_media_item(conn, str(p), media_type, h)
-                
-                count += 1
-            except Exception as e:
-                print(f"Bridge Scan Error: {e} for {p}")
-
-        return count
-
-    @Slot(list, str)
-    def start_scan(self, folders: list, search_query: str = "") -> None:
-        """Asynchronously scan folders for media items."""
-        self._scan_abort = True  # Signal previous thread to stop
-        
-        # Use existing disk cache if available to avoid redundant walk
-        disk_paths = list(self._disk_cache.values())
-        
-        def _work():
-            time.sleep(0.1)
-            self._scan_abort = False
-            primary = folders[0] if folders else ""
-            self.scanStarted.emit(primary)
-            
-            from app.mediamanager.db.connect import connect_db
-            scan_conn = connect_db(str(self.db_path))
-            try:
-                # If we don't have disk_paths yet (unlikely if called via flow), 
-                # we'd need to walk. But refreshFromBridge ensures we have them.
-                paths_to_scan = disk_paths
-                if not paths_to_scan:
-                    # Emergency fallback: pop cache manually or skip
-                    pass
-
-                self._do_full_scan(paths_to_scan, scan_conn)
-                
-                # Use the same reconciliation logic as list_media to get the final count
-                candidates = self._get_reconciled_candidates(folders, "all", search_query)
-                self.scanFinished.emit(primary, len(candidates))
-            finally:
-                scan_conn.close()
-
-        threading.Thread(target=_work, daemon=True).start()
-
-    @Slot(list, result=int)
-    def count_media(self, folders: list) -> int:
-        """Return total number of discoverable media items under folders."""
-        try:
-            return len(self._scan_media_paths(folders))
-        except Exception:
-            return 0
-
-    @Slot(str, result=str)
-    def get_video_poster(self, video_path: str) -> str:
-        """Return a file:// URL for a cached/generated poster image for a video."""
-
-        try:
-            p = Path(video_path)
-            out = self._ensure_video_poster(p)
-            if not out:
-                return ""
-            return QUrl.fromLocalFile(str(out)).toString()
-        except Exception:
-            return ""
-
-    @Slot(str, result=dict)
-    def debug_video_poster(self, video_path: str) -> dict:
-        """Attempt poster generation and return debug info for troubleshooting."""
-
-        p = Path(video_path)
-        out = self._video_poster_path(p)
-        ffmpeg = self._ffmpeg_bin()
-        if not ffmpeg:
-            return {"ok": False, "error": "ffmpeg not found", "out": str(out)}
-
-        vf = "thumbnail,scale=min(640\\,iw):-2"
-        cmd = [
-            ffmpeg,
-            "-y",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-ss",
-            "0.5",
-            "-i",
-            str(p),
-            "-frames:v",
-            "1",
-            "-vf",
-            vf,
-            "-q:v",
-            "4",
-            str(out),
-        ]
-
-        try:
-            r = subprocess.run(cmd, capture_output=True, text=True)
-            return {
-                "ok": bool(out.exists()) and r.returncode == 0,
-                "returncode": r.returncode,
-                "stderr": (r.stderr or "").strip()[:2000],
-                "stdout": (r.stdout or "").strip()[:2000],
-                "cmd": cmd,
-                "out": str(out),
-            }
-        except Exception as e:
-            return {"ok": False, "error": repr(e), "cmd": cmd, "out": str(out)}
-
-    @Slot(result=dict)
-    def get_tools_status(self) -> dict:
-        return {
-            "ffmpeg": bool(self._ffmpeg_bin()),
-            "ffmpeg_path": self._ffmpeg_bin() or "",
-            "ffprobe": bool(self._ffprobe_bin()),
-            "ffprobe_path": self._ffprobe_bin() or "",
-            "thumb_dir": str(self._thumb_dir),
-        }
+        return str(self.settings.value("gallery/last_folder", "", type=str) or "")
 
     @Slot(result=dict)
     def get_settings(self) -> dict:
@@ -751,7 +557,6 @@ class Bridge(QObject):
                 "ui.show_left_panel": bool(self.settings.value("ui/show_left_panel", True, type=bool)),
                 "ui.show_right_panel": bool(self.settings.value("ui/show_right_panel", True, type=bool)),
                 "ui.theme_mode": str(self.settings.value("ui/theme_mode", "dark", type=str) or "dark"),
-                "ui.enable_glassmorphism": bool(self.settings.value("ui/enable_glassmorphism", True, type=bool)),
                 "metadata.display.res": bool(self.settings.value("metadata/display/res", True, type=bool)),
                 "metadata.display.size": bool(self.settings.value("metadata/display/size", True, type=bool)),
                 "metadata.display.description": bool(self.settings.value("metadata/display/description", True, type=bool)),
@@ -767,15 +572,11 @@ class Bridge(QObject):
                 "metadata.display.dpi": bool(self.settings.value("metadata/display/dpi", False, type=bool)),
                 "metadata.display.embeddedtags": bool(self.settings.value("metadata/display/embeddedtags", True, type=bool)),
                 "metadata.display.embeddedcomments": bool(self.settings.value("metadata/display/embeddedcomments", True, type=bool)),
-                "metadata.display.embeddedtool": bool(self.settings.value("metadata/display/embeddedtool", True, type=bool)),
-                "metadata.display.combineddb": bool(self.settings.value("metadata/display/combineddb", True, type=bool)),
                 "metadata.display.aiprompt": bool(self.settings.value("metadata/display/aiprompt", True, type=bool)),
                 "metadata.display.ainegprompt": bool(self.settings.value("metadata/display/ainegprompt", True, type=bool)),
                 "metadata.display.aiparams": bool(self.settings.value("metadata/display/aiparams", True, type=bool)),
-                "metadata.display.sep1": bool(self.settings.value("metadata/display/sep1", True, type=bool)),
-                "metadata.display.sep2": bool(self.settings.value("metadata/display/sep2", False, type=bool)),
-                "metadata.display.sep3": bool(self.settings.value("metadata/display/sep3", False, type=bool)),
                 "metadata.display.order": self.settings.value("metadata/display/order", "[]", type=str),
+                "updates.check_on_launch": bool(self.settings.value("updates/check_on_launch", True, type=bool)),
             }
         except Exception:
             return {
@@ -789,29 +590,78 @@ class Bridge(QObject):
                 "ui.theme_mode": "dark",
             }
 
+    @Slot(result=str)
+    def get_app_version(self) -> str:
+        return __version__
+
+    @Slot(bool)
+    def check_for_updates(self, manual: bool = False):
+        """Check GitHub for a newer version in the VERSION file."""
+        url = "https://raw.githubusercontent.com/G1enB1and/MediaManagerX/main/VERSION"
+        request = QNetworkRequest(QUrl(url))
+        self._update_reply = self.nam.get(request)
+        
+        def _on_finished():
+            if self._update_reply.error() == QNetworkReply.NetworkError.NoError:
+                remote_version = bytes(self._update_reply.readAll()).decode().strip()
+                if remote_version and remote_version != __version__:
+                    self.updateAvailable.emit(remote_version, manual)
+                elif manual:
+                    self.updateAvailable.emit("", True)
+            elif manual:
+                self.updateError.emit(f"Failed to check for updates: {self._update_reply.errorString()}")
+            self._update_reply.deleteLater()
+            self._update_reply = None
+
+        self._update_reply.finished.connect(_on_finished)
+
+    @Slot()
+    def download_and_install_update(self):
+        """Download latest installer and launch it."""
+        url = "https://github.com/G1enB1and/MediaManagerX/releases/latest/download/MediaManagerX_Setup.exe"
+        request = QNetworkRequest(QUrl(url))
+        request.setAttribute(QNetworkRequest.Attribute.FollowRedirectsAttribute, True)
+        self._download_reply = self.nam.get(request)
+        
+        def _on_progress(received, total):
+            if total > 0:
+                pct = int((received / total) * 100)
+                self.updateDownloadProgress.emit(pct)
+
+        def _on_finished():
+            if self._download_reply.error() == QNetworkReply.NetworkError.NoError:
+                data = self._download_reply.readAll()
+                temp_dir = QStandardPaths.writableLocation(QStandardPaths.TempLocation)
+                setup_path = os.path.join(temp_dir, "MediaManagerX_Setup_New.exe")
+                try:
+                    with open(setup_path, "wb") as f:
+                        f.write(data)
+                    subprocess.Popen([setup_path, "/SILENT", "/SP-", "/NOICONS"])
+                    QApplication.quit()
+                except Exception as e:
+                    self.updateError.emit(f"Failed to save or launch installer: {e}")
+            else:
+                self.updateError.emit(f"Download failed: {self._download_reply.errorString()}")
+            self._download_reply.deleteLater()
+            self._download_reply = None
+
+        self._download_reply.downloadProgress.connect(_on_progress)
+        self._download_reply.finished.connect(_on_finished)
+
+    @Slot(result=bool)
+    def should_check_on_launch(self) -> bool:
+        return self.settings.value("updates.check_on_launch", True, type=bool)
+
     @Slot(str, bool, result=bool)
     def set_setting_bool(self, key: str, value: bool) -> bool:
         try:
-            if key not in (
-                "gallery.randomize",
-                "gallery.restore_last",
-                "gallery.hide_dot",
-                "ui.show_left_panel",
-                "ui.show_right_panel",
-            ) and not key.startswith("metadata.display."):
+            if key not in ("gallery.randomize", "gallery.restore_last", "gallery.hide_dot", "ui.show_left_panel", "ui.show_right_panel", "updates.check_on_launch") and not key.startswith("metadata.display."):
                 return False
             qkey = key.replace(".", "/")
             self.settings.setValue(qkey, bool(value))
-
-            # Any setting that impacts list results/order should invalidate cache.
-            if key in ("gallery.randomize", "gallery.hide_dot"):
-                self._media_cache.clear()
-
-            # UI flags should apply immediately.
             if key.startswith("ui.") or key.startswith("metadata.display."):
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, bool(value))
-
             return True
         except Exception:
             return False
@@ -826,831 +676,467 @@ class Bridge(QObject):
             if key == "ui.accent_color":
                 self.accentColorChanged.emit(str(value or "#8ab4f8"))
             elif key == "ui.theme_mode":
-                # Emit flag change for UI consistency if needed
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, value == "light")
-            elif key == "metadata.display.order":
-                self.settings.sync()
-                self.uiFlagChanged.emit(key, True) # Value is for refreshing layout
             return True
         except Exception:
             return False
 
     @Slot(str)
     def load_folder_now(self, path: str) -> None:
-        """Trigger immediate loading of the specified folder."""
         self.loadFolderRequested.emit(str(path))
 
     @Slot(result=str)
     def pick_folder(self) -> str:
-        # UI-driven folder picker for the web settings modal.
         try:
-            # Lazy import to avoid QtWidgets circulars.
             from PySide6.QtWidgets import QFileDialog
-
             folder = QFileDialog.getExistingDirectory(None, "Choose folder")
             return str(folder) if folder else ""
         except Exception:
             return ""
 
     def _unique_path(self, target: Path) -> Path:
-        if not target.exists():
-            return target
-
-        suffix = target.suffix
-        stem = target.stem
-        parent = target.parent
-        i = 2
+        if not target.exists(): return target
+        suffix, stem, parent, i = target.suffix, target.stem, target.parent, 2
         while True:
             cand = parent / f"{stem} ({i}){suffix}"
-            if not cand.exists():
-                return cand
+            if not cand.exists(): return cand
             i += 1
 
     def _hide_by_renaming_dot(self, path: str) -> str:
         p = Path(path)
-        if not p.exists():
-            return ""
-        name = p.name
-        if name.startswith("."):
-            return str(p)
-        target = p.with_name(f".{name}")
-        target = self._unique_path(target)
+        if not p.exists() or p.name.startswith("."): return str(p)
+        target = self._unique_path(p.with_name(f".{p.name}"))
         p.rename(target)
         return str(target)
 
     @Slot(str, result=str)
     def hide_by_renaming_dot(self, path: str) -> str:
-        """(Sync) Hide by dot-rename."""
-        try:
-            return self._hide_by_renaming_dot(path)
-        except Exception:
-            return ""
+        try: return self._hide_by_renaming_dot(path)
+        except Exception: return ""
 
     @Slot(str, result=bool)
     def hide_by_renaming_dot_async(self, path: str) -> bool:
-        """Async hide to avoid freezing WebEngine UI."""
-
         old = str(path)
-
-        def work() -> None:
-            ok = False
+        def work():
             newp = ""
-            try:
-                newp = self._hide_by_renaming_dot(old)
-                ok = bool(newp)
-            except Exception:
-                ok = False
-            self.fileOpFinished.emit("hide", ok, old, newp)
-
+            try: newp = self._hide_by_renaming_dot(old)
+            except Exception: pass
+            self.fileOpFinished.emit("hide", bool(newp), old, newp)
         threading.Thread(target=work, daemon=True).start()
         return True
 
     def _unhide_by_renaming_dot(self, path: str) -> str:
         p = Path(path)
-        if not p.exists():
-            return ""
-        name = p.name
-        if not name.startswith("."):
-            return str(p)
-        target = p.with_name(name[1:])
-        target = self._unique_path(target)
+        if not p.exists() or not p.name.startswith("."): return str(p)
+        target = self._unique_path(p.with_name(p.name[1:]))
         p.rename(target)
         return str(target)
 
     @Slot(str, result=str)
     def unhide_by_renaming_dot(self, path: str) -> str:
-        try:
-            return self._unhide_by_renaming_dot(path)
-        except Exception:
-            return ""
+        try: return self._unhide_by_renaming_dot(path)
+        except Exception: return ""
 
     @Slot(str, result=bool)
     def unhide_by_renaming_dot_async(self, path: str) -> bool:
         old = str(path)
-
-        def work() -> None:
-            ok = False
+        def work():
             newp = ""
-            try:
-                newp = self._unhide_by_renaming_dot(old)
-                ok = bool(newp)
-            except Exception:
-                ok = False
-            self.fileOpFinished.emit("unhide", ok, old, newp)
-
+            try: newp = self._unhide_by_renaming_dot(old)
+            except Exception: pass
+            self.fileOpFinished.emit("unhide", bool(newp), old, newp)
         threading.Thread(target=work, daemon=True).start()
         return True
 
     def _rename_path(self, path: str, new_name: str) -> str:
         p = Path(path)
-        if not p.exists():
-            return ""
-        new_name = (new_name or "").strip()
-        if not new_name:
-            return ""
-        target = p.with_name(new_name)
-        target = self._unique_path(target)
+        if not p.exists() or not new_name.strip(): return ""
+        target = self._unique_path(p.with_name(new_name.strip()))
         p.rename(target)
         return str(target)
 
     @Slot(str, str, result=str)
     def rename_path(self, path: str, new_name: str) -> str:
-        try:
-            return self._rename_path(path, new_name)
-        except Exception:
-            return ""
+        try: return self._rename_path(path, new_name)
+        except Exception: return ""
 
     @Slot(str, str, result=bool)
     def rename_path_async(self, path: str, new_name: str) -> bool:
-        old = str(path)
-        newn = str(new_name)
-
-        def work() -> None:
-            ok = False
-            newp = ""
+        old, newn = str(path), str(new_name)
+        def work():
+            ok, newp = False, ""
             try:
                 newp = self._rename_path(old, newn)
                 ok = bool(newp)
                 if ok:
-                    # Update the DB so the renamed file keeps its metadata and stays visible after refresh
                     from app.mediamanager.db.media_repo import rename_media_path
-                    try:
-                        rename_media_path(self.conn, old, newp)
-                    except Exception as db_err:
-                        print(f"Bridge Rename DB Update Error: {db_err}")
-            except Exception:
-                ok = False
+                    try: rename_media_path(self.conn, old, newp)
+                    except Exception: pass
+            except Exception: pass
             self.fileOpFinished.emit("rename", ok, old, newp)
-
         threading.Thread(target=work, daemon=True).start()
         return True
 
     @Slot(str, result=str)
     def path_to_url(self, path: str) -> str:
-        try:
-            return QUrl.fromLocalFile(str(path)).toString()
-        except Exception:
-            return ""
+        try: return QUrl.fromLocalFile(str(path)).toString()
+        except Exception: return ""
 
     @Slot(list, result=bool)
     def show_metadata(self, paths: list) -> bool:
-        try:
-            self.metadataRequested.emit(paths)
-            return True
-        except Exception:
-            return False
+        try: self.metadataRequested.emit(paths); return True
+        except Exception: return False
 
     @Slot(str)
     def open_in_explorer(self, path: str) -> None:
-        """Open Windows Explorer with the specified file selected or folder opened."""
         try:
-            print(f"Explorer Request: {path}")
-            # Ensure path is absolute and uses Windows backslashes
             p_obj = Path(path).absolute()
             p = str(p_obj).replace("/", "\\")
-            
-            if not p_obj.exists():
-                print(f"Explorer Error: Path does not exist: {p}")
-                return
-            
-            if p_obj.is_dir():
-                # Use os.startfile for directories (safest way to open a folder in Explorer)
-                import os
-                os.startfile(p)
-            else:
-                # Use a string command with shell=True for the complex /select syntax.
-                # Quotes are critical here.
-                cmd = f'explorer.exe /select,"{p}"'
-                print(f"Explorer Executing: {cmd}")
-                subprocess.Popen(cmd, shell=True)
-        except Exception as e:
-            print(f"Explorer Exception: {e}")
-            pass
+            if not p_obj.exists(): return
+            if p_obj.is_dir(): os.startfile(p)
+            else: subprocess.Popen(f'explorer.exe /select,"{p}"', shell=True)
+        except Exception: pass
 
     def _build_dropfiles_w(self, abs_paths: list[str]) -> bytes:
-        """Construct the Windows DROPFILES header + null-terminated UTF-16 strings."""
-        # struct DROPFILES { DWORD pFiles; POINT pt; BOOL fNC; BOOL fWide; }
-        # pFiles = 20 (offset to the first file)
-        # pt = (0,0) (point of drop)
-        # fNC = 0 (false)
-        # fWide = 1 (true, UTF-16)
         import struct
         header = struct.pack("IiiII", 20, 0, 0, 0, 1)
-        # Files are null-terminated, list ends with double null.
         files_data = b"".join([p.encode("utf-16-le") + b"\x00\x00" for p in abs_paths]) + b"\x00\x00"
         return header + files_data
 
     @Slot(list)
     def copy_to_clipboard(self, paths: list[str]) -> None:
-        """Copy file paths to the system clipboard with Windows Explorer compatibility."""
         try:
-            clipboard = QApplication.clipboard()
-            mime = QMimeData()
-            
+            clipboard, mime = QApplication.clipboard(), QMimeData()
             abs_paths = [str(Path(p).resolve()) for p in paths]
-            urls = [QUrl.fromLocalFile(p) for p in abs_paths]
-            mime.setUrls(urls)
+            mime.setUrls([QUrl.fromLocalFile(p) for p in abs_paths])
             mime.setText("\n".join(abs_paths))
-
-            # Preferred DropEffect: 5 = Copy
             mime.setData("Preferred DropEffect", b'\x05\x00\x00\x00')
-            
-            # FileNameW: DROPFILES structure is required for Explorer to see it as a file transfer
             mime.setData("FileNameW", self._build_dropfiles_w(abs_paths))
-            
             clipboard.setMimeData(mime)
-        except Exception:
-            pass
+        except Exception: pass
 
     @Slot(list)
     def cut_to_clipboard(self, paths: list[str]) -> None:
-        """Cut file paths to the system clipboard (sets Preferred DropEffect)."""
         try:
-            clipboard = QApplication.clipboard()
-            mime = QMimeData()
-            
+            clipboard, mime = QApplication.clipboard(), QMimeData()
             abs_paths = [str(Path(p).resolve()) for p in paths]
-            urls = [QUrl.fromLocalFile(p) for p in abs_paths]
-            mime.setUrls(urls)
+            mime.setUrls([QUrl.fromLocalFile(p) for p in abs_paths])
             mime.setText("\n".join(abs_paths))
-
-            # Preferred DropEffect: 2 = Move
             mime.setData("Preferred DropEffect", b'\x02\x00\x00\x00')
-            
             mime.setData("FileNameW", self._build_dropfiles_w(abs_paths))
-            
             clipboard.setMimeData(mime)
-        except Exception:
-            pass
+        except Exception: pass
 
     @Slot(result=bool)
     def has_files_in_clipboard(self) -> bool:
-        """Check if there are files (URLs) in the system clipboard."""
-        try:
-            clipboard = QApplication.clipboard()
-            return clipboard.mimeData().hasUrls()
-        except Exception:
-            return False
+        try: return QApplication.clipboard().mimeData().hasUrls()
+        except Exception: return False
 
     @Slot(str, result=bool)
     def delete_path(self, path_str: str) -> bool:
-        """Delete a file or folder from the filesystem."""
         try:
             p = Path(path_str)
-            if not p.exists():
-                return False
-            
-            if p.is_dir():
-                shutil.rmtree(p)
-            else:
-                p.unlink()
-            
-            # Also remove from database
-            normalized = normalize_windows_path(path_str)
-            self.conn.execute("DELETE FROM media_items WHERE path = ?", (normalized,))
+            if not p.exists(): return False
+            if p.is_dir(): shutil.rmtree(p)
+            else: p.unlink()
+            from app.mediamanager.utils.pathing import normalize_windows_path
+            self.conn.execute("DELETE FROM media_items WHERE path = ?", (normalize_windows_path(path_str),))
             self.conn.commit()
             return True
-        except Exception:
-            return False
+        except Exception: return False
 
     @Slot(str, str, result=str)
     def create_folder(self, parent_path: str, name: str) -> str:
-        """Create a new folder inside the parent path."""
         try:
             p = Path(parent_path) / name
             p.mkdir(parents=True, exist_ok=True)
             return str(p)
-        except Exception:
-            return ""
+        except Exception: return ""
 
     @Slot(str)
     def paste_into_folder_async(self, target_folder: str) -> None:
-        """Paste files from clipboard into the target folder asynchronously."""
         target_dir = Path(target_folder)
         if not target_dir.exists() or not target_dir.is_dir():
              self.fileOpFinished.emit("paste", False, "", "")
              return
-
-        # Must access clipboard on main thread
         try:
-            clipboard = QApplication.clipboard()
-            mime = clipboard.mimeData()
+            mime = QApplication.clipboard().mimeData()
             if not mime.hasUrls():
                 self.fileOpFinished.emit("paste", False, "", "")
                 return
-
-            is_move = False
-            if mime.hasFormat("Preferred DropEffect"):
-                data = mime.data("Preferred DropEffect")
-                if len(data) >= 1 and data[0] == 2:
-                    is_move = True
-
+            is_move = bool(mime.hasFormat("Preferred DropEffect") and mime.data("Preferred DropEffect")[0] == 2)
             src_paths = [Path(url.toLocalFile()) for url in mime.urls() if url.toLocalFile()]
         except Exception:
             self.fileOpFinished.emit("paste", False, "", "")
             return
-
-        def work() -> None:
+        def work():
             try:
                 for src in src_paths:
                     if not src.exists(): continue
-                    
-                    dst = target_dir / src.name
-                    # Avoid overwriting
-                    count = 1
-                    while dst.exists():
-                        dst = target_dir / f"{src.stem} ({count}){src.suffix}"
-                        count += 1
-                    
-                    if is_move:
-                        shutil.move(str(src), str(dst))
+                    dst = self._unique_path(target_dir / src.name)
+                    if is_move: shutil.move(str(src), str(dst))
                     else:
-                        if src.is_dir():
-                            shutil.copytree(str(src), str(dst))
-                        else:
-                            shutil.copy2(str(src), str(dst))
-                
+                        if src.is_dir(): shutil.copytree(str(src), str(dst))
+                        else: shutil.copy2(str(src), str(dst))
                 self.fileOpFinished.emit("paste", True, "", str(target_dir))
-            except Exception:
-                self.fileOpFinished.emit("paste", False, "", "")
-
+            except Exception: self.fileOpFinished.emit("paste", False, "", "")
         threading.Thread(target=work, daemon=True).start()
-
-    # reshuffle_gallery removed intentionally (kept randomize-per-session without UI clutter)
 
     @Slot(str, result=float)
     def get_video_duration_seconds(self, video_path: str) -> float:
-        """Return duration seconds using ffprobe (0 on failure)."""
-        print(f"Duration Request: {video_path}")
         try:
             ffprobe = self._ffprobe_bin()
-            if not ffprobe:
-                print("Duration Error: ffprobe not found")
-                return 0.0
-
-            cmd = [
-                ffprobe,
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "default=noprint_wrappers=1:nokey=1",
-                str(video_path),
-            ]
+            if not ffprobe: return 0.0
+            cmd = [ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(video_path)]
             r = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            s = (r.stdout or "").strip()
-            dur = float(s) if s else 0.0
-            print(f"Duration Success: {dur}s")
-            return dur
-        except Exception as e:
-            print(f"Duration Error: {e}")
-            return 0.0
+            return float((r.stdout or "").strip() or 0.0)
+        except Exception: return 0.0
 
     def _probe_video_size(self, video_path: str) -> tuple[int, int, bool]:
-        """
-        Return (display_width, display_height, is_malformed) for the first video stream.
-
-        is_malformed is True when either display dimension is odd after SAR adjustment.
-        Odd-dimensioned NV12 frames from H.264 HW-decoded sources crash Qt's swscaler
-        (coded_width=0 in the bitstream causes an impossible scale conversion). Videos
-        flagged here are transparently preprocessed to MJPEG/MKV before playback.
-        """
         ffprobe = self._ffprobe_bin()
-        if not ffprobe:
-            return (0, 0, False)
-
-        cmd = [
-            ffprobe, "-v", "error",
-            "-select_streams", "v:0",
-            "-show_entries", "stream=width,height,sample_aspect_ratio:stream_tags=rotate",
-            "-of", "json",
-            str(video_path)
-        ]
+        if not ffprobe: return (0, 0, False)
+        cmd = [ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,sample_aspect_ratio:stream_tags=rotate", "-of", "json", str(video_path)]
         try:
             import json
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
             data = json.loads(r.stdout)
             streams = data.get("streams", [])
-            if not streams:
-                return (0, 0, False)
-
+            if not streams: return (0, 0, False)
             s = streams[0]
-            w_raw = int(s.get("width", 0))
-            h_raw = int(s.get("height", 0))
-
-            w = w_raw
-            h = h_raw
-
-            # Apply SAR so the display size matches what the user sees.
+            w_raw, h_raw = int(s.get("width", 0)), int(s.get("height", 0))
             sar = s.get("sample_aspect_ratio", "1:1")
             parsed_sar = 1.0
             if sar and ":" in sar and sar != "1:1":
-                try:
-                    num, den = sar.split(":", 1)
-                    parsed_sar = float(num) / float(den)
-                except Exception:
-                    pass
-
-            w = max(2, int(w_raw * parsed_sar))
-            h = max(2, h_raw)
-
-            # Swap dimensions for rotated videos (portrait-encoded landscape, etc.).
-            tags = s.get("tags", {})
-            rotate = tags.get("rotate", "0")
-            if rotate in ("90", "270", "-90", "-270"):
-                w, h = h, w
-
-            # Flag odd dimensions: these indicate a malformed codec header that will
-            # cause the Qt/FFmpeg HW decoder to crash during format conversion.
-            is_malformed = (w % 2 != 0 or h % 2 != 0)
-
-            return (w, h, is_malformed)
-        except subprocess.TimeoutExpired:
-            print(f"[Bridge] Probe timeout: {video_path}")
-            return (0, 0, False)
-        except Exception as e:
-            print(f"[Bridge] Probe error for {video_path}: {e}")
-            return (0, 0, False)
+                try: num, den = sar.split(":", 1); parsed_sar = float(num) / float(den)
+                except Exception: pass
+            w, h = max(2, int(w_raw * parsed_sar)), max(2, h_raw)
+            rotate = s.get("tags", {}).get("rotate", "0")
+            if rotate in ("90", "270", "-90", "-270"): w, h = h, w
+            return (w, h, (w % 2 != 0 or h % 2 != 0))
+        except Exception: return (0, 0, False)
 
     @Slot(str, bool, bool, bool, result=bool)
     def open_native_video(self, video_path: str, autoplay: bool, loop: bool, muted: bool) -> bool:
-        """Open the native video overlay for the given file.
-
-        If the video has odd display dimensions (a sign of a malformed codec header
-        that crashes Qt's HW decoder), it is transparently preprocessed to an
-        MJPEG/MKV copy with corrected even dimensions before playback begins.
-        """
         try:
             w, h, is_malformed = self._probe_video_size(video_path)
             if is_malformed:
-                # Odd dimensions signal a malformed H.264 codec header.
-                # Route through async ffmpeg preprocessing before playing.
-                print(f"[Bridge] Malformed video detected ({w}x{h}), preprocessing: {Path(video_path).name}")
                 self.videoPreprocessingStatus.emit("Preparing video...")
-
-                def preprocess_and_open():
+                def work():
                     try:
-                        fixed_path = self._preprocess_to_even_dims(video_path, w, h)
-                    except Exception as e:
-                        print(f"[Bridge] Preprocess exception: {e}")
-                        fixed_path = None
-
-                    if fixed_path:
-                        pw, ph, _ = self._probe_video_size(fixed_path)
-                        self.videoPreprocessingStatus.emit("")  # Clear loading indicator
-                        self.openVideoRequested.emit(
-                            str(fixed_path), bool(autoplay), bool(loop), bool(muted), int(pw), int(ph)
-                        )
-                    else:
-                        print(f"[Bridge] Preprocess failed for {Path(video_path).name}")
-                        self.videoPreprocessingStatus.emit("Error: Could not prepare video.")
-
-                threading.Thread(target=preprocess_and_open, daemon=True).start()
-            else:
-                self.openVideoRequested.emit(
-                    str(video_path), bool(autoplay), bool(loop), bool(muted), int(w), int(h)
-                )
+                        fixed = self._preprocess_to_even_dims(video_path, w, h)
+                        if fixed:
+                            pw, ph, _ = self._probe_video_size(fixed)
+                            self.videoPreprocessingStatus.emit("")
+                            self.openVideoRequested.emit(str(fixed), bool(autoplay), bool(loop), bool(muted), int(pw), int(ph))
+                        else: self.videoPreprocessingStatus.emit("Error preparing video.")
+                    except Exception: self.videoPreprocessingStatus.emit("Error preparing video.")
+                threading.Thread(target=work, daemon=True).start()
+            else: self.openVideoRequested.emit(str(video_path), bool(autoplay), bool(loop), bool(muted), int(w), int(h))
             return True
-        except Exception as e:
-            print(f"[Bridge] open_native_video error: {e}")
-            return False
+        except Exception: return False
 
     def _preprocess_to_even_dims(self, video_path: str, w: int, h: int) -> str | None:
-        """Use ffmpeg to create a corrected copy with even dimensions in the system temp dir.
-
-        Outputs MJPEG in MKV so Qt software-decodes it (delivers BGRA frames, not NV12),
-        completely avoiding the swscaler crash that affects H.264 HW-decoded NV12 frames.
-        """
         import tempfile
         ffmpeg = self._ffmpeg_bin()
-        if not ffmpeg:
-            print("Preprocess Error: ffmpeg not found")
-            return None
-
-        # Round down to nearest even dimensions (explicit safety)
-        even_w = w if w % 2 == 0 else w - 1
-        even_h = h if h % 2 == 0 else h - 1
-        if even_w <= 0 or even_h <= 0:
-            return None
-
-        # Always output .mkv (supports MJPEG + any audio codec)
-        tmp = tempfile.NamedTemporaryFile(
-            prefix="mmx_fixed_", suffix=".mkv", delete=False
-        )
+        if not ffmpeg: return None
+        ew, eh = (w if w % 2 == 0 else w - 1), (h if h % 2 == 0 else h - 1)
+        if ew <= 0 or eh <= 0: return None
+        tmp = tempfile.NamedTemporaryFile(prefix="mmx_fixed_", suffix=".mkv", delete=False)
         tmp.close()
         out_path = tmp.name
-
-        # Use MJPEG codec:
-        # - Qt decodes in software -> receives BGRA/RGB frames, NOT NV12
-        # - Avoids D3D11 HW decode and the swscaler 450x797->0x797 crash
-        # - scale + setsar=1 ensures clean even dimensions with no SAR adjustment
-        # - format=yuv420p avoids the "deprecated pixel format yuvj420p" warning
-        #   that MJPEG emits by default (yuvj420p is a deprecated full-range alias)
-        vf = f"scale={even_w}:{even_h},setsar=1,format=yuv420p"
-        cmd = [
-            ffmpeg, "-y", "-hide_banner", "-loglevel", "warning",
-            "-i", str(video_path),
-            "-vf", vf,
-            "-c:v", "mjpeg", "-q:v", "3",
-            "-c:a", "copy",
-            out_path,
-        ]
-        print(f"Preprocess CMD: {' '.join(cmd)}")
+        vf = f"scale={ew}:{eh},setsar=1,format=yuv420p"
+        cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "warning", "-i", str(video_path), "-vf", vf, "-c:v", "mjpeg", "-q:v", "3", "-c:a", "copy", out_path]
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-            if r.returncode != 0 or not Path(out_path).exists():
-                print(f"Preprocess ffmpeg error: {r.stderr[:500]}")
-                return None
-            return out_path
-        except subprocess.TimeoutExpired:
-            print("Preprocess Error: ffmpeg timed out")
-            return None
-
+            if subprocess.run(cmd, capture_output=True, timeout=60).returncode == 0: return out_path
+        except Exception: pass
+        return None
 
     @Slot(result=bool)
     def close_native_video(self) -> bool:
-        try:
-            self.closeVideoRequested.emit()
-            return True
-        except Exception:
-            return False
+        try: self.closeVideoRequested.emit(); return True
+        except Exception: return False
 
     @Slot(str, result=dict)
     def get_media_metadata(self, path: str) -> dict:
-        """Fetch persistent metadata and tags for a media path."""
         from app.mediamanager.db.media_repo import get_media_by_path
         from app.mediamanager.db.metadata_repo import get_media_metadata
         from app.mediamanager.db.tags_repo import list_media_tags
-        
         try:
             m = get_media_by_path(self.conn, path)
-            if not m:
-                return {}
-            
-            meta = get_media_metadata(self.conn, m["id"])
-            has_meta = meta is not None
-            meta = meta or {}
-            tags = list_media_tags(self.conn, m["id"])
-            
+            if not m: return {}
+            meta = get_media_metadata(self.conn, m["id"]) or {}
             return {
-                "title": meta.get("title") or "",
-                "description": meta.get("description") or "",
-                "notes": meta.get("notes") or "",
-                "embedded_tags": meta.get("embedded_tags") or "",
-                "embedded_comments": meta.get("embedded_comments") or "",
-                "ai_prompt": meta.get("ai_prompt") or "",
-                "ai_negative_prompt": meta.get("ai_negative_prompt") or "",
-                "ai_params": meta.get("ai_params") or "",
-                "tags": tags,
-                "has_metadata": has_meta
+                "title": meta.get("title") or "", "description": meta.get("description") or "", "notes": meta.get("notes") or "",
+                "embedded_tags": meta.get("embedded_tags") or "", "embedded_comments": meta.get("embedded_comments") or "",
+                "ai_prompt": meta.get("ai_prompt") or "", "ai_negative_prompt": meta.get("ai_negative_prompt") or "",
+                "ai_params": meta.get("ai_params") or "", "tags": list_media_tags(self.conn, m["id"]), "has_metadata": bool(meta)
             }
-        except Exception as e:
-            print(f"Bridge Get Metadata Error: {e}")
-            return {}
+        except Exception: return {}
 
     @Slot(str, str, str, str, str, str, str, str, str)
-    def update_media_metadata(self, path: str, title: str, description: str, notes: str, 
-                              embedded_tags: str = "", embedded_comments: str = "",
-                              ai_prompt: str = "", ai_negative_prompt: str = "", ai_params: str = "") -> None:
-        """Update persistent metadata for a media path."""
+    def update_media_metadata(self, path, title, desc, notes, etags="", ecomm="", aip="", ainp="", aiparam="") -> None:
         from app.mediamanager.db.media_repo import get_media_by_path
         from app.mediamanager.db.metadata_repo import upsert_media_metadata
-        
         try:
             m = get_media_by_path(self.conn, path)
-            if m:
-                upsert_media_metadata(self.conn, m["id"], title, description, notes, 
-                                      embedded_tags, embedded_comments, 
-                                      ai_prompt, ai_negative_prompt, ai_params)
-        except Exception as e:
-            print(f"Bridge Update Metadata Error: {e}")
+            if m: upsert_media_metadata(self.conn, m["id"], title, desc, notes, etags, ecomm, aip, ainp, aiparam)
+        except Exception: pass
 
     @Slot(str, list)
     def set_media_tags(self, path: str, tags: list) -> None:
-        """Update the set of tags for a media path (replaces existing)."""
         from app.mediamanager.db.media_repo import get_media_by_path
         from app.mediamanager.db.tags_repo import set_media_tags
-        
         try:
             m = get_media_by_path(self.conn, path)
-            if m:
-                set_media_tags(self.conn, m["id"], tags)
-        except Exception as e:
-            print(f"Bridge Set Tags Error: {e}")
+            if m: set_media_tags(self.conn, m["id"], tags)
+        except Exception: pass
 
     @Slot(str, list)
     def attach_media_tags(self, path: str, tags: list) -> None:
-        """Append tags to a media path (additive)."""
         from app.mediamanager.db.media_repo import get_media_by_path
         from app.mediamanager.db.tags_repo import attach_tags
-        
         try:
             m = get_media_by_path(self.conn, path)
-            if m:
-                attach_tags(self.conn, m["id"], tags)
-        except Exception as e:
-            print(f"Bridge Attach Tags Error: {e}")
+            if m: attach_tags(self.conn, m["id"], tags)
+        except Exception: pass
 
     @Slot(str)
     def clear_media_tags(self, path: str) -> None:
-        """Remove all tags from a media path."""
         from app.mediamanager.db.media_repo import get_media_by_path
         from app.mediamanager.db.tags_repo import clear_all_media_tags
-        
         try:
             m = get_media_by_path(self.conn, path)
-            if m:
-                clear_all_media_tags(self.conn, m["id"])
-        except Exception as e:
-            print(f"Bridge Clear Tags Error: {e}")
+            if m: clear_all_media_tags(self.conn, m["id"])
+        except Exception: pass
 
     @Slot(list, int, int, str, str, str, result=list)
-    def list_media(
-        self,
-        folders: list,
-        limit: int = 100,
-        offset: int = 0,
-        sort_by: str = "name_asc",
-        filter_type: str = "all",
-        search_query: str = "",
-    ) -> list[dict]:
-        """Return gallery entries for the selected folders, always in sync with disk."""
+    def list_media(self, folders, limit=100, offset=0, sort_by="name_asc", filter_type="all", search_query="") -> list:
         try:
             candidates = self._get_reconciled_candidates(folders, filter_type, search_query)
-            
-            # --- Sort ---
-            image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
-            
-            if self._randomize_enabled() and sort_by == "name_asc":
-                random.Random(self._session_shuffle_seed).shuffle(candidates)
-            elif sort_by == "name_desc":
-                candidates.sort(key=lambda r: r["path"].lower(), reverse=True)
-            elif sort_by == "date_desc":
-                candidates.sort(key=lambda r: r.get("modified_time") or "", reverse=True)
-            elif sort_by == "date_asc":
-                candidates.sort(key=lambda r: r.get("modified_time") or "")
-            elif sort_by == "size_desc":
-                candidates.sort(key=lambda r: r.get("file_size") or 0, reverse=True)
-            elif sort_by == "size_asc":
-                candidates.sort(key=lambda r: r.get("file_size") or 0)
-            elif sort_by == "name_asc":
-                candidates.sort(key=lambda r: r["path"].lower())
-
-            # --- Paginate ---
-            start = max(0, int(offset))
-            end = start + max(0, int(limit))
-            page = candidates[start:end]
-
-            out: list[dict] = []
-            for r in page:
+            if self._randomize_enabled() and sort_by == "name_asc": random.Random(self._session_shuffle_seed).shuffle(candidates)
+            elif sort_by == "name_desc": candidates.sort(key=lambda r: r["path"].lower(), reverse=True)
+            elif sort_by == "date_desc": candidates.sort(key=lambda r: r.get("modified_time") or "", reverse=True)
+            elif sort_by == "date_asc": candidates.sort(key=lambda r: r.get("modified_time") or "")
+            elif sort_by == "size_desc": candidates.sort(key=lambda r: r.get("file_size") or 0, reverse=True)
+            elif sort_by == "size_asc": candidates.sort(key=lambda r: r.get("file_size") or 0)
+            else: candidates.sort(key=lambda r: r["path"].lower())
+            start, end = max(0, int(offset)), max(0, int(offset)) + max(0, int(limit))
+            out = []
+            for r in candidates[start:end]:
                 real = r.get("_real_path")
                 p = real if isinstance(real, Path) else Path(r["path"])
-                out.append({
-                    "path": str(p),
-                    "url": QUrl.fromLocalFile(str(p)).toString(),
-                    "media_type": r["media_type"],
-                    "is_animated": self._is_animated(p),
-                })
+                out.append({"path": str(p), "url": QUrl.fromLocalFile(str(p)).toString(), "media_type": r["media_type"], "is_animated": self._is_animated(p)})
             return out
-        except Exception as e:
-            print(f"Bridge list_media error: {e}")
-            import traceback
-            traceback.print_exc()
-            return []
-
+        except Exception: return []
 
     @Slot(list, str, str, result=int)
     def count_media(self, folders: list, filter_type: str = "all", search_query: str = "") -> int:
-        """Return total number of discoverable media items under folders, filtered."""
-        try:
-            candidates = self._get_reconciled_candidates(folders, filter_type, search_query)
-            return len(candidates)
-        except Exception as e:
-            print(f"Bridge count_media error: {e}")
-            return 0
+        try: return len(self._get_reconciled_candidates(folders, filter_type, search_query))
+        except Exception: return 0
 
     def _get_reconciled_candidates(self, folders: list, filter_type: str = "all", search_query: str = "") -> list[dict]:
         from app.mediamanager.db.media_repo import list_media_in_scope
         from app.mediamanager.utils.pathing import normalize_windows_path
-
-        ALL_MEDIA_EXTS = {
-            ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp",
-            ".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv",
-        }
+        ALL_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}
         image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
-        video_exts = {".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}
-
-        if not folders:
-            return []
-
-        # ── 1. Walk disk (Recursive) ──────────────────────────────────────────
-        # Use session-level cache to avoid repeated walks.
+        if not folders: return []
         current_key = hashlib.sha1(",".join(sorted(folders)).encode()).hexdigest()
-        
-        if self._disk_cache and self._disk_cache_key == current_key:
-            disk_files = self._disk_cache
+        if self._disk_cache and self._disk_cache_key == current_key: disk_files = self._disk_cache
         else:
-            disk_files: dict[str, Path] = {}
+            disk_files = {}
             for folder in folders:
                 folder_path = Path(folder)
-                if not folder_path.is_dir():
-                    continue
+                if not folder_path.is_dir(): continue
                 try:
                     for root_dir, _, files in os.walk(str(folder_path), followlinks=True):
                         curr_root = Path(root_dir)
                         for f in files:
                             p = curr_root / f
-                            if p.suffix.lower() in ALL_MEDIA_EXTS:
-                                norm = normalize_windows_path(str(p))
-                                disk_files[norm] = p
-                except Exception:
-                    pass
-            # Update cache
-            self._disk_cache = disk_files
-            self._disk_cache_key = current_key
-
-        # ── 2. Query DB candidates ────────────────────────────────────────────
+                            if p.suffix.lower() in ALL_EXTS: disk_files[normalize_windows_path(str(p))] = p
+                except Exception: pass
+            self._disk_cache, self._disk_cache_key = disk_files, current_key
         db_candidates = list_media_in_scope(self.conn, folders)
-
-        # ── 3. Filter to only files that actually exist on disk ───────────────
-        surviving: list[dict] = []
-        covered_norms: set[str] = set()
+        surviving, covered = [], set()
         for r in db_candidates:
             norm = normalize_windows_path(r["path"])
-            if norm in disk_files:
-                surviving.append(r)
-                covered_norms.add(norm)
-            elif Path(r["path"]).exists():
-                surviving.append(r)
-                covered_norms.add(norm)
-
-        # ── 4. Synthesize entries for on-disk files missing from DB ───────────
+            if norm in disk_files or Path(r["path"]).exists():
+                surviving.append(r); covered.add(norm)
         for norm, p_obj in disk_files.items():
-            if norm not in covered_norms:
-                ext = p_obj.suffix.lower()
-                mtype = "image" if ext in image_exts else "video"
-                surviving.append({
-                    "id": -1,
-                    "path": norm,
-                    "media_type": mtype,
-                    "file_size": None,
-                    "modified_time": None,
-                    "_real_path": p_obj,
-                })
-        
-        # ── 5. Filtering (Type & Search) ──────────────────────────────────────
+            if norm not in covered:
+                surviving.append({"id": -1, "path": norm, "media_type": ("image" if p_obj.suffix.lower() in image_exts else "video"), "file_size": None, "modified_time": None, "_real_path": p_obj})
         candidates = surviving
-        
-        # Type filtering
-        if filter_type == "image":
-            candidates = [r for r in candidates if r["path"].lower().endswith(tuple(image_exts)) and not self._is_animated(Path(r["path"]))]
-        elif filter_type == "video":
-            candidates = [r for r in candidates if r["path"].lower().endswith(tuple(video_exts))]
-        elif filter_type == "animated":
-            candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
-        
-        # Search filtering (multi-field match)
-        if search_query:
+        if filter_type == "image": candidates = [r for r in candidates if r["path"].lower().endswith(tuple(image_exts)) and not self._is_animated(Path(r["path"]))]
+        elif filter_type == "video": candidates = [r for r in candidates if not r["path"].lower().endswith(tuple(image_exts))]
+        elif filter_type == "animated": candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
+        if search_query.strip():
             q = search_query.strip().lower()
-            if q:
-                def _matches(r):
-                    # Path/Filename (always present)
-                    if q in r["path"].lower(): return True
-                    # Database metadata
-                    if r.get("title") and q in r["title"].lower(): return True
-                    if r.get("description") and q in r["description"].lower(): return True
-                    if r.get("notes") and q in r["notes"].lower(): return True
-                    if r.get("tags") and q in r["tags"].lower(): return True
-                    return False
-                
-                candidates = [r for r in candidates if _matches(r)]
-
+            candidates = [r for r in candidates if q in r["path"].lower() or q in (r.get("title") or "").lower() or q in (r.get("description") or "").lower() or q in (r.get("notes") or "").lower() or q in (r.get("tags") or "").lower()]
         return candidates
+
+    @Slot(list, str)
+    def start_scan(self, folders: list, search_query: str = "") -> None:
+        self._scan_abort = True
+        def work():
+            time.sleep(0.1); self._scan_abort = False
+            primary = folders[0] if folders else ""
+            self.scanStarted.emit(primary)
+            from app.mediamanager.db.connect import connect_db
+            scan_conn = connect_db(str(self.db_path))
+            try:
+                paths = list(self._disk_cache.values())
+                self._do_full_scan(paths, scan_conn)
+                self.scanFinished.emit(primary, len(self._get_reconciled_candidates(folders, "all", search_query)))
+            finally: scan_conn.close()
+        threading.Thread(target=work, daemon=True).start()
+
+    def _do_full_scan(self, paths: list[Path], conn) -> int:
+        from app.mediamanager.db.media_repo import get_media_by_path, upsert_media_item
+        from app.mediamanager.utils.hashing import calculate_file_hash
+        from datetime import datetime, timezone
+        image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+        total, count = len(paths), 0
+        for i, p in enumerate(paths):
+            if self._scan_abort: break
+            self.scanProgress.emit(p.name, int((i / total) * 100) if total > 0 else 100)
+            try:
+                stat = p.stat()
+                existing, skip = get_media_by_path(conn, str(p)), False
+                if existing:
+                    curr_mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat()
+                    if existing["file_size"] == stat.st_size and existing.get("modified_time") == curr_mtime: skip = True
+                if not skip: upsert_media_item(conn, str(p), ("image" if p.suffix.lower() in image_exts else "video"), calculate_file_hash(p))
+                count += 1
+            except Exception: pass
+        return count
+
+    @Slot(str, result=str)
+    def get_video_poster(self, video_path: str) -> str:
+        try:
+            p = Path(video_path)
+            out = self._ensure_video_poster(p)
+            return QUrl.fromLocalFile(str(out)).toString() if out else ""
+        except Exception: return ""
+
+    @Slot(result=dict)
+    def get_tools_status(self) -> dict:
+        return {"ffmpeg": bool(self._ffmpeg_bin()), "ffmpeg_path": self._ffmpeg_bin() or "", "ffprobe": bool(self._ffprobe_bin()), "ffprobe_path": self._ffprobe_bin() or "", "thumb_dir": str(self._thumb_dir)}
 
 
 class NativeSeparator(QWidget):
-    """A custom separator that guarantees exactly 1 physical pixel thickness,
-    immune to High DPI subpixel antialiasing and layout fractional coordinates.
-    """
     def __init__(self, parent=None):
         super().__init__(parent)
-        # 10px margin top + 1px line + 10px margin bottom
         self.setFixedHeight(21)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        
         text_color_str = Theme.get_text_color()
         pen = QPen(QColor(text_color_str))
         pen.setWidth(1)
-        pen.setCosmetic(True)  # Force exactly 1 physical pixel width
+        pen.setCosmetic(True)
         painter.setPen(pen)
-        
-        # Draw horizontal line exactly in the middle
         y = self.height() // 2
         painter.drawLine(0, y, self.width(), y)
 
