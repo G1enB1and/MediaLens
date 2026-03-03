@@ -1,4 +1,5 @@
 # Changelog
+old log - new Change Log is in C:\My_Projects\MediaManagerX\MediaManagerX\native\mediamanagerx_app\CHANGELOG.md
 
 ## 0.1.0-foundation (in progress)
 

@@ -173,8 +173,17 @@ def upsert_media_item(
 def list_media_in_scope(
     conn: sqlite3.Connection,
     selected_roots: list[str],
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
 ) -> list[dict]:
     where_sql, params = build_scope_where(selected_roots)
+    
+    if limit is not None:
+        limit_sql = f" LIMIT {limit} OFFSET {offset or 0}"
+    else:
+        limit_sql = ""
+
+    # ... rest of the SQL building ...
 
     # We use a LEFT JOIN for metadata and a GROUP_CONCAT subquery for tags
     # to keep it to one row per media item.
@@ -200,6 +209,7 @@ def list_media_in_scope(
         LEFT JOIN media_metadata meta ON m.id = meta.media_id
         WHERE {where_sql}
         ORDER BY m.path
+        {limit_sql}
     """
 
     rows = conn.execute(sql, params).fetchall()
@@ -231,3 +241,41 @@ def list_media_page(
     """Convenience wrapper for page-based access (1-based page index)."""
     limit, offset = page_to_limit_offset(page=page, page_size=page_size)
     return list_media_in_scope(conn, selected_roots, limit=limit, offset=offset)
+
+
+def move_directory_in_db(conn: sqlite3.Connection, old_path: str, new_path: str) -> bool:
+    """Update all stored paths for a directory and its children after an on-disk move.
+    
+    Returns True if any rows were updated.
+    """
+    old_norm = normalize_windows_path(old_path)
+    new_norm = normalize_windows_path(new_path)
+    now = _utc_now_iso()
+    
+    # Update items within the directory
+    # SQL: replace(path, old_prefix, new_prefix)
+    # We use lower() to ensure case-insensitive match since we normalized to lowercase.
+    # Note: SQLite replace is case-sensitive, but our paths are already casefolded.
+    
+    old_prefix = old_norm if old_norm.endswith('/') else old_norm + '/'
+    new_prefix = new_norm if new_norm.endswith('/') else new_norm + '/'
+    
+    # 1. Update the directory itself
+    cur = conn.execute(
+        "UPDATE media_items SET path = ?, updated_at_utc = ? WHERE path = ?",
+        (new_norm, now, old_norm)
+    )
+    
+    # 2. Update all children
+    # We use the length of the old_prefix to perform the replacement correctly.
+    conn.execute(
+        """
+        UPDATE media_items 
+        SET path = ? || substr(path, ?), updated_at_utc = ?
+        WHERE path LIKE ? || '/%'
+        """,
+        (new_norm, len(old_norm) + 1, now, old_norm)
+    )
+    
+    conn.commit()
+    return cur.rowcount > 0
