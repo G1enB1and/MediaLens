@@ -1026,7 +1026,14 @@ class Bridge(QObject):
             for r in candidates[start:end]:
                 real = r.get("_real_path")
                 p = real if isinstance(real, Path) else Path(r["path"])
-                out.append({"path": str(p), "url": QUrl.fromLocalFile(str(p)).toString(), "media_type": r["media_type"], "is_animated": self._is_animated(p)})
+                out.append({
+                    "path": str(p), 
+                    "url": QUrl.fromLocalFile(str(p)).toString(), 
+                    "media_type": r["media_type"], 
+                    "is_animated": self._is_animated(p),
+                    "width": r.get("width"),
+                    "height": r.get("height")
+                })
             return out
         except Exception: return []
 
@@ -1104,8 +1111,26 @@ class Bridge(QObject):
                 existing, skip = get_media_by_path(conn, str(p)), False
                 if existing:
                     curr_mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat()
-                    if existing["file_size"] == stat.st_size and existing.get("modified_time") == curr_mtime: skip = True
-                if not skip: upsert_media_item(conn, str(p), ("image" if p.suffix.lower() in image_exts else "video"), calculate_file_hash(p))
+                    if existing["file_size"] == stat.st_size and existing.get("modified_time") == curr_mtime:
+                        if existing.get("width") and existing.get("height"):
+                            skip = True
+                
+                if not skip:
+                    width, height = None, None
+                    mtype = "image" if p.suffix.lower() in image_exts else "video"
+                    
+                    if mtype == "image":
+                        reader = QImageReader(str(p))
+                        if reader.canRead():
+                            sz = reader.size()
+                            if sz.isValid():
+                                width, height = sz.width(), sz.height()
+                    else:
+                        w, h, _ = self._probe_video_size(str(p))
+                        if w > 0 and h > 0:
+                            width, height = w, h
+                            
+                    upsert_media_item(conn, str(p), mtype, calculate_file_hash(p), width=width, height=height)
                 count += 1
             except Exception: pass
         return count

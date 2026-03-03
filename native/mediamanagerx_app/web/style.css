@@ -979,8 +979,6 @@ p {
   border-color: transparent !important;
   background: transparent !important;
   box-shadow: none !important;
-  /* Reserve minimum height to prevent "line" appearance and trigger lazy loading */
-  min-height: 240px;
 }
 
 .card.ready {
