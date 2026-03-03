@@ -554,6 +554,52 @@ function renderMediaList(items, scrollToTop = true) {
         e.preventDefault();
         showCtx(e.clientX, e.clientY, item, idx, false);
       });
+
+      card.draggable = true;
+      card.addEventListener('dragstart', (e) => {
+        const path = item.path || '';
+        if (!path) return;
+
+        let paths = [];
+        if (gSelectedPaths.has(path)) {
+          paths = Array.from(gSelectedPaths);
+        } else {
+          paths = [path];
+        }
+
+        if (window.qt && gBridge && gBridge.debug_log) {
+          gBridge.debug_log("JS DragStart Image: SelectedCount=" + gSelectedPaths.size + " Dragging=" + path + " FinalCount=" + paths.length);
+        }
+        console.log("JS DragStart Image:", paths);
+
+        const urls = paths.map(p => 'file:///' + p.replace(/\\/g, '/'));
+        const pathsJson = JSON.stringify(paths);
+
+        // 1. text/uri-list (for Explorer/External)
+        e.dataTransfer.setData('text/uri-list', urls.join('\r\n'));
+
+        // 2. text/plain (Fallback and internal)
+        // We put JSON here too because WebEngine might drop custom types
+        e.dataTransfer.setData('text/plain', pathsJson);
+
+        // 3. custom formats (with web prefix for better compatibility)
+        e.dataTransfer.setData('web/mmx-paths', pathsJson);
+        e.dataTransfer.setData('application/x-mmx-type', 'file');
+
+        if (window.qt && gBridge && gBridge.set_drag_paths) {
+          gBridge.set_drag_paths(paths);
+        }
+
+        e.dataTransfer.effectAllowed = 'move';
+
+        const img = card.querySelector('img');
+        if (img) e.dataTransfer.setDragImage(img, 20, 20);
+      });
+      card.addEventListener('dragend', (e) => {
+        if (window.qt && gBridge && gBridge.set_drag_paths) {
+          gBridge.set_drag_paths([]);
+        }
+      });
     } else {
       // Video tile: lazy poster load only when near viewport.
       const img = document.createElement('img');
@@ -619,6 +665,46 @@ function renderMediaList(items, scrollToTop = true) {
       card.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         showCtx(e.clientX, e.clientY, item, idx, false);
+      });
+
+      card.draggable = true;
+      card.addEventListener('dragstart', (e) => {
+        const path = item.path || '';
+        if (!path) return;
+
+        let paths = [];
+        if (gSelectedPaths.has(path)) {
+          paths = Array.from(gSelectedPaths);
+        } else {
+          paths = [path];
+        }
+
+        const urls = paths.map(p => 'file:///' + p.replace(/\\/g, '/'));
+        const pathsJson = JSON.stringify(paths);
+
+        // 1. text/uri-list
+        e.dataTransfer.setData('text/uri-list', urls.join('\r\n'));
+
+        // 2. text/plain
+        e.dataTransfer.setData('text/plain', pathsJson);
+
+        // 3. custom formats
+        e.dataTransfer.setData('web/mmx-paths', pathsJson);
+        e.dataTransfer.setData('application/x-mmx-type', 'file');
+
+        if (window.qt && gBridge && gBridge.set_drag_paths) {
+          gBridge.set_drag_paths(paths);
+        }
+
+        e.dataTransfer.effectAllowed = 'move';
+
+        const img = card.querySelector('img');
+        if (img) e.dataTransfer.setDragImage(img, 20, 20);
+      });
+      card.addEventListener('dragend', (e) => {
+        if (window.qt && gBridge && gBridge.set_drag_paths) {
+          gBridge.set_drag_paths([]);
+        }
       });
     }
 

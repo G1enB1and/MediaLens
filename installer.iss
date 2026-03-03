@@ -1,5 +1,5 @@
 #define MyAppName "MediaManagerX"
-#define MyAppVersion "v1.0.1-alpha" ; Source of Truth: \VERSION
+#define MyAppVersion "v1.0.2" ; Source of Truth: \VERSION
 #define MyAppPublisher "G1enB1and"
 #define MyAppExeName "MediaManagerX.exe"
 

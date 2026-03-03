@@ -4,7 +4,7 @@ try:
     with open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "VERSION"), "r") as f:
         __version__ = f.read().strip()
 except Exception:
-    __version__ = "v1.0.1-alpha"
+    __version__ = "v1.0.2"
 
 
 import sys
@@ -284,6 +284,11 @@ class FolderTreeView(QTreeView):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setMouseTracking(True)
+        self.setAcceptDrops(True)
+        self.setDragEnabled(True)
+        self.setDropIndicatorShown(True)
+        self.setDragDropMode(QTreeView.DragDropMode.DragDrop)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
         if event.button() == Qt.MouseButton.RightButton:
@@ -301,6 +306,102 @@ class FolderTreeView(QTreeView):
         else:
             self.viewport().setCursor(Qt.CursorShape.ArrowCursor)
         super().mouseMoveEvent(event)
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasUrls() or event.mimeData().hasFormat("application/x-mmx-path") or event.mimeData().hasFormat("web/mmx-paths"):
+            event.setDropAction(Qt.DropAction.MoveAction)
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        if event.mimeData().hasUrls() or event.mimeData().hasFormat("application/x-mmx-path") or event.mimeData().hasFormat("web/mmx-paths"):
+            event.setDropAction(Qt.DropAction.MoveAction)
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        mime = event.mimeData()
+        idx = self.indexAt(event.position().toPoint())
+        
+        # Determine target folder
+        target_path = ""
+        if idx.isValid():
+            # Handle proxy model mapping
+            model = self.model()
+            if isinstance(model, QSortFilterProxyModel):
+                source_idx = model.mapToSource(idx)
+                fs_model = model.sourceModel()
+                if isinstance(fs_model, QFileSystemModel):
+                    if fs_model.isDir(source_idx):
+                        target_path = fs_model.filePath(source_idx)
+                    else:
+                        target_path = fs_model.filePath(source_idx.parent())
+            elif isinstance(model, QFileSystemModel):
+                if model.isDir(idx):
+                    target_path = model.filePath(idx)
+                else:
+                    target_path = model.filePath(idx.parent())
+
+        if not target_path:
+            event.ignore()
+            return
+
+        # Gather source paths
+        src_paths = []
+        
+        # Priority 0: Side-channel from Bridge (Reliable for internal Gallery -> Tree)
+        main_win = self.window()
+        bridge = getattr(main_win, "bridge", None)
+        if bridge and hasattr(bridge, "drag_paths") and bridge.drag_paths:
+            src_paths = list(bridge.drag_paths)
+            print(f"DEBUG: dropEvent using side-channel: count={len(src_paths)}")
+        
+        # Priority 1: fallback to MIME data for tree-to-tree or external drops
+        if not src_paths:
+            print(f"DEBUG: dropEvent falling back to MIME: formats={mime.formats()}")
+            # Custom formats
+            mmx_data = None
+            if mime.hasFormat("web/mmx-paths"):
+                mmx_data = bytes(mime.data("web/mmx-paths")).decode("utf-8")
+            elif mime.hasFormat("application/x-mmx-path"):
+                mmx_data = bytes(mime.data("application/x-mmx-path")).decode("utf-8")
+            
+            if not mmx_data and mime.hasText():
+                text = mime.text()
+                if text.startswith("[") and text.endswith("]"):
+                    mmx_data = text
+            
+            if mmx_data:
+                try:
+                    import json
+                    parsed = json.loads(mmx_data)
+                    src_paths = [str(p) for p in parsed] if isinstance(parsed, list) else [str(parsed)]
+                except Exception: pass
+
+            # Priority 3: urls() (Always check if still empty)
+            if not src_paths and mime.hasUrls():
+                src_paths = [url.toLocalFile() for url in mime.urls() if url.toLocalFile()]
+
+        if not src_paths:
+            event.ignore()
+            return
+
+        # Filter out if moving to the same folder
+        src_paths = [p for p in src_paths if os.path.dirname(p).replace("\\", "/").lower() != target_path.replace("\\", "/").lower()]
+
+        if not src_paths:
+            event.ignore()
+            return
+
+        # Trigger move via Bridge
+        if bridge:
+            event.setDropAction(Qt.DropAction.MoveAction)
+            bridge.move_paths_async(src_paths, target_path)
+            event.acceptProposedAction()
+        else:
+            event.ignore()
 
 
 class RootFilterProxyModel(QSortFilterProxyModel):
@@ -402,6 +503,7 @@ class Bridge(QObject):
         self._selected_folders: list[str] = []
         self._scan_abort = False
         self._scan_lock = threading.Lock()
+        self.drag_paths: list[str] = []
         
         appdata = Path(
             QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
@@ -782,6 +884,61 @@ class Bridge(QObject):
     def path_to_url(self, path: str) -> str:
         try: return QUrl.fromLocalFile(str(path)).toString()
         except Exception: return ""
+
+    @Slot(list)
+    def set_drag_paths(self, paths: list[str]) -> None:
+        self.drag_paths = paths
+        print(f"DEBUG: Bridge.set_drag_paths: count={len(paths)}")
+
+    @Slot(list, str)
+    def move_paths_async(self, src_paths: list[str], target_folder: str) -> None:
+        print(f"DEBUG: move_paths_async: count={len(src_paths)} target={target_folder}")
+        target_dir = Path(target_folder)
+        if not target_dir.exists() or not target_dir.is_dir():
+             self.fileOpFinished.emit("move", False, "", "")
+             return
+        
+        def work():
+            try:
+                from app.mediamanager.db.media_repo import rename_media_path, move_directory_in_db
+                any_ok = False
+                for src_str in src_paths:
+                    try:
+                        src = Path(src_str)
+                        if not src.exists():
+                            print(f"DEBUG: Move skip (not found): {src_str}")
+                            continue
+                        
+                        # Generate unique path if name collision
+                        dst = self._unique_path(target_dir / src.name)
+                        
+                        old_path = str(src.absolute())
+                        new_path = str(dst.absolute())
+                        
+                        if old_path.lower() == new_path.lower():
+                            print(f"DEBUG: Move skip (same path): {old_path}")
+                            continue
+
+                        print(f"DEBUG: Moving {old_path} -> {new_path}")
+                        shutil.move(old_path, new_path)
+                        
+                        # Update DB
+                        # Note: we use rename_media_path for files AND dirs if they aren't nested? 
+                        # Actually move_directory_in_db is correct for whole trees.
+                        if src.is_dir():
+                            move_directory_in_db(self.conn, old_path, new_path)
+                        else:
+                            rename_media_path(self.conn, old_path, new_path)
+                        any_ok = True
+                    except Exception as e:
+                        print(f"Move Error for {src_str}: {e}")
+                
+                self.fileOpFinished.emit("move", any_ok, "", str(target_dir))
+            except Exception as e:
+                print(f"Move Background Error: {e}")
+                self.fileOpFinished.emit("move", False, "", "")
+        
+        threading.Thread(target=work, daemon=True).start()
 
     @Slot(list, result=bool)
     def show_metadata(self, paths: list) -> bool:
