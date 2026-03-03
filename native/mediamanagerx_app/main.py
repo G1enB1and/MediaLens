@@ -1235,9 +1235,36 @@ class MainWindow(QMainWindow):
         view_menu.addAction(devtools_action)
 
         help_menu = menubar.addMenu("&Help")
+        
+        whats_new_action = QAction("&What's New", self)
+        whats_new_action.triggered.connect(self.show_whats_new)
+        help_menu.addAction(whats_new_action)
+        
+        help_menu.addSeparator()
+
         about_action = QAction("&About", self)
         about_action.triggered.connect(self.about)
         help_menu.addAction(about_action)
+
+        tos_action = QAction("&Terms of Service", self)
+        tos_action.triggered.connect(self.show_tos)
+        help_menu.addAction(tos_action)
+        
+        help_menu.addSeparator()
+        
+        bug_action = QAction("&Report a Bug", self)
+        bug_action.triggered.connect(lambda: __import__("webbrowser").open("https://github.com/G1enB1and/MediaManagerX/issues"))
+        help_menu.addAction(bug_action)
+        
+        website_action = QAction("&Project Website", self)
+        website_action.triggered.connect(lambda: __import__("webbrowser").open("https://github.com/G1enB1and/MediaManagerX"))
+        help_menu.addAction(website_action)
+
+        help_menu.addSeparator()
+
+        check_updates_action = QAction("Check for &Updates...", self)
+        check_updates_action.triggered.connect(lambda: self.bridge.check_for_updates(manual=True))
+        help_menu.addAction(check_updates_action)
 
         for m in (file_menu, edit_menu, view_menu, help_menu):
             m.aboutToShow.connect(self._dismiss_web_menus)
@@ -1715,6 +1742,15 @@ class MainWindow(QMainWindow):
                     self._clear_metadata_panel()
         except Exception:
             pass
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        # Check for MouseButtonPress to dismiss web context menus
+        if event.type() == QEvent.MouseButtonPress:
+            try:
+                self._dismiss_web_menus()
+            except Exception:
+                pass
+        return super().eventFilter(watched, event)
 
     def _rename_from_panel(self) -> None:
         """Rename the current file using the filename field in the metadata panel."""
@@ -3375,27 +3411,119 @@ class MainWindow(QMainWindow):
         ff = "✓" if st.get("ffmpeg") else "×"
         fp = "✓" if st.get("ffprobe") else "×"
         
-        # Get active Qt Multimedia backendinfo
-        # In Qt 6, we can sometimes probe which service is active
         try:
             from PySide6.QtMultimedia import QMediaFormat
-            backend = "Qt6 Default"
+            backend = "Qt6 Default (FFmpeg)"
         except ImportError:
             backend = "Unknown"
 
         info = (
-            "MediaManagerX\n\n"
-            "Windows native app (PySide6)\n\n"
-            "System Info:\n"
+            "MediaManagerX\n"
+            f"Version: {__version__}\n"
+            "Author: Glen Bland\n\n"
+            "A premium Windows native media manager built with PySide6.\n\n"
+            "System Diagnostics:\n"
             f"• Platform: {sys.platform}\n"
-            f"• Multimedia: {backend}\n\n"
-            "Diagnostics:\n"
+            f"• Multimedia: {backend}\n"
             f"• ffmpeg: {ff} ({st.get('ffmpeg_path', 'not found')})\n"
             f"• ffprobe: {fp} ({st.get('ffprobe_path', 'not found')})\n"
             f"• Thumbnails: {st.get('thumb_dir')}"
         )
 
         QMessageBox.information(self, "About MediaManagerX", info)
+
+    def _show_markdown_dialog(self, title: str, file_name: str) -> None:
+        """Helper to show a markdown file in a scrollable dialog."""
+        try:
+            path = Path(__file__).parent / file_name
+            if not path.exists():
+                QMessageBox.warning(self, title, f"File not found: {file_name}")
+                return
+            
+            content = path.read_text(encoding="utf-8")
+            
+            accent_q = QColor(self._current_accent)
+            bg = Theme.get_bg(accent_q)
+            fg = Theme.get_text_color()
+            border = Theme.get_border(accent_q)
+            
+            dialog = QDialog(self)
+            dialog.setWindowTitle(title)
+            dialog.resize(700, 600)
+            
+            # Apply theme to dialog and its components
+            dialog.setStyleSheet(f"""
+                QDialog {{
+                    background-color: {bg};
+                    color: {fg};
+                }}
+                QTextEdit {{
+                    background-color: {bg};
+                    color: {fg};
+                    border: 1px solid {border};
+                    border-radius: 6px;
+                    padding: 20px;
+                    font-size: 11pt;
+                    line-height: 1.4;
+                }}
+                QPushButton {{
+                    padding: 8px 24px;
+                    border-radius: 4px;
+                }}
+            """)
+            
+            layout = QVBoxLayout(dialog)
+            layout.setContentsMargins(20, 20, 20, 20)
+            layout.setSpacing(15)
+            
+            view = QTextEdit()
+            view.setReadOnly(True)
+            view.setMarkdown(content)
+            
+            # Standardize scrollbar styles to match the rest of the app
+            sb_track = Theme.get_scrollbar_track(accent_q)
+            sb_thumb = Theme.get_scrollbar_thumb(accent_q)
+            sb_hover = Theme.get_scrollbar_thumb_hover(accent_q)
+            
+            view.verticalScrollBar().setStyleSheet(f"""
+                QScrollBar:vertical {{
+                    background: {sb_track};
+                    width: 12px;
+                    margin: 0px;
+                }}
+                QScrollBar::handle:vertical {{
+                    background: {sb_thumb};
+                    min-height: 20px;
+                    border-radius: 6px;
+                    margin: 2px;
+                }}
+                QScrollBar::handle:vertical:hover {{
+                    background: {sb_hover};
+                }}
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                    height: 0px;
+                }}
+            """)
+            
+            layout.addWidget(view)
+            
+            btn_box = QHBoxLayout()
+            close_btn = QPushButton("Close")
+            close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            close_btn.clicked.connect(dialog.accept)
+            btn_box.addStretch()
+            btn_box.addWidget(close_btn)
+            layout.addLayout(btn_box)
+            
+            dialog.exec()
+        except Exception as e:
+            QMessageBox.critical(self, title, f"Error loading {file_name}: {e}")
+
+    def show_tos(self) -> None:
+        self._show_markdown_dialog("Terms of Service", "TOS.md")
+
+    def show_whats_new(self) -> None:
+        self._show_markdown_dialog("What's New", "CHANGELOG.md")
 
 
 def main() -> None:
