@@ -733,53 +733,12 @@ function openLightboxByIndex(idx) {
 
   lb.hidden = false;
 
-  const isGlass = !document.body.classList.contains('no-glass');
-  if (isGlass) {
-    suspendGalleryGifs();
-  }
 
   // prevent background scroll while open
   document.body.style.overflow = 'hidden';
 }
 
-function suspendGalleryGifs() {
-  const animated = document.querySelectorAll('img.thumb[data-animated="true"]');
-  animated.forEach(img => {
-    const path = img.getAttribute('data-path');
-    if (!path) return;
 
-    // Save current src if not already saved
-    if (!img.hasAttribute('data-original-src')) {
-      img.setAttribute('data-original-src', img.src);
-    }
-
-    const poster = img.getAttribute('data-poster-url');
-    if (poster) {
-      img.src = poster;
-    } else if (gBridge && gBridge.get_video_poster) {
-      gBridge.get_video_poster(path, (url) => {
-        if (url) {
-          img.setAttribute('data-poster-url', url);
-          // Only apply if we are still suspended
-          if (img.hasAttribute('data-original-src')) {
-            img.src = url;
-          }
-        }
-      });
-    }
-  });
-}
-
-function resumeGalleryGifs() {
-  const animated = document.querySelectorAll('img.thumb[data-animated="true"]');
-  animated.forEach(img => {
-    const original = img.getAttribute('data-original-src');
-    if (original) {
-      img.src = original;
-      img.removeAttribute('data-original-src');
-    }
-  });
-}
 
 let gClosingFromNative = false;
 
@@ -798,7 +757,6 @@ function closeLightbox() {
   vid.src = '';
   vid.style.display = 'none';
 
-  resumeGalleryGifs();
 
   if (!gClosingFromNative && gBridge && gBridge.close_native_video) {
     gBridge.close_native_video(function () { });
