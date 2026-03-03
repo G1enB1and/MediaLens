@@ -640,7 +640,8 @@ main {
   display: grid;
   place-items: center;
   z-index: 13000;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: pointer;
 }
 
 .loading[hidden] {
@@ -648,7 +649,7 @@ main {
 }
 
 .loading-card {
-  pointer-events: none;
+  pointer-events: auto;
   width: min(520px, calc(100vw - 40px));
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -973,6 +974,20 @@ p {
   backface-visibility: hidden;
 }
 
+.card.loading {
+  opacity: 0;
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  /* Reserve minimum height to prevent "line" appearance and trigger lazy loading */
+  min-height: 240px;
+}
+
+.card.ready {
+  opacity: 1;
+  transition: opacity 0.4s ease-out;
+}
+
 body.no-glass.lightbox-open main {
   /* Only hide gallery if glassmorphism is disabled (for max stability) */
   visibility: hidden;
@@ -993,11 +1008,7 @@ body.no-glass.lightbox-open main {
 }
 
 .skel {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  background: var(--card-bg);
+  display: none;
 }
 
 .skel::before {

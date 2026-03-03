@@ -1,4 +1,20 @@
-/* global QWebChannel */
+// Globals for state
+let gSearchQuery = '';
+let gPage = 0;
+const PAGE_SIZE = 100;
+let gTotal = 0;
+let gMedia = []; // Current page items
+let gSelectedFolders = [];
+let gBridge = null;
+let gPosterRequested = new Set();
+let gPosterObserver = null;
+let gSort = 'name_asc';
+let gFilter = 'all';
+
+// Loading progress tracking
+let gTotalOnPage = 0;
+let gLoadedOnPage = 0;
+let gLoadingDismissed = false;
 
 function setStatus(text) {
   const el = document.getElementById('status');
@@ -36,14 +52,22 @@ function ensurePosterObserver() {
 
         if (gBridge && gBridge.get_video_poster) {
           gBridge.get_video_poster(path, function (posterUrl) {
+            const card = el.closest('.card');
             if (posterUrl) {
-              el.src = posterUrl;
+              const tempImg = new Image();
+              tempImg.onload = tempImg.onerror = () => {
+                el.src = posterUrl;
+                if (card && card.onVideoPosterReady) {
+                  card.onVideoPosterReady();
+                  delete card.onVideoPosterReady;
+                }
+              };
+              tempImg.src = posterUrl;
             } else {
               el.removeAttribute('src');
-              if (gBridge.debug_video_poster) {
-                gBridge.debug_video_poster(path, function (info) {
-                  console.log('debug_video_poster', info);
-                });
+              if (card && card.onVideoPosterReady) {
+                card.onVideoPosterReady();
+                delete card.onVideoPosterReady;
               }
             }
           });
@@ -91,7 +115,7 @@ function setGlobalLoading(on, text = 'Loading…', pct = null) {
     }
     return;
   }
-
+  gLoadingDismissed = true;
   // Delay hiding a bit so it's actually visible (prevents "never showed" when
   // operations complete extremely quickly).
   const elapsed = Date.now() - (gLoadingShownAt || Date.now());
@@ -101,12 +125,29 @@ function setGlobalLoading(on, text = 'Loading…', pct = null) {
   }, wait);
 }
 
+function updatePageLoadingProgress() {
+  if (gLoadingDismissed || gTotalOnPage <= 0) {
+    setGlobalLoading(false);
+    return;
+  }
+  const pct = Math.round((gLoadedOnPage / gTotalOnPage) * 100);
+  setGlobalLoading(true, `Loading media: ${gLoadedOnPage} / ${gTotalOnPage}`, pct);
+
+  // Auto-hide once enough is loaded to fill the screen (e.g. 15 items)
+  // or if we've reached the total on page.
+  if (gLoadedOnPage >= 15 || gLoadedOnPage >= gTotalOnPage) {
+    // Add a small delay so user sees the "100%" or the jump to near-completion
+    setTimeout(() => setGlobalLoading(false), 500);
+  }
+}
+
 // Enable clicking to hide the loading overlay if it gets stuck
 document.addEventListener('DOMContentLoaded', () => {
   const gl = document.getElementById('globalLoading');
   if (gl) {
     gl.style.cursor = 'pointer';
     gl.onclick = () => {
+      gLoadingDismissed = true;
       gl.hidden = true;
     };
   }
@@ -408,6 +449,13 @@ function renderMediaList(items) {
   resetPosterState();
   ensurePosterObserver();
 
+  gTotalOnPage = 0;
+  gLoadedOnPage = 0;
+  gLoadingDismissed = false; // Reset for new page
+  if (viewItems.length > 0) {
+    setGlobalLoading(true, 'Loading media content…', 5);
+  }
+
   if (!items || items.length === 0) {
     const div = document.createElement('div');
     div.className = 'empty';
@@ -426,14 +474,19 @@ function renderMediaList(items) {
 
   viewItems.forEach((item, idx) => {
     const card = document.createElement('div');
-    card.className = 'card';
+    card.className = 'card loading'; // Start hidden
     card.tabIndex = 0;
 
-    if (item.media_type === 'image') {
-      const sk = document.createElement('div');
-      sk.className = 'skel';
-      card.appendChild(sk);
+    gTotalOnPage++;
 
+    const onMediaLoaded = () => {
+      gLoadedOnPage++;
+      updatePageLoadingProgress();
+      card.classList.remove('loading');
+      card.classList.add('ready');
+    };
+
+    if (item.media_type === 'image') {
       const img = document.createElement('img');
       img.className = 'thumb';
       img.loading = 'lazy';
@@ -443,11 +496,12 @@ function renderMediaList(items) {
         img.setAttribute('data-animated', 'true');
         img.setAttribute('data-path', item.path || '');
       }
-      img.addEventListener('load', () => sk.remove());
-      img.addEventListener('error', () => sk.remove());
+      img.addEventListener('load', onMediaLoaded);
+      img.addEventListener('error', onMediaLoaded); // Count error as loaded to show placeholder
       card.appendChild(img);
 
       card.setAttribute('data-path', item.path || '');
+      // ... rest of image listeners
 
       card.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -494,16 +548,15 @@ function renderMediaList(items) {
         showCtx(e.clientX, e.clientY, item, idx, false);
       });
     } else {
-      const sk = document.createElement('div');
-      sk.className = 'skel';
-      card.appendChild(sk);
       // Video tile: lazy poster load only when near viewport.
       const img = document.createElement('img');
       img.className = 'thumb poster';
       img.alt = '';
       img.setAttribute('data-video-path', item.path || '');
-      img.addEventListener('load', () => sk.remove());
-      img.addEventListener('error', () => sk.remove());
+
+      // Reveal handler for video cards (called in ensurePosterObserver)
+      card.onVideoPosterReady = onMediaLoaded;
+
       card.appendChild(img);
 
       const badge = document.createElement('div');
@@ -514,6 +567,7 @@ function renderMediaList(items) {
       if (item.path) gPosterObserver.observe(img);
 
       card.setAttribute('data-path', item.path || '');
+      // ... rest of video listeners
 
       card.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -581,20 +635,7 @@ function renderMediaList(items) {
 }
 
 
-// Globals for state
-let gSearchQuery = '';
-let gOffset = 0; // Not used? we use gPage instead
-let gPage = 0;
-const PAGE_SIZE = 100;
-let gTotal = 0;
-let gMedia = []; // Current page items
-let gSelectedFolders = [];
-let gBridge = null;
-let gPosterTx = null; // db transaction?
-let gPosterRequested = new Set();
-let gPosterObserver = null;
-let gSort = 'name_asc';
-let gFilter = 'all';
+// (Variable declarations moved to the top of the file)
 
 document.addEventListener('DOMContentLoaded', () => {
   // Global error handler to route JS errors to the terminal diagnostics
