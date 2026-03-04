@@ -1121,8 +1121,11 @@ class Bridge(QObject):
             self.conn.commit()
             self._disk_cache = {}
             self._disk_cache_key = ""
+            self.fileOpFinished.emit("delete", True, path_str, "")
             return True
-        except Exception: return False
+        except Exception:
+            self.fileOpFinished.emit("delete", False, path_str, "")
+            return False
 
     @Slot(str, str, result=str)
     def create_folder(self, parent_path: str, name: str) -> str:
@@ -1531,6 +1534,40 @@ class MainWindow(QMainWindow):
         self.bridge.updateAvailable.connect(self._on_update_available)
         self.bridge.updateError.connect(self._on_update_error)
 
+        self._setup_shortcuts()
+
+    def _setup_shortcuts(self) -> None:
+        """Standard Windows-style keyboard shortcuts."""
+        self.act_copy = QAction("Copy", self)
+        self.act_copy.setShortcut("Ctrl+C")
+        self.act_copy.triggered.connect(self._on_copy_shortcut)
+        self.addAction(self.act_copy)
+
+        self.act_cut = QAction("Cut", self)
+        self.act_cut.setShortcut("Ctrl+X")
+        self.act_cut.triggered.connect(self._on_cut_shortcut)
+        self.addAction(self.act_cut)
+
+        self.act_paste = QAction("Paste", self)
+        self.act_paste.setShortcut("Ctrl+V")
+        self.act_paste.triggered.connect(self._on_paste_shortcut)
+        self.addAction(self.act_paste)
+
+        self.act_delete = QAction("Delete", self)
+        self.act_delete.setShortcut("Del")
+        self.act_delete.triggered.connect(self._on_delete_shortcut)
+        self.addAction(self.act_delete)
+
+        self.act_rename = QAction("Rename", self)
+        self.act_rename.setShortcut("F2")
+        self.act_rename.triggered.connect(self._on_rename_shortcut)
+        self.addAction(self.act_rename)
+
+        self.act_select_all = QAction("Select All", self)
+        self.act_select_all.setShortcut("Ctrl+A")
+        self.act_select_all.triggered.connect(self._on_select_all_shortcut)
+        self.addAction(self.act_select_all)
+
     def _build_menu(self) -> None:
         menubar = self.menuBar()
 
@@ -1602,6 +1639,84 @@ class MainWindow(QMainWindow):
 
         for m in (file_menu, edit_menu, view_menu, help_menu):
             m.aboutToShow.connect(self._dismiss_web_menus)
+
+    def _get_focused_paths(self) -> list[str]:
+        """Get selected paths from whichever view (Tree or Gallery) has focus."""
+        if self.tree.hasFocus():
+            idx = self.tree.currentIndex()
+            if idx.isValid():
+                source_idx = self.proxy_model.mapToSource(idx)
+                return [self.fs_model.filePath(source_idx)]
+        # Default to gallery selection
+        return getattr(self, "_current_paths", [])
+
+    def _is_input_focused(self) -> bool:
+        """Check if focus is in a text input where shortcuts should be ignored."""
+        f = QApplication.focusWidget()
+        return isinstance(f, (QLineEdit, QTextEdit))
+
+    def _on_copy_shortcut(self) -> None:
+        if self._is_input_focused(): return
+        paths = self._get_focused_paths()
+        if paths: self.bridge.copy_to_clipboard(paths)
+
+    def _on_cut_shortcut(self) -> None:
+        if self._is_input_focused(): return
+        paths = self._get_focused_paths()
+        if paths: self.bridge.cut_to_clipboard(paths)
+
+    def _on_paste_shortcut(self) -> None:
+        if self._is_input_focused(): return
+        # Logic to determine where to paste:
+        # 1. If tree has focus and selection, paste INTO that folder.
+        # 2. Otherwise, if gallery has a folder loaded, paste into that folder.
+        target = ""
+        if self.tree.hasFocus():
+            idx = self.tree.currentIndex()
+            if idx.isValid():
+                source_idx = self.proxy_model.mapToSource(idx)
+                path = self.fs_model.filePath(source_idx)
+                if Path(path).is_dir(): target = path
+        
+        if not target and hasattr(self, "_current_paths") and self._current_paths:
+            # If a file is selected, use its parent folder
+            target = str(Path(self._current_paths[0]).parent)
+        elif not target and self.bridge._selected_folders:
+            target = self.bridge._selected_folders[0]
+            
+        if target:
+            self.bridge.paste_into_folder_async(target)
+
+    def _on_delete_shortcut(self) -> None:
+        if self._is_input_focused(): return
+        paths = self._get_focused_paths()
+        if not paths: return
+        
+        # Confirmation for multiple or folder deletion
+        count = len(paths)
+        msg = f"Are you sure you want to delete {count} items?" if count > 1 else f"Are you sure you want to delete '{Path(paths[0]).name}'?"
+        ret = QMessageBox.question(self, "Confirm Delete", msg, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if ret == QMessageBox.StandardButton.Yes:
+            for p in paths:
+                self.bridge.delete_path(p)
+
+    def _on_rename_shortcut(self) -> None:
+        if self._is_input_focused(): return
+        if self.tree.hasFocus():
+            idx = self.tree.currentIndex()
+            if idx.isValid():
+                self._on_tree_context_menu_rename(idx)
+        else:
+            # Tell web gallery to rename its selected item (usually just the first if multiple)
+            self.web.page().runJavaScript("if(window.triggerRename) window.triggerRename();")
+
+    def _on_select_all_shortcut(self) -> None:
+        if self._is_input_focused(): return
+        if self.tree.hasFocus():
+            # Standard tree Select All? usually doesn't exist but we could select all under parent
+            pass
+        else:
+            self.web.page().runJavaScript("if(window.selectAll) window.selectAll();")
 
     def _build_layout(self) -> None:
         try:
@@ -3699,6 +3814,19 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if event.type() == QEvent.Type.MouseButtonPress:
+            # 1. Ignore ALL mouse buttons if a native popup/menu is active.
+            # This protects against "Select All Files in Folder" from the tree context menu.
+            if QApplication.activePopupWidget() is not None:
+                return False
+
+            # 2. Ignore right-clicks for deselection logic (prevents context menu bugs)
+            if hasattr(event, "button") and event.button() == Qt.MouseButton.RightButton:
+                return False
+
+            # 3. Ignore clicks on menus themselves
+            if isinstance(watched, QMenu):
+                return False
+
             # Use a more robust geometric check instead of recursive object parent lookup.
             # This is safer and avoids potential crashes in transient widget states.
             from PySide6.QtGui import QCursor
@@ -3716,7 +3844,9 @@ class MainWindow(QMainWindow):
                     is_right_panel = self.right_panel.rect().contains(rp_pos)
                     
                 if not is_right_panel:
-                    self._deselect_web_items()
+                    # Double check: is a popup active? (Already checked above, but keep for safety)
+                    if QApplication.activePopupWidget() is None:
+                        self._deselect_web_items()
                     
         return False # Accept the event and let others handle it
 
