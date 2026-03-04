@@ -217,8 +217,13 @@ window.hideCtx = hideCtx;
 let gLockedCard = null;
 let gSelectedPaths = new Set();
 let gLastSelectionIdx = -1;
+let gIsCtxMenuClick = false; // Guard for context menu clicks
 
 function deselectAll() {
+  if (gIsCtxMenuClick) {
+    gIsCtxMenuClick = false;
+    return;
+  }
   document.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected'));
   gSelectedPaths.clear();
   gLockedCard = null;
@@ -233,9 +238,30 @@ function selectAll() {
     const path = c.getAttribute('data-path');
     if (path) gSelectedPaths.add(path);
   });
+  gIsCtxMenuClick = true; // Prevents the follow-up document click from deselecting
   syncMetadataToBridge();
 }
 window.selectAll = selectAll;
+
+function triggerRename() {
+  let path = null;
+  if (gCtxItem && gCtxItem.path) {
+    path = gCtxItem.path;
+  } else if (gSelectedPaths.size > 0) {
+    path = Array.from(gSelectedPaths)[0];
+  }
+
+  if (path && gBridge && gBridge.rename_path_async) {
+    const curName = path.split(/[/\\]/).pop();
+    const next = prompt('Rename to:', curName);
+    if (next && next !== curName) {
+      if (typeof closeLightbox === 'function') closeLightbox();
+      setGlobalLoading(true, 'Renaming…', 25);
+      gBridge.rename_path_async(path, next, () => { });
+    }
+  }
+}
+window.triggerRename = triggerRename;
 
 function syncMetadataToBridge() {
   if (gBridge && gBridge.show_metadata) {
