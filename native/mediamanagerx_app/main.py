@@ -91,9 +91,10 @@ from PySide6.QtCore import (
     QMimeData,
     QEvent,
     QTimer,
+    QMetaObject,
 )
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
-from PySide6.QtGui import QAction, QColor, QImageReader, QIcon, QPainter, QCursor
+from PySide6.QtGui import QAction, QColor, QImageReader, QIcon, QPainter, QCursor, QPixmap
 from PySide6.QtGui import QMouseEvent, QPen
 from PySide6.QtWidgets import (
     QApplication,
@@ -119,6 +120,9 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QFrame,
     QScrollArea,
+    QCheckBox,
+    QGridLayout,
+    QAbstractItemView,
 )
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -235,36 +239,233 @@ class Theme:
     ACCENT_DEFAULT = "#8ab4f8"
 
 
+class FileConflictDialog(QDialog):
+    def __init__(self, existing_path: Path, incoming_path: Path, bridge, parent=None):
+        super().__init__(parent)
+        self.existing_path = existing_path
+        self.incoming_path = incoming_path
+        self.bridge = bridge
+        self.result_action = "keep_both"
+        self.apply_to_all = False
+        
+        self.setWindowTitle("File Conflict")
+        self.setMinimumWidth(600)
+        
+        # Get theme colors
+        accent_str = str(self.bridge.settings.value("ui/accent_color", Theme.ACCENT_DEFAULT))
+        accent_q = QColor(accent_str)
+        is_light = Theme.get_is_light()
+        
+        bg_color = Theme.get_bg(accent_q)
+        fg_color = Theme.get_text_color()
+        muted_color = Theme.get_text_muted()
+        border_color = Theme.get_border(accent_q)
+        btn_bg = Theme.get_btn_save_bg(accent_q)
+        btn_hover = Theme.get_btn_save_hover(accent_q)
+        input_bg = Theme.get_input_bg(accent_q)
+        
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {bg_color};
+                color: {fg_color};
+            }}
+            QLabel {{
+                color: {fg_color};
+                font-size: 10pt;
+            }}
+            QPushButton {{
+                background-color: {btn_bg};
+                color: {fg_color};
+                border: 1px solid {border_color};
+                border-radius: 8px;
+                padding: 10px 20px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background-color: {btn_hover};
+                border: 1px solid {accent_str};
+            }}
+            QLineEdit {{
+                background-color: {input_bg};
+                color: {fg_color};
+                border: 1px solid {border_color};
+                border-radius: 6px;
+                padding: 6px;
+            }}
+            QCheckBox {{
+                color: {muted_color};
+                spacing: 8px;
+            }}
+        """)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(20)
+        
+        header = QLabel("<h3>A file with this name already exists.</h3>")
+        header.setStyleSheet("margin-bottom: 4px;")
+        layout.addWidget(header)
+        
+        # Grid for side-by-side comparison
+        grid = QGridLayout()
+        grid.setSpacing(20)
+        layout.addLayout(grid)
+        
+        def create_card(title_text, path, col):
+            # Title
+            title = QLabel(f"<b>{title_text}</b>")
+            title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            grid.addWidget(title, 0, col)
+            
+            # Thumbnail
+            thumb = QLabel()
+            thumb.setFixedSize(240, 180)
+            thumb.setStyleSheet(f"background: #000; border: 2px solid {border_color}; border-radius: 8px;")
+            thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._set_thumb(thumb, path)
+            grid.addWidget(thumb, 1, col, Qt.AlignmentFlag.AlignCenter)
+            
+            # Name
+            name_label = QLabel(path.name)
+            name_label.setWordWrap(True)
+            name_label.setMaximumWidth(240)
+            name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            grid.addWidget(name_label, 2, col, Qt.AlignmentFlag.AlignCenter)
+            
+            # Stats (Size, Date)
+            try:
+                stat = path.stat()
+                size_str = self._format_size(stat.st_size)
+                date_str = time.strftime('%Y-%m-%d %H:%M', time.localtime(stat.st_mtime))
+                stats = QLabel(f"<span style='color: {muted_color};'>{size_str} • {date_str}</span>")
+                stats.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                grid.addWidget(stats, 3, col, Qt.AlignmentFlag.AlignCenter)
+            except: pass
+            
+            # Rename components
+            rename_btn = QPushButton("Rename Item")
+            rename_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            rename_input = QLineEdit(path.name)
+            rename_input.hide()
+            grid.addWidget(rename_btn, 4, col)
+            grid.addWidget(rename_input, 4, col)
+            
+            def show_rename():
+                rename_btn.hide()
+                rename_input.show()
+                rename_input.setFocus()
+            rename_btn.clicked.connect(show_rename)
+            
+            return rename_input
+
+        self.existing_rename_input = create_card("Existing File", existing_path, 0)
+        self.incoming_rename_input = create_card("Incoming File", incoming_path, 1)
+        
+        # Action Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(12)
+        
+        keep_both_btn = QPushButton("Keep Both")
+        replace_btn = QPushButton("Replace")
+        skip_btn = QPushButton("Skip")
+        
+        for b in (keep_both_btn, replace_btn, skip_btn):
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+        
+        keep_both_btn.clicked.connect(lambda: self._finish("keep_both"))
+        replace_btn.clicked.connect(lambda: self._finish("replace"))
+        skip_btn.clicked.connect(lambda: self._finish("skip"))
+        
+        # Style the buttons to distinguish them
+        replace_btn_style = f"background-color: {accent_str}; color: #fff; border: 1px solid {border_color};"
+        if is_light:
+            # Lighter background for light mode to make text readable (black text)
+            lighter_accent = Theme.mix("#ffffff", accent_q, 0.2)
+            replace_btn_style = f"background-color: {lighter_accent}; color: #000; border: 1px solid {border_color};"
+            
+        replace_btn.setStyleSheet(f"""
+            QPushButton {{ 
+                {replace_btn_style}
+            }}
+            QPushButton:hover {{ 
+                background-color: {Theme.mix("#ffffff", accent_q, 0.8) if is_light else Theme.mix("#ffffff", accent_q, 0.9)};
+                border: 1px solid {accent_str};
+            }}
+        """)
+        
+        btn_layout.addStretch()
+        btn_layout.addWidget(skip_btn)
+        btn_layout.addWidget(keep_both_btn)
+        btn_layout.addWidget(replace_btn)
+        layout.addLayout(btn_layout)
+        
+        # Apply to all
+        self.apply_all_cb = QCheckBox("Apply to all remaining conflicts")
+        self.apply_all_cb.setCursor(Qt.CursorShape.PointingHandCursor)
+        layout.addWidget(self.apply_all_cb)
+
+    def _format_size(self, size):
+        for unit in ['B', 'KB', 'MB', 'GB']:
+            if size < 1024: return f"{size:.1f} {unit}"
+            size /= 1024
+        return f"{size:.1f} TB"
+
+    def _set_thumb(self, label, path: Path):
+        ext = path.suffix.lower()
+        if ext in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}:
+            reader = QImageReader(str(path))
+            reader.setAutoTransform(True)
+            img = reader.read()
+            if not img.isNull():
+                pix = QPixmap.fromImage(img).scaled(240, 180, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                label.setPixmap(pix)
+            else:
+                label.setText("Image Corrupt")
+        else:
+            # Try to get poster for video
+            try:
+                # We need to use bridge here, but bridge might be a web channel object.
+                # Bridge has its own thumb dir.
+                label.setText("Video")
+            except:
+                label.setText("File")
+
+    @property
+    def new_existing_name(self):
+        return self.existing_rename_input.text()
+
+    @property
+    def new_incoming_name(self):
+        return self.incoming_rename_input.text()
+
+    def _finish(self, action):
+        self.result_action = action
+        self.apply_to_all = self.apply_all_cb.isChecked()
+        self.accept()
+
+
 class CustomSplitterHandle(QSplitterHandle):
     """Custom handle that paints itself to ensure hover colors work on all platforms."""
     def __init__(self, orientation: Qt.Orientation, parent: QSplitter) -> None:
         super().__init__(orientation, parent)
         self.setMouseTracking(True)
-        self.setAttribute(Qt.WidgetAttribute.WA_Hover)
-        self._hovered = False
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
-        try:
-            accent_str = getattr(self.window(), "_current_accent", Theme.ACCENT_DEFAULT)
-        except Exception:
-            accent_str = Theme.ACCENT_DEFAULT
-        accent_q = QColor(accent_str)
+        accent_str = str(self.parent().window().bridge.settings.value("ui/accent_color", "#8ab4f8"))
+        accent = QColor(accent_str)
         
-        if self._hovered:
-            color = accent_q
-        else:
-            color = QColor(Theme.get_splitter_idle(accent_q))
-            
+        # Idle color is a very subtle tinted grey
+        idle = QColor("#555555") if not Theme.get_is_light() else QColor("#cccccc")
+        color = accent if self.underMouse() else idle
+        
         painter.fillRect(self.rect(), color)
 
     def enterEvent(self, event: QEnterEvent) -> None:
-        self._hovered = True
         self.update()
         super().enterEvent(event)
 
     def leaveEvent(self, event: QEvent) -> None:
-        self._hovered = False
         self.update()
         super().leaveEvent(event)
 
@@ -284,90 +485,78 @@ class FolderTreeView(QTreeView):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setMouseTracking(True)
         self.setAcceptDrops(True)
         self.setDragEnabled(True)
         self.setDropIndicatorShown(True)
-        self.setDragDropMode(QTreeView.DragDropMode.DragDrop)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
 
-    def mousePressEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
+    def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.RightButton:
-            # Let the customContextMenuRequested signal fire, but avoid changing
-            # currentIndex/selection.
-            event.accept()
-            self.customContextMenuRequested.emit(event.position().toPoint())
-            return
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
-        idx = self.indexAt(event.position().toPoint())
-        if idx.isValid():
-            self.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+            idx = self.indexAt(event.position().toPoint())
+            if idx.isValid() and not self.selectionModel().isSelected(idx):
+                # Only if not already selected, we might want to select just this one?
+                # Explorer actually selects on right-click if nothing is selected.
+                pass
+            # Don't call super() if we want to block the default selection behavior
+            # BUT we need it for the context menu to know WHERE we clicked.
+            super().mousePressEvent(event)
         else:
-            self.viewport().setCursor(Qt.CursorShape.ArrowCursor)
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
         super().mouseMoveEvent(event)
 
-    def dragEnterEvent(self, event) -> None:
-        if event.mimeData().hasUrls() or event.mimeData().hasFormat("application/x-mmx-path") or event.mimeData().hasFormat("web/mmx-paths"):
-            if event.modifiers() & Qt.ControlModifier:
-                event.setDropAction(Qt.DropAction.CopyAction)
-            else:
-                event.setDropAction(Qt.DropAction.MoveAction)
-            event.acceptProposedAction()
-        else:
-            super().dragEnterEvent(event)
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        event.acceptProposedAction()
+        super().dragEnterEvent(event)
 
-    def dragMoveEvent(self, event) -> None:
-        if event.mimeData().hasUrls() or event.mimeData().hasFormat("application/x-mmx-path") or event.mimeData().hasFormat("web/mmx-paths"):
-            if event.modifiers() & Qt.ControlModifier:
-                event.setDropAction(Qt.DropAction.CopyAction)
-            else:
-                event.setDropAction(Qt.DropAction.MoveAction)
-            event.acceptProposedAction()
-            
-            # Emit folder name for web tooltip
-            idx = self.indexAt(event.position().toPoint())
-            main_win = self.window()
-            bridge = getattr(main_win, "bridge", None)
-            if bridge:
-                target_folder = ""
-                if idx.isValid():
-                    target_folder = str(idx.data())
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        idx = self.indexAt(event.position().toPoint())
+        if idx.isValid():
+            source_idx = self.model().mapToSource(idx)
+            fs_model = self.model().sourceModel()
+            if fs_model.isDir(source_idx):
+                target_folder = fs_model.filePath(source_idx)
                 
-                # Check if it's a copy
-                is_copy = bool(event.modifiers() & Qt.ControlModifier)
+                # Check modifier keys for Copy vs Move
+                is_copy = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
                 
-                # We don't know the count here easily without mime data parsing,
-                # but the web side already knows it and will call update_drag_tooltip too.
-                # However, for tree-to-tree dragging, we might want to trigger it here.
-                # For now, we prioritize the dragOverFolder signal for compatibility,
-                # but we ALSO update the native tooltip directly if it's active.
-                bridge.dragOverFolder.emit(target_folder)
+                # Update tooltip via bridge
+                main_win = self.window()
+                bridge = getattr(main_win, "bridge", None)
+                if bridge:
+                    # Count items from side-channel or mime
+                    count = len(bridge.drag_paths) if bridge.drag_paths else 1
+                    bridge.update_drag_tooltip(count, is_copy, Path(target_folder).name)
                 
-                # If the native tooltip is already being managed (e.g. from app.js),
-                # this ensures the target folder label updates instantly as we hover the tree.
-                if hasattr(main_win, "native_tooltip") and main_win.native_tooltip.isVisible():
-                    # We reuse the last known count if possible, or just 1
-                    count = getattr(bridge, "_last_drag_count", 1)
-                    bridge.update_drag_tooltip(count, is_copy, target_folder)
-        else:
-            super().dragMoveEvent(event)
-
-    def dragLeaveEvent(self, event) -> None:
+                self.setExpanded(idx, True)
+                event.acceptProposedAction()
+                return
+        
+        # If not over a folder, hide tooltip target
         main_win = self.window()
         bridge = getattr(main_win, "bridge", None)
         if bridge:
-            bridge.dragOverFolder.emit("")
-            # Don't hide the tooltip entirely, just clear the target text
-            # if we are still dragging (the web side handles the actual hide)
-            # but we can force a refresh if the mouse left the tree
-            is_copy = bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.ControlModifier)
-            count = getattr(bridge, "_last_drag_count", 1)
+            count = len(bridge.drag_paths) if bridge.drag_paths else 1
+            is_copy = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
             bridge.update_drag_tooltip(count, is_copy, "")
+            
+        super().dragMoveEvent(event)
+
+    def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:
+        main_win = self.window()
+        bridge = getattr(main_win, "bridge", None)
+        if bridge:
+            bridge.hide_drag_tooltip()
         super().dragLeaveEvent(event)
 
-    def dropEvent(self, event) -> None:
+    def dropEvent(self, event: QDropEvent) -> None:
+        main_win = self.window()
+        bridge = getattr(main_win, "bridge", None)
+        if bridge:
+            bridge.hide_drag_tooltip()
+
         mime = event.mimeData()
         idx = self.indexAt(event.position().toPoint())
         
@@ -398,8 +587,6 @@ class FolderTreeView(QTreeView):
         src_paths = []
         
         # Priority 0: Side-channel from Bridge (Reliable for internal Gallery -> Tree)
-        main_win = self.window()
-        bridge = getattr(main_win, "bridge", None)
         if bridge and hasattr(bridge, "drag_paths") and bridge.drag_paths:
             src_paths = list(bridge.drag_paths)
             print(f"DEBUG: dropEvent using side-channel: count={len(src_paths)}")
@@ -407,48 +594,28 @@ class FolderTreeView(QTreeView):
         # Priority 1: fallback to MIME data for tree-to-tree or external drops
         if not src_paths:
             print(f"DEBUG: dropEvent falling back to MIME: formats={mime.formats()}")
-            # Custom formats
-            mmx_data = None
-            if mime.hasFormat("web/mmx-paths"):
-                mmx_data = bytes(mime.data("web/mmx-paths")).decode("utf-8")
-            elif mime.hasFormat("application/x-mmx-path"):
-                mmx_data = bytes(mime.data("application/x-mmx-path")).decode("utf-8")
-            
-            if not mmx_data and mime.hasText():
-                text = mime.text()
-                if text.startswith("[") and text.endswith("]"):
-                    mmx_data = text
-            
-            if mmx_data:
-                try:
-                    import json
-                    parsed = json.loads(mmx_data)
-                    src_paths = [str(p) for p in parsed] if isinstance(parsed, list) else [str(parsed)]
-                except Exception: pass
-
-            # Priority 3: urls() (Always check if still empty)
-            if not src_paths and mime.hasUrls():
+            if mime.hasUrls():
                 src_paths = [url.toLocalFile() for url in mime.urls() if url.toLocalFile()]
 
         if not src_paths:
             event.ignore()
             return
 
-        # Filter out if moving to the same folder
+        # Filter out if moving to THE SAME folder
         src_paths = [p for p in src_paths if os.path.dirname(p).replace("\\", "/").lower() != target_path.replace("\\", "/").lower()]
 
         if not src_paths:
             event.ignore()
             return
 
-        # Trigger move or copy via Bridge
+        # Determine if COPY or MOVE
+        is_copy = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+        op_type = "copy" if is_copy else "move"
+        
         if bridge:
-            if event.modifiers() & Qt.ControlModifier:
-                event.setDropAction(Qt.DropAction.CopyAction)
-                bridge.copy_paths_async(src_paths, target_path)
-            else:
-                event.setDropAction(Qt.DropAction.MoveAction)
-                bridge.move_paths_async(src_paths, target_path)
+            # Perform operation
+            paths_obj = [Path(p) for p in src_paths]
+            bridge._process_file_op(op_type, paths_obj, Path(target_path))
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -461,51 +628,38 @@ class RootFilterProxyModel(QSortFilterProxyModel):
     """
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._root_path: str = ""
+        self._root_path = ""
         self._fallback_icon: QIcon | None = None
 
     def setRootPath(self, path: str) -> None:
-        # We NO LONGER use .resolve() here. QFileSystemModel reports the "apparent"
-        # path within the tree. If we resolve, symlinks pointing outside the
-        # root will be filtered out.
-        self._root_path = str(Path(path).absolute())
-        self.invalidate()
+        self._root_path = str(Path(path).absolute()).replace("\\", "/")
+        self.invalidateFilter()
 
     def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:
-        source_model = self.sourceModel()
-        if not isinstance(source_model, QFileSystemModel):
+        if not self._root_path:
             return True
             
-        # Get the path of the item being checked
-        idx = source_model.index(source_row, 0, source_parent)
-        path_str = source_model.filePath(idx)
-        if not path_str:
-            return True # Allow it to load
-            
-        try:
-            # Normalize for robust comparison (lowercase posix)
-            p_str = Path(path_str).as_posix().lower()
-            r_str = Path(self._root_path).as_posix().lower()
-            
-            # Case 1: Root itself
-            if p_str == r_str:
-                return True
-                
-            # Case 2: p is an ancestor of r (so we can drill down)
-            # We use a trailing slash to avoid matching partial folder names (e.g. /my vs /media)
-            # but we handle the drive root case where as_posix() already includes the slash.
-            p_prefix = p_str if p_str.endswith("/") else p_str + "/"
-            if r_str.startswith(p_prefix):
-                return True
-                
-            # Case 3: p is a descendant of r
-            r_prefix = r_str if r_str.endswith("/") else r_str + "/"
-            if p_str.startswith(r_prefix):
-                return True
-                
-            return False
-        except Exception:
+        fs_model = self.sourceModel()
+        source_index = fs_model.index(source_row, 0, source_parent)
+        path = fs_model.filePath(source_index).replace("\\", "/")
+        
+        # Show the root path itself
+        if path == self._root_path:
             return True
+            
+        # Show children/descendants of the root path
+        if path.startswith(self._root_path + "/"):
+            return True
+            
+        # Show ancestors of the root path (so we can reach it from the top)
+        if self._root_path.startswith(path + "/"):
+            return True
+            
+        # Special case: show Windows drives if they are ancestors
+        if len(path) == 2 and path[1] == ":" and self._root_path.upper().startswith(path.upper()):
+            return True
+
+        return False
 
     def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
         # Prevent "customized" folder icons (which sometimes fail to load or are empty)
@@ -551,14 +705,16 @@ class Bridge(QObject):
     # Native Tooltip Controls
     updateTooltipRequested = Signal(int, bool, str) # count, isCopy, targetFolder
     hideTooltipRequested = Signal()
+    conflictDialogRequested = Signal(str, str)
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
         print("Bridge: Initializing...")
         self._selected_folders: list[str] = []
         self._scan_abort = False
         self._scan_lock = threading.Lock()
         self.drag_paths: list[str] = []
+        self._last_dlg_res = None
         
         appdata = Path(
             QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
@@ -612,6 +768,10 @@ class Bridge(QObject):
         # Hybrid Fast-Load Cache
         self._disk_cache: dict[str, Path] = {}
         self._disk_cache_key: str = "" # Hash of selected folders list
+
+        # Connect blocking signal for cross-thread dialogs
+        self.conflictDialogRequested.connect(self._invoke_conflict_dialog, Qt.BlockingQueuedConnection)
+        self._last_dlg_res = {"action": "skip", "apply_all": False, "new_existing": "", "new_incoming": ""}
 
         print(f"Bridge: Initialized (Session Seed: {self._session_shuffle_seed})")
 
@@ -672,16 +832,33 @@ class Bridge(QObject):
                 pass
         return False
 
+    @Slot(list)
     def set_selected_folders(self, folders: list[str]) -> None:
         if folders == self._selected_folders:
             return
         self._selected_folders = folders
         try:
+            # Persistent settings
+            settings = QSettings("G1enB1and", "MediaManagerX")
             primary = folders[0] if folders else ""
-            self.settings.setValue("gallery/last_folder", primary)
+            settings.setValue("gallery/last_folder", primary)
         except Exception:
             pass
         self.selectionChanged.emit(self._selected_folders)
+
+    @Slot(list)
+    def set_drag_paths(self, paths: list[str]) -> None:
+        """Called from JS to register the actual files being dragged."""
+        self.drag_paths = [str(p) for p in paths]
+        print(f"DEBUG: Bridge set_drag_paths: count={len(self.drag_paths)}")
+
+    @Slot(int, bool, str)
+    def update_drag_tooltip(self, count: int, is_copy: bool, target_folder: str) -> None:
+        self.updateTooltipRequested.emit(count, is_copy, target_folder)
+
+    @Slot()
+    def hide_drag_tooltip(self) -> None:
+        self.hideTooltipRequested.emit()
 
     @Slot(result=list)
     def get_selected_folders(self) -> list:
@@ -919,7 +1096,9 @@ class Bridge(QObject):
         p = Path(path)
         if not p.exists() or not new_name.strip(): return ""
         target = self._unique_path(p.with_name(new_name.strip()))
-        p.rename(target)
+        # Use shutil.move for robustness across drives if necessary, 
+        # though usually rename is fine for same folder.
+        shutil.move(str(p), str(target))
         return str(target)
 
     @Slot(str, str, result=str)
@@ -959,105 +1138,128 @@ class Bridge(QObject):
     def hide_drag_tooltip(self) -> None:
         self.hideTooltipRequested.emit()
 
-    @Slot(list, str)
-    def move_paths_async(self, src_paths: list[str], target_folder: str) -> None:
-        print(f"DEBUG: move_paths_async: count={len(src_paths)} target={target_folder}")
-        target_dir = Path(target_folder)
-        if not target_dir.exists() or not target_dir.is_dir():
-             self.fileOpFinished.emit("move", False, "", "")
-             return
-        
-        def work():
-            try:
-                from app.mediamanager.db.media_repo import rename_media_path, move_directory_in_db
-                any_ok = False
-                for src_str in src_paths:
-                    try:
-                        src = Path(src_str)
-                        if not src.exists():
-                            print(f"DEBUG: Move skip (not found): {src_str}")
-                            continue
-                        
-                        # Generate unique path if name collision
-                        dst = self._unique_path(target_dir / src.name)
-                        
-                        old_path = str(src.absolute())
-                        new_path = str(dst.absolute())
-                        
-                        if old_path.lower() == new_path.lower():
-                            print(f"DEBUG: Move skip (same path): {old_path}")
-                            continue
+    @Slot(str, str)
+    def _invoke_conflict_dialog(self, dst_str: str, src_str: str):
+        """Helper to show dialog on main thread."""
+        dst, src = Path(dst_str), Path(src_str)
+        # Ensure parent is a QWidget if possible
+        parent_win = self.parent() if isinstance(self.parent(), QWidget) else None
+        dlg = FileConflictDialog(dst, src, self, parent=parent_win)
+        if dlg.exec():
+            # Store results so processing thread can pick them up
+            self._last_dlg_res = {
+                "action": dlg.result_action,
+                "apply_all": dlg.apply_to_all,
+                "new_existing": dlg.new_existing_name,
+                "new_incoming": dlg.new_incoming_name
+            }
+        else:
+            self._last_dlg_res = {"action": "skip"}
 
-                        print(f"DEBUG: Moving {old_path} -> {new_path}")
-                        shutil.move(old_path, new_path)
-                        
-                        # Update DB
-                        # Note: we use rename_media_path for files AND dirs if they aren't nested? 
-                        # Actually move_directory_in_db is correct for whole trees.
-                        if src.is_dir():
-                            move_directory_in_db(self.conn, old_path, new_path)
+    def _process_file_op(self, op_type: str, src_paths: list[Path], target_dir: Path) -> None:
+        if not target_dir.exists() or not target_dir.is_dir():
+            self.fileOpFinished.emit(op_type, False, "", "")
+            return
+
+        def work():
+            from app.mediamanager.db.media_repo import rename_media_path, move_directory_in_db, add_media_item
+            print(f"DEBUG: _process_file_op START: op={op_type}, count={len(src_paths)}")
+            
+            is_move = op_type in ("move", "paste_move")
+            sticky_action = None
+            any_ok = False
+            
+            try:
+                for src in src_paths:
+                    if not src.exists():
+                        print(f"DEBUG: Source does not exist: {src}")
+                        continue
+                    
+                    dst = target_dir / src.name
+                    action = "keep_both"
+                    final_dst = dst
+                    
+                    if dst.exists() and not dst.samefile(src):
+                        if sticky_action:
+                            res = {"action": sticky_action, "new_incoming": src.name}
                         else:
-                            rename_media_path(self.conn, old_path, new_path)
+                            # Invoke dialog on main thread via signal
+                            self._last_dlg_res = None
+                            self.conflictDialogRequested.emit(str(dst), str(src))
+                            
+                            # Busy wait for result (max 10 mins)
+                            start_t = time.time()
+                            while self._last_dlg_res is None and (time.time() - start_t < 600):
+                                time.sleep(0.05)
+                            
+                            res = self._last_dlg_res or {"action": "skip"}
+                            if res.get("apply_all"): sticky_action = res["action"]
+                        
+                        action = res["action"]
+                        if action == "skip":
+                            continue
+                        elif action == "replace":
+                             final_dst = dst
+                        elif action == "keep_both":
+                             # Use the new name from dialog if provided
+                             new_name = res.get("new_incoming", src.name)
+                             final_dst = target_dir / new_name
+                             if final_dst.exists():
+                                 final_dst = self._unique_path(final_dst)
+                    
+                    # Execute with correct atomic logic
+                    try:
+                        print(f"DEBUG: {op_type} {src.name} -> {final_dst.name} (action={action})")
+                        if is_move:
+                            try:
+                                # Try atomic os.replace (removes source, overwrites target if exists)
+                                os.replace(src, final_dst)
+                                print(f"DEBUG: os.replace (MOVE) success")
+                            except OSError:
+                                # Cross-device move fallback
+                                shutil.move(src, final_dst)
+                                print(f"DEBUG: shutil.move fallback success")
+                            
+                            # Double check: ensure source is gone (as requested by user)
+                            if src.exists():
+                                try:
+                                    if src.is_dir(): shutil.rmtree(src)
+                                    else: src.unlink()
+                                    print(f"DEBUG: Explicit delete success for {src.name}")
+                                except: pass
+                            
+                            if src.is_dir(): move_directory_in_db(self.conn, str(src), str(final_dst))
+                            else: rename_media_path(self.conn, str(src), str(final_dst))
+                        else:
+                            # Copy operation
+                            if src.is_dir(): shutil.copytree(src, final_dst)
+                            else: shutil.copy2(src, final_dst)
+                            
+                            ext = final_dst.suffix.lower()
+                            mtype = "image" if ext in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"} else "video"
+                            add_media_item(self.conn, str(final_dst), mtype)
+                        
                         any_ok = True
                     except Exception as e:
-                        print(f"Move Error for {src_str}: {e}")
-                
-                self.fileOpFinished.emit("move", any_ok, "", str(target_dir))
-                self._disk_cache = {}
-                self._disk_cache_key = ""
+                        print(f"DEBUG: Op fail for {src.name}: {e}")
+
+                op_signal = "paste" if "paste" in op_type else op_type
+                self.fileOpFinished.emit(op_signal, any_ok, "", str(target_dir))
             except Exception as e:
-                print(f"Move Background Error: {e}")
-                self.fileOpFinished.emit("move", False, "", "")
-        
+                print(f"DEBUG: _process_file_op GLOBAL ERROR: {e}")
+                self.fileOpFinished.emit(op_type, False, "", "")
+            
+            self._disk_cache = {}; self._disk_cache_key = ""
+
         threading.Thread(target=work, daemon=True).start()
+
+    @Slot(list, str)
+    def move_paths_async(self, src_paths: list[str], target_folder: str) -> None:
+        self._process_file_op("move", [Path(p) for p in src_paths], Path(target_folder))
 
     @Slot(list, str)
     def copy_paths_async(self, src_paths: list[str], target_folder: str) -> None:
-        print(f"DEBUG: copy_paths_async: count={len(src_paths)} target={target_folder}")
-        target_dir = Path(target_folder)
-        if not target_dir.exists() or not target_dir.is_dir():
-             self.fileOpFinished.emit("copy", False, "", "")
-             return
-        
-        def work():
-            try:
-                from app.mediamanager.db.media_repo import add_media_item
-                any_ok = False
-                for src_str in src_paths:
-                    try:
-                        src = Path(src_str)
-                        if not src.exists(): continue
-                        
-                        dst = self._unique_path(target_dir / src.name)
-                        print(f"DEBUG: Copying {src} -> {dst}")
-                        
-                        if src.is_dir():
-                            shutil.copytree(str(src), str(dst))
-                            # For now, we don't have a recursive DB adder in this context,
-                            # but the next folder scan will pick it up. 
-                            # We could trigger a scan of the target folder.
-                        else:
-                            shutil.copy2(str(src), str(dst))
-                            # Add to DB
-                            try:
-                                # We need media_type. 
-                                ext = dst.suffix.lower()
-                                mtype = "image" if ext in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"} else "video"
-                                add_media_item(self.conn, str(dst), mtype)
-                            except Exception as e:
-                                print(f"DB Add Error: {e}")
-                        any_ok = True
-                    except Exception as e:
-                        print(f"Copy Error for {src_str}: {e}")
-                
-                self.fileOpFinished.emit("copy", any_ok, "", str(target_dir))
-                self._disk_cache = {}
-                self._disk_cache_key = ""
-            except Exception as e:
-                print(f"Copy Background Error: {e}")
-                self.fileOpFinished.emit("copy", False, "", "")
-        
-        threading.Thread(target=work, daemon=True).start()
+        self._process_file_op("copy", [Path(p) for p in src_paths], Path(target_folder))
 
     @Slot(list, result=bool)
     def show_metadata(self, paths: list) -> bool:
@@ -1138,9 +1340,6 @@ class Bridge(QObject):
     @Slot(str)
     def paste_into_folder_async(self, target_folder: str) -> None:
         target_dir = Path(target_folder)
-        if not target_dir.exists() or not target_dir.is_dir():
-             self.fileOpFinished.emit("paste", False, "", "")
-             return
         try:
             mime = QApplication.clipboard().mimeData()
             if not mime.hasUrls():
@@ -1148,23 +1347,10 @@ class Bridge(QObject):
                 return
             is_move = bool(mime.hasFormat("Preferred DropEffect") and mime.data("Preferred DropEffect")[0] == 2)
             src_paths = [Path(url.toLocalFile()) for url in mime.urls() if url.toLocalFile()]
+            op_type = "paste_move" if is_move else "paste_copy"
+            self._process_file_op(op_type, src_paths, target_dir)
         except Exception:
             self.fileOpFinished.emit("paste", False, "", "")
-            return
-        def work():
-            try:
-                for src in src_paths:
-                    if not src.exists(): continue
-                    dst = self._unique_path(target_dir / src.name)
-                    if is_move: shutil.move(str(src), str(dst))
-                    else:
-                        if src.is_dir(): shutil.copytree(str(src), str(dst))
-                        else: shutil.copy2(str(src), str(dst))
-                self.fileOpFinished.emit("paste", True, "", str(target_dir))
-                self._disk_cache = {}
-                self._disk_cache_key = ""
-            except Exception: self.fileOpFinished.emit("paste", False, "", "")
-        threading.Thread(target=work, daemon=True).start()
 
     @Slot(str, result=float)
     def get_video_duration_seconds(self, video_path: str) -> float:
@@ -1505,7 +1691,7 @@ class MainWindow(QMainWindow):
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
 
-        self.bridge = Bridge()
+        self.bridge = Bridge(self)
         self.bridge.openVideoRequested.connect(self._open_video_overlay)
         self.bridge.closeVideoRequested.connect(self._close_video_overlay)
         self.bridge.videoPreprocessingStatus.connect(self._on_video_preprocessing_status)
