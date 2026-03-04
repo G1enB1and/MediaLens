@@ -18,6 +18,7 @@ import time
 import re
 import json
 import html
+from packaging.version import Version
 from pathlib import Path
 
 def _install_stderr_filter() -> None:
@@ -716,7 +717,12 @@ class Bridge(QObject):
         def _on_finished():
             if self._update_reply.error() == QNetworkReply.NetworkError.NoError:
                 remote_version = bytes(self._update_reply.readAll()).decode().strip()
-                if remote_version and remote_version != __version__:
+                try:
+                    is_newer = remote_version and Version(remote_version) > Version(__version__)
+                except Exception:
+                    is_newer = False
+
+                if is_newer:
                     self.updateAvailable.emit(remote_version, manual)
                 elif manual:
                     self.updateAvailable.emit("", True)
