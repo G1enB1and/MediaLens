@@ -1,23 +1,3 @@
-// Drag Tooltip
-let gDragTooltip = null;
-function ensureDragTooltip() {
-  if (gDragTooltip) return gDragTooltip;
-  gDragTooltip = document.createElement('div');
-  gDragTooltip.id = 'mmxDragTooltip';
-  gDragTooltip.style.position = 'fixed';
-  gDragTooltip.style.pointerEvents = 'none';
-  gDragTooltip.style.zIndex = '9999';
-  gDragTooltip.style.padding = '4px 8px';
-  gDragTooltip.style.background = 'rgba(0,0,0,0.8)';
-  gDragTooltip.style.color = '#fff';
-  gDragTooltip.style.borderRadius = '4px';
-  gDragTooltip.style.fontSize = '12px';
-  gDragTooltip.style.display = 'none';
-  gDragTooltip.style.whiteSpace = 'nowrap';
-  gDragTooltip.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
-  document.body.appendChild(gDragTooltip);
-  return gDragTooltip;
-}
 
 // Globals for state
 let gSearchQuery = '';
@@ -31,6 +11,8 @@ let gPosterRequested = new Set();
 let gPosterObserver = null;
 let gSort = 'name_asc';
 let gFilter = 'all';
+let gCurrentTargetFolderName = '';
+let gCurrentDragCount = 0;
 
 // Loading progress tracking
 let gTotalOnPage = 0;
@@ -610,6 +592,7 @@ function renderMediaList(items, scrollToTop = true) {
         if (window.qt && gBridge && gBridge.set_drag_paths) {
           gBridge.set_drag_paths(paths);
         }
+        gCurrentDragCount = paths.length;
 
         e.dataTransfer.effectAllowed = 'copyMove';
 
@@ -626,20 +609,20 @@ function renderMediaList(items, scrollToTop = true) {
         }
       });
       card.addEventListener('drag', (e) => {
-        const tooltip = ensureDragTooltip();
-        if (e.clientX > 0 && e.clientY > 0) {
-          tooltip.style.left = (e.clientX + 15) + 'px';
-          tooltip.style.top = (e.clientY + 15) + 'px';
-          tooltip.style.display = 'block';
+        if (gBridge && gBridge.update_drag_tooltip && e.clientX > 0 && e.clientY > 0) {
           const isCopy = e.ctrlKey || e.metaKey;
-          tooltip.innerHTML = (isCopy ? '<span style="color:#00ff00;font-weight:bold;">+</span> Copy' : '<span style="color:#0088ff;font-weight:bold;">→</span> Move') + ' ' + (paths.length > 1 ? paths.length + ' items' : 'item');
+          const count = gCurrentDragCount || 1;
+          gBridge.update_drag_tooltip(count, isCopy, gCurrentTargetFolderName);
         }
       });
       card.addEventListener('dragend', (e) => {
-        if (gDragTooltip) gDragTooltip.style.display = 'none';
+        if (gBridge && gBridge.hide_drag_tooltip) {
+          gBridge.hide_drag_tooltip();
+        }
         if (window.qt && gBridge && gBridge.set_drag_paths) {
           gBridge.set_drag_paths([]);
         }
+        gCurrentDragCount = 0;
       });
     } else {
       // Video tile: lazy poster load only when near viewport.
@@ -736,6 +719,7 @@ function renderMediaList(items, scrollToTop = true) {
         if (window.qt && gBridge && gBridge.set_drag_paths) {
           gBridge.set_drag_paths(paths);
         }
+        gCurrentDragCount = paths.length;
 
         e.dataTransfer.effectAllowed = 'copyMove';
 
@@ -749,20 +733,20 @@ function renderMediaList(items, scrollToTop = true) {
         }
       });
       card.addEventListener('drag', (e) => {
-        const tooltip = ensureDragTooltip();
-        if (e.clientX > 0 && e.clientY > 0) {
-          tooltip.style.left = (e.clientX + 15) + 'px';
-          tooltip.style.top = (e.clientY + 15) + 'px';
-          tooltip.style.display = 'block';
+        if (gBridge && gBridge.update_drag_tooltip && e.clientX > 0 && e.clientY > 0) {
           const isCopy = e.ctrlKey || e.metaKey;
-          tooltip.innerHTML = (isCopy ? '<span style="color:#00ff00;font-weight:bold;">+</span> Copy' : '<span style="color:#0088ff;font-weight:bold;">→</span> Move') + ' ' + (paths.length > 1 ? paths.length + ' items' : 'item');
+          const count = gCurrentDragCount || 1;
+          gBridge.update_drag_tooltip(count, isCopy, gCurrentTargetFolderName);
         }
       });
       card.addEventListener('dragend', (e) => {
-        if (gDragTooltip) gDragTooltip.style.display = 'none';
+        if (gBridge && gBridge.hide_drag_tooltip) {
+          gBridge.hide_drag_tooltip();
+        }
         if (window.qt && gBridge && gBridge.set_drag_paths) {
           gBridge.set_drag_paths([]);
         }
+        gCurrentDragCount = 0;
       });
     }
 
@@ -1522,6 +1506,12 @@ async function main() {
 
     wireLightbox();
     wireCtxMenu();
+
+    if (bridge.dragOverFolder) {
+      bridge.dragOverFolder.connect(function (folderName) {
+        gCurrentTargetFolderName = folderName || '';
+      });
+    }
 
     if (bridge.updateAvailable) {
       bridge.updateAvailable.connect(function (newVer, manual) {

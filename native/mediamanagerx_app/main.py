@@ -93,7 +93,7 @@ from PySide6.QtCore import (
     QTimer,
 )
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
-from PySide6.QtGui import QAction, QColor, QImageReader, QIcon, QPainter
+from PySide6.QtGui import QAction, QColor, QImageReader, QIcon, QPainter, QCursor
 from PySide6.QtGui import QMouseEvent, QPen
 from PySide6.QtWidgets import (
     QApplication,
@@ -325,8 +325,47 @@ class FolderTreeView(QTreeView):
             else:
                 event.setDropAction(Qt.DropAction.MoveAction)
             event.acceptProposedAction()
+            
+            # Emit folder name for web tooltip
+            idx = self.indexAt(event.position().toPoint())
+            main_win = self.window()
+            bridge = getattr(main_win, "bridge", None)
+            if bridge:
+                target_folder = ""
+                if idx.isValid():
+                    target_folder = str(idx.data())
+                
+                # Check if it's a copy
+                is_copy = bool(event.modifiers() & Qt.ControlModifier)
+                
+                # We don't know the count here easily without mime data parsing,
+                # but the web side already knows it and will call update_drag_tooltip too.
+                # However, for tree-to-tree dragging, we might want to trigger it here.
+                # For now, we prioritize the dragOverFolder signal for compatibility,
+                # but we ALSO update the native tooltip directly if it's active.
+                bridge.dragOverFolder.emit(target_folder)
+                
+                # If the native tooltip is already being managed (e.g. from app.js),
+                # this ensures the target folder label updates instantly as we hover the tree.
+                if hasattr(main_win, "native_tooltip") and main_win.native_tooltip.isVisible():
+                    # We reuse the last known count if possible, or just 1
+                    count = getattr(bridge, "_last_drag_count", 1)
+                    bridge.update_drag_tooltip(count, is_copy, target_folder)
         else:
             super().dragMoveEvent(event)
+
+    def dragLeaveEvent(self, event) -> None:
+        main_win = self.window()
+        bridge = getattr(main_win, "bridge", None)
+        if bridge:
+            bridge.dragOverFolder.emit("")
+            # Don't hide the tooltip entirely, just clear the target text
+            # if we are still dragging (the web side handles the actual hide)
+            # but we can force a refresh if the mouse left the tree
+            is_copy = bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.ControlModifier)
+            count = getattr(bridge, "_last_drag_count", 1)
+            bridge.update_drag_tooltip(count, is_copy, "")
+        super().dragLeaveEvent(event)
 
     def dropEvent(self, event) -> None:
         mime = event.mimeData()
@@ -507,6 +546,11 @@ class Bridge(QObject):
     updateAvailable = Signal(str, bool)  # version, manual
     updateDownloadProgress = Signal(int)
     updateError = Signal(str)
+    
+    dragOverFolder = Signal(str)
+    # Native Tooltip Controls
+    updateTooltipRequested = Signal(int, bool, str) # count, isCopy, targetFolder
+    hideTooltipRequested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -907,10 +951,13 @@ class Bridge(QObject):
         try: return QUrl.fromLocalFile(str(path)).toString()
         except Exception: return ""
 
-    @Slot(list)
-    def set_drag_paths(self, paths: list[str]) -> None:
-        self.drag_paths = paths
-        print(f"DEBUG: Bridge.set_drag_paths: count={len(paths)}")
+    @Slot(int, bool, str)
+    def update_drag_tooltip(self, count: int, is_copy: bool, target_folder: str) -> None:
+        self.updateTooltipRequested.emit(count, is_copy, target_folder)
+
+    @Slot()
+    def hide_drag_tooltip(self) -> None:
+        self.hideTooltipRequested.emit()
 
     @Slot(list, str)
     def move_paths_async(self, src_paths: list[str], target_folder: str) -> None:
@@ -1381,6 +1428,51 @@ class Bridge(QObject):
         return {"ffmpeg": bool(self._ffmpeg_bin()), "ffmpeg_path": self._ffmpeg_bin() or "", "ffprobe": bool(self._ffprobe_bin()), "ffprobe_path": self._ffprobe_bin() or "", "thumb_dir": str(self._thumb_dir)}
 
 
+class NativeDragTooltip(QLabel):
+    """A floating, frameless tooltip that follows the cursor during drag operations."""
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowTransparentForInput | Qt.WindowType.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setObjectName("nativeDragTooltip")
+        # Standard styling: small padding, less rounding
+        self.setStyleSheet("""
+            #nativeDragTooltip {
+                background: palette(window);
+                border: 1px solid palette(highlight);
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 10pt;
+            }
+        """)
+
+    def update_style(self, accent_color: QColor, is_light: bool):
+        bg = Theme.mix("#222222", accent_color, 0.8) if not is_light else Theme.mix("#eeeeee", accent_color, 0.8)
+        fg = "#ffffff" if not is_light else "#000000"
+        border = "rgba(255,255,255,0.2)" if not is_light else "rgba(0,0,0,0.1)"
+        
+        self.setStyleSheet(f"""
+            #nativeDragTooltip {{
+                background-color: {bg} !important;
+                color: {fg} !important;
+                border: 1px solid {border};
+                border-radius: 6px;
+                padding: 6px 12px;
+                font-weight: 500;
+            }}
+        """)
+
+    def update_text(self, text: str):
+        self.setText(text)
+        self.adjustSize()
+
+    def follow_cursor(self):
+        pos = QCursor.pos()
+        # Offset slightly from the cursor
+        self.move(pos.x() + 15, pos.y() + 15)
+        if not self.isVisible():
+            self.show()
+
+
 class NativeSeparator(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1419,6 +1511,11 @@ class MainWindow(QMainWindow):
         self.bridge.loadFolderRequested.connect(self._on_load_folder_requested)
         self.bridge.accentColorChanged.connect(self._on_accent_changed)
         self._current_accent = Theme.ACCENT_DEFAULT
+
+        # Native Tooltip
+        self.native_tooltip = NativeDragTooltip()
+        self.bridge.updateTooltipRequested.connect(self._on_update_tooltip)
+        self.bridge.hideTooltipRequested.connect(self.native_tooltip.hide)
 
         self._build_menu()
         self._build_layout()
@@ -3213,10 +3310,31 @@ class MainWindow(QMainWindow):
         self._update_native_styles(accent_color)
         self._update_splitter_style(accent_color)
         
+        # Update tooltip theme
+        if hasattr(self, "native_tooltip"):
+            self.native_tooltip.update_style(QColor(accent_color), Theme.get_is_light())
+        
         # Belt and suspenders: force update web layer via injection
         js = f"document.documentElement.style.setProperty('--accent', '{accent_color}');"
         if hasattr(self, "webview") and self.webview.page():
             self.webview.page().runJavaScript(js)
+
+    def _on_update_tooltip(self, count: int, is_copy: bool, target_folder: str) -> None:
+        if not hasattr(self, "native_tooltip"):
+            return
+        
+        # Store for tree hover sync
+        self.bridge._last_drag_count = count
+        
+        op = "Copy" if is_copy else "Move"
+        icon = "+" if is_copy else "→"
+        items_text = f"{count} item" if count == 1 else f"{count} items"
+        
+        target_text = f" to <b>{target_folder}</b>" if target_folder else ""
+        
+        html = f"<div style='white-space: nowrap;'>{icon} {op} {items_text}{target_text}</div>"
+        self.native_tooltip.update_text(html)
+        self.native_tooltip.follow_cursor()
 
     def _set_window_title_bar_theme(self, is_dark: bool, bg_color: QColor | None = None) -> None:
         """Enable immersive dark mode and set custom caption color for the Windows title bar."""
@@ -3275,6 +3393,10 @@ class MainWindow(QMainWindow):
         
         # Windows Title Bar
         self._set_window_title_bar_theme(not is_light, sb_bg)
+        
+        # Native Tooltip Style
+        if hasattr(self, "native_tooltip"):
+            self.native_tooltip.update_style(accent, is_light)
         
         # Theme-aware Window Icon
         icon_name = "favicon-black.png" if is_light else "favicon.png"

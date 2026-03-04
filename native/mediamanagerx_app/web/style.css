@@ -1367,3 +1367,29 @@ body:not(.no-glass).light-mode .lightbox-backdrop {
   background: var(--accent);
   transition: width 0.3s ease;
 }
+/* Drag Tooltip */
+#mmxDragTooltip {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px !important;
+  background: color-mix(in srgb, var(--accent) 80%, #222) !important;
+  color: #fff !important;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 20px !important;
+  font-size: 15px !important;
+  font-weight: 500;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5) !important;
+  transition: opacity 0.1s ease;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  white-space: nowrap;
+  z-index: 100000 !important;
+}
+
+.light-mode #mmxDragTooltip {
+  background: color-mix(in srgb, var(--accent) 80%, #eee) !important;
+  color: #000 !important;
+  border-color: rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15) !important;
+}
