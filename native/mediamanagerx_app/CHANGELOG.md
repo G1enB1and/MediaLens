@@ -1,6 +1,30 @@
 # What's New in MediaManagerX
 
-## v1.0.2 (Current)
+## v1.0.3 (Current)
+
+- **Standard Keyboard Shortcuts**: Added global, focus-aware shortcuts:
+  - **Ctrl+C/X/V**: Copy, Cut, and Paste files/folders.
+  - **Del**: Delete selected items with confirmation.
+  - **F2**: Rename selected items (inline for folders, prompt for gallery).
+  - **Ctrl+A**: Select All items in the gallery.
+- **Enhanced Drag & Drop**:
+  - **Multi-file Support**: Move or copy multiple selections simultaneously.
+  - **Intuitive Modifiers**: "Move" is default; hold **Ctrl** to "Copy".
+  - **Dynamic Tooltips**: Real-time feedback showing "Move to [Folder]" or "Copy to [Folder]" that follows the cursor.
+  - **Visual Feedback**: Improved drag thumbnails offset from the cursor for better visibility.
+- **Selection & UI Stability**:
+  - **Right-Click Fix**: Prevented gallery items from deselecting when opening context menus or using "Select All" from the tree.
+  - **Reliable Refresh**: Gallery now automatically refreshes and removes items immediately after deletion.
+  - **Focus Isolation**: Shortcuts automatically prioritize text input (like tags/description) when a field is focused.
+- **Metadata & Compatibility**:
+  - **Windows Explorer Parity**: Fixed tag and comment embedding (XMP/EXIF) to be fully visible in Windows File Properties.
+  - **Persistent Layout**: Application now remembers your preferred sidebar widths across sessions.
+- **Bug Fixes**:
+  - Resolved `AttributeError` in native shortcut handlers.
+  - Fixed inconsistent theme colors in metadata and bulk tagging sidebars.
+  - Softened scrollbar hover effects to match web aesthetics.
+
+## v1.0.2
 
 - **Enhanced Media Loading**: Improved experience by hiding placeholders and borders until metadata/dimensions are fully fetched.
 - **Masonry Stability**: Fixed layout shifts during scrolling by reserving space with correct aspect ratio placeholders.
@@ -17,6 +41,7 @@
 ## v1.0.1-alpha
 
 ### Added
+
 - Project scaffold and Python package layout for MediaManager Phase 1.
 - SQLite schema bootstrap and init script (`scripts/init_db.py`).
 - Windows path normalization utilities and scope checks.
