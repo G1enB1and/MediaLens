@@ -138,12 +138,13 @@ from ctypes import wintypes
 class Theme:
     """Centralized theme system for dynamic accent tinting."""
     @staticmethod
-    def mix(base_hex: str, accent_color: QColor, strength: float) -> str:
-        """Mix a base hex color with an accent QColor."""
+    def mix(base_hex: str, accent_color: QColor | str, strength: float) -> str:
+        """Mix a base hex color with an accent QColor (or hex string)."""
         base = QColor(base_hex)
-        r = int(base.red() + (accent_color.red() - base.red()) * strength)
-        g = int(base.green() + (accent_color.green() - base.green()) * strength)
-        b = int(base.blue() + (accent_color.blue() - base.blue()) * strength)
+        acc = QColor(accent_color) if isinstance(accent_color, str) else accent_color
+        r = int(base.red() + (acc.red() - base.red()) * strength)
+        g = int(base.green() + (acc.green() - base.green()) * strength)
+        b = int(base.blue() + (acc.blue() - base.blue()) * strength)
         return QColor(r, g, b).name()
 
     # Base Palette (Used as starting point for tinting)
@@ -296,11 +297,47 @@ class FileConflictDialog(QDialog):
                 color: {muted_color};
                 spacing: 8px;
             }}
+            QCheckBox::indicator {{
+                width: 18px;
+                height: 18px;
+                background-color: #fff;
+                border: 1px solid {"#888" if is_light else border_color};
+                border-radius: 4px;
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {accent_str};
+                image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBvbHlsaW5lIHBvaW50cz0iMjAgNiA5IDE3IDQgMTIiPjwvcG9seWxpbmU+PC9zdmc+");
+            }}
         """)
         
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(20)
+
+        # Style refinements for light mode
+        other_btn_style = ""
+        replace_btn_style = f"background-color: {accent_str}; color: #fff; border: 1px solid {border_color};"
+        other_hover_style = f"background-color: {Theme.mix(btn_bg, accent_q, 0.4)}; border: 1px solid {accent_str};"
+        replace_hover_bg = Theme.mix("#ffffff", accent_q, 0.9)
+        
+        if is_light:
+            darker_border = Theme.mix(border_color, QColor("#000000"), 0.4)
+            other_btn_bg = Theme.mix("#ffffff", accent_q, 0.2)
+            replace_btn_bg = Theme.mix("#ffffff", accent_q, 0.4)
+            other_btn_style = f"background-color: {other_btn_bg}; color: #000; border: 1px solid {darker_border};"
+            replace_btn_style = f"background-color: {replace_btn_bg}; color: #000; border: 1px solid {darker_border};"
+            
+            # Hover styles: more accent, darker than base
+            other_hover_bg = Theme.mix(other_btn_bg, accent_q, 0.2)
+            other_hover_bg = Theme.mix(other_hover_bg, QColor("#000000"), 0.1) # Darken slightly
+            other_hover_style = f"background-color: {other_hover_bg}; border: 1px solid {accent_str};"
+            
+            # Replace hover: darker than others
+            replace_hover_bg = Theme.mix(replace_btn_bg, accent_q, 0.2)
+            replace_hover_bg = Theme.mix(replace_hover_bg, QColor("#000000"), 0.1) # Darker
+            replace_hover_style = f"background-color: {replace_hover_bg}; color: #000; border: 1px solid {accent_str};"
+        else:
+            replace_hover_style = f"background-color: {replace_hover_bg}; border: 1px solid {accent_str};"
         
         header = QLabel("<h3>A file with this name already exists.</h3>")
         header.setStyleSheet("margin-bottom: 4px;")
@@ -309,6 +346,7 @@ class FileConflictDialog(QDialog):
         # Grid for side-by-side comparison
         grid = QGridLayout()
         grid.setSpacing(20)
+        grid.setRowStretch(2, 1) # Allow name label row to expand
         layout.addLayout(grid)
         
         def create_card(title_text, path, col):
@@ -328,8 +366,11 @@ class FileConflictDialog(QDialog):
             # Name
             name_label = QLabel(path.name)
             name_label.setWordWrap(True)
-            name_label.setMaximumWidth(240)
+            name_label.setFixedWidth(240)
             name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            # Ensure it can grow vertically without clipping
+            name_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.MinimumExpanding)
+            name_label.setContentsMargins(0, 5, 0, 5)
             grid.addWidget(name_label, 2, col, Qt.AlignmentFlag.AlignCenter)
             
             # Stats (Size, Date)
@@ -349,6 +390,12 @@ class FileConflictDialog(QDialog):
             rename_input.hide()
             grid.addWidget(rename_btn, 4, col)
             grid.addWidget(rename_input, 4, col)
+            
+            if is_light:
+                rename_btn.setStyleSheet(f"""
+                    QPushButton {{ {other_btn_style} }}
+                    QPushButton:hover {{ {other_hover_style} }}
+                """)
             
             def show_rename():
                 rename_btn.hide()
@@ -371,27 +418,29 @@ class FileConflictDialog(QDialog):
         
         for b in (keep_both_btn, replace_btn, skip_btn):
             b.setCursor(Qt.CursorShape.PointingHandCursor)
+            if is_light and b != replace_btn:
+                b.setStyleSheet(f"QPushButton {{ {other_btn_style} }}")
         
         keep_both_btn.clicked.connect(lambda: self._finish("keep_both"))
         replace_btn.clicked.connect(lambda: self._finish("replace"))
         skip_btn.clicked.connect(lambda: self._finish("skip"))
         
-        # Style the buttons to distinguish them
-        replace_btn_style = f"background-color: {accent_str}; color: #fff; border: 1px solid {border_color};"
-        if is_light:
-            # Lighter background for light mode to make text readable (black text)
-            lighter_accent = Theme.mix("#ffffff", accent_q, 0.2)
-            replace_btn_style = f"background-color: {lighter_accent}; color: #000; border: 1px solid {border_color};"
-            
         replace_btn.setStyleSheet(f"""
             QPushButton {{ 
                 {replace_btn_style}
             }}
             QPushButton:hover {{ 
-                background-color: {Theme.mix("#ffffff", accent_q, 0.8) if is_light else Theme.mix("#ffffff", accent_q, 0.9)};
-                border: 1px solid {accent_str};
+                {replace_hover_style}
             }}
         """)
+        
+        # Consistent style for other buttons in light mode
+        if is_light:
+            for b in (skip_btn, keep_both_btn):
+                b.setStyleSheet(f"""
+                    QPushButton {{ {other_btn_style} }}
+                    QPushButton:hover {{ {other_hover_style} }}
+                """)
         
         btn_layout.addStretch()
         btn_layout.addWidget(skip_btn)
