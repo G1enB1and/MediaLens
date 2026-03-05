@@ -4,7 +4,7 @@ try:
     with open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "VERSION"), "r") as f:
         __version__ = f.read().strip()
 except Exception:
-    __version__ = "v1.0.4"
+    __version__ = "v1.0.5"
 
 
 import sys
@@ -709,7 +709,7 @@ class RootFilterProxyModel(QSortFilterProxyModel):
         self._fallback_icon: QIcon | None = None
 
     def setRootPath(self, path: str) -> None:
-        self._root_path = str(Path(path).absolute()).replace("\\", "/")
+        self._root_path = str(Path(path).absolute()).replace("\\", "/").lower()
         self.invalidateFilter()
 
     def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:
@@ -718,22 +718,29 @@ class RootFilterProxyModel(QSortFilterProxyModel):
             
         fs_model = self.sourceModel()
         source_index = fs_model.index(source_row, 0, source_parent)
-        path = fs_model.filePath(source_index).replace("\\", "/")
+        path = fs_model.filePath(source_index).replace("\\", "/").lower()
         
+        # Normalize trailing slashes for comparison logic.
+        # QFileSystemModel often returns drive roots like "C:/" while Path.absolute() might not have it.
+        # We ensure consistent behavior by stripping trailing slashes for the equality/startswith checks
+        # except for the drive root itself if needed.
+        root = self._root_path.rstrip("/")
+        normalized_path = path.rstrip("/")
+
         # Show the root path itself
-        if path == self._root_path:
+        if normalized_path == root:
             return True
             
         # Show children/descendants of the root path
-        if path.startswith(self._root_path + "/"):
+        if path.startswith(self._root_path + "/") or path.startswith(root + "/"):
             return True
             
         # Show ancestors of the root path (so we can reach it from the top)
-        if self._root_path.startswith(path + "/"):
+        if (root + "/").startswith(path + "/"):
             return True
             
         # Special case: show Windows drives if they are ancestors
-        if len(path) == 2 and path[1] == ":" and self._root_path.upper().startswith(path.upper()):
+        if len(normalized_path) == 2 and normalized_path[1] == ":" and root.startswith(normalized_path):
             return True
 
         return False
@@ -2137,6 +2144,7 @@ class MainWindow(QMainWindow):
         parent_idx = self.fs_model.setRootPath(str(root_parent))
         
         proxy_parent_idx = self.proxy_model.mapFromSource(parent_idx)
+        self.bridge._log(f"Tree: Proxy parent index valid={proxy_parent_idx.isValid()}")
         self.tree.setRootIndex(proxy_parent_idx)
 
         # Expand the root folder by default
@@ -2144,6 +2152,10 @@ class MainWindow(QMainWindow):
         self.bridge._log(f"Tree: Root index valid={root_idx.isValid()}")
         if root_idx.isValid():
             self.tree.expand(root_idx)
+        else:
+            # If still invalid, it might be because the model hasn't loaded the parent yet.
+            # We'll rely on directoryLoaded to fix this.
+            self.bridge._log(f"Tree: Root index (late load pending) for {default_root}")
         
         self.tree.setHeaderHidden(True)
         self.tree.setAnimated(True)
@@ -2504,8 +2516,39 @@ class MainWindow(QMainWindow):
 
     def _on_directory_loaded(self, path: str) -> None:
         """Triggered when QFileSystemModel finishes loading a directory's contents."""
-        # Refresh the proxy so newly loaded icons appear.
+        self.bridge._log(f"Tree: Directory loaded: {path}")
         self.proxy_model.invalidate()
+        
+        # If the tree's root index is still invalid, try to fix it now
+        if not self.tree.rootIndex().isValid():
+            root_path_str = self.proxy_model._root_path
+            root_parent = Path(root_path_str).parent
+            parent_idx = self.fs_model.index(str(root_parent))
+            
+            self.bridge._log(f"Tree: Late loading check - parent_idx valid={parent_idx.isValid()} for {root_parent}")
+            
+            if parent_idx.isValid():
+                proxy_idx = self.proxy_model.mapFromSource(parent_idx)
+                if proxy_idx.isValid():
+                    self.bridge._log(f"Tree: Setting root index from directoryLoaded (late load success) for {root_parent}")
+                    self.tree.setRootIndex(proxy_idx)
+                else:
+                    self.bridge._log(f"Tree: Proxy index still invalid for {root_parent}")
+        
+        # Also ensure the actual root is expanded
+        root_path_str = self.proxy_model._root_path
+        root_idx = self.proxy_model.mapFromSource(self.fs_model.index(root_path_str))
+        if root_idx.isValid():
+            if not self.tree.isExpanded(root_idx):
+                self.bridge._log(f"Tree: Expanding root index for {root_path_str}")
+                self.tree.expand(root_idx)
+        else:
+            # Try with normalized path if exact match fails
+            norm_root = root_path_str.rstrip("/")
+            root_idx = self.proxy_model.mapFromSource(self.fs_model.index(norm_root))
+            if root_idx.isValid() and not self.tree.isExpanded(root_idx):
+                self.bridge._log(f"Tree: Expanding root index (normalized) for {norm_root}")
+                self.tree.expand(root_idx)
 
     def _on_tree_selection(self, *_args) -> None:
         selection_model = self.tree.selectionModel()
