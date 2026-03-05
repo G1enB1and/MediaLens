@@ -778,21 +778,6 @@ function renderMediaList(items, scrollToTop = true) {
 
     el.appendChild(card);
   });
-
-  el.addEventListener('click', (e) => {
-    // If we click on the mediaList container itself (not a card)
-    if (e.target === el) {
-      deselectAll();
-    }
-  });
-
-  // Enable background context menu for pasting into current folder
-  el.addEventListener('contextmenu', (e) => {
-    if (e.target === el) {
-      e.preventDefault();
-      showCtx(e.clientX, e.clientY, null, -1, false);
-    }
-  });
 }
 
 
@@ -1500,6 +1485,27 @@ function wireSearch() {
   });
 }
 
+function wireGalleryBackground() {
+  const main = document.querySelector('main');
+  if (!main) return;
+
+  main.addEventListener('click', (e) => {
+    // If we click the background (anything not a card or inside a card)
+    if (!e.target.closest('.card')) {
+      deselectAll();
+      syncMetadataToBridge();
+    }
+  });
+
+  main.addEventListener('contextmenu', (e) => {
+    // If we right-click the background
+    if (!e.target.closest('.card')) {
+      e.preventDefault();
+      showCtx(e.clientX, e.clientY, null, -1, false);
+    }
+  });
+}
+
 async function main() {
   wirePager();
   wireSettings();
@@ -1532,6 +1538,7 @@ async function main() {
 
     wireLightbox();
     wireCtxMenu();
+    wireGalleryBackground();
 
     if (bridge.dragOverFolder) {
       bridge.dragOverFolder.connect(function (folderName) {
