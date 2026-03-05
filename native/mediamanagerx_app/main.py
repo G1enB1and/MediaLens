@@ -265,6 +265,9 @@ class FileConflictDialog(QDialog):
         btn_hover = Theme.get_btn_save_hover(accent_q)
         input_bg = Theme.get_input_bg(accent_q)
         
+        # Physical SVG for checkbox (data URIs are unreliable in Qt QSS)
+        check_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "scrollbar_arrows", "check.svg").replace("\\", "/")
+        
         self.setStyleSheet(f"""
             QDialog {{
                 background-color: {bg_color};
@@ -306,7 +309,7 @@ class FileConflictDialog(QDialog):
             }}
             QCheckBox::indicator:checked {{
                 background-color: {accent_str};
-                image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBvbHlsaW5lIHBvaW50cz0iMjAgNiA5IDE3IDQgMTIiPjwvcG9seWxpbmU+PC9zdmc+");
+                image: url("{check_path}");
             }}
         """)
         
