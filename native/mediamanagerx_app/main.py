@@ -4,7 +4,7 @@ try:
     with open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "VERSION"), "r") as f:
         __version__ = f.read().strip()
 except Exception:
-    __version__ = "v1.0.2"
+    __version__ = "v1.0.4"
 
 
 import sys
@@ -94,8 +94,22 @@ from PySide6.QtCore import (
     QMetaObject,
 )
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
-from PySide6.QtGui import QAction, QColor, QImageReader, QIcon, QPainter, QCursor, QPixmap
-from PySide6.QtGui import QMouseEvent, QPen
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QImageReader,
+    QIcon,
+    QPainter,
+    QCursor,
+    QPixmap,
+    QMouseEvent,
+    QPen,
+    QDragEnterEvent,
+    QDragMoveEvent,
+    QDragLeaveEvent,
+    QDropEvent,
+    QEnterEvent,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -1738,6 +1752,86 @@ class NativeSeparator(QWidget):
         painter.drawLine(0, y, self.width(), y)
 
 
+class GalleryView(QWebEngineView):
+    """Gallery view that accepts drag and drop from external file explorers."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event: QDragMoveEvent):
+        # Determine target folder
+        main_win = self.window()
+        bridge = getattr(main_win, "bridge", None)
+        if bridge:
+            selected = bridge.get_selected_folders()
+            target_folder = selected[0] if selected else ""
+            
+            # Count items: side-channel first (internal), then MIME (external)
+            count = len(bridge.drag_paths) if bridge.drag_paths else len(event.mimeData().urls())
+            if count == 0: count = 1
+            
+            is_copy = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+            
+            # Target folder name for display
+            target_name = Path(target_folder).name if target_folder else ""
+            
+            bridge.update_drag_tooltip(count, is_copy, target_name)
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dragLeaveEvent(self, event: QDragLeaveEvent):
+        main_win = self.window()
+        bridge = getattr(main_win, "bridge", None)
+        if bridge:
+            bridge.hide_drag_tooltip()
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event: QDropEvent):
+        main_win = self.window()
+        bridge = getattr(main_win, "bridge", None)
+        if bridge:
+            bridge.hide_drag_tooltip()
+            
+            mime = event.mimeData()
+            src_paths = []
+            
+            # Priority 0: Side-channel from Bridge (Internal Gallery -> Gallery)
+            if bridge and bridge.drag_paths:
+                src_paths = list(bridge.drag_paths)
+            
+            # Priority 1: Fallback to MIME data (External drops)
+            if not src_paths and mime.hasUrls():
+                src_paths = [url.toLocalFile() for url in mime.urls() if url.toLocalFile()]
+            
+            if src_paths:
+                selected = bridge.get_selected_folders()
+                target_path = selected[0] if selected else ""
+                
+                if target_path:
+                    # Filter out if moving to THE SAME folder
+                    target_path_norm = target_path.replace("\\", "/").lower()
+                    src_paths = [p for p in src_paths if os.path.dirname(p).replace("\\", "/").lower() != target_path_norm]
+                    
+                    if src_paths:
+                        # Determine if COPY or MOVE
+                        is_copy = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+                        op_type = "copy" if is_copy else "move"
+                        
+                        paths_obj = [Path(p) for p in src_paths]
+                        bridge._process_file_op(op_type, paths_obj, Path(target_path))
+                        event.acceptProposedAction()
+                        return
+        
+        super().dropEvent(event)
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -2069,7 +2163,7 @@ class MainWindow(QMainWindow):
         center_layout = QVBoxLayout(center)
         center_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.web = QWebEngineView()
+        self.web = GalleryView(self)
         center_layout.addWidget(self.web)
 
         # Native loading overlay shown while the WebEngine page itself is loading.

@@ -1,6 +1,16 @@
 # What's New in MediaManagerX
 
-## v1.0.3 (Current)
+## v1.0.4 (Current)
+
+- **UI & Navigation**:
+  - **Interactive File Tree**: Cursor now changes to a hand pointer when hovering over clickable folders and files for better visual feedback.
+- **Conflict Resolution Improvements**:
+  - **Themed Checkboxes**: Fixed the "Apply to all" checkbox SVG rendering to ensure a clear checkmark is visible in all themes.
+  - **Refined Dialog Aesthetics**: Stronger hover effects on buttons for clearer interaction.
+  - **Layout Fixes**: Resolved vertical clipping of long filenames in the conflict dialog.
+- **Improved Drag & Drop**: Refined logic for multi-file transfers between the gallery and file tree.
+
+## v1.0.3
 
 - **Standard Keyboard Shortcuts**: Added global, focus-aware shortcuts:
   - **Ctrl+C/X/V**: Copy, Cut, and Paste files/folders.
