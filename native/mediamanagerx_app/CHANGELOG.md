@@ -1,4 +1,13 @@
-## v1.0.4 (Current)
+## v1.0.5 (Current)
+
+### Changed
+
+- **File Tree Fix**: Improved path normalization and initialization robustness to ensure the file tree is visible in the packaged installer environment.
+- **Improved Logging**: Added detailed initialization logging to help diagnose environment-specific path issues.
+
+---
+
+## v1.0.4
 
 ### Added
 
