@@ -799,10 +799,20 @@ class Bridge(QObject):
         self._thumb_dir = appdata / "thumbs"
         self._thumb_dir.mkdir(parents=True, exist_ok=True)
         
+        # Initialize Logging
+        self.log_path = appdata / "app.log"
+        def _log(msg):
+            try:
+                with open(self.log_path, "a", encoding="utf-8") as f:
+                    f.write(f"[{time.ctime()}] {msg}\n")
+            except Exception: pass
+        self._log = _log
+        self._log(f"Bridge: Initializing (Version: {__version__})...")
+        
         # Initialize Database
         from app.mediamanager.db.connect import connect_db
         self.db_path = appdata / "mediamanagerx.db"
-        print(f"DEBUG: DB Path = {self.db_path}")
+        self._log(f"DB Path = {self.db_path}")
         self.conn = connect_db(str(self.db_path))
 
         # Migration for AI EXIF fields -> Embedded
@@ -2105,13 +2115,9 @@ class MainWindow(QMainWindow):
                 default_root = p
 
         if default_root is None:
-            p = Path.home() / "Pictures"
-            if p.exists():
-                default_root = p
-
-        if default_root is None:
             default_root = Path.home()
 
+        self.bridge._log(f"Tree: Initializing with root={default_root}")
         self.fs_model = QFileSystemModel(self)
         self.fs_model.setFilter(QDir.Filter.AllDirs | QDir.Filter.NoDotAndDotDot | QDir.Filter.Drives)
         self.fs_model.setRootPath(str(default_root))
@@ -2127,6 +2133,7 @@ class MainWindow(QMainWindow):
         # Set the tree root to the PARENT of our desired root folder
         # root_parent needs to be loaded by fs_model for visibility.
         root_parent = default_root.parent
+        self.bridge._log(f"Tree: Setting root index to parent={root_parent}")
         parent_idx = self.fs_model.setRootPath(str(root_parent))
         
         proxy_parent_idx = self.proxy_model.mapFromSource(parent_idx)
@@ -2134,6 +2141,7 @@ class MainWindow(QMainWindow):
 
         # Expand the root folder by default
         root_idx = self.proxy_model.mapFromSource(self.fs_model.index(str(default_root)))
+        self.bridge._log(f"Tree: Root index valid={root_idx.isValid()}")
         if root_idx.isValid():
             self.tree.expand(root_idx)
         
