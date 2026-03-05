@@ -580,8 +580,12 @@ class FolderTreeView(QTreeView):
         super().mouseMoveEvent(event)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        event.acceptProposedAction()
-        super().dragEnterEvent(event)
+        if event.mimeData().hasUrls():
+            is_copy = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+            event.setDropAction(Qt.DropAction.CopyAction if is_copy else Qt.DropAction.MoveAction)
+            event.accept()
+        else:
+            super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event: QDragMoveEvent) -> None:
         idx = self.indexAt(event.position().toPoint())
@@ -603,7 +607,8 @@ class FolderTreeView(QTreeView):
                     bridge.update_drag_tooltip(count, is_copy, Path(target_folder).name)
                 
                 self.setExpanded(idx, True)
-                event.acceptProposedAction()
+                event.setDropAction(Qt.DropAction.CopyAction if is_copy else Qt.DropAction.MoveAction)
+                event.accept()
                 return
         
         # If not over a folder, hide tooltip target
@@ -1728,8 +1733,8 @@ class NativeDragTooltip(QLabel):
 
     def follow_cursor(self):
         pos = QCursor.pos()
-        # Offset slightly from the cursor
-        self.move(pos.x() + 15, pos.y() + 15)
+        # Offset slightly from the cursor - closer (10,10) helps cover native tooltips
+        self.move(pos.x() + 10, pos.y() + 10)
         if not self.isVisible():
             self.show()
 
@@ -1760,7 +1765,9 @@ class GalleryView(QWebEngineView):
 
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
-            event.acceptProposedAction()
+            is_copy = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+            event.setDropAction(Qt.DropAction.CopyAction if is_copy else Qt.DropAction.MoveAction)
+            event.accept()
         else:
             super().dragEnterEvent(event)
 
@@ -1782,7 +1789,8 @@ class GalleryView(QWebEngineView):
             target_name = Path(target_folder).name if target_folder else ""
             
             bridge.update_drag_tooltip(count, is_copy, target_name)
-            event.acceptProposedAction()
+            event.setDropAction(Qt.DropAction.CopyAction if is_copy else Qt.DropAction.MoveAction)
+            event.accept()
         else:
             super().dragMoveEvent(event)
 
