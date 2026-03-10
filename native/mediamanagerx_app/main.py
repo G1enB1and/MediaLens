@@ -4,7 +4,7 @@ try:
     with open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "VERSION"), "r") as f:
         __version__ = f.read().strip()
 except Exception:
-    __version__ = "v1.0.5"
+    __version__ = "v1.0.6"
 
 
 import sys
@@ -1060,7 +1060,11 @@ class Bridge(QObject):
         """Download latest installer and launch it."""
         url = "https://github.com/G1enB1and/MediaManagerX/releases/latest/download/MediaManagerX_Setup.exe"
         request = QNetworkRequest(QUrl(url))
-        request.setAttribute(QNetworkRequest.Attribute.FollowRedirectsAttribute, True)
+        # Use the modern redirect policy (FollowRedirectsAttribute is deprecated since Qt 5.15)
+        request.setAttribute(
+            QNetworkRequest.Attribute.RedirectPolicyAttribute,
+            QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy
+        )
         self._download_reply = self.nam.get(request)
         
         def _on_progress(received, total):
@@ -4438,7 +4442,12 @@ class MainWindow(QMainWindow):
     def _show_markdown_dialog(self, title: str, file_name: str) -> None:
         """Helper to show a markdown file in a scrollable dialog."""
         try:
-            path = Path(__file__).parent / file_name
+            # In a PyInstaller bundle, data files are at sys._MEIPASS root.
+            # At dev time, they live in the same directory as main.py.
+            if getattr(sys, 'frozen', False):
+                path = Path(sys._MEIPASS) / file_name
+            else:
+                path = Path(__file__).parent / file_name
             if not path.exists():
                 QMessageBox.warning(self, title, f"File not found: {file_name}")
                 return
