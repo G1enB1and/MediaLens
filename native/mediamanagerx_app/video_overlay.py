@@ -138,7 +138,7 @@ class LightboxVideoOverlay(QWidget):
         self.controls.setVisible(False)
 
         self.btn_prev = QPushButton("⏮", self.controls)
-        self.btn_toggle_play = QPushButton("⏵", self.controls)
+        self.btn_toggle_play = QPushButton("", self.controls)
         self.btn_next = QPushButton("⏭", self.controls)
         self.btn_mute = QPushButton("🔊", self.controls)
         self.lbl_time = QLabel("0:00 / 0:00", self.controls)
@@ -179,9 +179,19 @@ class LightboxVideoOverlay(QWidget):
             b.setStyleSheet(btn_css)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
 
+        # Load SVG icons
+        import os
+        from PySide6.QtGui import QIcon
+        from PySide6.QtCore import QSize
+        icon_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "icons")
+        self.icon_play = QIcon(os.path.join(icon_dir, "play.svg"))
+        self.icon_pause = QIcon(os.path.join(icon_dir, "pause.svg"))
+        
         # Style play button specifically
         self.btn_toggle_play.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_toggle_play.setFixedSize(48, 48)
+        self.btn_toggle_play.setIconSize(QSize(28, 28))
+        self.btn_toggle_play.setIcon(self.icon_play)
         self.btn_toggle_play.setStyleSheet(
             "QPushButton {"
             "  background: rgba(0, 0, 0, 130);"
@@ -339,14 +349,13 @@ class LightboxVideoOverlay(QWidget):
             "  border: none;"
             "  border-radius: 24px;"
             "  color: white;"
-            "  font-size: 24px;"
             "  padding: 0;"
             "}"
             "QPushButton:hover {"
             "  background: rgba(50, 50, 60, 160);"
             "}"
         )
-        mute_qss = btn_qss.replace("border-radius: 24px;", "border-radius: 18px;").replace("48px", "36px").replace("font-size: 24px;", "font-size: 16px;")
+        mute_qss = btn_qss.replace("border-radius: 24px;", "border-radius: 18px;").replace("48px", "36px").replace("padding: 0;", "font-size: 16px; padding: 0;")
 
         if is_inplace:
             self.controls.setStyleSheet(
@@ -879,10 +888,10 @@ class LightboxVideoOverlay(QWidget):
 
     def _update_controls_ui(self, state: QMediaPlayer.PlaybackState) -> None:
         if state == QMediaPlayer.PlaybackState.PlayingState:
-            self.btn_toggle_play.setText("\u23f8\ufe0e")
+            self.btn_toggle_play.setIcon(self.icon_pause)
             self.btn_toggle_play.setToolTip("Pause (Space)")
         else:
-            self.btn_toggle_play.setText("\u25b6\ufe0e")
+            self.btn_toggle_play.setIcon(self.icon_play)
             self.btn_toggle_play.setToolTip("Play (Space)")
 
     def _on_volume_changed(self, val: int) -> None:
