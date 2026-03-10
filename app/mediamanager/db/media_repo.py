@@ -21,6 +21,7 @@ def add_media_item(
     content_hash: Optional[str] = None,
     width: Optional[int] = None,
     height: Optional[int] = None,
+    duration_ms: Optional[int] = None,
 ) -> int:
     now = _utc_now_iso()
     normalized = normalize_windows_path(path)
@@ -32,8 +33,8 @@ def add_media_item(
 
     conn.execute(
         """
-        INSERT INTO media_items(path, content_hash, media_type, file_size_bytes, modified_time_utc, width, height, created_at_utc, updated_at_utc)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO media_items(path, content_hash, media_type, file_size_bytes, modified_time_utc, width, height, duration_ms, created_at_utc, updated_at_utc)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(path) DO UPDATE SET
           content_hash=COALESCE(excluded.content_hash, content_hash),
           media_type=excluded.media_type,
@@ -41,9 +42,10 @@ def add_media_item(
           modified_time_utc=excluded.modified_time_utc,
           width=COALESCE(excluded.width, width),
           height=COALESCE(excluded.height, height),
+          duration_ms=COALESCE(excluded.duration_ms, duration_ms),
           updated_at_utc=excluded.updated_at_utc
         """,
-        (normalized, content_hash, media_type, size, mtime, width, height, now, now),
+        (normalized, content_hash, media_type, size, mtime, width, height, duration_ms, now, now),
     )
     row = conn.execute("SELECT id FROM media_items WHERE path = ?", (normalized,)).fetchone()
     if not row:
@@ -55,7 +57,7 @@ def add_media_item(
 def get_media_by_path(conn: sqlite3.Connection, path: str) -> Optional[dict]:
     normalized = normalize_windows_path(path)
     row = conn.execute(
-        "SELECT id, path, media_type, file_size_bytes, modified_time_utc, width, height FROM media_items WHERE path = ?",
+        "SELECT id, path, media_type, file_size_bytes, modified_time_utc, width, height, duration_ms FROM media_items WHERE path = ?",
         (normalized,),
     ).fetchone()
     if not row:
@@ -68,6 +70,7 @@ def get_media_by_path(conn: sqlite3.Connection, path: str) -> Optional[dict]:
         "modified_time": row[4],
         "width": row[5],
         "height": row[6],
+        "duration_ms": row[7],
     }
 
 
@@ -105,6 +108,7 @@ def upsert_media_item(
     content_hash: str,
     width: Optional[int] = None,
     height: Optional[int] = None,
+    duration_ms: Optional[int] = None,
 ) -> int:
     """Upsert media item, handling renames/moves via content hash."""
     now = _utc_now_iso()
@@ -125,10 +129,10 @@ def upsert_media_item(
         conn.execute(
             """
             UPDATE media_items 
-            SET content_hash = ?, file_size_bytes = ?, modified_time_utc = ?, width = ?, height = ?, updated_at_utc = ? 
+            SET content_hash = ?, file_size_bytes = ?, modified_time_utc = ?, width = ?, height = ?, duration_ms = ?, updated_at_utc = ? 
             WHERE id = ?
             """,
-            (content_hash, size, mtime, width, height, now, existing_by_path[0]),
+            (content_hash, size, mtime, width, height, duration_ms, now, existing_by_path[0]),
         )
         conn.commit()
         return int(existing_by_path[0])
@@ -154,10 +158,10 @@ def upsert_media_item(
             conn.execute(
                 """
                 UPDATE media_items 
-                SET path = ?, file_size_bytes = ?, modified_time_utc = ?, width = ?, height = ?, updated_at_utc = ? 
+                SET path = ?, file_size_bytes = ?, modified_time_utc = ?, width = ?, height = ?, duration_ms = ?, updated_at_utc = ? 
                 WHERE id = ?
                 """,
-                (normalized, size, mtime, width, height, now, media_id),
+                (normalized, size, mtime, width, height, duration_ms, now, media_id),
             )
             conn.commit()
             return int(media_id)
@@ -167,7 +171,7 @@ def upsert_media_item(
             pass
 
     # 3. Brand new item (or duplicate content at new path)
-    return add_media_item(conn, normalized, media_type, content_hash, width=width, height=height)
+    return add_media_item(conn, normalized, media_type, content_hash, width=width, height=height, duration_ms=duration_ms)
 
 
 def list_media_in_scope(
@@ -196,6 +200,7 @@ def list_media_in_scope(
             m.modified_time_utc,
             m.width,
             m.height,
+            m.duration_ms,
             meta.title,
             meta.description,
             meta.notes,
@@ -222,10 +227,11 @@ def list_media_in_scope(
             "modified_time": r[4],
             "width": r[5],
             "height": r[6],
-            "title": r[7],
-            "description": r[8],
-            "notes": r[9],
-            "tags": r[10],
+            "duration": (r[7] / 1000.0) if r[7] else None, # Seconds for JS bridge
+            "title": r[8],
+            "description": r[9],
+            "notes": r[10],
+            "tags": r[11],
         }
         for r in rows
     ]

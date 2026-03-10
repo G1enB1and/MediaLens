@@ -1024,18 +1024,7 @@ body.no-glass.lightbox-open main {
   min-height: 120px;
 }
 
-.videoBadge {
-  position: absolute;
-  left: 8px;
-  bottom: 8px;
-  padding: 3px 6px;
-  border-radius: 6px;
-  border: 1px solid color-mix(in srgb, var(--fg), transparent 85%);
-  background: color-mix(in srgb, black, transparent 55%);
-  color: color-mix(in srgb, var(--fg), transparent 10%);
-  font-size: 11px;
-  letter-spacing: 0.5px;
-}
+/* Removed videoBadge */
 
 .masonry .empty {
   padding: 10px 12px;
@@ -1043,6 +1032,71 @@ body.no-glass.lightbox-open main {
   font-size: 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
+}
+
+/* Video Play Indicator */
+.video-play-indicator {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  opacity: 1;
+  transition: opacity 0.2s ease, background 0.2s ease;
+  z-index: 5;
+  pointer-events: none;
+  /* Let clicks through to the card body for selection */
+}
+
+.video-play-indicator svg {
+  width: 52px;
+  height: 52px;
+  background: rgba(255, 255, 255, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 50%;
+  padding: 8px;
+  filter: drop-shadow(0 4px 16px rgba(0, 0, 0, 0.6));
+  transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), background 0.2s ease;
+  pointer-events: auto;
+  /* Only the circular button triggers playback */
+  cursor: pointer;
+}
+
+.video-play-indicator:hover svg {
+  transform: scale(1.1);
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.video-play-indicator:hover {
+  background: transparent;
+  /* Don't darken the card on hover anymore */
+}
+
+/* Hide indicator when video is playing in-place (handled by native) */
+.card.playing-inplace .video-play-indicator {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Keep thumbnail visible slightly longer or until bridge confirms playback */
+.card.playing-inprogress .thumb {
+  filter: blur(4px) brightness(0.7);
+}
+
+.card.playing-confirmed .thumb {
+  display: none;
+}
+
+/* Poster Restore: show thumbnail when video is suppressed by header clipping */
+.card.suppressed-poster .thumb {
+  display: block;
+  filter: none;
+  opacity: 1;
+}
+
+.card.suppressed-poster .video-play-indicator {
+  opacity: 0;
 }
 
 .lightbox {
@@ -1367,6 +1421,7 @@ body:not(.no-glass).light-mode .lightbox-backdrop {
   background: var(--accent);
   transition: width 0.3s ease;
 }
+
 /* Drag Tooltip */
 #mmxDragTooltip {
   display: flex !important;

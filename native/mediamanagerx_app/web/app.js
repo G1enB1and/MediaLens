@@ -13,6 +13,7 @@ let gSort = 'name_asc';
 let gFilter = 'all';
 let gCurrentTargetFolderName = '';
 let gCurrentDragCount = 0;
+let gPlayingInplaceCard = null;
 
 // Loading progress tracking
 let gTotalOnPage = 0;
@@ -228,6 +229,15 @@ function deselectAll() {
   gSelectedPaths.clear();
   gLockedCard = null;
   gLastSelectionIdx = -1;
+
+  if (gPlayingInplaceCard) {
+    gPlayingInplaceCard.classList.remove('playing-inplace', 'playing-inprogress', 'playing-confirmed');
+    gPlayingInplaceCard.removeAttribute('data-paused');
+    gPlayingInplaceCard = null;
+    if (gBridge && gBridge.close_native_video) {
+      gBridge.close_native_video(() => { });
+    }
+  }
 }
 window.deselectAll = deselectAll;
 
@@ -659,13 +669,34 @@ function renderMediaList(items, scrollToTop = true) {
 
       // Reveal handler for video cards (called in ensurePosterObserver)
       card.onVideoPosterReady = onMediaLoaded;
-
       card.appendChild(img);
 
-      const badge = document.createElement('div');
-      badge.className = 'videoBadge';
-      badge.textContent = 'VIDEO';
-      card.appendChild(badge);
+      // --- Simple Play Indicator ---
+      const playIndicator = document.createElement('div');
+      playIndicator.className = 'video-play-indicator';
+      playIndicator.innerHTML = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'><path d='M8 5v14l11-7z'/></svg>`;
+      card.appendChild(playIndicator);
+
+      playIndicator.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const path = item.path || '';
+        if (!path || !gBridge) return;
+
+        if (gPlayingInplaceCard) {
+          gPlayingInplaceCard.classList.remove('playing-inplace', 'playing-inprogress', 'playing-confirmed');
+          gPlayingInplaceCard.removeAttribute('data-paused');
+        }
+
+        const rect = card.getBoundingClientRect();
+        if (gBridge.open_native_video_inplace) {
+          card.classList.add('playing-inplace', 'playing-inprogress');
+          gPlayingInplaceCard = card;
+          const shouldLoop = (item.duration && item.duration < 60) || false;
+          gBridge.open_native_video_inplace(path, rect.x, rect.y, rect.width, rect.height, true, shouldLoop, true);
+        } else {
+          gBridge.open_native_video(path, true, false, true);
+        }
+      });
 
       if (item.path) gPosterObserver.observe(img);
 
@@ -876,6 +907,18 @@ function openLightboxByIndex(idx) {
   }
   gLightboxNativeVideo = false;
 
+  // Also cleanup any in-place playback
+  if (gPlayingInplaceCard) {
+    gPlayingInplaceCard.classList.remove('playing-inplace');
+    gPlayingInplaceCard.removeAttribute('data-paused');
+    gPlayingInplaceCard = null;
+    // (close_native_video already called above if gLightboxNativeVideo was true, 
+    // but in-place doesn't set that flag. So we call it if not already called.)
+    if (!gLightboxNativeVideo && gBridge && gBridge.close_native_video) {
+      gBridge.close_native_video(function () { });
+    }
+  }
+
   if (!gMedia || gMedia.length === 0) return;
   if (idx < 0) idx = 0;
   if (idx >= gMedia.length) idx = gMedia.length - 1;
@@ -960,6 +1003,12 @@ window.__mmx_closeLightboxFromNative = function () {
     closeLightbox();
   } finally {
     gClosingFromNative = false;
+  }
+
+  if (gPlayingInplaceCard) {
+    gPlayingInplaceCard.classList.remove('playing-inplace', 'playing-inprogress', 'playing-confirmed');
+    gPlayingInplaceCard.removeAttribute('data-paused');
+    gPlayingInplaceCard = null;
   }
 };
 
@@ -1504,6 +1553,15 @@ function wireGalleryBackground() {
       showCtx(e.clientX, e.clientY, null, -1, false);
     }
   });
+
+  main.addEventListener('scroll', () => {
+    if (gPlayingInplaceCard && gBridge && gBridge.update_native_video_rect) {
+      const rect = gPlayingInplaceCard.getBoundingClientRect();
+      // If it scrolls off-screen, we might want to stop it, 
+      // but let's first try just moving it.
+      gBridge.update_native_video_rect(rect.x, rect.y, rect.width, rect.height);
+    }
+  });
 }
 
 async function main() {
@@ -1750,6 +1808,23 @@ async function main() {
         document.documentElement.style.setProperty('--accent', v);
         const ac = document.getElementById('accentColor');
         if (ac) ac.value = v;
+      });
+    }
+
+    if (bridge.videoPlaybackStarted) {
+      bridge.videoPlaybackStarted.connect(function () {
+        if (gPlayingInplaceCard) {
+          gPlayingInplaceCard.classList.remove('playing-inprogress');
+          gPlayingInplaceCard.classList.add('playing-confirmed');
+        }
+      });
+    }
+
+    if (bridge.videoSuppressed) {
+      bridge.videoSuppressed.connect(function (suppressed) {
+        if (gPlayingInplaceCard) {
+          gPlayingInplaceCard.classList.toggle('suppressed-poster', suppressed);
+        }
       });
     }
   });

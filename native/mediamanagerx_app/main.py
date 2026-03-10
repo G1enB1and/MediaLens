@@ -92,6 +92,7 @@ from PySide6.QtCore import (
     QEvent,
     QTimer,
     QMetaObject,
+    QRect,
 )
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 from PySide6.QtGui import (
@@ -763,8 +764,14 @@ class RootFilterProxyModel(QSortFilterProxyModel):
 class Bridge(QObject):
     selectedFolderChanged = Signal(str)
     openVideoRequested = Signal(str, bool, bool, bool, int, int)  # path, autoplay, loop, muted, w, h
+    openVideoInPlaceRequested = Signal(str, int, int, int, int, bool, bool, bool, int, int) # path, x, y, w, h, autoplay, loop, muted, pw, ph
+    updateVideoRectRequested = Signal(int, int, int, int)
     videoPreprocessingStatus = Signal(str)  # status message (empty = done)
+    videoPlaybackStarted = Signal() # Signal that native player has received first frame
+    videoSuppressed = Signal(bool) # Signal when video is hidden/suppressed (e.g. by header)
     closeVideoRequested = Signal()
+    videoMutedChanged = Signal(bool)
+    videoPausedChanged = Signal(bool)
 
     uiFlagChanged = Signal(str, bool)  # key, value
     metadataRequested = Signal(list)
@@ -1499,6 +1506,44 @@ class Bridge(QObject):
             return True
         except Exception: return False
 
+    @Slot(str, int, int, int, int, bool, bool, bool)
+    def open_native_video_inplace(self, video_path: str, x: int, y: int, w: int, h: int, autoplay: bool, loop: bool, muted: bool) -> None:
+        # If loop is false, double check duration (for previously scanned files without duration metadata)
+        if not loop:
+            d_s = self.get_video_duration_seconds(video_path)
+            if 0 < d_s < 60:
+                loop = True
+        try:
+            vw, vh, is_malformed = self._probe_video_size(video_path)
+            if is_malformed:
+                self.videoPreprocessingStatus.emit("Preparing video...")
+                def work():
+                    try:
+                        fixed = self._preprocess_to_even_dims(video_path, vw, vh)
+                        if fixed:
+                            pw, ph, _ = self._probe_video_size(fixed)
+                            self.videoPreprocessingStatus.emit("")
+                            self.openVideoInPlaceRequested.emit(str(fixed), int(x), int(y), int(w), int(h), bool(autoplay), bool(loop), bool(muted), int(pw), int(ph))
+                        else: self.videoPreprocessingStatus.emit("Error preparing video.")
+                    except Exception: self.videoPreprocessingStatus.emit("Error preparing video.")
+                threading.Thread(target=work, daemon=True).start()
+            else:
+                self.openVideoInPlaceRequested.emit(str(video_path), int(x), int(y), int(w), int(h), bool(autoplay), bool(loop), bool(muted), int(vw), int(vh))
+        except Exception:
+            pass
+
+    @Slot(int, int, int, int)
+    def update_native_video_rect(self, x, y, w, h):
+        self.updateVideoRectRequested.emit(x, y, w, h)
+
+    @Slot(bool)
+    def set_video_muted(self, muted: bool) -> None:
+        self.videoMutedChanged.emit(muted)
+
+    @Slot(bool)
+    def set_video_paused(self, paused: bool) -> None:
+        self.videoPausedChanged.emit(paused)
+
     def _preprocess_to_even_dims(self, video_path: str, w: int, h: int) -> str | None:
         import tempfile
         ffmpeg = self._ffmpeg_bin()
@@ -1595,7 +1640,8 @@ class Bridge(QObject):
                     "media_type": r["media_type"], 
                     "is_animated": self._is_animated(p),
                     "width": r.get("width"),
-                    "height": r.get("height")
+                    "height": r.get("height"),
+                    "duration": r.get("duration")
                 })
             return out
         except Exception: return []
@@ -1634,7 +1680,7 @@ class Bridge(QObject):
                 surviving.append(r); covered.add(norm)
         for norm, p_obj in disk_files.items():
             if norm not in covered:
-                surviving.append({"id": -1, "path": norm, "media_type": ("image" if p_obj.suffix.lower() in image_exts else "video"), "file_size": None, "modified_time": None, "_real_path": p_obj})
+                surviving.append({"id": -1, "path": norm, "media_type": ("image" if p_obj.suffix.lower() in image_exts else "video"), "file_size": None, "modified_time": None, "duration": None, "_real_path": p_obj})
         candidates = surviving
         if filter_type == "image": candidates = [r for r in candidates if r["path"].lower().endswith(tuple(image_exts)) and not self._is_animated(Path(r["path"]))]
         elif filter_type == "video": candidates = [r for r in candidates if not r["path"].lower().endswith(tuple(image_exts))]
@@ -1679,7 +1725,7 @@ class Bridge(QObject):
                             skip = True
                 
                 if not skip:
-                    width, height = None, None
+                    width, height, d_ms = None, None, None
                     mtype = "image" if p.suffix.lower() in image_exts else "video"
                     
                     if mtype == "image":
@@ -1692,8 +1738,12 @@ class Bridge(QObject):
                         w, h, _ = self._probe_video_size(str(p))
                         if w > 0 and h > 0:
                             width, height = w, h
+                        # Capture duration for looping logic
+                        d_s = self.get_video_duration_seconds(str(p))
+                        if d_s > 0:
+                            d_ms = int(d_s * 1000)
                             
-                    upsert_media_item(conn, str(p), mtype, calculate_file_hash(p), width=width, height=height)
+                    upsert_media_item(conn, str(p), mtype, calculate_file_hash(p), width=width, height=height, duration_ms=d_ms)
                 count += 1
             except Exception: pass
         return count
@@ -1870,7 +1920,11 @@ class MainWindow(QMainWindow):
 
         self.bridge = Bridge(self)
         self.bridge.openVideoRequested.connect(self._open_video_overlay)
+        self.bridge.openVideoInPlaceRequested.connect(self._open_video_inplace)
+        self.bridge.updateVideoRectRequested.connect(self._update_video_inplace_rect)
         self.bridge.closeVideoRequested.connect(self._close_video_overlay)
+        self.bridge.videoMutedChanged.connect(self._on_video_muted_changed)
+        self.bridge.videoPausedChanged.connect(self._on_video_paused_changed)
         self.bridge.videoPreprocessingStatus.connect(self._on_video_preprocessing_status)
         self.bridge.uiFlagChanged.connect(self._apply_ui_flag)
         self.bridge.metadataRequested.connect(self._show_metadata_for_path)
@@ -3759,7 +3813,9 @@ class MainWindow(QMainWindow):
         else:
             self._cleanup_temp_video()
 
+        # Standard lightbox mode: cover entire web view and show backdrop
         self.video_overlay.setGeometry(self.web.rect())
+        self.video_overlay.set_mode(is_inplace=False)
         self.video_overlay.open_video(
             VideoRequest(
                 path=path,
@@ -3770,6 +3826,71 @@ class MainWindow(QMainWindow):
                 height=int(height),
             )
         )
+
+    def _open_video_inplace(self, path: str, x: int, y: int, w: int, h: int, autoplay: bool, loop: bool, muted: bool, native_w: int, native_h: int) -> None:
+        if not self.video_overlay:
+            return
+        
+        # The rect from JS is already relative to the web view's viewport.
+        # Since video_overlay is a child of self.web, we use parent-relative coords.
+        target_rect = QRect(x, y, w, h)
+        
+        # Define header height to avoid covering search bars/toolbar
+        header_height = 112 # Total height of header + toolbar in JS
+        
+        self.video_overlay.set_mode(is_inplace=True) # In-place mode
+        self.video_overlay.setGeometry(target_rect)
+        
+        if y < header_height:
+            self.video_overlay.hide()
+        else:
+            self.video_overlay.show()
+            self.video_overlay.raise_()
+
+        self.video_overlay.open_video(
+            VideoRequest(
+                path=path,
+                autoplay=autoplay,
+                loop=loop,
+                muted=muted,
+                width=int(native_w),
+                height=int(native_h),
+            )
+        )
+
+    def _update_video_inplace_rect(self, x, y, w, h):
+        if not self.video_overlay:
+            return
+            
+        # Define header height for clipping
+        header_height = 112
+        
+        # Relative coordinates for child widget
+        target_rect = QRect(x, y, w, h)
+        self.video_overlay.setGeometry(target_rect)
+        
+        # If the video top scrolls under the sticky header, hide it.
+        # Also hide if it scrolls off the bottom (y > self.web.height() - small_buffer)
+        if y < header_height:
+            if self.video_overlay.isVisible():
+                self.video_overlay.hide()
+                self.bridge.videoSuppressed.emit(True)
+        else:
+            if not self.video_overlay.isVisible() and self.video_overlay.is_inplace_mode():
+                 self.video_overlay.show()
+                 self.video_overlay.raise_()
+                 self.bridge.videoSuppressed.emit(False)
+
+    def _on_video_muted_changed(self, muted: bool) -> None:
+        if hasattr(self, "video_overlay"):
+            self.video_overlay.set_muted(muted)
+
+    def _on_video_paused_changed(self, paused: bool) -> None:
+        if hasattr(self, "video_overlay"):
+            if paused:
+                self.video_overlay.player.pause()
+            else:
+                self.video_overlay.player.play()
 
     def _on_video_preprocessing_status(self, status: str) -> None:
         """Show/clear the preprocessing status in the overlay."""
@@ -3921,7 +4042,8 @@ class MainWindow(QMainWindow):
         load_bg = "rgba(0,0,0,25)" if is_light else "rgba(255,255,255,25)"
         self.web_loading_label.setStyleSheet(f"color: {load_fg}; font-size: 13px;")
         self.web_loading_bar.setStyleSheet(
-            f"QProgressBar{{background: {load_bg}; border-radius: 5px;}}"
+            f"QProgressBar{{background: {load_bg}; border-radius:"
+            " 5px;}}"
             f"QProgressBar::chunk{{background: {accent_str}; border-radius: 5px;}}"
         )
         
@@ -4281,7 +4403,10 @@ class MainWindow(QMainWindow):
                 self.web_loading.raise_()
 
         if hasattr(self, "video_overlay") and self.video_overlay.isVisible():
-            self.video_overlay.setGeometry(self.web.rect())
+            # In inplace mode, the geometry is set by JS, so we don't want to reset it here.
+            # Only reset if it's in full overlay mode.
+            if not self.video_overlay.is_inplace_mode():
+                self.video_overlay.setGeometry(self.web.rect())
             self.video_overlay.raise_()
 
     def about(self) -> None:

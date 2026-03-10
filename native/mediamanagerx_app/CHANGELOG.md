@@ -1,6 +1,8 @@
+# Change Log
+
 ## v1.0.5 (Current)
 
-### Changed
+### Changed in v1.0.5
 
 - **File Tree Fix**: Improved path normalization and initialization robustness to ensure the file tree is visible in the packaged installer environment.
 - **Improved Logging**: Added detailed initialization logging to help diagnose environment-specific path issues.
@@ -9,12 +11,12 @@
 
 ## v1.0.4
 
-### Added
+### Added in v1.0.4
 
 - **Gallery Drag & Drop**: Drag and drop files or folders from Windows File Explorer directly into the gallery area with the same behavior and styling as the file tree.
 - **Conflict Comparison Dialog**: Added a popup dialog when copying or moving files to a destination containing an existing filename, allowing context comparison before resolving the conflict.
 
-### Changed
+### Changed in v1.0.4
 
 - **Cursor Feedback**: Cursor now changes to a hand pointer when hovering over clickable folders and files.
 - **Conflict Dialog Improvements**:
@@ -30,7 +32,7 @@
 
 ## v1.0.3
 
-### Added
+### Added in v1.0.3
 
 - **Keyboard Shortcuts**:
   - **Ctrl+C / Ctrl+X / Ctrl+V** — Copy, Cut, Paste files and folders
@@ -38,7 +40,7 @@
   - **F2** — Rename selected items (inline for folders, dialog for gallery)
   - **Ctrl+A** — Select all gallery items
 
-### Changed
+### Changed in v1.0.3
 
 - **Drag & Drop Improvements**:
   - Move or copy multiple selections simultaneously
@@ -60,12 +62,12 @@
 
 ## v1.0.2
 
-### Added
+### Added in v1.0.2
 
 - **Auto-Update System**: App now checks GitHub for updates on launch (manual check available).
 - **Help Dialogs**: Added **Terms of Service** and **What’s New** windows in the Help menu.
 
-### Changed
+### Changed in v1.0.2
 
 - **Media Loading**: Placeholders and borders remain hidden until metadata and dimensions are loaded.
 - **Navigation Fix**: Scroll position now resets correctly when switching pages or search results.
@@ -81,7 +83,7 @@
 
 ## v1.0.1-alpha
 
-### Added
+### Added in v1.0.1-alpha
 
 - Initial MediaManagerX project scaffold and Python package layout.
 - SQLite schema bootstrap and initialization scripts.
