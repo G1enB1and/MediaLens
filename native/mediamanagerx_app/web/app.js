@@ -1017,6 +1017,12 @@ function openLightboxByIndex(idx) {
 
     if (gBridge && gBridge.open_native_video && item.path) {
       gLightboxNativeVideo = true;
+      const lbClose = document.getElementById('lbClose');
+      const lbPrev = document.getElementById('lbPrev');
+      const lbNext = document.getElementById('lbNext');
+      if (lbClose) lbClose.hidden = true; // Hide web buttons so only native shows
+      if (lbPrev) lbPrev.hidden = true;
+      if (lbNext) lbNext.hidden = true;
       gBridge.get_video_duration_seconds(item.path, function (dur) {
         const seconds = Number(dur || 0);
         const loop = seconds > 0 && seconds < 60;
@@ -1031,10 +1037,16 @@ function openLightboxByIndex(idx) {
     vid.src = '';
     img.style.display = 'block';
     img.src = item.url;
+
+    const lbClose = document.getElementById('lbClose');
+    const lbPrev = document.getElementById('lbPrev');
+    const lbNext = document.getElementById('lbNext');
+    if (lbClose) lbClose.hidden = false;
+    if (lbPrev) lbPrev.hidden = false;
+    if (lbNext) lbNext.hidden = false;
   }
 
   lb.hidden = false;
-
 
   // prevent background scroll while open
   document.body.style.overflow = 'hidden';
@@ -1051,6 +1063,13 @@ function closeLightbox() {
   if (!lb || !img || !vid) return;
   lb.hidden = true;
   document.body.classList.remove('lightbox-open');
+
+  const lbClose = document.getElementById('lbClose');
+  const lbPrev = document.getElementById('lbPrev');
+  const lbNext = document.getElementById('lbNext');
+  if (lbClose) lbClose.hidden = false;
+  if (lbPrev) lbPrev.hidden = false;
+  if (lbNext) lbNext.hidden = false;
 
   img.src = '';
   img.style.display = 'block';

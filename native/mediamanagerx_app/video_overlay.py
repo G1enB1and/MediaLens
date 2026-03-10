@@ -112,6 +112,7 @@ class LightboxVideoOverlay(QWidget):
 
         self.player = QMediaPlayer(self)
         self.audio = QAudioOutput(self)
+        self.audio.setMuted(True)
         self.player.setAudioOutput(self.audio)
 
         self.backdrop = QFrame(self)
@@ -129,25 +130,22 @@ class LightboxVideoOverlay(QWidget):
 
         # Controls overlay as sibling above video_view
         self.controls = QWidget(self)
-        # Glassy dark control bar
-        self.controls.setStyleSheet(
-            "background: rgba(20,20,26,190);"
-            "border: 1px solid rgba(255,255,255,30);"
-            "border-radius: 14px;"
-        )
+        self.controls.setStyleSheet("background: transparent; border: none;")
         self.controls.setVisible(False)
 
-        self.btn_prev = QPushButton("⏮", self.controls)
+        # Glassy dark background only for the bottom control bar
+        self.controls_bg = QFrame(self.controls)
+        self.controls_bg.lower()
+
+        self.btn_prev = QPushButton("", self.controls)
         self.btn_toggle_play = QPushButton("", self.controls)
-        self.btn_next = QPushButton("⏭", self.controls)
-        self.btn_mute = QPushButton("🔊", self.controls)
+        self.btn_next = QPushButton("", self.controls)
+        self.btn_mute = QPushButton("", self.controls)
         self.lbl_time = QLabel("0:00 / 0:00", self.controls)
         self.lbl_dbg = QLabel("", self.controls)
         self.slider = QSlider(Qt.Orientation.Horizontal, self.controls)
         self.vol_slider = QSlider(Qt.Orientation.Horizontal, self.controls)
-        self.btn_close = QPushButton("✕", self.controls)
 
-        self.btn_close.setToolTip("Close (Esc)")
         self.btn_prev.setToolTip("Previous (←)")
         self.btn_next.setToolTip("Next (→)")
         self.btn_toggle_play.setToolTip("Play/Pause (Space)")
@@ -175,7 +173,7 @@ class LightboxVideoOverlay(QWidget):
             " border-radius: 10px;"
             " }"
         )
-        for b in (self.btn_prev, self.btn_next, self.btn_mute, self.btn_close):
+        for b in (self.btn_prev, self.btn_next, self.btn_mute):
             b.setStyleSheet(btn_css)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -186,7 +184,17 @@ class LightboxVideoOverlay(QWidget):
         icon_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "icons")
         self.icon_play = QIcon(os.path.join(icon_dir, "play.svg"))
         self.icon_pause = QIcon(os.path.join(icon_dir, "pause.svg"))
-        
+        self.icon_prev = QIcon(os.path.join(icon_dir, "prev.svg"))
+        self.icon_next = QIcon(os.path.join(icon_dir, "next.svg"))
+        self.icon_mute_on = QIcon(os.path.join(icon_dir, "mute_on.svg"))
+        self.icon_mute_off = QIcon(os.path.join(icon_dir, "mute_off.svg"))
+
+        self.btn_prev.setIcon(self.icon_prev)
+        self.btn_next.setIcon(self.icon_next)
+        self.btn_mute.setIcon(self.icon_mute_on)
+
+        for b in (self.btn_prev, self.btn_next, self.btn_mute):
+            b.setIconSize(QSize(22, 22))
         # Style play button specifically
         self.btn_toggle_play.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_toggle_play.setFixedSize(48, 48)
@@ -213,7 +221,6 @@ class LightboxVideoOverlay(QWidget):
 
         self.slider.setParent(self.controls)
         self.vol_slider.setParent(self.controls)
-        self.btn_close.setParent(self.controls)
         
         self._is_inplace = False
         self._apply_theme()
@@ -221,7 +228,6 @@ class LightboxVideoOverlay(QWidget):
         self.btn_toggle_play.clicked.connect(self._toggle_playback)
         self.btn_prev.clicked.connect(self._on_prev_clicked)
         self.btn_next.clicked.connect(self._on_next_clicked)
-        self.btn_close.clicked.connect(self.close_overlay)
         self.btn_mute.clicked.connect(self._toggle_mute)
         self.vol_slider.valueChanged.connect(self._on_volume_changed)
 
@@ -240,7 +246,6 @@ class LightboxVideoOverlay(QWidget):
         self.btn_toggle_play.setParent(self.controls)
         self.btn_next.setParent(self.controls)
         self.btn_mute.setParent(self.controls)
-        self.btn_close.setParent(self.controls)
         self.slider.setParent(self.controls)
         self.vol_slider.setParent(self.controls)
         self.lbl_time.setParent(self.controls)
@@ -338,7 +343,6 @@ class LightboxVideoOverlay(QWidget):
         # Show/Hide specific buttons for mini mode
         self.btn_prev.setVisible(not is_inplace)
         self.btn_next.setVisible(not is_inplace)
-        self.btn_close.setVisible(not is_inplace)
         self.lbl_time.setVisible(not is_inplace)
         self.slider.setVisible(True) # Always visible in Phase 5
 
@@ -358,11 +362,7 @@ class LightboxVideoOverlay(QWidget):
         mute_qss = btn_qss.replace("border-radius: 24px;", "border-radius: 18px;").replace("48px", "36px").replace("padding: 0;", "font-size: 16px; padding: 0;")
 
         if is_inplace:
-            self.controls.setStyleSheet(
-                "background: transparent;"
-                "border: none;"
-                "border-radius: 0px;"
-            )
+            self.controls_bg.setStyleSheet("background: transparent; border: none;")
             self.btn_toggle_play.setStyleSheet(btn_qss)
             self.btn_toggle_play.setFixedSize(48, 48)
             self.btn_mute.setStyleSheet(mute_qss)
@@ -370,26 +370,25 @@ class LightboxVideoOverlay(QWidget):
             self.slider.setVisible(True)
             self.vol_slider.setVisible(True)
             self._apply_theme()
-            self.controls.setMinimumHeight(95)
-            self.controls.setMaximumHeight(95)
+            self.controls.setMinimumHeight(0)
+            self.controls.setMaximumHeight(16777215)
         else:
-            self.controls.setStyleSheet(
+            self.controls_bg.setStyleSheet(
                 "background: rgba(20,20,26,190);"
-                "border: 1px solid rgba(255,255,255,30);"
-                "border-radius: 14px;"
+                "border-top: 1px solid rgba(255,255,255,30);"
             )
             # Reset button styles for lightbox mode
             self.btn_toggle_play.setStyleSheet("")
             self.btn_toggle_play.setFixedSize(48, 48) # Keep it circular but maybe unstyled? 
             # Actually user wants full circle premium. Let's keep the premium styling for both or reset carefully.
             self.btn_toggle_play.setStyleSheet(btn_qss) 
-            self.btn_mute.setStyleSheet(mute_qss)
+            self.btn_mute.setStyleSheet("") # Revert to the transparent btn_css defined in __init__
             self._apply_theme()
             self.slider.setVisible(True)
             self.vol_slider.setVisible(True)
             self.lbl_time.setVisible(True)
-            self.controls.setMinimumHeight(105)
-            self.controls.setMaximumHeight(105)
+            self.controls.setMinimumHeight(0)
+            self.controls.setMaximumHeight(16777215)  # QWIDGETSIZE_MAX — no constraint
         
         self.resizeEvent(None)
         self._show_controls()
@@ -403,7 +402,7 @@ class LightboxVideoOverlay(QWidget):
 
     def set_muted(self, muted: bool) -> None:
         self.audio.setMuted(muted)
-        self.btn_mute.setText("🔇" if muted else "🔊")
+        self.btn_mute.setIcon(self.icon_mute_off if muted else self.icon_mute_on)
 
     def eventFilter(self, obj, event) -> bool:  # type: ignore[override]
         if (obj is self or obj is self.backdrop or obj is self.video_view) and event.type() == QEvent.Type.MouseButtonPress:
@@ -493,6 +492,8 @@ class LightboxVideoOverlay(QWidget):
             vw_vol = self.vol_slider.width()
             vh_vol = self.vol_slider.height()
             
+
+
             spacing1 = 15
             spacing2 = 10
             grp1_w = pw + spacing1 + mw + spacing2 + vw_vol
@@ -520,37 +521,51 @@ class LightboxVideoOverlay(QWidget):
             self.controls.setGeometry(r)
             cw = self.controls.width()
             ch = self.controls.height()
-            
-            # Center play/prev/next vertically
-            cy = ch // 2
-            cx = cw // 2
-            
-            pw = self.btn_toggle_play.width()
-            ph = self.btn_toggle_play.height()
-            self.btn_toggle_play.setGeometry(cx - pw//2, cy - ph//2, pw, ph)
-            
-            self.btn_prev.setGeometry(cx - pw//2 - 50, cy - ph//2, pw, ph)
-            self.btn_next.setGeometry(cx + pw//2 + 50, cy - ph//2, pw, ph)
-            
-            # Close at top right
-            cw_btn = self.btn_close.width()
-            ch_btn = self.btn_close.height()
-            self.btn_close.setGeometry(cw - cw_btn - 10, 10, cw_btn, ch_btn)
 
-            # Mute/Vol right of next
-            mw = self.btn_mute.width()
-            mh = self.btn_mute.height()
-            self.btn_mute.setGeometry(cx + pw//2 + 50 + pw + 20, cy - mh//2, mw, mh)
+            # ── Bottom strip layout ──────────────────────────────────────────
+            # Row 1 (bottom): seek bar + time label
+            seek_h  = 24
+            margin_b = 16
+            time_w  = 80
+            margin_x = 24
+            seek_y = ch - margin_b - seek_h
+            self.slider.setGeometry(margin_x, seek_y, cw - margin_x * 2 - time_w - 8, seek_h)
+            self.lbl_time.setGeometry(cw - margin_x - time_w, seek_y, time_w, seek_h)
+
+            # Row 2 (above seek bar): perfectly center the entire cluster
+            pw  = self.btn_toggle_play.width()
+            ph  = self.btn_toggle_play.height()
+            pw_prev = self.btn_prev.width()
+            pw_next = self.btn_next.width()
+            mw  = self.btn_mute.width()
+            mh  = self.btn_mute.height()
             vw_vol = self.vol_slider.width()
             vh_vol = self.vol_slider.height()
-            self.vol_slider.setGeometry(cx + pw//2 + 50 + pw + 20 + mw + 10, cy - vh_vol//2, vw_vol, vh_vol)
 
-            # Seek bar at bottom
-            seek_h = 24
-            margin_b = 10
-            time_w = 80
-            self.slider.setGeometry(20, ch - margin_b - seek_h, cw - 40 - time_w, seek_h)
-            self.lbl_time.setGeometry(cw - 20 - time_w, ch - margin_b - seek_h, time_w, seek_h)
+            spacing1 = 15
+            spacing2 = 24
+            grp_w = pw_prev + spacing1 + pw + spacing1 + pw_next + spacing2 + mw + 8 + vw_vol
+            grp_x = (cw - grp_w) // 2
+            btn_row_y = seek_y - ph - 16   # 16 px gap above seeker
+
+            curr_x = grp_x
+            self.btn_prev.setGeometry(curr_x, btn_row_y + (ph - ph) // 2, pw_prev, ph)
+            curr_x += pw_prev + spacing1
+            self.btn_toggle_play.setGeometry(curr_x, btn_row_y, pw, ph)
+            curr_x += pw + spacing1
+            self.btn_next.setGeometry(curr_x, btn_row_y + (ph - ph) // 2, pw_next, ph)
+            curr_x += pw_next + spacing2
+
+            self.btn_mute.setGeometry(curr_x, btn_row_y + (ph - mh) // 2, mw, mh)
+            curr_x += mw + 8
+            self.vol_slider.setGeometry(curr_x, btn_row_y + (ph - vh_vol) // 2, vw_vol, vh_vol)
+
+
+            # Bottom tinted background strip
+            bg_y = btn_row_y - 12
+            self.controls_bg.setGeometry(0, bg_y, cw, ch - bg_y)
+            self.controls_bg.lower()
+
 
         # Keep stacking order consistent
         self.backdrop.lower()
@@ -563,7 +578,7 @@ class LightboxVideoOverlay(QWidget):
         
         self._loop = bool(req.loop)
         self.audio.setMuted(bool(req.muted))
-        self.btn_mute.setText("🔇" if req.muted else "🔊")
+        self.btn_mute.setIcon(self.icon_mute_off if req.muted else self.icon_mute_on)
 
         if req.width > 0 and req.height > 0:
             self._native_size = QSize(int(req.width), int(req.height))
@@ -906,7 +921,7 @@ class LightboxVideoOverlay(QWidget):
         self._update_mute_icon(val == 0)
 
     def _update_mute_icon(self, muted: bool) -> None:
-        self.btn_mute.setText("🔇" if muted else "🔊")
+        self.btn_mute.setIcon(self.icon_mute_off if muted else self.icon_mute_on)
 
     def _toggle_mute(self) -> None:
         m = not self.audio.isMuted()
