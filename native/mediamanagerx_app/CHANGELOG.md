@@ -1,6 +1,27 @@
 # Change Log
 
-## v1.0.5 (Current)
+## v1.0.6 (Current)
+
+### Added in v1.0.6
+
+- **In-Place Video Playback**: Videos can now play directly inside the gallery card, overlaid on the thumbnail, without opening a separate window.
+- **Custom SVG Media Controls**: Play and Pause buttons now use custom SVG icons for a crisp, professional appearance that avoids OS emoji rendering issues on Windows.
+- **Video Controls Overlay**: A translucent control bar with play/pause, mute, volume slider, and a seek bar is displayed while a video is playing in-place.
+
+### Changed in v1.0.6
+
+- **Accent Color on Video Sliders**: Volume and seek bar sliders in the video overlay now use the user's selected accent color from Settings.
+- **Smart Lazy Loading**: Gallery images are now loaded on demand as you scroll, using a native `IntersectionObserver` bound to the scrollable container. Images one full screen below the visible area are preloaded before you scroll to them.
+- **Poster Restoration**: Pausing or closing an in-place video now correctly restores the original thumbnail poster image.
+- **Video Click Behavior**: Clicking the video frame no longer pauses playback; only the dedicated Pause button does.
+
+### Removed in v1.0.6
+
+- **Removed Loading Media Dialog**: Removed the "Loading Media" progress dialogue because local files load faster than the dialog can meaningfully update, eliminating a visual stutter on every gallery update.
+
+---
+
+## v1.0.5
 
 ### Changed in v1.0.5
 
