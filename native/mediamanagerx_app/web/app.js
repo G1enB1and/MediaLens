@@ -120,10 +120,13 @@ function ensureMediaObserver() {
       }
     },
     {
-      // Load current viewport + double down (approx 2 screens)
-      root: null,
-      rootMargin: '2000px 0px 2000px 0px',
-      threshold: 0.01,
+      // Bind to the <main> scroll container so rootMargin is applied relative
+      // to what's actually visible inside it, not the outer window.
+      // A margin of one screen-height below means images one full scroll
+      // ahead will already be loaded before the user gets there.
+      root: document.querySelector('main'),
+      rootMargin: `0px 0px ${Math.round(window.innerHeight)}px 0px`,
+      threshold: 0,
     }
   );
 }
