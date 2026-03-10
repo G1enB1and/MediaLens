@@ -443,9 +443,15 @@ class LightboxVideoOverlay(QWidget):
         super().keyPressEvent(event)
 
     def _compute_video_rect(self) -> QRect:
-        # Removed internal padding (pad=0) to maximize fill space.
         pad = 0
         bounds = self.rect().adjusted(pad, pad, -pad, -pad)
+
+        # In inplace mode the overlay widget is already sized to the gallery card,
+        # which has the correct aspect-ratio from DB metadata.  Just fill the whole
+        # card — doing a second aspect-ratio fit here would produce the wrong size
+        # whenever _native_size is stale between sessions (race condition).
+        if self._is_inplace:
+            return bounds
 
         if not self._native_size or self._native_size.width() <= 0 or self._native_size.height() <= 0:
             return bounds
@@ -455,7 +461,7 @@ class LightboxVideoOverlay(QWidget):
         target_w = bounds.width()
         target_h = bounds.height()
 
-        # Fit rect preserving aspect ratio
+        # Fit rect preserving aspect ratio (lightbox mode only)
         scale = min(target_w / vw, target_h / vh)
         w = max(1, int(vw * scale))
         h = max(1, int(vh * scale))
@@ -919,6 +925,7 @@ class LightboxVideoOverlay(QWidget):
             self._hide_timer.start()
         else:
             self._hide_timer.stop()
+
 
     def _on_prev_clicked(self) -> None:
         if callable(self.on_prev):

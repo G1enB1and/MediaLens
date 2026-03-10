@@ -95,23 +95,26 @@ function loadImage(el, imgSrc) {
 function loadVideoPoster(el, path) {
   if (gPosterRequested.has(el)) return;
   gPosterRequested.add(el);
+  // Hide immediately so the card's shimmer shows through until the poster arrives
+  el.style.opacity = '0';
   if (gBridge && gBridge.get_video_poster) {
     gBridge.get_video_poster(path, function (posterUrl) {
       const card = el.closest('.card');
       if (posterUrl) {
-        // Preload into a temp image first so the flip is instant
+        // Preload via tempImg so the browser caches it — then show instantly
         const tempImg = new Image();
         tempImg.onload = tempImg.onerror = () => {
-          el.style.opacity = '0';
           el.src = posterUrl;
           gLoadedOnPage++;
-          el.style.opacity = '1';
+          // Push opacity change one frame out so the CSS transition fires
+          requestAnimationFrame(() => { el.style.opacity = '1'; });
           if (card) { card.classList.remove('loading'); card.classList.add('ready'); }
         };
         tempImg.src = posterUrl;
       } else {
         el.removeAttribute('src');
         gLoadedOnPage++;
+        requestAnimationFrame(() => { el.style.opacity = '1'; });
         if (card) { card.classList.remove('loading'); card.classList.add('ready'); }
       }
     });

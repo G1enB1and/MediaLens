@@ -1045,8 +1045,7 @@ body.no-glass.lightbox-open main {
 }
 
 .thumb.poster {
-  background: var(--thumb-bg);
-  min-height: 120px;
+  background: transparent;
 }
 
 /* Removed videoBadge */
