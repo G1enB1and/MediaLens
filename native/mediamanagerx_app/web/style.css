@@ -974,17 +974,41 @@ p {
   backface-visibility: hidden;
 }
 
+/* Shimmer animation for loading cards */
+@keyframes shimmer {
+  0% {
+    background-position: -400px 0;
+  }
+
+  100% {
+    background-position: 400px 0;
+  }
+}
+
 .card.loading {
-  opacity: 0;
-  border-color: transparent !important;
-  background: transparent !important;
-  box-shadow: none !important;
+  background: linear-gradient(90deg,
+      var(--card-bg) 25%,
+      color-mix(in srgb, var(--card-bg), white 6%) 50%,
+      var(--card-bg) 75%);
+  background-size: 800px 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+  min-height: 120px;
+}
+
+.light-mode .card.loading {
+  background: linear-gradient(90deg,
+      var(--card-bg) 25%,
+      color-mix(in srgb, var(--card-bg), black 4%) 50%,
+      var(--card-bg) 75%);
+  background-size: 800px 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
 }
 
 .card.ready {
-  opacity: 1;
-  transition: opacity 0.4s ease-out;
+  transition: none;
+  animation: none;
 }
+
 
 body.no-glass.lightbox-open main {
   /* Only hide gallery if glassmorphism is disabled (for max stability) */
@@ -1003,6 +1027,7 @@ body.no-glass.lightbox-open main {
   object-fit: contain;
   display: block;
   background: var(--thumb-bg);
+  transition: opacity 0.25s ease;
 }
 
 .skel {
