@@ -3835,6 +3835,10 @@ class MainWindow(QMainWindow):
         if not self.video_overlay:
             return
         
+        # Reset stale native size so resizeEvents during set_mode/setGeometry
+        # use the full-bounds fallback instead of the previous video's size.
+        self.video_overlay._native_size = None
+
         # The rect from JS is already relative to the web view's viewport.
         # Since video_overlay is a child of self.web, we use parent-relative coords.
         target_rect = QRect(x, y, w, h)
