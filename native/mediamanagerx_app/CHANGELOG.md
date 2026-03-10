@@ -14,6 +14,8 @@
 - **Smart Lazy Loading**: Gallery images are now loaded on demand as you scroll, using a native `IntersectionObserver` bound to the scrollable container. Images one full screen below the visible area are preloaded before you scroll to them.
 - **Poster Restoration**: Pausing or closing an in-place video now correctly restores the original thumbnail poster image.
 - **Video Click Behavior**: Clicking the video frame no longer pauses playback; only the dedicated Pause button does.
+- **Fixed What's New:** What's New now accurately reflects current Changelog.md.
+- **Fixed Auto-Update:** Auto-Update now uses RedirectPolicyAttribute with NoLessSafeRedirectPolicy which properly follows the redirects that github uses for releases.
 
 ### Removed in v1.0.6
 

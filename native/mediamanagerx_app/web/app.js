@@ -39,91 +39,109 @@ function setSelectedFolder(paths) {
   }
 }
 
+// Background queue for items not yet in the viewport
+let gBackgroundQueue = [];
+let gBackgroundIdleId = null;
+
+function flushBackgroundQueue() {
+  gBackgroundIdleId = null;
+  if (gBackgroundQueue.length === 0) return;
+
+  // Process in idle time: drain up to 5 items per idle slot
+  const deadline = performance.now() + 8; // 8ms budget per batch
+  while (gBackgroundQueue.length > 0 && performance.now() < deadline) {
+    const item = gBackgroundQueue.shift();
+    if (item.type === 'image') {
+      loadImage(item.el, item.imgSrc);
+    } else if (item.type === 'video') {
+      loadVideoPoster(item.el, item.path);
+    }
+  }
+
+  // Schedule next batch if any remain
+  if (gBackgroundQueue.length > 0) {
+    scheduleBackgroundDrain();
+  }
+}
+
+function scheduleBackgroundDrain() {
+  if (gBackgroundIdleId) return;
+  if (typeof requestIdleCallback !== 'undefined') {
+    gBackgroundIdleId = requestIdleCallback(flushBackgroundQueue, { timeout: 500 });
+  } else {
+    gBackgroundIdleId = setTimeout(flushBackgroundQueue, 16);
+  }
+}
+
+function loadImage(el, imgSrc) {
+  if (gPosterRequested.has(el)) return;
+  gPosterRequested.add(el);
+  el.onload = () => {
+    gLoadedOnPage++;
+    el.style.opacity = '1';
+    const card = el.closest('.card');
+    if (card) { card.classList.remove('loading'); card.classList.add('ready'); }
+  };
+  el.onerror = () => {
+    gLoadedOnPage++;
+    el.style.opacity = '1';
+    const card = el.closest('.card');
+    if (card) { card.classList.remove('loading'); card.classList.add('ready'); }
+  };
+  el.style.opacity = '0';
+  el.src = imgSrc;
+}
+
+function loadVideoPoster(el, path) {
+  if (gPosterRequested.has(el)) return;
+  gPosterRequested.add(el);
+  if (gBridge && gBridge.get_video_poster) {
+    gBridge.get_video_poster(path, function (posterUrl) {
+      const card = el.closest('.card');
+      if (posterUrl) {
+        // Preload into a temp image first so the flip is instant
+        const tempImg = new Image();
+        tempImg.onload = tempImg.onerror = () => {
+          el.style.opacity = '0';
+          el.src = posterUrl;
+          gLoadedOnPage++;
+          el.style.opacity = '1';
+          if (card) { card.classList.remove('loading'); card.classList.add('ready'); }
+        };
+        tempImg.src = posterUrl;
+      } else {
+        el.removeAttribute('src');
+        gLoadedOnPage++;
+        if (card) { card.classList.remove('loading'); card.classList.add('ready'); }
+      }
+    });
+  }
+}
+
 function ensureMediaObserver() {
   if (gPosterObserver) return;
   gPosterObserver = new IntersectionObserver(
     (entries) => {
-      let newlyObserved = 0;
-      let pendingImages = [];
-      let pendingVideos = [];
-
       for (const entry of entries) {
         if (!entry.isIntersecting) continue;
         const el = entry.target;
-        const path = el.getAttribute('data-video-path');
-        const imgSrc = el.getAttribute('data-src');
-
-        // Prevent double requesting
         if (gPosterRequested.has(el)) continue;
-        gPosterRequested.add(el);
+
+        const imgSrc = el.getAttribute('data-src');
+        const path = el.getAttribute('data-video-path');
 
         gTotalOnPage++;
-        newlyObserved++;
-
-        if (imgSrc) {
-          pendingImages.push({ el, imgSrc });
-        } else if (path) {
-          pendingVideos.push({ el, path });
-        }
         gPosterObserver.unobserve(el);
-      }
 
-      if (newlyObserved > 0) {
-        // Delay the actual loading by one animation frame + a tiny timeout
-        // to avoid blocking the UI thread immediately.
-        requestAnimationFrame(() => {
-          setTimeout(() => {
-            // Process images
-            pendingImages.forEach(({ el, imgSrc }) => {
-              const onMediaLoaded = () => {
-                gLoadedOnPage++;
-                const card = el.closest('.card');
-                if (card) {
-                  card.classList.remove('loading');
-                  card.classList.add('ready');
-                }
-              };
-              el.onload = onMediaLoaded;
-              el.onerror = onMediaLoaded;
-              el.src = imgSrc;
-            });
-
-            // Process video posters
-            pendingVideos.forEach(({ el, path }) => {
-              if (gBridge && gBridge.get_video_poster) {
-                gBridge.get_video_poster(path, function (posterUrl) {
-                  const card = el.closest('.card');
-                  if (posterUrl) {
-                    const tempImg = new Image();
-                    tempImg.onload = tempImg.onerror = () => {
-                      el.src = posterUrl;
-                      gLoadedOnPage++;
-                      if (card) {
-                        card.classList.remove('loading');
-                        card.classList.add('ready');
-                      }
-                    };
-                    tempImg.src = posterUrl;
-                  } else {
-                    el.removeAttribute('src');
-                    gLoadedOnPage++;
-                    if (card) {
-                      card.classList.remove('loading');
-                      card.classList.add('ready');
-                    }
-                  }
-                });
-              }
-            });
-          }, 10);
-        });
+        // Load immediately — no delay for items entering the viewport
+        if (imgSrc) {
+          loadImage(el, imgSrc);
+        } else if (path) {
+          loadVideoPoster(el, path);
+        }
       }
     },
     {
-      // Bind to the <main> scroll container so rootMargin is applied relative
-      // to what's actually visible inside it, not the outer window.
-      // A margin of one screen-height below means images one full scroll
-      // ahead will already be loaded before the user gets there.
       root: document.querySelector('main'),
       rootMargin: `0px 0px ${Math.round(window.innerHeight)}px 0px`,
       threshold: 0,
@@ -528,6 +546,14 @@ function renderMediaList(items, scrollToTop = true) {
   resetMediaState();
   ensureMediaObserver();
 
+  // Cancel any previous background idle drain
+  if (gBackgroundIdleId) {
+    if (typeof cancelIdleCallback !== 'undefined') cancelIdleCallback(gBackgroundIdleId);
+    else clearTimeout(gBackgroundIdleId);
+    gBackgroundIdleId = null;
+  }
+  gBackgroundQueue = [];
+
   gTotalOnPage = 0;
   gLoadedOnPage = 0;
   if (!items || items.length === 0) {
@@ -832,7 +858,27 @@ function renderMediaList(items, scrollToTop = true) {
 
     el.appendChild(card);
   });
+
+  // After building all cards, queue the items NOT yet visible into the
+  // background idle-time loader. The IntersectionObserver will handle them
+  // first if the user scrolls near them; the background queue will handle
+  // anything that hasn't been touched yet once the browser is idle.
+  requestAnimationFrame(() => {
+    const unobserved = el.querySelectorAll('img[data-src]:not([src]), img[data-video-path]:not([src])');
+    unobserved.forEach(img => {
+      if (gPosterRequested.has(img)) return;
+      const imgSrc = img.getAttribute('data-src');
+      const path = img.getAttribute('data-video-path');
+      if (imgSrc) {
+        gBackgroundQueue.push({ type: 'image', el: img, imgSrc });
+      } else if (path) {
+        gBackgroundQueue.push({ type: 'video', el: img, path });
+      }
+    });
+    scheduleBackgroundDrain();
+  });
 }
+
 
 
 // (Variable declarations moved to the top of the file)
