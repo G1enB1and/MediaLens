@@ -39,57 +39,96 @@ function setSelectedFolder(paths) {
   }
 }
 
-function ensurePosterObserver() {
+function ensureMediaObserver() {
   if (gPosterObserver) return;
   gPosterObserver = new IntersectionObserver(
     (entries) => {
+      let newlyObserved = 0;
+      let pendingImages = [];
+      let pendingVideos = [];
+
       for (const entry of entries) {
         if (!entry.isIntersecting) continue;
         const el = entry.target;
         const path = el.getAttribute('data-video-path');
-        if (!path) continue;
-        if (gPosterRequested.has(path)) {
-          gPosterObserver.unobserve(el);
-          continue;
-        }
-        gPosterRequested.add(path);
+        const imgSrc = el.getAttribute('data-src');
 
-        if (gBridge && gBridge.get_video_poster) {
-          gBridge.get_video_poster(path, function (posterUrl) {
-            const card = el.closest('.card');
-            if (posterUrl) {
-              const tempImg = new Image();
-              tempImg.onload = tempImg.onerror = () => {
-                el.src = posterUrl;
-                if (card && card.onVideoPosterReady) {
-                  card.onVideoPosterReady();
-                  delete card.onVideoPosterReady;
+        // Prevent double requesting
+        if (gPosterRequested.has(el)) continue;
+        gPosterRequested.add(el);
+
+        gTotalOnPage++;
+        newlyObserved++;
+
+        if (imgSrc) {
+          pendingImages.push({ el, imgSrc });
+        } else if (path) {
+          pendingVideos.push({ el, path });
+        }
+        gPosterObserver.unobserve(el);
+      }
+
+      if (newlyObserved > 0) {
+        // Delay the actual loading by one animation frame + a tiny timeout
+        // to avoid blocking the UI thread immediately.
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            // Process images
+            pendingImages.forEach(({ el, imgSrc }) => {
+              const onMediaLoaded = () => {
+                gLoadedOnPage++;
+                const card = el.closest('.card');
+                if (card) {
+                  card.classList.remove('loading');
+                  card.classList.add('ready');
                 }
               };
-              tempImg.src = posterUrl;
-            } else {
-              el.removeAttribute('src');
-              if (card && card.onVideoPosterReady) {
-                card.onVideoPosterReady();
-                delete card.onVideoPosterReady;
-              }
-            }
-          });
-        }
+              el.onload = onMediaLoaded;
+              el.onerror = onMediaLoaded;
+              el.src = imgSrc;
+            });
 
-        gPosterObserver.unobserve(el);
+            // Process video posters
+            pendingVideos.forEach(({ el, path }) => {
+              if (gBridge && gBridge.get_video_poster) {
+                gBridge.get_video_poster(path, function (posterUrl) {
+                  const card = el.closest('.card');
+                  if (posterUrl) {
+                    const tempImg = new Image();
+                    tempImg.onload = tempImg.onerror = () => {
+                      el.src = posterUrl;
+                      gLoadedOnPage++;
+                      if (card) {
+                        card.classList.remove('loading');
+                        card.classList.add('ready');
+                      }
+                    };
+                    tempImg.src = posterUrl;
+                  } else {
+                    el.removeAttribute('src');
+                    gLoadedOnPage++;
+                    if (card) {
+                      card.classList.remove('loading');
+                      card.classList.add('ready');
+                    }
+                  }
+                });
+              }
+            });
+          }, 10);
+        });
       }
     },
     {
-      // Start loading slightly before visible so scrolling feels instant.
+      // Load current viewport + double down (approx 2 screens)
       root: null,
-      rootMargin: '600px 0px 600px 0px',
+      rootMargin: '2000px 0px 2000px 0px',
       threshold: 0.01,
     }
   );
 }
 
-function resetPosterState() {
+function resetMediaState() {
   gPosterRequested.clear();
   if (gPosterObserver) {
     gPosterObserver.disconnect();
@@ -100,6 +139,8 @@ function resetPosterState() {
 let gLoadingShownAt = 0;
 const MIN_LOADING_MS = 1000;
 
+let gLoadingHideTimer = null;
+
 function setGlobalLoading(on, text = 'Loading…', pct = null) {
   const gl = document.getElementById('globalLoading');
   const t = document.getElementById('loadingText');
@@ -107,6 +148,11 @@ function setGlobalLoading(on, text = 'Loading…', pct = null) {
   if (!gl || !t || !b) return;
 
   if (on) {
+    if (gLoadingHideTimer) {
+      clearTimeout(gLoadingHideTimer);
+      gLoadingHideTimer = null;
+    }
+
     if (gl.hidden) {
       gLoadingShownAt = Date.now();
     }
@@ -119,31 +165,18 @@ function setGlobalLoading(on, text = 'Loading…', pct = null) {
     }
     return;
   }
+
   gLoadingDismissed = true;
-  // Delay hiding a bit so it's actually visible (prevents "never showed" when
-  // operations complete extremely quickly).
   const elapsed = Date.now() - (gLoadingShownAt || Date.now());
   const wait = Math.max(0, MIN_LOADING_MS - elapsed);
-  window.setTimeout(() => {
+
+  if (gLoadingHideTimer) clearTimeout(gLoadingHideTimer);
+  gLoadingHideTimer = window.setTimeout(() => {
     gl.hidden = true;
+    gLoadingHideTimer = null;
   }, wait);
 }
 
-function updatePageLoadingProgress() {
-  if (gLoadingDismissed || gTotalOnPage <= 0) {
-    setGlobalLoading(false);
-    return;
-  }
-  const pct = Math.round((gLoadedOnPage / gTotalOnPage) * 100);
-  setGlobalLoading(true, `Loading media: ${gLoadedOnPage} / ${gTotalOnPage}`, pct);
-
-  // Auto-hide once enough is loaded to fill the screen (e.g. 15 items)
-  // or if we've reached the total on page.
-  if (gLoadedOnPage >= 15 || gLoadedOnPage >= gTotalOnPage) {
-    // Add a small delay so user sees the "100%" or the jump to near-completion
-    setTimeout(() => setGlobalLoading(false), 500);
-  }
-}
 
 // Enable clicking to hide the loading overlay if it gets stuck
 document.addEventListener('DOMContentLoaded', () => {
@@ -489,16 +522,11 @@ function renderMediaList(items, scrollToTop = true) {
   gMedia = Array.isArray(items) ? items : [];
   const viewItems = gMedia;
 
-  resetPosterState();
-  ensurePosterObserver();
+  resetMediaState();
+  ensureMediaObserver();
 
   gTotalOnPage = 0;
   gLoadedOnPage = 0;
-  gLoadingDismissed = false; // Reset for new page
-  if (viewItems.length > 0) {
-    setGlobalLoading(true, 'Loading media content…', 5);
-  }
-
   if (!items || items.length === 0) {
     const div = document.createElement('div');
     div.className = 'empty';
@@ -523,28 +551,19 @@ function renderMediaList(items, scrollToTop = true) {
       card.style.aspectRatio = `${item.width} / ${item.height}`;
     }
 
-    gTotalOnPage++;
-
-    const onMediaLoaded = () => {
-      gLoadedOnPage++;
-      updatePageLoadingProgress();
-      card.classList.remove('loading');
-      card.classList.add('ready');
-    };
-
     if (item.media_type === 'image') {
       const img = document.createElement('img');
       img.className = 'thumb';
-      img.loading = 'lazy';
-      img.src = item.url;
+      // Use IntersectionObserver to control src injection accurately,
+      // avoiding browser's default loading="lazy" black-box behavior.
+      img.setAttribute('data-src', item.url);
       img.alt = '';
       if (item.is_animated) {
         img.setAttribute('data-animated', 'true');
         img.setAttribute('data-path', item.path || '');
       }
-      img.addEventListener('load', onMediaLoaded);
-      img.addEventListener('error', onMediaLoaded); // Count error as loaded to show placeholder
       card.appendChild(img);
+      gPosterObserver.observe(img);
 
       card.setAttribute('data-path', item.path || '');
       // ... rest of image listeners
@@ -667,8 +686,6 @@ function renderMediaList(items, scrollToTop = true) {
       img.alt = '';
       img.setAttribute('data-video-path', item.path || '');
 
-      // Reveal handler for video cards (called in ensurePosterObserver)
-      card.onVideoPosterReady = onMediaLoaded;
       card.appendChild(img);
 
       // --- Simple Play Indicator ---
@@ -698,7 +715,10 @@ function renderMediaList(items, scrollToTop = true) {
         }
       });
 
-      if (item.path) gPosterObserver.observe(img);
+      if (item.path) {
+        // Fallback for path string observation if img fails to exist
+        gPosterObserver.observe(img);
+      }
 
       card.setAttribute('data-path', item.path || '');
       // ... rest of video listeners
