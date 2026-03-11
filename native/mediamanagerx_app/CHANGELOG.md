@@ -1,6 +1,24 @@
 # Change Log
 
-## v1.0.7 (Current)
+## v1.0.8 (Current)
+
+### Added in v1.0.8
+
+- **Video Rotation**: Added context menu options to rotate video files 90 degrees CW and CCW.
+- **Image Rotation**: Added context menu options to rotate image files 90 degrees CW and CCW.
+- **External Editors**: Added Open with Photoshop and Open with Affinity right-click actions.
+
+### Changed in v1.0.8
+
+- **Pause Button**: Refined the pause button interaction and logic.
+
+### Fixed in v1.0.8
+
+- **Installer**: Fixed setup installer missing files and pathing bugs.
+
+---
+
+## v1.0.7
 
 ### Changed in v1.0.7
 
