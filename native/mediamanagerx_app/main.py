@@ -1205,6 +1205,31 @@ class Bridge(QObject):
         except Exception as e:
             print(f"Failed to open in {editor_key}: {e}")
 
+    @Slot(str, int)
+    def rotate_image(self, path: str, degrees: int):
+        """Rotate an image by degrees and update it in-place."""
+        if not os.path.exists(path):
+            return
+        
+        try:
+            from PIL import Image
+            with Image.open(path) as img:
+                # Rotate (expand=True automatically adjusts dimensions for 90/270 degree rotations)
+                rotated = img.rotate(degrees, expand=True)
+                
+                # Retrieve EXIF if it exists, to preserve orientation/metadata (though orientation might be technically wrong now,
+                # usually people just want the pixels rotated and to keep the rest of the metadata).
+                exif = img.info.get('exif')
+                if exif:
+                    rotated.save(path, exif=exif)
+                else:
+                    rotated.save(path)
+            
+            # Inform frontend that a file was modified so it can refresh the thumbnail
+            self.fileOpFinished.emit("rotate", True, path, path)
+        except Exception as e:
+            print(f"Failed to rotate image: {e}")
+
     @Slot(str, result=str)
     def hide_by_renaming_dot(self, path: str) -> str:
         try: return self._hide_by_renaming_dot(path)
@@ -1689,9 +1714,14 @@ class Bridge(QObject):
             for r in candidates[start:end]:
                 real = r.get("_real_path")
                 p = real if isinstance(real, Path) else Path(r["path"])
+                try:
+                    mtime = int(p.stat().st_mtime)
+                except Exception:
+                    mtime = int(r.get("modified_time") or 0)
+                    
                 out.append({
                     "path": str(p), 
-                    "url": QUrl.fromLocalFile(str(p)).toString(), 
+                    "url": f"{QUrl.fromLocalFile(str(p)).toString()}?t={mtime}", 
                     "media_type": r["media_type"], 
                     "is_animated": self._is_animated(p),
                     "width": r.get("width"),

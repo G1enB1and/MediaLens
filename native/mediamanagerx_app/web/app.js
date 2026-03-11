@@ -382,6 +382,12 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
     if (el) el.style.display = hasItem ? 'block' : 'none';
   });
   
+  const isImage = hasItem && item.media_type === 'image';
+  ['ctxRotCW', 'ctxRotCCW', 'ctxRotSep'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = isImage ? 'block' : 'none';
+  });
+  
   // External Editors
   const psBtn = document.getElementById('ctxPhotoshop');
   const affBtn = document.getElementById('ctxAffinity');
@@ -479,6 +485,20 @@ function wireCtxMenu() {
       case 'ctxAffinity':
         if (item && item.path && gBridge && gBridge.open_in_editor) {
             gBridge.open_in_editor('affinity', item.path);
+        }
+        hideCtx();
+        break;
+        
+      case 'ctxRotCW':
+        if (item && item.path && gBridge && gBridge.rotate_image) {
+            gBridge.rotate_image(item.path, -90);
+        }
+        hideCtx();
+        break;
+        
+      case 'ctxRotCCW':
+        if (item && item.path && gBridge && gBridge.rotate_image) {
+            gBridge.rotate_image(item.path, 90);
         }
         hideCtx();
         break;
