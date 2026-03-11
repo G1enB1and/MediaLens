@@ -588,25 +588,44 @@ class LightboxVideoOverlay(QWidget):
         # Reset preprocessing status label
         self.lbl_dbg.setVisible(False)
 
-        # Looping support varies by Qt version.
-        if hasattr(self.player, "setLoops"):
-            try:
-                self.player.setLoops(-1 if req.loop else 1)  # type: ignore[attr-defined]
-            except Exception:
-                pass
-        
-        # Explicit cleanup for new session
-        self.video_view.set_image(None)
-        self.lbl_dbg.setText("")
-        self._current_source = path
-        
         # Sync volume slider
         self.vol_slider.setValue(int(self.audio.volume() * 100))
 
         try:
             self.player.stop()
+            self.player.positionChanged.disconnect()
+            self.player.durationChanged.disconnect()
+            self.player.playbackStateChanged.disconnect()
+            self.player.errorOccurred.disconnect()
+            self.player.mediaStatusChanged.disconnect()
+            self.player.deleteLater()
+            self.audio.deleteLater()
         except Exception:
             pass
+
+        # Completely recreate the QMediaPlayer and QAudioOutput instances to flush
+        # Qt's internal FFmpeg demuxer cache, ensuring rotated files are read freshly
+        self.player = QMediaPlayer(self)
+        self.audio = QAudioOutput(self)
+        self.player.setAudioOutput(self.audio)
+        self.player.setVideoOutput(self.video_sink)
+        
+        self.player.positionChanged.connect(self._on_position)
+        self.player.durationChanged.connect(self._on_duration)
+        self.player.playbackStateChanged.connect(self._on_playback_state_changed)
+        self.player.errorOccurred.connect(self._on_player_error)
+        self.player.mediaStatusChanged.connect(self._on_media_status)
+        
+        self.audio.setVolume(self.vol_slider.value() / 100.0)
+        self.audio.setMuted(bool(req.muted))
+        
+        # Looping support varies by Qt version.
+        if hasattr(self.player, "setLoops"):
+            try:
+                self.player.setLoops(-1 if req.loop else 1)
+            except Exception:
+                pass
+
         self.player.setSource(QUrl.fromLocalFile(path))
         self.setVisible(True)
         self.video_view.setVisible(True)

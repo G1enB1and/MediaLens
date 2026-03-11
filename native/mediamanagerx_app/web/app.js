@@ -382,10 +382,10 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
     if (el) el.style.display = hasItem ? 'block' : 'none';
   });
   
-  const isImage = hasItem && item.media_type === 'image';
+  const isRotatable = hasItem && (item.media_type === 'image' || item.media_type === 'video');
   ['ctxRotCW', 'ctxRotCCW', 'ctxRotSep'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.style.display = isImage ? 'block' : 'none';
+    if (el) el.style.display = isRotatable ? 'block' : 'none';
   });
   
   // External Editors
