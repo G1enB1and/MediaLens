@@ -1150,6 +1150,61 @@ class Bridge(QObject):
         p.rename(target)
         return str(target)
 
+    @Slot(result="QVariantMap")
+    def get_external_editors(self):
+        """Find installation paths for external editors."""
+        editors = {"photoshop": None, "affinity": None}
+        import winreg
+        
+        # Check Photoshop via App Paths
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Photoshop.exe") as key:
+                editors["photoshop"] = winreg.QueryValue(key, None)
+        except Exception:
+            pass
+            
+        # Check Affinity Photo 2 via App Paths
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Photo.exe") as key:
+                editors["affinity"] = winreg.QueryValue(key, None)
+        except Exception:
+            pass
+            
+        # Fallback for Affinity
+        if not editors["affinity"]:
+            affinity_fallbacks = [
+                r"C:\Program Files\Affinity\Photo 2\Photo.exe",
+                r"C:\Program Files\Affinity\Photo\Photo.exe"
+            ]
+            local_appdata = os.environ.get("LOCALAPPDATA", "")
+            if local_appdata:
+                windows_apps = os.path.join(local_appdata, "Microsoft", "WindowsApps")
+                affinity_fallbacks.extend([
+                    os.path.join(windows_apps, "Affinity.exe"),
+                    os.path.join(windows_apps, "AffinityPhoto2.exe"),
+                    os.path.join(windows_apps, "AffinityPhoto.exe")
+                ])
+                
+            for fb in affinity_fallbacks:
+                if os.path.exists(fb):
+                    editors["affinity"] = fb
+                    break
+                    
+        return {k: v for k, v in editors.items() if v}
+
+    @Slot(str, str)
+    def open_in_editor(self, editor_key: str, path: str):
+        """Open a file in the specified external editor."""
+        editors = self.get_external_editors()
+        editor_path = editors.get(editor_key)
+        if not editor_path or not os.path.exists(path):
+            return
+            
+        try:
+            subprocess.Popen([editor_path, path])
+        except Exception as e:
+            print(f"Failed to open in {editor_key}: {e}")
+
     @Slot(str, result=str)
     def hide_by_renaming_dot(self, path: str) -> str:
         try: return self._hide_by_renaming_dot(path)

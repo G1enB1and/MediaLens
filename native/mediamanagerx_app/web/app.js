@@ -12,6 +12,7 @@ let gPosterObserver = null;
 let gSort = 'name_asc';
 let gFilter = 'all';
 let gCurrentTargetFolderName = '';
+let gExternalEditors = {};
 let gCurrentDragCount = 0;
 let gPlayingInplaceCard = null;
 
@@ -380,6 +381,25 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
     const el = document.getElementById(id);
     if (el) el.style.display = hasItem ? 'block' : 'none';
   });
+  
+  // External Editors
+  const psBtn = document.getElementById('ctxPhotoshop');
+  const affBtn = document.getElementById('ctxAffinity');
+  const edSep = document.getElementById('ctxEditorSep');
+  let hasEd = false;
+  if (psBtn) {
+      const showPs = hasItem && !!gExternalEditors.photoshop;
+      psBtn.style.display = showPs ? 'block' : 'none';
+      if (showPs) hasEd = true;
+  }
+  if (affBtn) {
+      const showAff = hasItem && !!gExternalEditors.affinity;
+      affBtn.style.display = showAff ? 'block' : 'none';
+      if (showAff) hasEd = true;
+  }
+  if (edSep) {
+      edSep.style.display = hasEd ? 'block' : 'none';
+  }
 
   // Bulk actions
   const selectAllBtn = document.getElementById('ctxSelectAll');
@@ -447,6 +467,20 @@ function wireCtxMenu() {
         if (item && item.path && gBridge && gBridge.open_in_explorer) {
           gBridge.open_in_explorer(item.path);
         }
+        break;
+        
+      case 'ctxPhotoshop':
+        if (item && item.path && gBridge && gBridge.open_in_editor) {
+            gBridge.open_in_editor('photoshop', item.path);
+        }
+        hideCtx();
+        break;
+
+      case 'ctxAffinity':
+        if (item && item.path && gBridge && gBridge.open_in_editor) {
+            gBridge.open_in_editor('affinity', item.path);
+        }
+        hideCtx();
         break;
       case 'ctxHide':
         if (item && item.path && gBridge && gBridge.hide_by_renaming_dot_async) {
@@ -1881,6 +1915,13 @@ async function main() {
         applyMetadataOrder(order);
       }
     });
+    
+    // Fetch external editors
+    if (bridge.get_external_editors) {
+        bridge.get_external_editors(function(editors) {
+            gExternalEditors = editors || {};
+        });
+    }
 
     // Initial sync
     refreshFromBridge(bridge);
