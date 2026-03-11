@@ -862,6 +862,7 @@ class Bridge(QObject):
 
         self.settings = QSettings("G1enB1and", "MediaManagerX")
         self.nam = QNetworkAccessManager(self)
+        self.nam.setRedirectPolicy(QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy)
         self._update_reply = None
         self._download_reply = None
         self._session_shuffle_seed = random.getrandbits(32)
@@ -1060,11 +1061,6 @@ class Bridge(QObject):
         """Download latest installer and launch it."""
         url = "https://github.com/G1enB1and/MediaManagerX/releases/latest/download/MediaManagerX_Setup.exe"
         request = QNetworkRequest(QUrl(url))
-        # Use the modern redirect policy (FollowRedirectsAttribute is deprecated since Qt 5.15)
-        request.setAttribute(
-            QNetworkRequest.Attribute.RedirectPolicyAttribute,
-            QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy
-        )
         self._download_reply = self.nam.get(request)
         
         def _on_progress(received, total):
