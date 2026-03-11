@@ -1207,28 +1207,97 @@ class Bridge(QObject):
 
     @Slot(str, int)
     def rotate_image(self, path: str, degrees: int):
-        """Rotate an image by degrees and update it in-place."""
+        """Rotate an image or video by degrees and update it in-place."""
         if not os.path.exists(path):
             return
-        
-        try:
-            from PIL import Image
-            with Image.open(path) as img:
-                # Rotate (expand=True automatically adjusts dimensions for 90/270 degree rotations)
-                rotated = img.rotate(degrees, expand=True)
-                
-                # Retrieve EXIF if it exists, to preserve orientation/metadata (though orientation might be technically wrong now,
-                # usually people just want the pixels rotated and to keep the rest of the metadata).
-                exif = img.info.get('exif')
-                if exif:
-                    rotated.save(path, exif=exif)
-                else:
-                    rotated.save(path)
             
-            # Inform frontend that a file was modified so it can refresh the thumbnail
-            self.fileOpFinished.emit("rotate", True, path, path)
-        except Exception as e:
-            print(f"Failed to rotate image: {e}")
+        def work():
+            try:
+                is_video = path.lower().endswith(('.mp4', '.mkv', '.avi', '.mov', '.webm'))
+                if is_video:
+                    import subprocess, json, tempfile
+                    
+                    # 1. Probe current rotation
+                    current_ccw_rot = 0.0
+                    try:
+                        cmd_probe = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', path]
+                        res = subprocess.run(cmd_probe, capture_output=True, text=True)
+                        data = json.loads(res.stdout)
+                        for st in data.get('streams', []):
+                            if st.get('codec_type') == 'video': # check video stream
+                                # Read tags (rare nowadays)
+                                tags = st.get('tags', {})
+                                if 'rotate' in tags:
+                                    current_ccw_rot = float(tags['rotate'])
+                                # Read side data (modern standard)
+                                for sd in st.get('side_data_list', []):
+                                    if 'rotation' in sd:
+                                        # FFprobe reports CCW as positive.
+                                        current_ccw_rot = float(sd['rotation'])
+                                break
+                    except Exception as e:
+                        print("Warning: Failed to probe rotation:", e)
+                    
+                    # Frontend degrees: 90 is CCW, -90 is CW. 
+                    # new_ccw = current + delta
+                    new_ccw_rot = (current_ccw_rot + degrees) % 360
+                    if new_ccw_rot < 0:
+                        new_ccw_rot += 360
+                    
+                    # 2. FFmpeg copy and set rotation
+                    # For FFmpeg, we set the input's display rotation so it copies that directly to the output.
+                    with tempfile.NamedTemporaryFile(suffix=os.path.splitext(path)[1], delete=False) as tmp:
+                        tmp_name = tmp.name
+                    
+                    cmd_ffmpeg = [
+                        'ffmpeg', '-y', 
+                        '-display_rotation', str(new_ccw_rot),
+                        '-i', path,
+                        '-c', 'copy',
+                        tmp_name
+                    ]
+                    
+                    # hide ffmpeg output
+                    subprocess.run(cmd_ffmpeg, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    
+                    # 3. Replace original file
+                    import shutil
+                    shutil.move(tmp_name, path)
+                else:
+                    from PIL import Image
+                    with Image.open(path) as img:
+                        rotated = img.rotate(degrees, expand=True)
+                        exif = img.info.get('exif')
+                        if exif:
+                            rotated.save(path, exif=exif)
+                        else:
+                            rotated.save(path)
+                
+                # If this is a video, delete the cached poster so it regenerates on next view
+                if is_video:
+                    poster = self._video_poster_path(Path(path))
+                    if poster.exists():
+                        try: poster.unlink()
+                        except Exception: pass
+                        
+                # Update SQLite so width and height are inverted
+                try:
+                    from app.mediamanager.utils.pathing import normalize_windows_path
+                    if hasattr(self, 'conn') and self.conn:
+                        norm = normalize_windows_path(path)
+                        # Swap width and height for 90-degree rotations
+                        if degrees in (90, -90, 270, -270):
+                            self.conn.execute("UPDATE media_items SET width = height, height = width WHERE path = ?", (norm,))
+                            self.conn.commit()
+                except Exception: pass
+                
+                # Finally, inform frontend that a file was modified so it can refresh the thumbnail
+                self.fileOpFinished.emit("rotate", True, path, path)
+            except Exception as e:
+                print(f"Failed to rotate media: {e}")
+
+        # Run in background to prevent freezing the UI on large videos
+        threading.Thread(target=work, daemon=True).start()
 
     @Slot(str, result=str)
     def hide_by_renaming_dot(self, path: str) -> str:
@@ -1546,24 +1615,36 @@ class Bridge(QObject):
     def _probe_video_size(self, video_path: str) -> tuple[int, int, bool]:
         ffprobe = self._ffprobe_bin()
         if not ffprobe: return (0, 0, False)
-        cmd = [ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,sample_aspect_ratio:stream_tags=rotate", "-of", "json", str(video_path)]
+        cmd = [ffprobe, "-v", "quiet", "-print_format", "json", "-show_streams", str(video_path)]
         try:
             import json
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
             data = json.loads(r.stdout)
             streams = data.get("streams", [])
             if not streams: return (0, 0, False)
-            s = streams[0]
-            w_raw, h_raw = int(s.get("width", 0)), int(s.get("height", 0))
-            sar = s.get("sample_aspect_ratio", "1:1")
-            parsed_sar = 1.0
-            if sar and ":" in sar and sar != "1:1":
-                try: num, den = sar.split(":", 1); parsed_sar = float(num) / float(den)
-                except Exception: pass
-            w, h = max(2, int(w_raw * parsed_sar)), max(2, h_raw)
-            rotate = s.get("tags", {}).get("rotate", "0")
-            if rotate in ("90", "270", "-90", "-270"): w, h = h, w
-            return (w, h, (w % 2 != 0 or h % 2 != 0))
+            for s in streams:
+                if s.get("codec_type") == "video":
+                    w_raw, h_raw = int(s.get("width", 0)), int(s.get("height", 0))
+                    sar = s.get("sample_aspect_ratio", "1:1")
+                    parsed_sar = 1.0
+                    if sar and ":" in sar and sar != "1:1":
+                        try: num, den = sar.split(":", 1); parsed_sar = float(num) / float(den)
+                        except Exception: pass
+                    w, h = max(2, int(w_raw * parsed_sar)), max(2, h_raw)
+                    
+                    cw_rot = 0
+                    tags = s.get("tags", {})
+                    if "rotate" in tags:
+                        cw_rot = int(tags["rotate"]) % 360
+                    for sd in s.get("side_data_list", []):
+                        if "rotation" in sd:
+                            cw_rot = int(abs(float(sd["rotation"]))) % 360
+                    
+                    if cw_rot in (90, 270): 
+                        w, h = h, w
+                        
+                    return (w, h, (w % 2 != 0 or h % 2 != 0))
+            return (0, 0, False)
         except Exception: return (0, 0, False)
 
     @Slot(str, bool, bool, bool, result=bool)
@@ -1715,7 +1796,7 @@ class Bridge(QObject):
                 real = r.get("_real_path")
                 p = real if isinstance(real, Path) else Path(r["path"])
                 try:
-                    mtime = int(p.stat().st_mtime)
+                    mtime = int(p.stat().st_mtime_ns)
                 except Exception:
                     mtime = int(r.get("modified_time") or 0)
                     
@@ -1838,7 +1919,14 @@ class Bridge(QObject):
         try:
             p = Path(video_path)
             out = self._ensure_video_poster(p)
-            return QUrl.fromLocalFile(str(out)).toString() if out else ""
+            if out:
+                try:
+                    mtime = int(out.stat().st_mtime_ns)
+                except Exception:
+                    import time
+                    mtime = int(time.time() * 1000)
+                return f"{QUrl.fromLocalFile(str(out)).toString()}?t={mtime}"
+            return ""
         except Exception: return ""
 
     @Slot(result=dict)
