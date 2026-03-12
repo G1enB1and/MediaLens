@@ -204,6 +204,24 @@ def list_media_in_scope(
             meta.title,
             meta.description,
             meta.notes,
+            ai.ai_prompt,
+            ai.ai_negative_prompt,
+            ai.tool_name_found,
+            ai.tool_name_inferred,
+            ai.model_name,
+            ai.checkpoint_name,
+            ai.sampler,
+            ai.scheduler,
+            ai.cfg_scale,
+            ai.steps,
+            ai.seed,
+            ai.source_formats_json,
+            ai.metadata_families_json,
+            (
+                SELECT GROUP_CONCAT(l.name, ', ')
+                FROM media_ai_loras l
+                WHERE l.media_id = m.id
+            ) as ai_loras,
             (
                 SELECT GROUP_CONCAT(t.name, ', ')
                 FROM tags t
@@ -212,6 +230,7 @@ def list_media_in_scope(
             ) as tags
         FROM media_items m
         LEFT JOIN media_metadata meta ON m.id = meta.media_id
+        LEFT JOIN media_ai_metadata ai ON m.id = ai.media_id
         WHERE {where_sql}
         ORDER BY m.path
         {limit_sql}
@@ -231,7 +250,21 @@ def list_media_in_scope(
             "title": r[8],
             "description": r[9],
             "notes": r[10],
-            "tags": r[11],
+            "ai_prompt": r[11],
+            "ai_negative_prompt": r[12],
+            "tool_name_found": r[13],
+            "tool_name_inferred": r[14],
+            "model_name": r[15],
+            "checkpoint_name": r[16],
+            "sampler": r[17],
+            "scheduler": r[18],
+            "cfg_scale": r[19],
+            "steps": r[20],
+            "seed": r[21],
+            "source_formats": r[22],
+            "metadata_families": r[23],
+            "ai_loras": r[24],
+            "tags": r[25],
         }
         for r in rows
     ]

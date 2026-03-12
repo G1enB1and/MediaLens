@@ -15,6 +15,90 @@ let gCurrentTargetFolderName = '';
 let gExternalEditors = {};
 let gCurrentDragCount = 0;
 let gPlayingInplaceCard = null;
+let gActiveMetadataMode = 'image';
+
+const METADATA_SETTINGS_CONFIG = {
+  image: {
+    groups: {
+      general: {
+        label: 'General',
+        fields: [
+          ['res', 'Resolution', true], ['size', 'File Size', true], ['description', 'Description', true],
+          ['tags', 'Tags', true], ['notes', 'Notes', true], ['embeddedtags', 'Embedded Tags', true],
+          ['embeddedcomments', 'Embedded Comments', true],
+        ],
+      },
+      camera: {
+        label: 'Camera',
+        fields: [
+          ['camera', 'Camera Model', false], ['location', 'Location (GPS)', false], ['iso', 'ISO Speed', false],
+          ['shutter', 'Shutter Speed', false], ['aperture', 'Aperture', false], ['software', 'Software / Editor', false],
+          ['lens', 'Lens Info', false], ['dpi', 'DPI', false],
+        ],
+      },
+      ai: {
+        label: 'AI',
+        fields: [
+          ['aistatus', 'AI Detection', true], ['aisource', 'AI Tool / Source', true], ['aifamilies', 'AI Metadata Families', true],
+          ['aidetectionreasons', 'AI Detection Reasons', false], ['ailoras', 'AI LoRAs', true], ['aimodel', 'AI Model', true],
+          ['aicheckpoint', 'AI Checkpoint', false], ['aisampler', 'AI Sampler', true], ['aischeduler', 'AI Scheduler', true],
+          ['aicfg', 'AI CFG', true], ['aisteps', 'AI Steps', true], ['aiseed', 'AI Seed', true],
+          ['aiupscaler', 'AI Upscaler', false], ['aidenoise', 'AI Denoise', false], ['aiprompt', 'AI Prompt', true],
+          ['ainegprompt', 'AI Negative Prompt', true], ['aiparams', 'AI Parameters', true], ['aiworkflows', 'AI Workflows', false],
+          ['aiprovenance', 'AI Provenance', false], ['aicharcards', 'AI Character Cards', false], ['airawpaths', 'AI Metadata Paths', false],
+        ],
+      },
+    },
+    groupOrder: ['general', 'camera', 'ai'],
+  },
+  video: {
+    groups: {
+      general: {
+        label: 'General',
+        fields: [
+          ['res', 'Resolution', true], ['size', 'File Size', true], ['duration', 'Duration', true], ['fps', 'Frames Per Second', true],
+          ['codec', 'Codec', true], ['audio', 'Audio', true], ['description', 'Description', true], ['tags', 'Tags', true], ['notes', 'Notes', true],
+        ],
+      },
+      ai: {
+        label: 'AI',
+        fields: [
+          ['aistatus', 'AI Detection', true], ['aisource', 'AI Tool / Source', true], ['aifamilies', 'AI Metadata Families', true],
+          ['aimodel', 'AI Model', true], ['aicheckpoint', 'AI Checkpoint', false], ['aisampler', 'AI Sampler', true],
+          ['aischeduler', 'AI Scheduler', true], ['aicfg', 'AI CFG', true], ['aisteps', 'AI Steps', true], ['aiseed', 'AI Seed', true],
+          ['aiprompt', 'AI Prompt', true], ['ainegprompt', 'AI Negative Prompt', true], ['aiparams', 'AI Parameters', true],
+          ['aiworkflows', 'AI Workflows', false], ['aiprovenance', 'AI Provenance', false], ['airawpaths', 'AI Metadata Paths', false],
+        ],
+      },
+    },
+    groupOrder: ['general', 'ai'],
+  },
+  gif: {
+    groups: {
+      general: {
+        label: 'General',
+        fields: [
+          ['res', 'Resolution', true], ['size', 'File Size', true], ['duration', 'Duration', true], ['fps', 'Frames Per Second', true],
+          ['description', 'Description', true], ['tags', 'Tags', true], ['notes', 'Notes', true], ['embeddedtags', 'Embedded Tags', true],
+          ['embeddedcomments', 'Embedded Comments', true],
+        ],
+      },
+      ai: {
+        label: 'AI',
+        fields: [
+          ['aistatus', 'AI Detection', true], ['aisource', 'AI Tool / Source', true], ['aifamilies', 'AI Metadata Families', true],
+          ['aidetectionreasons', 'AI Detection Reasons', false], ['ailoras', 'AI LoRAs', true], ['aimodel', 'AI Model', true],
+          ['aicheckpoint', 'AI Checkpoint', false], ['aisampler', 'AI Sampler', true], ['aischeduler', 'AI Scheduler', true],
+          ['aicfg', 'AI CFG', true], ['aisteps', 'AI Steps', true], ['aiseed', 'AI Seed', true], ['aiupscaler', 'AI Upscaler', false],
+          ['aidenoise', 'AI Denoise', false], ['aiprompt', 'AI Prompt', true], ['ainegprompt', 'AI Negative Prompt', true],
+          ['aiparams', 'AI Parameters', true], ['aiworkflows', 'AI Workflows', false], ['aiprovenance', 'AI Provenance', false],
+          ['aicharcards', 'AI Character Cards', false], ['airawpaths', 'AI Metadata Paths', false],
+        ],
+      },
+    },
+    groupOrder: ['general', 'ai'],
+  },
+};
 
 // Loading progress tracking
 let gTotalOnPage = 0;
@@ -1508,108 +1592,244 @@ function wireSettings() {
     });
   });
 
-  // Wire up Metadata toggles
-  const metaToggles = [
-    'metaShowRes', 'metaShowSize', 'metaShowDescription', 'metaShowTags', 'metaShowNotes',
-    'metaShowCamera', 'metaShowLocation', 'metaShowISO',
-    'metaShowShutter', 'metaShowAperture', 'metaShowSoftware', 'metaShowLens',
-    'metaShowDPI', 'metaShowEmbeddedTags', 'metaShowEmbeddedComments',
-    'metaShowEmbeddedTool', 'metaShowCombinedDB',
-    'metaShowAIStatus', 'metaShowAISource', 'metaShowAIFamilies', 'metaShowAIDetectionReasons', 'metaShowAILoras',
-    'metaShowAIPrompt', 'metaShowAINegPrompt', 'metaShowAIParams',
-    'metaShowAIWorkflows', 'metaShowAIProvenance', 'metaShowAICharCards', 'metaShowAIRawPaths',
-    'metaShowSep1', 'metaShowSep2', 'metaShowSep3'
-  ];
-  metaToggles.forEach(id => {
-    const el = document.getElementById(id);
-    if (el) {
-      el.addEventListener('change', () => {
-        if (!gBridge || !gBridge.set_setting_bool) return;
-        // Use lowercase for key compatibility with bridge (e.g. metaShowRes -> res)
-        const key = `metadata.display.${id.replace('metaShow', '').toLowerCase()}`;
-        gBridge.set_setting_bool(key, el.checked, function () {
-          // Future: trigger metadata panel refresh if open
-        });
-      });
+  wireMetadataSettings();
+}
+
+function metadataConfigFor(mode) {
+  return METADATA_SETTINGS_CONFIG[mode] || METADATA_SETTINGS_CONFIG.image;
+}
+
+function metadataGroupOrderKey(mode) {
+  return `metadata.layout.${mode}.group_order`;
+}
+
+function metadataFieldOrderKey(mode, groupKey) {
+  return `metadata.layout.${mode}.field_order.${groupKey}`;
+}
+
+function metadataGroupEnabledKey(mode, groupKey) {
+  return `metadata.display.${mode}.groups.${groupKey}`;
+}
+
+function metadataGroupCollapsedKey(mode, groupKey) {
+  return `metadata.display.${mode}.groupcollapsed.${groupKey}`;
+}
+
+function metadataFieldEnabledKey(mode, fieldKey) {
+  return `metadata.display.${mode}.${fieldKey}`;
+}
+
+function getMetadataGroupOrder(settings, mode) {
+  const cfg = metadataConfigFor(mode);
+  const raw = settings && settings[metadataGroupOrderKey(mode)];
+  let order = [];
+  try { order = raw ? JSON.parse(raw) : []; } catch (e) { order = []; }
+  if (!Array.isArray(order)) order = [];
+  cfg.groupOrder.forEach(key => { if (!order.includes(key)) order.push(key); });
+  return order.filter(key => cfg.groups[key]);
+}
+
+function getMetadataFieldOrder(settings, mode, groupKey) {
+  const cfg = metadataConfigFor(mode);
+  const defaults = cfg.groups[groupKey].fields.map(([key]) => key);
+  const raw = settings && settings[metadataFieldOrderKey(mode, groupKey)];
+  let order = [];
+  try { order = raw ? JSON.parse(raw) : []; } catch (e) { order = []; }
+  if (!Array.isArray(order)) order = [];
+  defaults.forEach(key => { if (!order.includes(key)) order.push(key); });
+  return order.filter(key => defaults.includes(key));
+}
+
+function renderMetadataSettings(settings) {
+  const mount = document.getElementById('metadataSettingsMount');
+  if (!mount) return;
+  const cfg = metadataConfigFor(gActiveMetadataMode);
+  const groupOrder = getMetadataGroupOrder(settings, gActiveMetadataMode);
+  mount.innerHTML = '';
+
+  groupOrder.forEach(groupKey => {
+    const groupCfg = cfg.groups[groupKey];
+    if (!groupCfg) return;
+    const section = document.createElement('section');
+    section.className = 'metadata-group';
+    section.draggable = true;
+    section.dataset.groupKey = groupKey;
+
+    const collapsed = !!(settings && settings[metadataGroupCollapsedKey(gActiveMetadataMode, groupKey)]);
+    if (collapsed) section.classList.add('collapsed');
+
+    const header = document.createElement('div');
+    header.className = 'metadata-group-header';
+    header.innerHTML = `
+      <div class="drag-handle" title="Drag group">☰</div>
+      <label class="toggle">
+        <input type="checkbox" class="metadata-group-toggle" ${((settings && settings[metadataGroupEnabledKey(gActiveMetadataMode, groupKey)]) !== false) ? 'checked' : ''} />
+        <span class="metadata-group-title">${groupCfg.label}</span>
+      </label>
+      <button class="collapse-btn" type="button">${collapsed ? '+' : '−'}</button>
+    `;
+    section.appendChild(header);
+
+    const body = document.createElement('div');
+    body.className = 'metadata-group-body';
+    body.dataset.groupKey = groupKey;
+    const fieldMap = Object.fromEntries(groupCfg.fields.map(field => [field[0], field]));
+    getMetadataFieldOrder(settings, gActiveMetadataMode, groupKey).forEach(fieldKey => {
+      const fieldCfg = fieldMap[fieldKey];
+      if (!fieldCfg) return;
+      const [key, label, defaultEnabled] = fieldCfg;
+      const row = document.createElement('div');
+      row.className = 'sortable-item';
+      row.draggable = true;
+      row.dataset.key = key;
+      row.dataset.groupKey = groupKey;
+      const enabled = settings && settings[metadataFieldEnabledKey(gActiveMetadataMode, key)];
+      row.innerHTML = `
+        <div class="drag-handle" title="Drag field">☰</div>
+        <label class="toggle">
+          <input type="checkbox" class="metadata-field-toggle" data-field-key="${key}" ${enabled !== undefined ? (enabled ? 'checked' : '') : (defaultEnabled ? 'checked' : '')} />
+          <span>${label}</span>
+        </label>
+      `;
+      body.appendChild(row);
+    });
+    section.appendChild(body);
+    mount.appendChild(section);
+  });
+}
+
+function saveMetadataGroupOrder() {
+  const mount = document.getElementById('metadataSettingsMount');
+  if (!mount || !gBridge || !gBridge.set_setting_str) return;
+  const order = Array.from(mount.querySelectorAll('.metadata-group')).map(el => el.dataset.groupKey);
+  gBridge.set_setting_str(metadataGroupOrderKey(gActiveMetadataMode), JSON.stringify(order), () => {});
+}
+
+function saveMetadataFieldOrder(groupKey) {
+  const body = document.querySelector(`.metadata-group-body[data-group-key="${groupKey}"]`);
+  if (!body || !gBridge || !gBridge.set_setting_str) return;
+  const order = Array.from(body.querySelectorAll('.sortable-item')).map(el => el.dataset.key);
+  gBridge.set_setting_str(metadataFieldOrderKey(gActiveMetadataMode, groupKey), JSON.stringify(order), () => {});
+}
+
+function wireMetadataSettings() {
+  const mount = document.getElementById('metadataSettingsMount');
+  if (!mount) return;
+
+  document.querySelectorAll('input[name="metadata_mode"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      if (!radio.checked) return;
+      gActiveMetadataMode = radio.value;
+      if (gBridge && gBridge.set_setting_str) {
+        gBridge.set_setting_str('metadata.layout.active_mode', gActiveMetadataMode, () => {});
+      }
+      if (gBridge && gBridge.get_settings) {
+        gBridge.get_settings(renderMetadataSettings);
+      }
+    });
+  });
+
+  let dragGroup = null;
+  let dragField = null;
+
+  mount.addEventListener('change', (e) => {
+    const groupToggle = e.target.closest('.metadata-group-toggle');
+    if (groupToggle) {
+      const section = groupToggle.closest('.metadata-group');
+      if (gBridge && gBridge.set_setting_bool && section) {
+        gBridge.set_setting_bool(metadataGroupEnabledKey(gActiveMetadataMode, section.dataset.groupKey), !!groupToggle.checked, () => {});
+      }
+      return;
+    }
+    const fieldToggle = e.target.closest('.metadata-field-toggle');
+    if (fieldToggle && gBridge && gBridge.set_setting_bool) {
+      gBridge.set_setting_bool(metadataFieldEnabledKey(gActiveMetadataMode, fieldToggle.dataset.fieldKey), !!fieldToggle.checked, () => {});
     }
   });
 
-  wireSortableMetadata();
-}
+  mount.addEventListener('click', (e) => {
+    const btn = e.target.closest('.collapse-btn');
+    if (!btn) return;
+    const section = btn.closest('.metadata-group');
+    if (!section) return;
+    section.classList.toggle('collapsed');
+    btn.textContent = section.classList.contains('collapsed') ? '+' : '−';
+    if (gBridge && gBridge.set_setting_bool) {
+      gBridge.set_setting_bool(metadataGroupCollapsedKey(gActiveMetadataMode, section.dataset.groupKey), section.classList.contains('collapsed'), () => {});
+    }
+  });
 
-function wireSortableMetadata() {
-  const list = document.getElementById('metaSortableList');
-  if (!list) return;
-
-  let dragItem = null;
-
-  list.addEventListener('dragstart', (e) => {
-    // Only allow dragging from the handle or if user clicks near it (to be simpler let's allow the whole item but handles look better)
-    dragItem = e.target.closest('.sortable-item');
-    if (dragItem) {
-      dragItem.classList.add('dragging');
+  mount.addEventListener('dragstart', (e) => {
+    const field = e.target.closest('.sortable-item');
+    const group = e.target.closest('.metadata-group');
+    if (field) {
+      dragField = field;
+      field.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      return;
+    }
+    if (group) {
+      dragGroup = group;
+      group.classList.add('dragging');
       e.dataTransfer.effectAllowed = 'move';
     }
   });
 
-  list.addEventListener('dragend', (e) => {
-    if (dragItem) {
-      dragItem.classList.remove('dragging');
+  mount.addEventListener('dragend', () => {
+    if (dragField) {
+      const groupKey = dragField.dataset.groupKey;
+      dragField.classList.remove('dragging');
+      dragField = null;
+      saveMetadataFieldOrder(groupKey);
     }
-    dragItem = null;
-    document.querySelectorAll('.sortable-item').forEach(i => i.classList.remove('drag-over'));
-    saveMetadataOrder();
+    if (dragGroup) {
+      dragGroup.classList.remove('dragging');
+      dragGroup = null;
+      saveMetadataGroupOrder();
+    }
+    mount.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
   });
 
-  list.addEventListener('dragover', (e) => {
+  mount.addEventListener('dragover', (e) => {
     e.preventDefault();
-    const target = e.target.closest('.sortable-item');
-    if (target && target !== dragItem) {
-      target.classList.add('drag-over');
+    if (dragField) {
+      const target = e.target.closest('.sortable-item');
+      if (target && target !== dragField && target.dataset.groupKey === dragField.dataset.groupKey) {
+        target.classList.add('drag-over');
+      }
+      return;
+    }
+    if (dragGroup) {
+      const target = e.target.closest('.metadata-group');
+      if (target && target !== dragGroup) {
+        target.classList.add('drag-over');
+      }
     }
   });
 
-  list.addEventListener('dragleave', (e) => {
-    const target = e.target.closest('.sortable-item');
-    if (target) {
-      target.classList.remove('drag-over');
-    }
+  mount.addEventListener('dragleave', (e) => {
+    const target = e.target.closest('.drag-over');
+    if (target) target.classList.remove('drag-over');
   });
 
-  list.addEventListener('drop', (e) => {
+  mount.addEventListener('drop', (e) => {
     e.preventDefault();
-    const target = e.target.closest('.sortable-item');
-    if (target && target !== dragItem) {
-      const rect = target.getBoundingClientRect();
-      const next = (e.clientY - rect.top) > (rect.height / 2);
-      list.insertBefore(dragItem, next ? target.nextSibling : target);
+    if (dragField) {
+      const target = e.target.closest('.sortable-item');
+      if (target && target !== dragField && target.dataset.groupKey === dragField.dataset.groupKey) {
+        const rect = target.getBoundingClientRect();
+        const next = (e.clientY - rect.top) > (rect.height / 2);
+        target.parentElement.insertBefore(dragField, next ? target.nextSibling : target);
+      }
+      return;
     }
-  });
-}
-
-function saveMetadataOrder() {
-  const items = document.querySelectorAll('#metaSortableList .sortable-item');
-  const order = Array.from(items).map(i => i.getAttribute('data-key'));
-  if (gBridge && gBridge.set_setting_str) {
-    gBridge.set_setting_str('metadata.display.order', JSON.stringify(order), () => { });
-  }
-}
-
-function applyMetadataOrder(orderJson) {
-  if (!orderJson) return;
-  let order = [];
-  try {
-    order = typeof orderJson === 'string' ? JSON.parse(orderJson) : orderJson;
-  } catch (e) { return; }
-
-  if (!Array.isArray(order)) return;
-  const list = document.getElementById('metaSortableList');
-  if (!list) return;
-
-  order.forEach(key => {
-    const item = list.querySelector(`.sortable-item[data-key="${key}"]`);
-    if (item) {
-      list.appendChild(item);
+    if (dragGroup) {
+      const target = e.target.closest('.metadata-group');
+      if (target && target !== dragGroup) {
+        const rect = target.getBoundingClientRect();
+        const next = (e.clientY - rect.top) > (rect.height / 2);
+        mount.insertBefore(dragGroup, next ? target.nextSibling : target);
+      }
     }
   });
 }
@@ -1897,31 +2117,11 @@ async function main() {
       updateSidebarButtonIcons('left', !!(s && s['ui.show_left_panel']));
       updateSidebarButtonIcons('right', !!(s && s['ui.show_right_panel']));
 
-      // Init new metadata toggles
-      const metaToggles = [
-        'metaShowRes', 'metaShowSize', 'metaShowDescription', 'metaShowTags', 'metaShowNotes',
-        'metaShowCamera', 'metaShowLocation', 'metaShowISO',
-        'metaShowShutter', 'metaShowAperture', 'metaShowSoftware', 'metaShowLens',
-        'metaShowDPI', 'metaShowEmbeddedTags', 'metaShowEmbeddedComments',
-        'metaShowEmbeddedTool', 'metaShowCombinedDB',
-        'metaShowAIStatus', 'metaShowAISource', 'metaShowAIFamilies', 'metaShowAIDetectionReasons', 'metaShowAILoras',
-        'metaShowAIModel', 'metaShowAICheckpoint', 'metaShowAISampler', 'metaShowAIScheduler', 'metaShowAICFG',
-        'metaShowAISteps', 'metaShowAISeed', 'metaShowAIUpscaler', 'metaShowAIDenoise',
-        'metaShowAIPrompt', 'metaShowAINegPrompt', 'metaShowAIParams',
-        'metaShowAIWorkflows', 'metaShowAIProvenance', 'metaShowAICharCards', 'metaShowAIRawPaths',
-        'metaShowSep1', 'metaShowSep2', 'metaShowSep3'
-      ];
-      metaToggles.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) {
-          const key = `metadata.display.${id.replace('metaShow', '').toLowerCase()}`;
-          // Default to checked if not set yet (optional, based on user preference)
-          const val = s && s[key];
-          if (val !== undefined) {
-            el.checked = !!val;
-          }
-        }
-      });
+      const savedMode = (s && s['metadata.layout.active_mode']) || 'image';
+      gActiveMetadataMode = ['image', 'video', 'gif'].includes(savedMode) ? savedMode : 'image';
+      const modeRadio = document.getElementById(`metadataMode${gActiveMetadataMode.charAt(0).toUpperCase()}${gActiveMetadataMode.slice(1)}`);
+      if (modeRadio) modeRadio.checked = true;
+      renderMetadataSettings(s || {});
 
       // Update settings
       const autoUpdate = document.getElementById('toggleAutoUpdate');
@@ -1935,11 +2135,6 @@ async function main() {
         });
       }
 
-      // Load metadata order
-      const order = s && s['metadata.display.order'];
-      if (order) {
-        applyMetadataOrder(order);
-      }
     });
     
     // Fetch external editors

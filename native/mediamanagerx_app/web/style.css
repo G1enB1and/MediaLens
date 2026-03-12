@@ -401,6 +401,62 @@ body.no-glass header {
   gap: 2px;
 }
 
+.metadata-mode-tabs {
+  margin-bottom: 14px;
+}
+
+.metadata-settings-mount {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.metadata-group {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--card-bg), transparent 8%);
+  overflow: hidden;
+}
+
+.metadata-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--hover-bg), transparent 35%);
+}
+
+.metadata-group-title {
+  flex: 1;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.metadata-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+}
+
+.metadata-group.collapsed .metadata-group-body {
+  display: none;
+}
+
+.collapse-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--input-bg);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.collapse-btn:hover {
+  border-color: var(--accent);
+}
+
 .sortable-item {
   display: flex;
   align-items: center;
