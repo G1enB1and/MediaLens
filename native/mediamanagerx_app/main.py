@@ -2915,11 +2915,14 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(self.btn_save_meta)
 
         # AI/EXIF Actions
-        action_layout = QHBoxLayout()
+        action_layout = QVBoxLayout()
+        action_layout.setContentsMargins(0, 0, 0, 0)
+        action_layout.setSpacing(6)
         self.btn_import_exif = QPushButton("Import Metadata")
         self.btn_import_exif.setObjectName("btnImportExif")
         self.btn_import_exif.setToolTip("Append tags/comments from file to database")
         self.btn_import_exif.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_import_exif.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.btn_import_exif.clicked.connect(self._import_exif_to_db)
         action_layout.addWidget(self.btn_import_exif)
 
@@ -2927,6 +2930,7 @@ class MainWindow(QMainWindow):
         self.btn_merge_hidden_meta.setObjectName("btnMergeHiddenMeta")
         self.btn_merge_hidden_meta.setToolTip("Write combined hidden metadata into the Windows-visible comments field using the existing embed path")
         self.btn_merge_hidden_meta.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_merge_hidden_meta.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.btn_merge_hidden_meta.clicked.connect(self._merge_hidden_metadata_into_visible_comments)
         action_layout.addWidget(self.btn_merge_hidden_meta)
 
@@ -2934,6 +2938,7 @@ class MainWindow(QMainWindow):
         self.btn_save_to_exif.setObjectName("btnSaveToExif")
         self.btn_save_to_exif.setToolTip("Write tags and comments from these fields into the file's embedded metadata")
         self.btn_save_to_exif.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_save_to_exif.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.btn_save_to_exif.clicked.connect(self._save_to_exif_cmd)
         action_layout.addWidget(self.btn_save_to_exif)
         right_layout.addLayout(action_layout)
@@ -4984,16 +4989,16 @@ class MainWindow(QMainWindow):
                 padding: 4px;
                 color: {text};
             }}
-            QPushButton#btnSaveMeta, QPushButton#btnImportExif, QPushButton#btnSaveToExif {{
+            QPushButton#btnSaveMeta, QPushButton#btnImportExif, QPushButton#btnMergeHiddenMeta, QPushButton#btnSaveToExif {{
                 background-color: {Theme.get_btn_save_bg(accent)};
                 color: {text};
                 border: 1px solid {Theme.get_border(accent)};
                 border-radius: 4px;
-                padding: 5px 10px;
-                font-size: 13px;
+                padding: 4px 8px;
+                font-size: 11px;
                 font-weight: 500;
             }}
-            QPushButton#btnSaveMeta:hover, QPushButton#btnImportExif:hover, QPushButton#btnSaveToExif:hover {{
+            QPushButton#btnSaveMeta:hover, QPushButton#btnImportExif:hover, QPushButton#btnMergeHiddenMeta:hover, QPushButton#btnSaveToExif:hover {{
                 background-color: {Theme.get_btn_save_hover(accent)};
                 color: {"#000" if is_light else "#fff"};
                 border-color: {accent_str};
