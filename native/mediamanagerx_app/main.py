@@ -18,6 +18,7 @@ import time
 import re
 import json
 import html
+import shlex
 from packaging.version import Version
 from pathlib import Path
 
@@ -984,7 +985,7 @@ class Bridge(QObject):
     @Slot(result=dict)
     def get_settings(self) -> dict:
         try:
-            return {
+            data = {
                 "gallery.randomize": self._randomize_enabled(),
                 "gallery.restore_last": self._restore_last_enabled(),
                 "gallery.hide_dot": self._hide_dot_enabled(),
@@ -1032,6 +1033,10 @@ class Bridge(QObject):
                 "metadata.display.order": self.settings.value("metadata/display/order", "[]", type=str),
                 "updates.check_on_launch": bool(self.settings.value("updates/check_on_launch", True, type=bool)),
             }
+            for qkey in self.settings.allKeys():
+                if qkey.startswith("metadata/display/") or qkey.startswith("metadata/layout/"):
+                    data[qkey.replace("/", ".")] = self._coerce_setting_value(self.settings.value(qkey))
+            return data
         except Exception:
             return {
                 "gallery.randomize": False,
@@ -1110,6 +1115,14 @@ class Bridge(QObject):
     def should_check_on_launch(self) -> bool:
         return self.settings.value("updates.check_on_launch", True, type=bool)
 
+    @staticmethod
+    def _coerce_setting_value(value):
+        if isinstance(value, str):
+            low = value.lower()
+            if low in ("true", "false"):
+                return low == "true"
+        return value
+
     @Slot(str, bool, result=bool)
     def set_setting_bool(self, key: str, value: bool) -> bool:
         try:
@@ -1127,7 +1140,7 @@ class Bridge(QObject):
     @Slot(str, str, result=bool)
     def set_setting_str(self, key: str, value: str) -> bool:
         try:
-            if key not in ("gallery.start_folder", "ui.accent_color", "ui.theme_mode", "metadata.display.order"):
+            if key not in ("gallery.start_folder", "ui.accent_color", "ui.theme_mode", "metadata.display.order") and not key.startswith("metadata.layout."):
                 return False
             qkey = key.replace(".", "/")
             self.settings.setValue(qkey, str(value or ""))
@@ -1136,7 +1149,7 @@ class Bridge(QObject):
             elif key == "ui.theme_mode":
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, value == "light")
-            elif key == "metadata.display.order":
+            elif key == "metadata.display.order" or key.startswith("metadata.layout."):
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, True)
             return True
@@ -1904,9 +1917,82 @@ class Bridge(QObject):
         elif filter_type == "video": candidates = [r for r in candidates if not r["path"].lower().endswith(tuple(image_exts))]
         elif filter_type == "animated": candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
         if search_query.strip():
-            q = search_query.strip().lower()
-            candidates = [r for r in candidates if q in r["path"].lower() or q in (r.get("title") or "").lower() or q in (r.get("description") or "").lower() or q in (r.get("notes") or "").lower() or q in (r.get("tags") or "").lower()]
+            candidates = [r for r in candidates if self._matches_media_search(r, search_query)]
         return candidates
+
+    def _matches_media_search(self, row: dict, search_query: str) -> bool:
+        try:
+            terms = shlex.split(search_query)
+        except Exception:
+            terms = search_query.split()
+        if not terms:
+            return True
+
+        def _text(value) -> str:
+            return str(value or "").strip().lower()
+
+        generic_fields = [
+            row.get("path"),
+            row.get("title"),
+            row.get("description"),
+            row.get("notes"),
+            row.get("tags"),
+            row.get("ai_prompt"),
+            row.get("ai_negative_prompt"),
+            row.get("tool_name_found"),
+            row.get("tool_name_inferred"),
+            row.get("model_name"),
+            row.get("checkpoint_name"),
+            row.get("sampler"),
+            row.get("scheduler"),
+            row.get("cfg_scale"),
+            row.get("steps"),
+            row.get("seed"),
+            row.get("source_formats"),
+            row.get("metadata_families"),
+            row.get("ai_loras"),
+        ]
+        generic_haystack = "\n".join(_text(value) for value in generic_fields if value not in (None, ""))
+
+        field_map = {
+            "path": [row.get("path")],
+            "title": [row.get("title")],
+            "description": [row.get("description")],
+            "notes": [row.get("notes")],
+            "tags": [row.get("tags")],
+            "prompt": [row.get("ai_prompt")],
+            "negative": [row.get("ai_negative_prompt")],
+            "negprompt": [row.get("ai_negative_prompt")],
+            "tool": [row.get("tool_name_found"), row.get("tool_name_inferred")],
+            "model": [row.get("model_name")],
+            "checkpoint": [row.get("checkpoint_name")],
+            "sampler": [row.get("sampler")],
+            "scheduler": [row.get("scheduler")],
+            "cfg": [row.get("cfg_scale")],
+            "steps": [row.get("steps")],
+            "seed": [row.get("seed")],
+            "source": [row.get("source_formats")],
+            "family": [row.get("metadata_families")],
+            "lora": [row.get("ai_loras")],
+        }
+
+        for raw_term in terms:
+            term = raw_term.strip()
+            if not term:
+                continue
+            if ":" in term:
+                key, value = term.split(":", 1)
+                key = key.strip().lower()
+                value = value.strip().lower()
+                if not value:
+                    continue
+                haystack = "\n".join(_text(item) for item in field_map.get(key, []))
+                if value not in haystack:
+                    return False
+            else:
+                if term.lower() not in generic_haystack:
+                    return False
+        return True
 
     @Slot(list, str)
     def start_scan(self, folders: list, search_query: str = "") -> None:
@@ -2610,6 +2696,18 @@ class MainWindow(QMainWindow):
         self.meta_dpi_lbl = QLabel("")
         self.meta_dpi_lbl.setObjectName("metaDPILabel")
 
+        self.meta_duration_lbl = QLabel("")
+        self.meta_duration_lbl.setObjectName("metaDurationLabel")
+
+        self.meta_fps_lbl = QLabel("")
+        self.meta_fps_lbl.setObjectName("metaFPSLabel")
+
+        self.meta_codec_lbl = QLabel("")
+        self.meta_codec_lbl.setObjectName("metaCodecLabel")
+
+        self.meta_audio_lbl = QLabel("")
+        self.meta_audio_lbl.setObjectName("metaAudioLabel")
+
         self.lbl_embedded_tags_cap = QLabel("Embedded-Tags (semicolon separated):")
         self.lbl_embedded_tags_cap.setObjectName("metaEmbeddedTagsCaption")
         self.meta_embedded_tags_edit = QLineEdit()
@@ -2622,22 +2720,6 @@ class MainWindow(QMainWindow):
         self.meta_embedded_comments_edit.setObjectName("metaEmbeddedCommentsEdit")
         self.meta_embedded_comments_edit.setPlaceholderText("Embedded comments...")
         self.meta_embedded_comments_edit.setMaximumHeight(70)
-
-        self.lbl_embedded_tool_cap = QLabel("Embedded-Tool-Metadata:")
-        self.lbl_embedded_tool_cap.setObjectName("metaEmbeddedToolCaption")
-        self.meta_embedded_tool_edit = QTextEdit()
-        self.meta_embedded_tool_edit.setObjectName("metaEmbeddedToolEdit")
-        self.meta_embedded_tool_edit.setReadOnly(True)
-        self.meta_embedded_tool_edit.setPlaceholderText("AI parameters/Tool info...")
-        self.meta_embedded_tool_edit.setMaximumHeight(70)
-
-        self.lbl_combined_db_cap = QLabel("Combined-From-DB (Read-Only):")
-        self.lbl_combined_db_cap.setObjectName("metaCombinedDBCaption")
-        self.meta_combined_db = QTextEdit()
-        self.meta_combined_db.setObjectName("metaCombinedDBEdit")
-        self.meta_combined_db.setReadOnly(True)
-        self.meta_combined_db.setPlaceholderText("Combined DB notes/AI info...")
-        self.meta_combined_db.setMaximumHeight(100)
 
         self.lbl_ai_status_cap = QLabel("AI Detection:")
         self.lbl_ai_status_cap.setObjectName("metaAIStatusCaption")
@@ -2841,6 +2923,13 @@ class MainWindow(QMainWindow):
         self.btn_import_exif.clicked.connect(self._import_exif_to_db)
         action_layout.addWidget(self.btn_import_exif)
 
+        self.btn_merge_hidden_meta = QPushButton("Merge Hidden Metadata Into Visible Comments Field")
+        self.btn_merge_hidden_meta.setObjectName("btnMergeHiddenMeta")
+        self.btn_merge_hidden_meta.setToolTip("Write combined hidden metadata into the Windows-visible comments field using the existing embed path")
+        self.btn_merge_hidden_meta.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_merge_hidden_meta.clicked.connect(self._merge_hidden_metadata_into_visible_comments)
+        action_layout.addWidget(self.btn_merge_hidden_meta)
+
         self.btn_save_to_exif = QPushButton("Embed Data in File")
         self.btn_save_to_exif.setObjectName("btnSaveToExif")
         self.btn_save_to_exif.setToolTip("Write tags and comments from these fields into the file's embedded metadata")
@@ -3013,7 +3102,7 @@ class MainWindow(QMainWindow):
             elif key == "ui.theme_mode":
                 self._update_native_styles(self._current_accent)
                 self._update_splitter_style(self._current_accent)
-            elif key == "metadata.display.order":
+            elif key == "metadata.display.order" or key.startswith("metadata.layout."):
                 self._setup_metadata_layout()
                 if hasattr(self, "_current_paths") and self._current_paths:
                     self._show_metadata_for_path(self._current_paths)
@@ -3454,11 +3543,6 @@ class MainWindow(QMainWindow):
             # 1. REPLACE Embedded UI fields (Strictly File -> UI)
             self.meta_embedded_tags_edit.setText("; ".join(visible["tags"]))
             self.meta_embedded_comments_edit.setPlainText(visible["comment"] or "")
-            file_tool = res["tool_metadata"] or ""
-            if ai_tool_summary and file_tool and ai_tool_summary.strip() != file_tool.strip():
-                self.meta_embedded_tool_edit.setPlainText(f"{ai_tool_summary}\n\n[File Metadata]\n{file_tool}")
-            else:
-                self.meta_embedded_tool_edit.setPlainText(ai_tool_summary or file_tool)
             self.meta_ai_status_edit.setText(ai_ui.get("ai_status_summary", ""))
             self.meta_ai_source_edit.setPlainText(ai_ui.get("ai_source_summary", ""))
             self.meta_ai_families_edit.setText(ai_ui.get("ai_families_summary", ""))
@@ -3525,6 +3609,57 @@ class MainWindow(QMainWindow):
         if notes:
             sections.append(f"[Notes]\n{notes}")
         return "\n\n".join(sections)
+
+    def _build_hidden_metadata_merge_comment(self) -> str:
+        sections = []
+
+        def add_section(title: str, value: str) -> None:
+            text = str(value or "").strip()
+            if text:
+                sections.append(f"[{title}]\n{text}")
+
+        add_section("Description", self.meta_desc.toPlainText())
+        add_section("AI Prompt", self.meta_ai_prompt_edit.toPlainText())
+        add_section("AI Negative Prompt", self.meta_ai_negative_prompt_edit.toPlainText())
+
+        ai_params_lines = []
+        for label, value in (
+            ("Tool / Source", self.meta_ai_source_edit.toPlainText()),
+            ("Families", self.meta_ai_families_edit.text()),
+            ("Model", self.meta_ai_model_edit.text()),
+            ("Checkpoint", self.meta_ai_checkpoint_edit.text()),
+            ("Sampler", self.meta_ai_sampler_edit.text()),
+            ("Scheduler", self.meta_ai_scheduler_edit.text()),
+            ("CFG", self.meta_ai_cfg_edit.text()),
+            ("Steps", self.meta_ai_steps_edit.text()),
+            ("Seed", self.meta_ai_seed_edit.text()),
+            ("Upscaler", self.meta_ai_upscaler_edit.text()),
+            ("Denoise", self.meta_ai_denoise_edit.text()),
+            ("LoRAs", self.meta_ai_loras_edit.toPlainText()),
+            ("Legacy Params", self.meta_ai_params_edit.toPlainText()),
+        ):
+            text = str(value or "").strip()
+            if text:
+                ai_params_lines.append(f"{label}: {text}")
+        add_section("AI Parameters", "\n".join(ai_params_lines))
+        add_section("AI Detection Reasons", self.meta_ai_detection_reasons_edit.toPlainText())
+        add_section("AI Workflows", self.meta_ai_workflows_edit.toPlainText())
+        add_section("AI Provenance", self.meta_ai_provenance_edit.toPlainText())
+        add_section("AI Character Cards", self.meta_ai_character_cards_edit.toPlainText())
+        add_section("AI Metadata Paths", self.meta_ai_raw_paths_edit.toPlainText())
+        add_section("Notes", self.meta_notes.toPlainText())
+        return "\n\n".join(sections)
+
+    @Slot()
+    def _merge_hidden_metadata_into_visible_comments(self) -> None:
+        if not self._current_path:
+            return
+        merged = self._build_hidden_metadata_merge_comment()
+        if not merged:
+            self.meta_status_lbl.setText("No hidden metadata available to merge.")
+            return
+        self.meta_embedded_comments_edit.setPlainText(merged)
+        self._save_to_exif_cmd()
 
     @Slot()
     def _save_to_exif_cmd(self) -> None:
@@ -3708,52 +3843,68 @@ class MainWindow(QMainWindow):
         is_bulk = len(paths) > 1
         self._current_paths = paths # Store list for bulk save
         self._current_path = paths[0] if not is_bulk else None
+        metadata_kind = self._metadata_kind_for_path(paths[0] if paths else None)
+        self._current_metadata_kind = metadata_kind
+        self._setup_metadata_layout(metadata_kind)
 
         # Toggle UI for bulk mode
         self.lbl_fn_cap.setVisible(not is_bulk)
         self.meta_filename_edit.setVisible(not is_bulk)
         self.meta_path_lbl.setVisible(not is_bulk)
 
-        show_res = self._is_metadata_enabled("res", True)
-        show_size = self._is_metadata_enabled("size", True)
-        show_description = self._is_metadata_enabled("description", True)
-        show_notes = self._is_metadata_enabled("notes", True)
-        show_camera = self._is_metadata_enabled("camera", False)
-        show_location = self._is_metadata_enabled("location", False)
-        show_iso = self._is_metadata_enabled("iso", False)
-        show_shutter = self._is_metadata_enabled("shutter", False)
-        show_aperture = self._is_metadata_enabled("aperture", False)
-        show_software = self._is_metadata_enabled("software", False)
-        show_lens = self._is_metadata_enabled("lens", False)
-        show_dpi = self._is_metadata_enabled("dpi", False)
-        show_embedded_tags = self._is_metadata_enabled("embeddedtags", True)
-        show_embedded_comments = self._is_metadata_enabled("embeddedcomments", True)
-        show_embedded_tool = self._is_metadata_enabled("embeddedtool", True)
-        show_combined_db = self._is_metadata_enabled("combineddb", True)
-        show_ai_status = self._is_metadata_enabled("aistatus", True)
-        show_ai_source = self._is_metadata_enabled("aisource", True)
-        show_ai_families = self._is_metadata_enabled("aifamilies", True)
-        show_ai_detection_reasons = self._is_metadata_enabled("aidetectionreasons", False)
-        show_ai_loras = self._is_metadata_enabled("ailoras", True)
-        show_ai_model = self._is_metadata_enabled("aimodel", True)
-        show_ai_checkpoint = self._is_metadata_enabled("aicheckpoint", False)
-        show_ai_sampler = self._is_metadata_enabled("aisampler", True)
-        show_ai_scheduler = self._is_metadata_enabled("aischeduler", True)
-        show_ai_cfg = self._is_metadata_enabled("aicfg", True)
-        show_ai_steps = self._is_metadata_enabled("aisteps", True)
-        show_ai_seed = self._is_metadata_enabled("aiseed", True)
-        show_ai_upscaler = self._is_metadata_enabled("aiupscaler", False)
-        show_ai_denoise = self._is_metadata_enabled("aidenoise", False)
-        show_ai_prompt = self._is_metadata_enabled("aiprompt", True)
-        show_ai_neg_prompt = self._is_metadata_enabled("ainegprompt", True)
-        show_ai_params = self._is_metadata_enabled("aiparams", True)
-        show_ai_workflows = self._is_metadata_enabled("aiworkflows", False)
-        show_ai_provenance = self._is_metadata_enabled("aiprovenance", False)
-        show_ai_character_cards = self._is_metadata_enabled("aicharcards", False)
-        show_ai_raw_paths = self._is_metadata_enabled("airawpaths", False)
+        visible_group_keys = [group for group in self._metadata_group_order(metadata_kind) if self._is_metadata_group_enabled(metadata_kind, group, True)]
+        active_fields = {
+            field
+            for group in visible_group_keys
+            for field in self._metadata_group_fields(metadata_kind).get(group, [])
+        }
+        show_res = "res" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "res", True)
+        show_size = "size" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "size", True)
+        show_duration = "duration" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "duration", True)
+        show_fps = "fps" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "fps", True)
+        show_codec = "codec" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "codec", True)
+        show_audio = "audio" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "audio", True)
+        show_description = "description" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "description", True)
+        show_notes = "notes" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "notes", True)
+        show_camera = "camera" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "camera", False)
+        show_location = "location" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "location", False)
+        show_iso = "iso" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "iso", False)
+        show_shutter = "shutter" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "shutter", False)
+        show_aperture = "aperture" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aperture", False)
+        show_software = "software" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "software", False)
+        show_lens = "lens" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "lens", False)
+        show_dpi = "dpi" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "dpi", False)
+        show_embedded_tags = "embeddedtags" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "embeddedtags", True)
+        show_embedded_comments = "embeddedcomments" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "embeddedcomments", True)
+        show_ai_status = "aistatus" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aistatus", True)
+        show_ai_source = "aisource" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aisource", True)
+        show_ai_families = "aifamilies" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aifamilies", True)
+        show_ai_detection_reasons = "aidetectionreasons" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aidetectionreasons", False)
+        show_ai_loras = "ailoras" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "ailoras", True)
+        show_ai_model = "aimodel" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aimodel", True)
+        show_ai_checkpoint = "aicheckpoint" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aicheckpoint", False)
+        show_ai_sampler = "aisampler" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aisampler", True)
+        show_ai_scheduler = "aischeduler" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aischeduler", True)
+        show_ai_cfg = "aicfg" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aicfg", True)
+        show_ai_steps = "aisteps" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aisteps", True)
+        show_ai_seed = "aiseed" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aiseed", True)
+        show_ai_upscaler = "aiupscaler" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aiupscaler", False)
+        show_ai_denoise = "aidenoise" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aidenoise", False)
+        show_ai_prompt = "aiprompt" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aiprompt", True)
+        show_ai_neg_prompt = "ainegprompt" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "ainegprompt", True)
+        show_ai_params = "aiparams" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aiparams", True)
+        show_ai_workflows = "aiworkflows" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aiworkflows", False)
+        show_ai_provenance = "aiprovenance" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aiprovenance", False)
+        show_ai_character_cards = "aicharcards" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aicharcards", False)
+        show_ai_raw_paths = "airawpaths" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "airawpaths", False)
+        visible_groups = visible_group_keys
 
         self.meta_res_lbl.setVisible(not is_bulk and show_res)
         self.meta_size_lbl.setVisible(not is_bulk and show_size)
+        self.meta_duration_lbl.setVisible(not is_bulk and show_duration)
+        self.meta_fps_lbl.setVisible(not is_bulk and show_fps)
+        self.meta_codec_lbl.setVisible(not is_bulk and show_codec)
+        self.meta_audio_lbl.setVisible(not is_bulk and show_audio)
         self.meta_camera_lbl.setVisible(not is_bulk and show_camera)
         self.meta_location_lbl.setVisible(not is_bulk and show_location)
         self.meta_iso_lbl.setVisible(not is_bulk and show_iso)
@@ -3809,19 +3960,17 @@ class MainWindow(QMainWindow):
         self.lbl_ai_character_cards_cap.setVisible(not is_bulk and show_ai_character_cards)
         self.meta_ai_raw_paths_edit.setVisible(not is_bulk and show_ai_raw_paths)
         self.lbl_ai_raw_paths_cap.setVisible(not is_bulk and show_ai_raw_paths)
-        self.meta_embedded_tool_edit.setVisible(not is_bulk and show_embedded_tool)
-        self.lbl_embedded_tool_cap.setVisible(not is_bulk and show_embedded_tool)
-        self.meta_combined_db.setVisible(not is_bulk and show_combined_db)
-        self.lbl_combined_db_cap.setVisible(not is_bulk and show_combined_db)
-
-        # Separator visibility in show/bulk mode
-        self.meta_sep1.setVisible(not is_bulk and self._is_metadata_enabled("sep1", True))
-        self.meta_sep2.setVisible(not is_bulk and self._is_metadata_enabled("sep2", False))
-        self.meta_sep3.setVisible(not is_bulk and self._is_metadata_enabled("sep3", False))
+        self.meta_sep1.setVisible(not is_bulk and len(visible_groups) > 1)
+        self.meta_sep2.setVisible(not is_bulk and len(visible_groups) > 2)
+        self.meta_sep3.setVisible(False)
 
         # Set default text prefixes so they show even if blank
         self.meta_res_lbl.setText("Resolution: ")
         self.meta_size_lbl.setText("File Size: ")
+        self.meta_duration_lbl.setText("Duration: ")
+        self.meta_fps_lbl.setText("FPS: ")
+        self.meta_codec_lbl.setText("Codec: ")
+        self.meta_audio_lbl.setText("Audio: ")
         self.meta_camera_lbl.setText("Camera: ")
         self.meta_location_lbl.setText("Location: ")
         self.meta_iso_lbl.setText("ISO: ")
@@ -3847,7 +3996,6 @@ class MainWindow(QMainWindow):
         self.meta_ai_seed_edit.setText("")
         self.meta_ai_upscaler_edit.setText("")
         self.meta_ai_denoise_edit.setText("")
-        self.meta_embedded_tool_edit.setPlainText("")
         self.meta_ai_prompt_edit.setPlainText("")
         self.meta_ai_negative_prompt_edit.setPlainText("")
         self.meta_ai_params_edit.setPlainText("")
@@ -3861,9 +4009,8 @@ class MainWindow(QMainWindow):
         self.lbl_notes_cap.setVisible(not is_bulk and show_notes)
         self.meta_notes.setVisible(not is_bulk and show_notes)
         
-        # Tags stay visible
-        self.lbl_tags_cap.setVisible(True)
-        self.meta_tags.setVisible(True)
+        self.lbl_tags_cap.setVisible(not is_bulk and ("tags" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "tags", True)))
+        self.meta_tags.setVisible(not is_bulk and ("tags" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "tags", True)))
         self.btn_clear_bulk_tags.setVisible(is_bulk)
         
         self.meta_filename_edit.blockSignals(True)
@@ -3914,19 +4061,6 @@ class MainWindow(QMainWindow):
                 
                 self.meta_tags.setText(", ".join(data.get("tags", [])))
                 
-                # Build Combined-From-DB text
-                db_notes = data.get("notes", "").strip()
-                db_p = data.get("ai_prompt", "").strip()
-                db_neg = data.get("ai_negative_prompt", "").strip()
-                db_par = data.get("ai_params", "").strip()
-                
-                combined_db = []
-                if db_notes: combined_db.append(f"[Notes]\n{db_notes}")
-                if db_p: combined_db.append(f"[AI Prompt]\n{db_p}")
-                if db_neg: combined_db.append(f"[AI Negative Prompt]\n{db_neg}")
-                if db_par: combined_db.append(f"[AI Parameters]\n{db_par}")
-                
-                self.meta_combined_db.setPlainText("\n\n".join(combined_db))
             except Exception:
                 pass
 
@@ -3965,6 +4099,16 @@ class MainWindow(QMainWindow):
                             dpi = img.info.get("dpi")
                             if dpi:
                                 self.meta_dpi_lbl.setText(f"DPI: {dpi[0]} × {dpi[1]}")
+                            if metadata_kind == "gif":
+                                animated = self._probe_animated_image_details(str(p))
+                                if animated.get("duration"):
+                                    self.meta_duration_lbl.setText(f"Duration: {animated['duration']}")
+                                if animated.get("fps"):
+                                    self.meta_fps_lbl.setText(f"FPS: {animated['fps']}")
+                                if animated.get("codec"):
+                                    self.meta_codec_lbl.setText(f"Codec: {animated['codec']}")
+                                if animated.get("audio"):
+                                    self.meta_audio_lbl.setText(f"Audio: {animated['audio']}")
 
                         # Embedded fields should mirror the file (Windows-visible subset), never the DB.
                         try:
@@ -3975,13 +4119,6 @@ class MainWindow(QMainWindow):
                         harvested = self._harvest_universal_metadata(img)
                         self.meta_embedded_tags_edit.setText("; ".join(visible.get("tags", [])))
                         self.meta_embedded_comments_edit.setPlainText(visible.get("comment", "") or "")
-                        harvested_tool = harvested.get("tool_metadata", "") or ""
-                        db_tool = data.get("ai_tool_summary", "") if isinstance(data, dict) else ""
-                        if harvested_tool and db_tool and harvested_tool.strip() != db_tool.strip():
-                            self.meta_embedded_tool_edit.setPlainText(f"{db_tool}\n\n[File Metadata]\n{harvested_tool}")
-                        else:
-                            self.meta_embedded_tool_edit.setPlainText(harvested_tool or db_tool or "")
-
                         # Also check for separately-stored AI fields from the harvester
                         # (We do NOT overwrite the DB editable fields here, they are populated from DB earlier)
                         
@@ -4028,7 +4165,20 @@ class MainWindow(QMainWindow):
                 except Exception as e:
                     print(f"Metadata Read Error for {p.name}: {e}")
             else:
-                self.meta_res_lbl.setText("Resolution: ")
+                vw, vh, _ = self.bridge._probe_video_size(str(p))
+                if vw > 0 and vh > 0:
+                    self.meta_res_lbl.setText(f"Resolution: {vw} × {vh} px")
+                else:
+                    self.meta_res_lbl.setText("Resolution: ")
+                video_meta = self._probe_video_details(str(p))
+                if video_meta.get("duration"):
+                    self.meta_duration_lbl.setText(f"Duration: {video_meta['duration']}")
+                if video_meta.get("fps"):
+                    self.meta_fps_lbl.setText(f"FPS: {video_meta['fps']}")
+                if video_meta.get("codec"):
+                    self.meta_codec_lbl.setText(f"Codec: {video_meta['codec']}")
+                if video_meta.get("audio"):
+                    self.meta_audio_lbl.setText(f"Audio: {video_meta['audio']}")
         
             self.btn_save_meta.setText("Save Changes to Database")
         else:
@@ -4067,8 +4217,6 @@ class MainWindow(QMainWindow):
         self.meta_ai_seed_edit.setText("")
         self.meta_ai_upscaler_edit.setText("")
         self.meta_ai_denoise_edit.setText("")
-        self.meta_embedded_tool_edit.setPlainText("")
-        self.meta_combined_db.setPlainText("")
         self.meta_ai_prompt_edit.setPlainText("")
         self.meta_ai_negative_prompt_edit.setPlainText("")
         self.meta_ai_params_edit.setPlainText("")
@@ -4093,14 +4241,180 @@ class MainWindow(QMainWindow):
         except Exception:
             return default
 
-    def _setup_metadata_layout(self):
+    def _metadata_kind_for_path(self, path: str | None) -> str:
+        if not path:
+            return "image"
+        p = Path(path)
+        if self.bridge._is_animated(p):
+            return "gif"
+        if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}:
+            return "image"
+        return "video"
+
+    def _metadata_group_fields(self, kind: str) -> dict[str, list[str]]:
+        image_general = ["res", "size", "description", "tags", "notes", "embeddedtags", "embeddedcomments"]
+        image_camera = ["camera", "location", "iso", "shutter", "aperture", "software", "lens", "dpi"]
+        image_ai = [
+            "aistatus", "aisource", "aifamilies", "aidetectionreasons", "ailoras", "aimodel", "aicheckpoint",
+            "aisampler", "aischeduler", "aicfg", "aisteps", "aiseed", "aiupscaler", "aidenoise",
+            "aiprompt", "ainegprompt", "aiparams", "aiworkflows", "aiprovenance", "aicharcards", "airawpaths",
+        ]
+        if kind == "video":
+            return {
+                "general": ["res", "size", "duration", "fps", "codec", "audio", "description", "tags", "notes"],
+                "ai": image_ai,
+            }
+        if kind == "gif":
+            return {
+                "general": ["res", "size", "duration", "fps", "description", "tags", "notes", "embeddedtags", "embeddedcomments"],
+                "ai": image_ai,
+            }
+        return {"general": image_general, "camera": image_camera, "ai": image_ai}
+
+    def _metadata_default_group_order(self, kind: str) -> list[str]:
+        return list(self._metadata_group_fields(kind).keys())
+
+    def _metadata_group_order(self, kind: str) -> list[str]:
+        default_order = self._metadata_default_group_order(kind)
+        raw = str(self.bridge.settings.value(f"metadata/layout/{kind}/group_order", "[]") or "[]")
+        try:
+            order = json.loads(raw)
+        except Exception:
+            order = []
+        if not isinstance(order, list):
+            order = []
+        for key in default_order:
+            if key not in order:
+                order.append(key)
+        return [key for key in order if key in default_order]
+
+    def _metadata_field_order(self, kind: str, group: str) -> list[str]:
+        defaults = list(self._metadata_group_fields(kind).get(group, []))
+        raw = str(self.bridge.settings.value(f"metadata/layout/{kind}/field_order/{group}", "[]") or "[]")
+        try:
+            order = json.loads(raw)
+        except Exception:
+            order = []
+        if not isinstance(order, list):
+            order = []
+        for key in defaults:
+            if key not in order:
+                order.append(key)
+        return [key for key in order if key in defaults]
+
+    def _is_metadata_group_enabled(self, kind: str, group: str, default: bool = True) -> bool:
+        try:
+            qkey = f"metadata/display/{kind}/groups/{group}"
+            self.bridge.settings.sync()
+            val = self.bridge.settings.value(qkey)
+            if val is None:
+                return default
+            if isinstance(val, str):
+                return val.lower() in ("true", "1")
+            return bool(val)
+        except Exception:
+            return default
+
+    def _is_metadata_enabled_for_kind(self, kind: str, key: str, default: bool = True) -> bool:
+        try:
+            qkey = f"metadata/display/{kind}/{key}"
+            self.bridge.settings.sync()
+            val = self.bridge.settings.value(qkey)
+            if val is None:
+                return self._is_metadata_enabled(key, default)
+            if isinstance(val, str):
+                return val.lower() in ("true", "1")
+            return bool(val)
+        except Exception:
+            return default
+
+    @staticmethod
+    def _format_duration_seconds(seconds: float | None) -> str:
+        if not seconds or seconds <= 0:
+            return ""
+        total_ms = int(round(seconds * 1000))
+        total_seconds = total_ms // 1000
+        hours, rem = divmod(total_seconds, 3600)
+        minutes, secs = divmod(rem, 60)
+        if hours:
+            return f"{hours}:{minutes:02d}:{secs:02d}"
+        return f"{minutes}:{secs:02d}"
+
+    def _probe_video_details(self, video_path: str) -> dict[str, str]:
+        ffprobe = self.bridge._ffprobe_bin()
+        if not ffprobe:
+            return {}
+        cmd = [ffprobe, "-v", "quiet", "-print_format", "json", "-show_streams", "-show_format", str(video_path)]
+        try:
+            probe = json.loads(subprocess.run(cmd, capture_output=True, text=True, timeout=5).stdout or "{}")
+        except Exception:
+            return {}
+        video_stream = None
+        audio_stream = None
+        for stream in probe.get("streams", []):
+            if stream.get("codec_type") == "video" and video_stream is None:
+                video_stream = stream
+            elif stream.get("codec_type") == "audio" and audio_stream is None:
+                audio_stream = stream
+        fps_text = ""
+        if video_stream:
+            rate = str(video_stream.get("avg_frame_rate") or video_stream.get("r_frame_rate") or "")
+            if rate and "/" in rate:
+                try:
+                    num, den = rate.split("/", 1)
+                    den_v = float(den)
+                    if den_v:
+                        fps_text = f"{float(num) / den_v:.2f}".rstrip("0").rstrip(".")
+                except Exception:
+                    fps_text = ""
+        duration = ""
+        try:
+            duration = self._format_duration_seconds(float(probe.get("format", {}).get("duration") or 0.0))
+        except Exception:
+            duration = ""
+        return {
+            "duration": duration,
+            "fps": fps_text,
+            "codec": str((video_stream or {}).get("codec_name") or "").upper(),
+            "audio": "Yes" if audio_stream else "No",
+        }
+
+    def _probe_animated_image_details(self, path: str) -> dict[str, str]:
+        try:
+            from PIL import Image
+            with Image.open(path) as img:
+                frames = int(getattr(img, "n_frames", 1) or 1)
+                total_ms = 0
+                for idx in range(frames):
+                    try:
+                        img.seek(idx)
+                        total_ms += int(img.info.get("duration") or 0)
+                    except Exception:
+                        pass
+                fps = ""
+                if total_ms > 0 and frames > 0:
+                    fps_val = frames / (total_ms / 1000.0)
+                    fps = f"{fps_val:.2f}".rstrip("0").rstrip(".")
+                return {
+                    "duration": self._format_duration_seconds(total_ms / 1000.0),
+                    "fps": fps,
+                    "codec": "ANIMATED WEBP" if path.lower().endswith(".webp") else "GIF",
+                    "audio": "No",
+                }
+        except Exception:
+            return {}
+
+    def _setup_metadata_layout(self, kind: str | None = None):
         """Group metadata widgets and apply the saved display order."""
-        import json
-        
-        # 1. Define all reorderable groups
+        kind = kind or getattr(self, "_current_metadata_kind", "image")
+
         self._meta_groups = {
             "res": [self.meta_res_lbl],
             "size": [self.meta_size_lbl],
+            "duration": [self.meta_duration_lbl],
+            "fps": [self.meta_fps_lbl],
+            "codec": [self.meta_codec_lbl],
+            "audio": [self.meta_audio_lbl],
             "description": [self.lbl_desc_cap, self.meta_desc],
             "tags": [self.lbl_tags_cap, self.meta_tags],
             "notes": [self.lbl_notes_cap, self.meta_notes],
@@ -4114,8 +4428,6 @@ class MainWindow(QMainWindow):
             "dpi": [self.meta_dpi_lbl],
             "embeddedtags": [self.lbl_embedded_tags_cap, self.meta_embedded_tags_edit],
             "embeddedcomments": [self.lbl_embedded_comments_cap, self.meta_embedded_comments_edit],
-            "embeddedtool": [self.lbl_embedded_tool_cap, self.meta_embedded_tool_edit],
-            "combineddb": [self.lbl_combined_db_cap, self.meta_combined_db],
             "aistatus": [self.lbl_ai_status_cap, self.meta_ai_status_edit],
             "aisource": [self.lbl_ai_source_cap, self.meta_ai_source_edit],
             "aifamilies": [self.lbl_ai_families_cap, self.meta_ai_families_edit],
@@ -4141,132 +4453,124 @@ class MainWindow(QMainWindow):
             "sep2": [self.meta_sep2],
             "sep3": [self.meta_sep3],
         }
-        
-        # Default fallback order
-        default_order = [
-            "res", "size", "sep1", "description", "tags", "notes", "sep2", "camera", "location", "iso", "shutter",
-            "aperture", "software", "lens", "dpi", "embeddedtags", "embeddedcomments", "embeddedtool", "combineddb",
-            "sep3", "aistatus", "aisource", "aifamilies", "aimodel", "aicheckpoint", "aisampler", "aischeduler",
-            "aicfg", "aisteps", "aiseed", "aiupscaler", "aidenoise", "ailoras", "aiprompt", "ainegprompt", "aiparams",
-            "aiworkflows", "aiprovenance", "aicharcards", "airawpaths", "aidetectionreasons"
-        ]
-        
-        # 2. Get saved order
-        saved_order_json = self.bridge.settings.value("metadata/display/order", "[]", type=str)
-        try:
-            order = json.loads(saved_order_json)
-        except Exception:
-            order = []
-            
-        # Ensure all keys are present
-        if not order:
-            order = default_order
-        else:
-            # Append missing keys
-            for k in default_order:
-                if k not in order:
-                    order.append(k)
 
-        # 3. Clear existing layout items AND HIDE THEM to prevent visual duplication
+        # Clear existing layout items AND HIDE THEM to prevent visual duplication
         while self.meta_fields_layout.count():
             item = self.meta_fields_layout.takeAt(0)
             if item.widget():
                 item.widget().hide()
-            
-        # 4. Add widgets in the specified order
-        for key in order:
-            widgets = self._meta_groups.get(key, [])
-            for w in widgets:
-                self.meta_fields_layout.addWidget(w)
+
+        group_order = self._metadata_group_order(kind)
+        visible_groups = [group for group in group_order if self._is_metadata_group_enabled(kind, group, True)]
+        sep_widgets = [self.meta_sep1, self.meta_sep2]
+        sep_index = 0
+        for index, group in enumerate(visible_groups):
+            field_order = self._metadata_field_order(kind, group)
+            for key in field_order:
+                for widget in self._meta_groups.get(key, []):
+                    self.meta_fields_layout.addWidget(widget)
+            if index < len(visible_groups) - 1 and sep_index < len(sep_widgets):
+                self.meta_fields_layout.addWidget(sep_widgets[sep_index])
+                sep_index += 1
 
     def _clear_metadata_panel(self):
         """Reset all labels and hide/show them based on current settings."""
         self._current_path = None
         self._current_paths = []
+        kind = getattr(self, "_current_metadata_kind", "image")
+        self._setup_metadata_layout(kind)
         
         self.meta_filename_edit.setText("")
         self.meta_path_lbl.setText("Folder: ")
         self.meta_size_lbl.setText("File Size: ")
         self.meta_res_lbl.setText("Resolution: ")
+        self.meta_duration_lbl.setText("Duration: ")
+        self.meta_fps_lbl.setText("FPS: ")
+        self.meta_codec_lbl.setText("Codec: ")
+        self.meta_audio_lbl.setText("Audio: ")
         self._clear_embedded_labels()
         
         # UI visibility logic
-        self.meta_res_lbl.setVisible(self._is_metadata_enabled("res", True))
-        self.meta_size_lbl.setVisible(self._is_metadata_enabled("size", True))
-        self.meta_camera_lbl.setVisible(self._is_metadata_enabled("camera", False))
-        self.meta_location_lbl.setVisible(self._is_metadata_enabled("location", False))
-        self.meta_iso_lbl.setVisible(self._is_metadata_enabled("iso", False))
-        self.meta_shutter_lbl.setVisible(self._is_metadata_enabled("shutter", False))
-        self.meta_aperture_lbl.setVisible(self._is_metadata_enabled("aperture", False))
-        self.meta_software_lbl.setVisible(self._is_metadata_enabled("software", False))
-        self.meta_lens_lbl.setVisible(self._is_metadata_enabled("lens", False))
-        self.meta_dpi_lbl.setVisible(self._is_metadata_enabled("dpi", False))
-        self.meta_embedded_tags_edit.setVisible(self._is_metadata_enabled("embeddedtags", True))
-        self.lbl_embedded_tags_cap.setVisible(self._is_metadata_enabled("embeddedtags", True))
-        self.meta_embedded_comments_edit.setVisible(self._is_metadata_enabled("embeddedcomments", True))
-        self.lbl_embedded_comments_cap.setVisible(self._is_metadata_enabled("embeddedcomments", True))
-        self.meta_ai_status_edit.setVisible(self._is_metadata_enabled("aistatus", True))
-        self.lbl_ai_status_cap.setVisible(self._is_metadata_enabled("aistatus", True))
-        self.meta_ai_source_edit.setVisible(self._is_metadata_enabled("aisource", True))
-        self.lbl_ai_source_cap.setVisible(self._is_metadata_enabled("aisource", True))
-        self.meta_ai_families_edit.setVisible(self._is_metadata_enabled("aifamilies", True))
-        self.lbl_ai_families_cap.setVisible(self._is_metadata_enabled("aifamilies", True))
-        self.meta_ai_detection_reasons_edit.setVisible(self._is_metadata_enabled("aidetectionreasons", False))
-        self.lbl_ai_detection_reasons_cap.setVisible(self._is_metadata_enabled("aidetectionreasons", False))
-        self.meta_ai_loras_edit.setVisible(self._is_metadata_enabled("ailoras", True))
-        self.lbl_ai_loras_cap.setVisible(self._is_metadata_enabled("ailoras", True))
-        self.meta_ai_model_edit.setVisible(self._is_metadata_enabled("aimodel", True))
-        self.lbl_ai_model_cap.setVisible(self._is_metadata_enabled("aimodel", True))
-        self.meta_ai_checkpoint_edit.setVisible(self._is_metadata_enabled("aicheckpoint", False))
-        self.lbl_ai_checkpoint_cap.setVisible(self._is_metadata_enabled("aicheckpoint", False))
-        self.meta_ai_sampler_edit.setVisible(self._is_metadata_enabled("aisampler", True))
-        self.lbl_ai_sampler_cap.setVisible(self._is_metadata_enabled("aisampler", True))
-        self.meta_ai_scheduler_edit.setVisible(self._is_metadata_enabled("aischeduler", True))
-        self.lbl_ai_scheduler_cap.setVisible(self._is_metadata_enabled("aischeduler", True))
-        self.meta_ai_cfg_edit.setVisible(self._is_metadata_enabled("aicfg", True))
-        self.lbl_ai_cfg_cap.setVisible(self._is_metadata_enabled("aicfg", True))
-        self.meta_ai_steps_edit.setVisible(self._is_metadata_enabled("aisteps", True))
-        self.lbl_ai_steps_cap.setVisible(self._is_metadata_enabled("aisteps", True))
-        self.meta_ai_seed_edit.setVisible(self._is_metadata_enabled("aiseed", True))
-        self.lbl_ai_seed_cap.setVisible(self._is_metadata_enabled("aiseed", True))
-        self.meta_ai_upscaler_edit.setVisible(self._is_metadata_enabled("aiupscaler", False))
-        self.lbl_ai_upscaler_cap.setVisible(self._is_metadata_enabled("aiupscaler", False))
-        self.meta_ai_denoise_edit.setVisible(self._is_metadata_enabled("aidenoise", False))
-        self.lbl_ai_denoise_cap.setVisible(self._is_metadata_enabled("aidenoise", False))
-        self.meta_ai_prompt_edit.setVisible(self._is_metadata_enabled("aiprompt", True))
-        self.lbl_ai_prompt_cap.setVisible(self._is_metadata_enabled("aiprompt", True))
-        self.meta_ai_negative_prompt_edit.setVisible(self._is_metadata_enabled("ainegprompt", True))
-        self.lbl_ai_negative_prompt_cap.setVisible(self._is_metadata_enabled("ainegprompt", True))
-        self.meta_ai_params_edit.setVisible(self._is_metadata_enabled("aiparams", True))
-        self.lbl_ai_params_cap.setVisible(self._is_metadata_enabled("aiparams", True))
-        self.meta_ai_workflows_edit.setVisible(self._is_metadata_enabled("aiworkflows", False))
-        self.lbl_ai_workflows_cap.setVisible(self._is_metadata_enabled("aiworkflows", False))
-        self.meta_ai_provenance_edit.setVisible(self._is_metadata_enabled("aiprovenance", False))
-        self.lbl_ai_provenance_cap.setVisible(self._is_metadata_enabled("aiprovenance", False))
-        self.meta_ai_character_cards_edit.setVisible(self._is_metadata_enabled("aicharcards", False))
-        self.lbl_ai_character_cards_cap.setVisible(self._is_metadata_enabled("aicharcards", False))
-        self.meta_ai_raw_paths_edit.setVisible(self._is_metadata_enabled("airawpaths", False))
-        self.lbl_ai_raw_paths_cap.setVisible(self._is_metadata_enabled("airawpaths", False))
-        
-        self.meta_embedded_tool_edit.setVisible(self._is_metadata_enabled("embeddedtool", True))
-        self.lbl_embedded_tool_cap.setVisible(self._is_metadata_enabled("embeddedtool", True))
-        self.meta_combined_db.setVisible(self._is_metadata_enabled("combineddb", True))
-        self.lbl_combined_db_cap.setVisible(self._is_metadata_enabled("combineddb", True))
-        
+        visible_groups = [group for group in self._metadata_group_order(kind) if self._is_metadata_group_enabled(kind, group, True)]
+        active_fields = {
+            field
+            for group in visible_groups
+            for field in self._metadata_group_fields(kind).get(group, [])
+        }
+        self.meta_res_lbl.setVisible("res" in active_fields and self._is_metadata_enabled_for_kind(kind, "res", True))
+        self.meta_size_lbl.setVisible("size" in active_fields and self._is_metadata_enabled_for_kind(kind, "size", True))
+        self.meta_duration_lbl.setVisible("duration" in active_fields and self._is_metadata_enabled_for_kind(kind, "duration", True))
+        self.meta_fps_lbl.setVisible("fps" in active_fields and self._is_metadata_enabled_for_kind(kind, "fps", True))
+        self.meta_codec_lbl.setVisible("codec" in active_fields and self._is_metadata_enabled_for_kind(kind, "codec", True))
+        self.meta_audio_lbl.setVisible("audio" in active_fields and self._is_metadata_enabled_for_kind(kind, "audio", True))
+        self.meta_camera_lbl.setVisible("camera" in active_fields and self._is_metadata_enabled_for_kind(kind, "camera", False))
+        self.meta_location_lbl.setVisible("location" in active_fields and self._is_metadata_enabled_for_kind(kind, "location", False))
+        self.meta_iso_lbl.setVisible("iso" in active_fields and self._is_metadata_enabled_for_kind(kind, "iso", False))
+        self.meta_shutter_lbl.setVisible("shutter" in active_fields and self._is_metadata_enabled_for_kind(kind, "shutter", False))
+        self.meta_aperture_lbl.setVisible("aperture" in active_fields and self._is_metadata_enabled_for_kind(kind, "aperture", False))
+        self.meta_software_lbl.setVisible("software" in active_fields and self._is_metadata_enabled_for_kind(kind, "software", False))
+        self.meta_lens_lbl.setVisible("lens" in active_fields and self._is_metadata_enabled_for_kind(kind, "lens", False))
+        self.meta_dpi_lbl.setVisible("dpi" in active_fields and self._is_metadata_enabled_for_kind(kind, "dpi", False))
+        self.meta_embedded_tags_edit.setVisible("embeddedtags" in active_fields and self._is_metadata_enabled_for_kind(kind, "embeddedtags", True))
+        self.lbl_embedded_tags_cap.setVisible("embeddedtags" in active_fields and self._is_metadata_enabled_for_kind(kind, "embeddedtags", True))
+        self.meta_embedded_comments_edit.setVisible("embeddedcomments" in active_fields and self._is_metadata_enabled_for_kind(kind, "embeddedcomments", True))
+        self.lbl_embedded_comments_cap.setVisible("embeddedcomments" in active_fields and self._is_metadata_enabled_for_kind(kind, "embeddedcomments", True))
+        self.meta_ai_status_edit.setVisible("aistatus" in active_fields and self._is_metadata_enabled_for_kind(kind, "aistatus", True))
+        self.lbl_ai_status_cap.setVisible("aistatus" in active_fields and self._is_metadata_enabled_for_kind(kind, "aistatus", True))
+        self.meta_ai_source_edit.setVisible("aisource" in active_fields and self._is_metadata_enabled_for_kind(kind, "aisource", True))
+        self.lbl_ai_source_cap.setVisible("aisource" in active_fields and self._is_metadata_enabled_for_kind(kind, "aisource", True))
+        self.meta_ai_families_edit.setVisible("aifamilies" in active_fields and self._is_metadata_enabled_for_kind(kind, "aifamilies", True))
+        self.lbl_ai_families_cap.setVisible("aifamilies" in active_fields and self._is_metadata_enabled_for_kind(kind, "aifamilies", True))
+        self.meta_ai_detection_reasons_edit.setVisible("aidetectionreasons" in active_fields and self._is_metadata_enabled_for_kind(kind, "aidetectionreasons", False))
+        self.lbl_ai_detection_reasons_cap.setVisible("aidetectionreasons" in active_fields and self._is_metadata_enabled_for_kind(kind, "aidetectionreasons", False))
+        self.meta_ai_loras_edit.setVisible("ailoras" in active_fields and self._is_metadata_enabled_for_kind(kind, "ailoras", True))
+        self.lbl_ai_loras_cap.setVisible("ailoras" in active_fields and self._is_metadata_enabled_for_kind(kind, "ailoras", True))
+        self.meta_ai_model_edit.setVisible("aimodel" in active_fields and self._is_metadata_enabled_for_kind(kind, "aimodel", True))
+        self.lbl_ai_model_cap.setVisible("aimodel" in active_fields and self._is_metadata_enabled_for_kind(kind, "aimodel", True))
+        self.meta_ai_checkpoint_edit.setVisible("aicheckpoint" in active_fields and self._is_metadata_enabled_for_kind(kind, "aicheckpoint", False))
+        self.lbl_ai_checkpoint_cap.setVisible("aicheckpoint" in active_fields and self._is_metadata_enabled_for_kind(kind, "aicheckpoint", False))
+        self.meta_ai_sampler_edit.setVisible("aisampler" in active_fields and self._is_metadata_enabled_for_kind(kind, "aisampler", True))
+        self.lbl_ai_sampler_cap.setVisible("aisampler" in active_fields and self._is_metadata_enabled_for_kind(kind, "aisampler", True))
+        self.meta_ai_scheduler_edit.setVisible("aischeduler" in active_fields and self._is_metadata_enabled_for_kind(kind, "aischeduler", True))
+        self.lbl_ai_scheduler_cap.setVisible("aischeduler" in active_fields and self._is_metadata_enabled_for_kind(kind, "aischeduler", True))
+        self.meta_ai_cfg_edit.setVisible("aicfg" in active_fields and self._is_metadata_enabled_for_kind(kind, "aicfg", True))
+        self.lbl_ai_cfg_cap.setVisible("aicfg" in active_fields and self._is_metadata_enabled_for_kind(kind, "aicfg", True))
+        self.meta_ai_steps_edit.setVisible("aisteps" in active_fields and self._is_metadata_enabled_for_kind(kind, "aisteps", True))
+        self.lbl_ai_steps_cap.setVisible("aisteps" in active_fields and self._is_metadata_enabled_for_kind(kind, "aisteps", True))
+        self.meta_ai_seed_edit.setVisible("aiseed" in active_fields and self._is_metadata_enabled_for_kind(kind, "aiseed", True))
+        self.lbl_ai_seed_cap.setVisible("aiseed" in active_fields and self._is_metadata_enabled_for_kind(kind, "aiseed", True))
+        self.meta_ai_upscaler_edit.setVisible("aiupscaler" in active_fields and self._is_metadata_enabled_for_kind(kind, "aiupscaler", False))
+        self.lbl_ai_upscaler_cap.setVisible("aiupscaler" in active_fields and self._is_metadata_enabled_for_kind(kind, "aiupscaler", False))
+        self.meta_ai_denoise_edit.setVisible("aidenoise" in active_fields and self._is_metadata_enabled_for_kind(kind, "aidenoise", False))
+        self.lbl_ai_denoise_cap.setVisible("aidenoise" in active_fields and self._is_metadata_enabled_for_kind(kind, "aidenoise", False))
+        self.meta_ai_prompt_edit.setVisible("aiprompt" in active_fields and self._is_metadata_enabled_for_kind(kind, "aiprompt", True))
+        self.lbl_ai_prompt_cap.setVisible("aiprompt" in active_fields and self._is_metadata_enabled_for_kind(kind, "aiprompt", True))
+        self.meta_ai_negative_prompt_edit.setVisible("ainegprompt" in active_fields and self._is_metadata_enabled_for_kind(kind, "ainegprompt", True))
+        self.lbl_ai_negative_prompt_cap.setVisible("ainegprompt" in active_fields and self._is_metadata_enabled_for_kind(kind, "ainegprompt", True))
+        self.meta_ai_params_edit.setVisible("aiparams" in active_fields and self._is_metadata_enabled_for_kind(kind, "aiparams", True))
+        self.lbl_ai_params_cap.setVisible("aiparams" in active_fields and self._is_metadata_enabled_for_kind(kind, "aiparams", True))
+        self.meta_ai_workflows_edit.setVisible("aiworkflows" in active_fields and self._is_metadata_enabled_for_kind(kind, "aiworkflows", False))
+        self.lbl_ai_workflows_cap.setVisible("aiworkflows" in active_fields and self._is_metadata_enabled_for_kind(kind, "aiworkflows", False))
+        self.meta_ai_provenance_edit.setVisible("aiprovenance" in active_fields and self._is_metadata_enabled_for_kind(kind, "aiprovenance", False))
+        self.lbl_ai_provenance_cap.setVisible("aiprovenance" in active_fields and self._is_metadata_enabled_for_kind(kind, "aiprovenance", False))
+        self.meta_ai_character_cards_edit.setVisible("aicharcards" in active_fields and self._is_metadata_enabled_for_kind(kind, "aicharcards", False))
+        self.lbl_ai_character_cards_cap.setVisible("aicharcards" in active_fields and self._is_metadata_enabled_for_kind(kind, "aicharcards", False))
+        self.meta_ai_raw_paths_edit.setVisible("airawpaths" in active_fields and self._is_metadata_enabled_for_kind(kind, "airawpaths", False))
+        self.lbl_ai_raw_paths_cap.setVisible("airawpaths" in active_fields and self._is_metadata_enabled_for_kind(kind, "airawpaths", False))
         self.meta_filename_edit.setVisible(True)
         self.meta_path_lbl.setVisible(True)
         
-        self.meta_sep1.setVisible(self._is_metadata_enabled("sep1", True))
-        self.meta_sep2.setVisible(self._is_metadata_enabled("sep2", False))
-        self.meta_sep3.setVisible(self._is_metadata_enabled("sep3", False))
+        self.meta_sep1.setVisible(len(visible_groups) > 1)
+        self.meta_sep2.setVisible(len(visible_groups) > 2)
+        self.meta_sep3.setVisible(False)
         
         
-        self.meta_desc.setVisible(self._is_metadata_enabled("description", True))
-        self.lbl_desc_cap.setVisible(self._is_metadata_enabled("description", True))
-        self.meta_tags.setVisible(self._is_metadata_enabled("tags", True))
-        self.lbl_tags_cap.setVisible(self._is_metadata_enabled("tags", True))
-        self.meta_notes.setVisible(self._is_metadata_enabled("notes", True))
-        self.lbl_notes_cap.setVisible(self._is_metadata_enabled("notes", True))
+        self.meta_desc.setVisible("description" in active_fields and self._is_metadata_enabled_for_kind(kind, "description", True))
+        self.lbl_desc_cap.setVisible("description" in active_fields and self._is_metadata_enabled_for_kind(kind, "description", True))
+        self.meta_tags.setVisible("tags" in active_fields and self._is_metadata_enabled_for_kind(kind, "tags", True))
+        self.lbl_tags_cap.setVisible("tags" in active_fields and self._is_metadata_enabled_for_kind(kind, "tags", True))
+        self.meta_notes.setVisible("notes" in active_fields and self._is_metadata_enabled_for_kind(kind, "notes", True))
+        self.lbl_notes_cap.setVisible("notes" in active_fields and self._is_metadata_enabled_for_kind(kind, "notes", True))
         
         self.meta_desc.setPlainText("")
         self.meta_notes.setPlainText("")
