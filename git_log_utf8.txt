@@ -1,0 +1,15 @@
+﻿Change UI of metadata sidebar to vertically stack buttons and fit button width within available space.
+Separated metadata into Image, Video, and Gif with separate tabs in settings, then grouped metadata into General, Camera, and AI sections that can be hidden or moved. I also added a button to save hidden metadata into visible comments field
+Expanded metadata scraping to include tEXt, iTXt, zTXt, XMP, EXIF, chara, C2PA, JUMBF, caBX, IPTC, JFIF, COM and found a ton more embedded data including digital watermarks, comfyui workflows, character cards, AI prompts, AI parameters, and more.
+Updated to v1.0.8
+Add rotation options for video files
+Added rotate 90 degrees CW and CCS for image files
+Added Open with PhotoShop and Open with Affinity - both dynamically find install paths and add to right click context if found.
+Fixed updater error WinError 193 %1 is not a valid Win32 application
+Bump version to v1.0.7
+Removed video player and lightbox close buttons, changed previous and next buttons.
+Fixed video player size changing bug in gallery.
+Improved preload logic and removed delays that caused lag.
+Fixed auto-updater download problem and fixed Changelog location in setup installer
+Fixed preloading issue to correctly preload exactly 1 screen ahead as the user scrolls.
+Removed Loading Media dialogue because media loads faster than it can update
