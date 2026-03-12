@@ -1,6 +1,21 @@
 # Change Log
 
-## v1.0.8 (Current)
+## v1.0.9 (Current)
+
+### Added in v1.0.9
+
+- **Enhanced Metadata Support**: Expanded metadata scraping to include tEXt, iTXt, zTXt, XMP, EXIF, chara, C2PA, JUMBF, caBX, IPTC, JFIF, and COM. The app now detects digital watermarks, ComfyUI workflows, character cards, AI prompts/parameters, and more.
+- **Metadata Settings Tabs**: Added separate tabs in Settings for Image, Video, and GIF metadata configurations.
+- **Metadata Grouping**: Grouped metadata into General, Camera, and AI sections that can be individually hidden or reordered.
+- **Metadata Persistence**: Added a button to save hidden metadata into a visible comments field for easier access.
+
+### Changed in v1.0.9
+
+- **Metadata Sidebar UI**: Redesigned the metadata sidebar to use vertically stacked buttons, ensuring elements fit correctly within the available width.
+
+---
+
+## v1.0.8
 
 ### Added in v1.0.8
 
