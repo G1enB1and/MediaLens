@@ -20,5 +20,8 @@ def connect_db(db_path: str) -> sqlite3.Connection:
     # sqlite3 is thread-safe for the file itself, but Python's wrapper defaults to strict thread checks.
     conn = sqlite3.connect(path, check_same_thread=False)
     conn.execute("PRAGMA foreign_keys=ON;")
-    conn.execute("PRAGMA journal_mode=WAL;")  # Better concurrency
+    # WAL has been unreliable in this Windows packaging/runtime environment and
+    # can report success before later writes fail with disk I/O errors. Keep the
+    # app on MEMORY journaling so scan/import writes remain functional.
+    conn.execute("PRAGMA journal_mode=MEMORY;")
     return conn

@@ -38,6 +38,104 @@ CREATE TABLE IF NOT EXISTS media_metadata (
   FOREIGN KEY(media_id) REFERENCES media_items(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS media_ai_metadata (
+  media_id INTEGER PRIMARY KEY,
+  parser_version TEXT NOT NULL,
+  normalized_schema_version TEXT NOT NULL,
+  is_ai_detected INTEGER NOT NULL DEFAULT 0,
+  is_ai_confidence REAL NOT NULL DEFAULT 0,
+  tool_name_found TEXT,
+  tool_name_inferred TEXT,
+  tool_name_confidence REAL NOT NULL DEFAULT 0,
+  ai_prompt TEXT,
+  ai_negative_prompt TEXT,
+  description TEXT,
+  model_name TEXT,
+  model_hash TEXT,
+  checkpoint_name TEXT,
+  sampler TEXT,
+  scheduler TEXT,
+  cfg_scale REAL,
+  steps INTEGER,
+  seed TEXT,
+  width INTEGER,
+  height INTEGER,
+  denoise_strength REAL,
+  upscaler TEXT,
+  source_formats_json TEXT NOT NULL DEFAULT '[]',
+  metadata_families_json TEXT NOT NULL DEFAULT '[]',
+  ai_detection_reasons_json TEXT NOT NULL DEFAULT '[]',
+  raw_paths_json TEXT NOT NULL DEFAULT '[]',
+  unknown_fields_json TEXT NOT NULL DEFAULT '{}',
+  updated_at_utc TEXT NOT NULL,
+  FOREIGN KEY(media_id) REFERENCES media_items(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS media_ai_metadata_raw (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  media_id INTEGER NOT NULL,
+  family TEXT NOT NULL,
+  container_type TEXT,
+  path_descriptor TEXT NOT NULL,
+  raw_kind TEXT NOT NULL,
+  raw_text TEXT,
+  raw_json TEXT,
+  raw_binary_b64 TEXT,
+  parse_status TEXT NOT NULL DEFAULT 'parsed',
+  parser_version TEXT NOT NULL,
+  created_at_utc TEXT NOT NULL,
+  FOREIGN KEY(media_id) REFERENCES media_items(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_ai_metadata_raw_media ON media_ai_metadata_raw(media_id);
+CREATE INDEX IF NOT EXISTS idx_media_ai_metadata_raw_family ON media_ai_metadata_raw(family);
+
+CREATE TABLE IF NOT EXISTS media_ai_loras (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  media_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  weight TEXT,
+  hash TEXT,
+  source TEXT,
+  created_at_utc TEXT NOT NULL,
+  FOREIGN KEY(media_id) REFERENCES media_items(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_ai_loras_media ON media_ai_loras(media_id);
+
+CREATE TABLE IF NOT EXISTS media_ai_workflows (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  media_id INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  data_json TEXT NOT NULL,
+  created_at_utc TEXT NOT NULL,
+  FOREIGN KEY(media_id) REFERENCES media_items(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_ai_workflows_media ON media_ai_workflows(media_id);
+
+CREATE TABLE IF NOT EXISTS media_ai_provenance (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  media_id INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  data_json TEXT NOT NULL,
+  created_at_utc TEXT NOT NULL,
+  FOREIGN KEY(media_id) REFERENCES media_items(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_ai_provenance_media ON media_ai_provenance(media_id);
+
+CREATE TABLE IF NOT EXISTS media_character_cards (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  media_id INTEGER NOT NULL,
+  name TEXT,
+  data_json TEXT NOT NULL,
+  created_at_utc TEXT NOT NULL,
+  FOREIGN KEY(media_id) REFERENCES media_items(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_character_cards_media ON media_character_cards(media_id);
+
 CREATE TABLE IF NOT EXISTS tags (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,

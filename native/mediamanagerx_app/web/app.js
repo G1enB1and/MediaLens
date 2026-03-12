@@ -1515,7 +1515,9 @@ function wireSettings() {
     'metaShowShutter', 'metaShowAperture', 'metaShowSoftware', 'metaShowLens',
     'metaShowDPI', 'metaShowEmbeddedTags', 'metaShowEmbeddedComments',
     'metaShowEmbeddedTool', 'metaShowCombinedDB',
+    'metaShowAIStatus', 'metaShowAISource', 'metaShowAIFamilies', 'metaShowAIDetectionReasons', 'metaShowAILoras',
     'metaShowAIPrompt', 'metaShowAINegPrompt', 'metaShowAIParams',
+    'metaShowAIWorkflows', 'metaShowAIProvenance', 'metaShowAICharCards', 'metaShowAIRawPaths',
     'metaShowSep1', 'metaShowSep2', 'metaShowSep3'
   ];
   metaToggles.forEach(id => {
@@ -1902,7 +1904,11 @@ async function main() {
         'metaShowShutter', 'metaShowAperture', 'metaShowSoftware', 'metaShowLens',
         'metaShowDPI', 'metaShowEmbeddedTags', 'metaShowEmbeddedComments',
         'metaShowEmbeddedTool', 'metaShowCombinedDB',
+        'metaShowAIStatus', 'metaShowAISource', 'metaShowAIFamilies', 'metaShowAIDetectionReasons', 'metaShowAILoras',
+        'metaShowAIModel', 'metaShowAICheckpoint', 'metaShowAISampler', 'metaShowAIScheduler', 'metaShowAICFG',
+        'metaShowAISteps', 'metaShowAISeed', 'metaShowAIUpscaler', 'metaShowAIDenoise',
         'metaShowAIPrompt', 'metaShowAINegPrompt', 'metaShowAIParams',
+        'metaShowAIWorkflows', 'metaShowAIProvenance', 'metaShowAICharCards', 'metaShowAIRawPaths',
         'metaShowSep1', 'metaShowSep2', 'metaShowSep3'
       ];
       metaToggles.forEach(id => {

@@ -1008,9 +1008,27 @@ class Bridge(QObject):
                 "metadata.display.dpi": bool(self.settings.value("metadata/display/dpi", False, type=bool)),
                 "metadata.display.embeddedtags": bool(self.settings.value("metadata/display/embeddedtags", True, type=bool)),
                 "metadata.display.embeddedcomments": bool(self.settings.value("metadata/display/embeddedcomments", True, type=bool)),
+                "metadata.display.aistatus": bool(self.settings.value("metadata/display/aistatus", True, type=bool)),
+                "metadata.display.aisource": bool(self.settings.value("metadata/display/aisource", True, type=bool)),
+                "metadata.display.aifamilies": bool(self.settings.value("metadata/display/aifamilies", True, type=bool)),
+                "metadata.display.aidetectionreasons": bool(self.settings.value("metadata/display/aidetectionreasons", False, type=bool)),
+                "metadata.display.ailoras": bool(self.settings.value("metadata/display/ailoras", True, type=bool)),
+                "metadata.display.aimodel": bool(self.settings.value("metadata/display/aimodel", True, type=bool)),
+                "metadata.display.aicheckpoint": bool(self.settings.value("metadata/display/aicheckpoint", False, type=bool)),
+                "metadata.display.aisampler": bool(self.settings.value("metadata/display/aisampler", True, type=bool)),
+                "metadata.display.aischeduler": bool(self.settings.value("metadata/display/aischeduler", True, type=bool)),
+                "metadata.display.aicfg": bool(self.settings.value("metadata/display/aicfg", True, type=bool)),
+                "metadata.display.aisteps": bool(self.settings.value("metadata/display/aisteps", True, type=bool)),
+                "metadata.display.aiseed": bool(self.settings.value("metadata/display/aiseed", True, type=bool)),
+                "metadata.display.aiupscaler": bool(self.settings.value("metadata/display/aiupscaler", False, type=bool)),
+                "metadata.display.aidenoise": bool(self.settings.value("metadata/display/aidenoise", False, type=bool)),
                 "metadata.display.aiprompt": bool(self.settings.value("metadata/display/aiprompt", True, type=bool)),
                 "metadata.display.ainegprompt": bool(self.settings.value("metadata/display/ainegprompt", True, type=bool)),
                 "metadata.display.aiparams": bool(self.settings.value("metadata/display/aiparams", True, type=bool)),
+                "metadata.display.aiworkflows": bool(self.settings.value("metadata/display/aiworkflows", False, type=bool)),
+                "metadata.display.aiprovenance": bool(self.settings.value("metadata/display/aiprovenance", False, type=bool)),
+                "metadata.display.aicharcards": bool(self.settings.value("metadata/display/aicharcards", False, type=bool)),
+                "metadata.display.airawpaths": bool(self.settings.value("metadata/display/airawpaths", False, type=bool)),
                 "metadata.display.order": self.settings.value("metadata/display/order", "[]", type=str),
                 "updates.check_on_launch": bool(self.settings.value("updates/check_on_launch", True, type=bool)),
             }
@@ -1118,6 +1136,9 @@ class Bridge(QObject):
             elif key == "ui.theme_mode":
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, value == "light")
+            elif key == "metadata.display.order":
+                self.settings.sync()
+                self.uiFlagChanged.emit(key, True)
             return True
         except Exception:
             return False
@@ -1728,19 +1749,50 @@ class Bridge(QObject):
 
     @Slot(str, result=dict)
     def get_media_metadata(self, path: str) -> dict:
+        image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
         from app.mediamanager.db.media_repo import get_media_by_path
+        from app.mediamanager.db.ai_metadata_repo import (
+            build_media_ai_ui_fields,
+            get_media_ai_metadata,
+            summarize_media_ai_metadata,
+            summarize_media_ai_tool_metadata,
+        )
         from app.mediamanager.db.metadata_repo import get_media_metadata
+        from app.mediamanager.metadata.persistence import inspect_and_persist_if_supported
         from app.mediamanager.db.tags_repo import list_media_tags
         try:
             m = get_media_by_path(self.conn, path)
-            if not m: return {}
+            if not m:
+                p = Path(path)
+                if not p.exists():
+                    return {}
+                from app.mediamanager.db.media_repo import add_media_item
+                media_type = "image" if p.suffix.lower() in image_exts else "video"
+                add_media_item(self.conn, path, media_type)
+                m = get_media_by_path(self.conn, path)
+                if not m:
+                    return {}
             meta = get_media_metadata(self.conn, m["id"]) or {}
-            return {
-                "title": meta.get("title") or "", "description": meta.get("description") or "", "notes": meta.get("notes") or "",
+            ai_meta = get_media_ai_metadata(self.conn, m["id"]) or {}
+            if not ai_meta:
+                inspect_and_persist_if_supported(self.conn, m["id"], path, m.get("media_type"))
+                ai_meta = get_media_ai_metadata(self.conn, m["id"]) or {}
+            ai_ui = build_media_ai_ui_fields(ai_meta)
+
+            description = meta.get("description") or ai_meta.get("description") or ""
+            ai_prompt = meta.get("ai_prompt") or ai_meta.get("ai_prompt") or ""
+            ai_negative_prompt = meta.get("ai_negative_prompt") or ai_meta.get("ai_negative_prompt") or ""
+            ai_params = meta.get("ai_params") or summarize_media_ai_metadata(ai_meta) or ""
+            ai_tool_summary = summarize_media_ai_tool_metadata(ai_meta) or ""
+            payload = {
+                "title": meta.get("title") or "", "description": description, "notes": meta.get("notes") or "",
                 "embedded_tags": meta.get("embedded_tags") or "", "embedded_comments": meta.get("embedded_comments") or "",
-                "ai_prompt": meta.get("ai_prompt") or "", "ai_negative_prompt": meta.get("ai_negative_prompt") or "",
-                "ai_params": meta.get("ai_params") or "", "tags": list_media_tags(self.conn, m["id"]), "has_metadata": bool(meta)
+                "ai_prompt": ai_prompt, "ai_negative_prompt": ai_negative_prompt,
+                "ai_params": ai_params, "ai_tool_summary": ai_tool_summary,
+                "tags": list_media_tags(self.conn, m["id"]), "has_metadata": bool(meta or ai_meta)
             }
+            payload.update(ai_ui)
+            return payload
         except Exception: return {}
 
     @Slot(str, str, str, str, str, str, str, str, str)
@@ -1860,30 +1912,43 @@ class Bridge(QObject):
     def start_scan(self, folders: list, search_query: str = "") -> None:
         self._scan_abort = True
         def work():
-            time.sleep(0.1); self._scan_abort = False
-            primary = folders[0] if folders else ""
-            self.scanStarted.emit(primary)
-            from app.mediamanager.db.connect import connect_db
-            scan_conn = connect_db(str(self.db_path))
             try:
-                paths = list(self._disk_cache.values())
-                self._do_full_scan(paths, scan_conn)
-                self.scanFinished.emit(primary, len(self._get_reconciled_candidates(folders, "all", search_query)))
-            finally: scan_conn.close()
+                time.sleep(0.1)
+                self._scan_abort = False
+                primary = folders[0] if folders else ""
+                self.scanStarted.emit(primary)
+                from app.mediamanager.db.connect import connect_db
+                scan_conn = connect_db(str(self.db_path))
+                try:
+                    paths = list(self._disk_cache.values())
+                    if not paths and folders:
+                        self._get_reconciled_candidates(folders, "all", search_query)
+                        paths = list(self._disk_cache.values())
+                    self._do_full_scan(paths, scan_conn)
+                    self.scanFinished.emit(primary, len(self._get_reconciled_candidates(folders, "all", search_query)))
+                finally:
+                    scan_conn.close()
+            except Exception as exc:
+                try:
+                    self._log(f"Background scan failed: {exc}")
+                except Exception:
+                    pass
         threading.Thread(target=work, daemon=True).start()
 
     def _do_full_scan(self, paths: list[Path], conn) -> int:
         from app.mediamanager.db.media_repo import get_media_by_path, upsert_media_item
+        from app.mediamanager.metadata.persistence import inspect_and_persist_if_supported
         from app.mediamanager.utils.hashing import calculate_file_hash
         from datetime import datetime, timezone
         image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
         total, count = len(paths), 0
         for i, p in enumerate(paths):
             if self._scan_abort: break
-            self.scanProgress.emit(p.name, int((i / total) * 100) if total > 0 else 100)
+            self.scanProgress.emit(p.name, int(((i + 1) / total) * 100) if total > 0 else 100)
             try:
                 stat = p.stat()
                 existing, skip = get_media_by_path(conn, str(p)), False
+                media_id = existing["id"] if existing else None
                 if existing:
                     curr_mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat()
                     if existing["file_size"] == stat.st_size and existing.get("modified_time") == curr_mtime:
@@ -1909,9 +1974,15 @@ class Bridge(QObject):
                         if d_s > 0:
                             d_ms = int(d_s * 1000)
                             
-                    upsert_media_item(conn, str(p), mtype, calculate_file_hash(p), width=width, height=height, duration_ms=d_ms)
+                    media_id = upsert_media_item(conn, str(p), mtype, calculate_file_hash(p), width=width, height=height, duration_ms=d_ms)
+                if media_id is not None:
+                    inspect_and_persist_if_supported(conn, media_id, str(p), "image" if p.suffix.lower() in image_exts else "video")
                 count += 1
-            except Exception: pass
+            except Exception as exc:
+                try:
+                    self._log(f"Background scan item failed for {p}: {exc}")
+                except Exception:
+                    pass
         return count
 
     @Slot(str, result=str)
@@ -2015,7 +2086,14 @@ class GalleryView(QWebEngineView):
         # Determine target folder
         main_win = self.window()
         bridge = getattr(main_win, "bridge", None)
-        if bridge:
+        
+        is_file_drag = False
+        if bridge and bridge.drag_paths:
+            is_file_drag = True
+        elif event.mimeData().hasUrls():
+            is_file_drag = True
+            
+        if is_file_drag and bridge:
             selected = bridge.get_selected_folders()
             target_folder = selected[0] if selected else ""
             
@@ -2452,7 +2530,7 @@ class MainWindow(QMainWindow):
             accent = "#8ab4f8"
 
         self.web_loading_bar.setStyleSheet(
-            "QProgressBar{background: rgba(255,255,255,25); border-radius: 5px;}"
+            "QProgressBar{background: rgba(255,255,255,25); border-radius: 5px;} "
             f"QProgressBar::chunk{{background: {accent}; border-radius: 5px;}}"
         )
         center_layout_loading.addWidget(self.web_loading_bar, 0, Qt.AlignmentFlag.AlignHCenter)
@@ -2561,6 +2639,107 @@ class MainWindow(QMainWindow):
         self.meta_combined_db.setPlaceholderText("Combined DB notes/AI info...")
         self.meta_combined_db.setMaximumHeight(100)
 
+        self.lbl_ai_status_cap = QLabel("AI Detection:")
+        self.lbl_ai_status_cap.setObjectName("metaAIStatusCaption")
+        self.meta_ai_status_edit = QLineEdit()
+        self.meta_ai_status_edit.setObjectName("metaAIStatusEdit")
+        self.meta_ai_status_edit.setReadOnly(True)
+        self.meta_ai_status_edit.setPlaceholderText("AI detection status...")
+
+        self.lbl_ai_source_cap = QLabel("AI Tool / Source:")
+        self.lbl_ai_source_cap.setObjectName("metaAISourceCaption")
+        self.meta_ai_source_edit = QTextEdit()
+        self.meta_ai_source_edit.setObjectName("metaAISourceEdit")
+        self.meta_ai_source_edit.setReadOnly(True)
+        self.meta_ai_source_edit.setPlaceholderText("Tool and source metadata...")
+        self.meta_ai_source_edit.setMaximumHeight(60)
+
+        self.lbl_ai_families_cap = QLabel("AI Metadata Families:")
+        self.lbl_ai_families_cap.setObjectName("metaAIFamiliesCaption")
+        self.meta_ai_families_edit = QLineEdit()
+        self.meta_ai_families_edit.setObjectName("metaAIFamiliesEdit")
+        self.meta_ai_families_edit.setReadOnly(True)
+        self.meta_ai_families_edit.setPlaceholderText("Detected metadata families...")
+
+        self.lbl_ai_detection_reasons_cap = QLabel("AI Detection Reasons:")
+        self.lbl_ai_detection_reasons_cap.setObjectName("metaAIDetectionReasonsCaption")
+        self.meta_ai_detection_reasons_edit = QTextEdit()
+        self.meta_ai_detection_reasons_edit.setObjectName("metaAIDetectionReasonsEdit")
+        self.meta_ai_detection_reasons_edit.setReadOnly(True)
+        self.meta_ai_detection_reasons_edit.setPlaceholderText("Detection reasons...")
+        self.meta_ai_detection_reasons_edit.setMaximumHeight(60)
+
+        self.lbl_ai_loras_cap = QLabel("AI LoRAs:")
+        self.lbl_ai_loras_cap.setObjectName("metaAILorasCaption")
+        self.meta_ai_loras_edit = QTextEdit()
+        self.meta_ai_loras_edit.setObjectName("metaAILorasEdit")
+        self.meta_ai_loras_edit.setReadOnly(True)
+        self.meta_ai_loras_edit.setPlaceholderText("LoRAs...")
+        self.meta_ai_loras_edit.setMaximumHeight(60)
+
+        self.lbl_ai_model_cap = QLabel("AI Model:")
+        self.lbl_ai_model_cap.setObjectName("metaAIModelCaption")
+        self.meta_ai_model_edit = QLineEdit()
+        self.meta_ai_model_edit.setObjectName("metaAIModelEdit")
+        self.meta_ai_model_edit.setReadOnly(True)
+        self.meta_ai_model_edit.setPlaceholderText("Model...")
+
+        self.lbl_ai_checkpoint_cap = QLabel("AI Checkpoint:")
+        self.lbl_ai_checkpoint_cap.setObjectName("metaAICheckpointCaption")
+        self.meta_ai_checkpoint_edit = QLineEdit()
+        self.meta_ai_checkpoint_edit.setObjectName("metaAICheckpointEdit")
+        self.meta_ai_checkpoint_edit.setReadOnly(True)
+        self.meta_ai_checkpoint_edit.setPlaceholderText("Checkpoint...")
+
+        self.lbl_ai_sampler_cap = QLabel("AI Sampler:")
+        self.lbl_ai_sampler_cap.setObjectName("metaAISamplerCaption")
+        self.meta_ai_sampler_edit = QLineEdit()
+        self.meta_ai_sampler_edit.setObjectName("metaAISamplerEdit")
+        self.meta_ai_sampler_edit.setReadOnly(True)
+        self.meta_ai_sampler_edit.setPlaceholderText("Sampler...")
+
+        self.lbl_ai_scheduler_cap = QLabel("AI Scheduler:")
+        self.lbl_ai_scheduler_cap.setObjectName("metaAISchedulerCaption")
+        self.meta_ai_scheduler_edit = QLineEdit()
+        self.meta_ai_scheduler_edit.setObjectName("metaAISchedulerEdit")
+        self.meta_ai_scheduler_edit.setReadOnly(True)
+        self.meta_ai_scheduler_edit.setPlaceholderText("Scheduler...")
+
+        self.lbl_ai_cfg_cap = QLabel("AI CFG:")
+        self.lbl_ai_cfg_cap.setObjectName("metaAICFGCaption")
+        self.meta_ai_cfg_edit = QLineEdit()
+        self.meta_ai_cfg_edit.setObjectName("metaAICFGEdit")
+        self.meta_ai_cfg_edit.setReadOnly(True)
+        self.meta_ai_cfg_edit.setPlaceholderText("CFG...")
+
+        self.lbl_ai_steps_cap = QLabel("AI Steps:")
+        self.lbl_ai_steps_cap.setObjectName("metaAIStepsCaption")
+        self.meta_ai_steps_edit = QLineEdit()
+        self.meta_ai_steps_edit.setObjectName("metaAIStepsEdit")
+        self.meta_ai_steps_edit.setReadOnly(True)
+        self.meta_ai_steps_edit.setPlaceholderText("Steps...")
+
+        self.lbl_ai_seed_cap = QLabel("AI Seed:")
+        self.lbl_ai_seed_cap.setObjectName("metaAISeedCaption")
+        self.meta_ai_seed_edit = QLineEdit()
+        self.meta_ai_seed_edit.setObjectName("metaAISeedEdit")
+        self.meta_ai_seed_edit.setReadOnly(True)
+        self.meta_ai_seed_edit.setPlaceholderText("Seed...")
+
+        self.lbl_ai_upscaler_cap = QLabel("AI Upscaler:")
+        self.lbl_ai_upscaler_cap.setObjectName("metaAIUpscalerCaption")
+        self.meta_ai_upscaler_edit = QLineEdit()
+        self.meta_ai_upscaler_edit.setObjectName("metaAIUpscalerEdit")
+        self.meta_ai_upscaler_edit.setReadOnly(True)
+        self.meta_ai_upscaler_edit.setPlaceholderText("Upscaler...")
+
+        self.lbl_ai_denoise_cap = QLabel("AI Denoise:")
+        self.lbl_ai_denoise_cap.setObjectName("metaAIDenoiseCaption")
+        self.meta_ai_denoise_edit = QLineEdit()
+        self.meta_ai_denoise_edit.setObjectName("metaAIDenoiseEdit")
+        self.meta_ai_denoise_edit.setReadOnly(True)
+        self.meta_ai_denoise_edit.setPlaceholderText("Denoise strength...")
+
         # --- Separators ---
         self.meta_sep1 = self._add_sep("meta_sep1_line")
         self.meta_sep2 = self._add_sep("meta_sep2_line")
@@ -2572,6 +2751,7 @@ class MainWindow(QMainWindow):
         self.meta_desc = QTextEdit()
         self.meta_desc.setPlaceholderText("Add a description...")
         self.meta_desc.setMaximumHeight(90)
+        self.meta_desc.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
 
         self.lbl_tags_cap = QLabel("Tags (comma separated):")
         self.meta_tags = QLineEdit()
@@ -2598,6 +2778,38 @@ class MainWindow(QMainWindow):
         self.meta_ai_params_edit.setObjectName("metaAIParamsEdit")
         self.meta_ai_params_edit.setPlaceholderText("AI parameters...")
         self.meta_ai_params_edit.setMaximumHeight(70)
+
+        self.lbl_ai_workflows_cap = QLabel("AI Workflows:")
+        self.lbl_ai_workflows_cap.setObjectName("metaAIWorkflowsCaption")
+        self.meta_ai_workflows_edit = QTextEdit()
+        self.meta_ai_workflows_edit.setObjectName("metaAIWorkflowsEdit")
+        self.meta_ai_workflows_edit.setReadOnly(True)
+        self.meta_ai_workflows_edit.setPlaceholderText("Workflow metadata...")
+        self.meta_ai_workflows_edit.setMaximumHeight(70)
+
+        self.lbl_ai_provenance_cap = QLabel("AI Provenance:")
+        self.lbl_ai_provenance_cap.setObjectName("metaAIProvenanceCaption")
+        self.meta_ai_provenance_edit = QTextEdit()
+        self.meta_ai_provenance_edit.setObjectName("metaAIProvenanceEdit")
+        self.meta_ai_provenance_edit.setReadOnly(True)
+        self.meta_ai_provenance_edit.setPlaceholderText("Provenance metadata...")
+        self.meta_ai_provenance_edit.setMaximumHeight(70)
+
+        self.lbl_ai_character_cards_cap = QLabel("AI Character Cards:")
+        self.lbl_ai_character_cards_cap.setObjectName("metaAICharacterCardsCaption")
+        self.meta_ai_character_cards_edit = QTextEdit()
+        self.meta_ai_character_cards_edit.setObjectName("metaAICharacterCardsEdit")
+        self.meta_ai_character_cards_edit.setReadOnly(True)
+        self.meta_ai_character_cards_edit.setPlaceholderText("Character card metadata...")
+        self.meta_ai_character_cards_edit.setMaximumHeight(70)
+
+        self.lbl_ai_raw_paths_cap = QLabel("AI Metadata Paths:")
+        self.lbl_ai_raw_paths_cap.setObjectName("metaAIRawPathsCaption")
+        self.meta_ai_raw_paths_edit = QTextEdit()
+        self.meta_ai_raw_paths_edit.setObjectName("metaAIRawPathsEdit")
+        self.meta_ai_raw_paths_edit.setReadOnly(True)
+        self.meta_ai_raw_paths_edit.setPlaceholderText("Embedded metadata paths...")
+        self.meta_ai_raw_paths_edit.setMaximumHeight(70)
 
         self.lbl_notes_cap = QLabel("Notes:")
         self.meta_notes = QTextEdit()
@@ -3195,6 +3407,13 @@ class MainWindow(QMainWindow):
             return
 
         try:
+            from app.mediamanager.db.ai_metadata_repo import (
+                build_media_ai_ui_fields,
+                get_media_ai_metadata,
+                summarize_media_ai_tool_metadata,
+            )
+            from app.mediamanager.db.media_repo import add_media_item, get_media_by_path
+            from app.mediamanager.metadata.persistence import inspect_and_persist_if_supported
             from PIL import Image
             with Image.open(str(p)) as img:
                 try:
@@ -3203,15 +3422,52 @@ class MainWindow(QMainWindow):
                     pass
                 visible = self._harvest_windows_visible_metadata(img)
                 res = self._harvest_universal_metadata(img)
+            media = get_media_by_path(self.bridge.conn, path)
+            if not media:
+                media_type = "image" if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"} else "video"
+                add_media_item(self.bridge.conn, path, media_type)
+                media = get_media_by_path(self.bridge.conn, path)
+            ai_ui = {}
+            ai_tool_summary = ""
+            if media:
+                inspect_and_persist_if_supported(self.bridge.conn, media["id"], path, media.get("media_type"))
+                ai_meta = get_media_ai_metadata(self.bridge.conn, media["id"]) or {}
+                ai_ui = build_media_ai_ui_fields(ai_meta)
+                ai_tool_summary = summarize_media_ai_tool_metadata(ai_meta) or ""
 
-            if not visible["comment"] and not visible["tags"] and not res["tool_metadata"]:
+            has_pipeline_data = any(
+                [
+                    ai_ui.get("ai_status_summary"),
+                    ai_ui.get("ai_source_summary"),
+                    ai_ui.get("ai_families_summary"),
+                    ai_ui.get("ai_loras_summary"),
+                    ai_ui.get("ai_workflows_summary"),
+                    ai_ui.get("ai_provenance_summary"),
+                    ai_ui.get("ai_character_cards_summary"),
+                    ai_ui.get("ai_raw_paths_summary"),
+                ]
+            )
+            if not visible["comment"] and not visible["tags"] and not res["tool_metadata"] and not has_pipeline_data:
                 self.meta_status_lbl.setText("No metadata found in file.")
                 return
 
             # 1. REPLACE Embedded UI fields (Strictly File -> UI)
             self.meta_embedded_tags_edit.setText("; ".join(visible["tags"]))
             self.meta_embedded_comments_edit.setPlainText(visible["comment"] or "")
-            self.meta_embedded_tool_edit.setPlainText(res["tool_metadata"] or "")
+            file_tool = res["tool_metadata"] or ""
+            if ai_tool_summary and file_tool and ai_tool_summary.strip() != file_tool.strip():
+                self.meta_embedded_tool_edit.setPlainText(f"{ai_tool_summary}\n\n[File Metadata]\n{file_tool}")
+            else:
+                self.meta_embedded_tool_edit.setPlainText(ai_tool_summary or file_tool)
+            self.meta_ai_status_edit.setText(ai_ui.get("ai_status_summary", ""))
+            self.meta_ai_source_edit.setPlainText(ai_ui.get("ai_source_summary", ""))
+            self.meta_ai_families_edit.setText(ai_ui.get("ai_families_summary", ""))
+            self.meta_ai_detection_reasons_edit.setPlainText(ai_ui.get("ai_detection_reasons_summary", ""))
+            self.meta_ai_loras_edit.setPlainText(ai_ui.get("ai_loras_summary", ""))
+            self.meta_ai_workflows_edit.setPlainText(ai_ui.get("ai_workflows_summary", ""))
+            self.meta_ai_provenance_edit.setPlainText(ai_ui.get("ai_provenance_summary", ""))
+            self.meta_ai_character_cards_edit.setPlainText(ai_ui.get("ai_character_cards_summary", ""))
+            self.meta_ai_raw_paths_edit.setPlainText(ai_ui.get("ai_raw_paths_summary", ""))
 
             # 2. Status update
             self.meta_status_lbl.setText("Metadata imported to UI. Click 'Save Changes' to persist.")
@@ -3474,9 +3730,27 @@ class MainWindow(QMainWindow):
         show_embedded_comments = self._is_metadata_enabled("embeddedcomments", True)
         show_embedded_tool = self._is_metadata_enabled("embeddedtool", True)
         show_combined_db = self._is_metadata_enabled("combineddb", True)
+        show_ai_status = self._is_metadata_enabled("aistatus", True)
+        show_ai_source = self._is_metadata_enabled("aisource", True)
+        show_ai_families = self._is_metadata_enabled("aifamilies", True)
+        show_ai_detection_reasons = self._is_metadata_enabled("aidetectionreasons", False)
+        show_ai_loras = self._is_metadata_enabled("ailoras", True)
+        show_ai_model = self._is_metadata_enabled("aimodel", True)
+        show_ai_checkpoint = self._is_metadata_enabled("aicheckpoint", False)
+        show_ai_sampler = self._is_metadata_enabled("aisampler", True)
+        show_ai_scheduler = self._is_metadata_enabled("aischeduler", True)
+        show_ai_cfg = self._is_metadata_enabled("aicfg", True)
+        show_ai_steps = self._is_metadata_enabled("aisteps", True)
+        show_ai_seed = self._is_metadata_enabled("aiseed", True)
+        show_ai_upscaler = self._is_metadata_enabled("aiupscaler", False)
+        show_ai_denoise = self._is_metadata_enabled("aidenoise", False)
         show_ai_prompt = self._is_metadata_enabled("aiprompt", True)
         show_ai_neg_prompt = self._is_metadata_enabled("ainegprompt", True)
         show_ai_params = self._is_metadata_enabled("aiparams", True)
+        show_ai_workflows = self._is_metadata_enabled("aiworkflows", False)
+        show_ai_provenance = self._is_metadata_enabled("aiprovenance", False)
+        show_ai_character_cards = self._is_metadata_enabled("aicharcards", False)
+        show_ai_raw_paths = self._is_metadata_enabled("airawpaths", False)
 
         self.meta_res_lbl.setVisible(not is_bulk and show_res)
         self.meta_size_lbl.setVisible(not is_bulk and show_size)
@@ -3492,6 +3766,34 @@ class MainWindow(QMainWindow):
         self.lbl_embedded_tags_cap.setVisible(not is_bulk and show_embedded_tags)
         self.meta_embedded_comments_edit.setVisible(not is_bulk and show_embedded_comments)
         self.lbl_embedded_comments_cap.setVisible(not is_bulk and show_embedded_comments)
+        self.meta_ai_status_edit.setVisible(not is_bulk and show_ai_status)
+        self.lbl_ai_status_cap.setVisible(not is_bulk and show_ai_status)
+        self.meta_ai_source_edit.setVisible(not is_bulk and show_ai_source)
+        self.lbl_ai_source_cap.setVisible(not is_bulk and show_ai_source)
+        self.meta_ai_families_edit.setVisible(not is_bulk and show_ai_families)
+        self.lbl_ai_families_cap.setVisible(not is_bulk and show_ai_families)
+        self.meta_ai_detection_reasons_edit.setVisible(not is_bulk and show_ai_detection_reasons)
+        self.lbl_ai_detection_reasons_cap.setVisible(not is_bulk and show_ai_detection_reasons)
+        self.meta_ai_loras_edit.setVisible(not is_bulk and show_ai_loras)
+        self.lbl_ai_loras_cap.setVisible(not is_bulk and show_ai_loras)
+        self.meta_ai_model_edit.setVisible(not is_bulk and show_ai_model)
+        self.lbl_ai_model_cap.setVisible(not is_bulk and show_ai_model)
+        self.meta_ai_checkpoint_edit.setVisible(not is_bulk and show_ai_checkpoint)
+        self.lbl_ai_checkpoint_cap.setVisible(not is_bulk and show_ai_checkpoint)
+        self.meta_ai_sampler_edit.setVisible(not is_bulk and show_ai_sampler)
+        self.lbl_ai_sampler_cap.setVisible(not is_bulk and show_ai_sampler)
+        self.meta_ai_scheduler_edit.setVisible(not is_bulk and show_ai_scheduler)
+        self.lbl_ai_scheduler_cap.setVisible(not is_bulk and show_ai_scheduler)
+        self.meta_ai_cfg_edit.setVisible(not is_bulk and show_ai_cfg)
+        self.lbl_ai_cfg_cap.setVisible(not is_bulk and show_ai_cfg)
+        self.meta_ai_steps_edit.setVisible(not is_bulk and show_ai_steps)
+        self.lbl_ai_steps_cap.setVisible(not is_bulk and show_ai_steps)
+        self.meta_ai_seed_edit.setVisible(not is_bulk and show_ai_seed)
+        self.lbl_ai_seed_cap.setVisible(not is_bulk and show_ai_seed)
+        self.meta_ai_upscaler_edit.setVisible(not is_bulk and show_ai_upscaler)
+        self.lbl_ai_upscaler_cap.setVisible(not is_bulk and show_ai_upscaler)
+        self.meta_ai_denoise_edit.setVisible(not is_bulk and show_ai_denoise)
+        self.lbl_ai_denoise_cap.setVisible(not is_bulk and show_ai_denoise)
         
         self.meta_ai_prompt_edit.setVisible(not is_bulk and show_ai_prompt)
         self.lbl_ai_prompt_cap.setVisible(not is_bulk and show_ai_prompt)
@@ -3499,6 +3801,14 @@ class MainWindow(QMainWindow):
         self.lbl_ai_negative_prompt_cap.setVisible(not is_bulk and show_ai_neg_prompt)
         self.meta_ai_params_edit.setVisible(not is_bulk and show_ai_params)
         self.lbl_ai_params_cap.setVisible(not is_bulk and show_ai_params)
+        self.meta_ai_workflows_edit.setVisible(not is_bulk and show_ai_workflows)
+        self.lbl_ai_workflows_cap.setVisible(not is_bulk and show_ai_workflows)
+        self.meta_ai_provenance_edit.setVisible(not is_bulk and show_ai_provenance)
+        self.lbl_ai_provenance_cap.setVisible(not is_bulk and show_ai_provenance)
+        self.meta_ai_character_cards_edit.setVisible(not is_bulk and show_ai_character_cards)
+        self.lbl_ai_character_cards_cap.setVisible(not is_bulk and show_ai_character_cards)
+        self.meta_ai_raw_paths_edit.setVisible(not is_bulk and show_ai_raw_paths)
+        self.lbl_ai_raw_paths_cap.setVisible(not is_bulk and show_ai_raw_paths)
         self.meta_embedded_tool_edit.setVisible(not is_bulk and show_embedded_tool)
         self.lbl_embedded_tool_cap.setVisible(not is_bulk and show_embedded_tool)
         self.meta_combined_db.setVisible(not is_bulk and show_combined_db)
@@ -3523,10 +3833,28 @@ class MainWindow(QMainWindow):
         self.meta_embedded_tags_edit.setText("")
         # Clear the text edits
         self.meta_embedded_comments_edit.setPlainText("")
+        self.meta_ai_status_edit.setText("")
+        self.meta_ai_source_edit.setPlainText("")
+        self.meta_ai_families_edit.setText("")
+        self.meta_ai_detection_reasons_edit.setPlainText("")
+        self.meta_ai_loras_edit.setPlainText("")
+        self.meta_ai_model_edit.setText("")
+        self.meta_ai_checkpoint_edit.setText("")
+        self.meta_ai_sampler_edit.setText("")
+        self.meta_ai_scheduler_edit.setText("")
+        self.meta_ai_cfg_edit.setText("")
+        self.meta_ai_steps_edit.setText("")
+        self.meta_ai_seed_edit.setText("")
+        self.meta_ai_upscaler_edit.setText("")
+        self.meta_ai_denoise_edit.setText("")
         self.meta_embedded_tool_edit.setPlainText("")
         self.meta_ai_prompt_edit.setPlainText("")
         self.meta_ai_negative_prompt_edit.setPlainText("")
         self.meta_ai_params_edit.setPlainText("")
+        self.meta_ai_workflows_edit.setPlainText("")
+        self.meta_ai_provenance_edit.setPlainText("")
+        self.meta_ai_character_cards_edit.setPlainText("")
+        self.meta_ai_raw_paths_edit.setPlainText("")
 
         self.lbl_desc_cap.setVisible(not is_bulk and show_description)
         self.meta_desc.setVisible(not is_bulk and show_description)
@@ -3548,6 +3876,7 @@ class MainWindow(QMainWindow):
             p = Path(path)
             self.meta_filename_edit.setText(p.name)
             self.meta_path_lbl.setText(f"Folder: {p.parent}")
+            data = {}
 
             # 1. Database Metadata (Load FIRST)
             try:
@@ -3563,6 +3892,25 @@ class MainWindow(QMainWindow):
                 
                 db_params = data.get('ai_params', '')
                 if db_params: self.meta_ai_params_edit.setPlainText(db_params)
+
+                self.meta_ai_status_edit.setText(data.get("ai_status_summary", ""))
+                self.meta_ai_source_edit.setPlainText(data.get("ai_source_summary", ""))
+                self.meta_ai_families_edit.setText(data.get("ai_families_summary", ""))
+                self.meta_ai_detection_reasons_edit.setPlainText(data.get("ai_detection_reasons_summary", ""))
+                self.meta_ai_loras_edit.setPlainText(data.get("ai_loras_summary", ""))
+                self.meta_ai_model_edit.setText(data.get("ai_model_summary", ""))
+                self.meta_ai_checkpoint_edit.setText(data.get("ai_checkpoint_summary", ""))
+                self.meta_ai_sampler_edit.setText(data.get("ai_sampler_summary", ""))
+                self.meta_ai_scheduler_edit.setText(data.get("ai_scheduler_summary", ""))
+                self.meta_ai_cfg_edit.setText(data.get("ai_cfg_summary", ""))
+                self.meta_ai_steps_edit.setText(data.get("ai_steps_summary", ""))
+                self.meta_ai_seed_edit.setText(data.get("ai_seed_summary", ""))
+                self.meta_ai_upscaler_edit.setText(data.get("ai_upscaler_summary", ""))
+                self.meta_ai_denoise_edit.setText(data.get("ai_denoise_summary", ""))
+                self.meta_ai_workflows_edit.setPlainText(data.get("ai_workflows_summary", ""))
+                self.meta_ai_provenance_edit.setPlainText(data.get("ai_provenance_summary", ""))
+                self.meta_ai_character_cards_edit.setPlainText(data.get("ai_character_cards_summary", ""))
+                self.meta_ai_raw_paths_edit.setPlainText(data.get("ai_raw_paths_summary", ""))
                 
                 self.meta_tags.setText(", ".join(data.get("tags", [])))
                 
@@ -3627,7 +3975,12 @@ class MainWindow(QMainWindow):
                         harvested = self._harvest_universal_metadata(img)
                         self.meta_embedded_tags_edit.setText("; ".join(visible.get("tags", [])))
                         self.meta_embedded_comments_edit.setPlainText(visible.get("comment", "") or "")
-                        self.meta_embedded_tool_edit.setPlainText(harvested.get("tool_metadata", ""))
+                        harvested_tool = harvested.get("tool_metadata", "") or ""
+                        db_tool = data.get("ai_tool_summary", "") if isinstance(data, dict) else ""
+                        if harvested_tool and db_tool and harvested_tool.strip() != db_tool.strip():
+                            self.meta_embedded_tool_edit.setPlainText(f"{db_tool}\n\n[File Metadata]\n{harvested_tool}")
+                        else:
+                            self.meta_embedded_tool_edit.setPlainText(harvested_tool or db_tool or "")
 
                         # Also check for separately-stored AI fields from the harvester
                         # (We do NOT overwrite the DB editable fields here, they are populated from DB earlier)
@@ -3700,11 +4053,29 @@ class MainWindow(QMainWindow):
         self.meta_dpi_lbl.setText("DPI: ")
         self.meta_embedded_tags_edit.setText("")
         self.meta_embedded_comments_edit.setPlainText("")
+        self.meta_ai_status_edit.setText("")
+        self.meta_ai_source_edit.setPlainText("")
+        self.meta_ai_families_edit.setText("")
+        self.meta_ai_detection_reasons_edit.setPlainText("")
+        self.meta_ai_loras_edit.setPlainText("")
+        self.meta_ai_model_edit.setText("")
+        self.meta_ai_checkpoint_edit.setText("")
+        self.meta_ai_sampler_edit.setText("")
+        self.meta_ai_scheduler_edit.setText("")
+        self.meta_ai_cfg_edit.setText("")
+        self.meta_ai_steps_edit.setText("")
+        self.meta_ai_seed_edit.setText("")
+        self.meta_ai_upscaler_edit.setText("")
+        self.meta_ai_denoise_edit.setText("")
         self.meta_embedded_tool_edit.setPlainText("")
         self.meta_combined_db.setPlainText("")
         self.meta_ai_prompt_edit.setPlainText("")
         self.meta_ai_negative_prompt_edit.setPlainText("")
         self.meta_ai_params_edit.setPlainText("")
+        self.meta_ai_workflows_edit.setPlainText("")
+        self.meta_ai_provenance_edit.setPlainText("")
+        self.meta_ai_character_cards_edit.setPlainText("")
+        self.meta_ai_raw_paths_edit.setPlainText("")
 
     def _is_metadata_enabled(self, key: str, default: bool = True) -> bool:
         """Read metadata visibility setting with robust boolean conversion."""
@@ -3745,18 +4116,40 @@ class MainWindow(QMainWindow):
             "embeddedcomments": [self.lbl_embedded_comments_cap, self.meta_embedded_comments_edit],
             "embeddedtool": [self.lbl_embedded_tool_cap, self.meta_embedded_tool_edit],
             "combineddb": [self.lbl_combined_db_cap, self.meta_combined_db],
+            "aistatus": [self.lbl_ai_status_cap, self.meta_ai_status_edit],
+            "aisource": [self.lbl_ai_source_cap, self.meta_ai_source_edit],
+            "aifamilies": [self.lbl_ai_families_cap, self.meta_ai_families_edit],
+            "aidetectionreasons": [self.lbl_ai_detection_reasons_cap, self.meta_ai_detection_reasons_edit],
+            "ailoras": [self.lbl_ai_loras_cap, self.meta_ai_loras_edit],
+            "aimodel": [self.lbl_ai_model_cap, self.meta_ai_model_edit],
+            "aicheckpoint": [self.lbl_ai_checkpoint_cap, self.meta_ai_checkpoint_edit],
+            "aisampler": [self.lbl_ai_sampler_cap, self.meta_ai_sampler_edit],
+            "aischeduler": [self.lbl_ai_scheduler_cap, self.meta_ai_scheduler_edit],
+            "aicfg": [self.lbl_ai_cfg_cap, self.meta_ai_cfg_edit],
+            "aisteps": [self.lbl_ai_steps_cap, self.meta_ai_steps_edit],
+            "aiseed": [self.lbl_ai_seed_cap, self.meta_ai_seed_edit],
+            "aiupscaler": [self.lbl_ai_upscaler_cap, self.meta_ai_upscaler_edit],
+            "aidenoise": [self.lbl_ai_denoise_cap, self.meta_ai_denoise_edit],
             "aiprompt": [self.lbl_ai_prompt_cap, self.meta_ai_prompt_edit],
             "ainegprompt": [self.lbl_ai_negative_prompt_cap, self.meta_ai_negative_prompt_edit],
             "aiparams": [self.lbl_ai_params_cap, self.meta_ai_params_edit],
+            "aiworkflows": [self.lbl_ai_workflows_cap, self.meta_ai_workflows_edit],
+            "aiprovenance": [self.lbl_ai_provenance_cap, self.meta_ai_provenance_edit],
+            "aicharcards": [self.lbl_ai_character_cards_cap, self.meta_ai_character_cards_edit],
+            "airawpaths": [self.lbl_ai_raw_paths_cap, self.meta_ai_raw_paths_edit],
             "sep1": [self.meta_sep1],
             "sep2": [self.meta_sep2],
             "sep3": [self.meta_sep3],
         }
         
         # Default fallback order
-        default_order = ["res", "size", "sep1", "description", "tags", "notes", "sep2", "camera", "location", "iso", "shutter", 
-                         "aperture", "software", "lens", "dpi", "embeddedtags", "embeddedcomments", 
-                         "embeddedtool", "combineddb", "sep3", "aiprompt", "ainegprompt", "aiparams"]
+        default_order = [
+            "res", "size", "sep1", "description", "tags", "notes", "sep2", "camera", "location", "iso", "shutter",
+            "aperture", "software", "lens", "dpi", "embeddedtags", "embeddedcomments", "embeddedtool", "combineddb",
+            "sep3", "aistatus", "aisource", "aifamilies", "aimodel", "aicheckpoint", "aisampler", "aischeduler",
+            "aicfg", "aisteps", "aiseed", "aiupscaler", "aidenoise", "ailoras", "aiprompt", "ainegprompt", "aiparams",
+            "aiworkflows", "aiprovenance", "aicharcards", "airawpaths", "aidetectionreasons"
+        ]
         
         # 2. Get saved order
         saved_order_json = self.bridge.settings.value("metadata/display/order", "[]", type=str)
@@ -3812,12 +4205,48 @@ class MainWindow(QMainWindow):
         self.lbl_embedded_tags_cap.setVisible(self._is_metadata_enabled("embeddedtags", True))
         self.meta_embedded_comments_edit.setVisible(self._is_metadata_enabled("embeddedcomments", True))
         self.lbl_embedded_comments_cap.setVisible(self._is_metadata_enabled("embeddedcomments", True))
+        self.meta_ai_status_edit.setVisible(self._is_metadata_enabled("aistatus", True))
+        self.lbl_ai_status_cap.setVisible(self._is_metadata_enabled("aistatus", True))
+        self.meta_ai_source_edit.setVisible(self._is_metadata_enabled("aisource", True))
+        self.lbl_ai_source_cap.setVisible(self._is_metadata_enabled("aisource", True))
+        self.meta_ai_families_edit.setVisible(self._is_metadata_enabled("aifamilies", True))
+        self.lbl_ai_families_cap.setVisible(self._is_metadata_enabled("aifamilies", True))
+        self.meta_ai_detection_reasons_edit.setVisible(self._is_metadata_enabled("aidetectionreasons", False))
+        self.lbl_ai_detection_reasons_cap.setVisible(self._is_metadata_enabled("aidetectionreasons", False))
+        self.meta_ai_loras_edit.setVisible(self._is_metadata_enabled("ailoras", True))
+        self.lbl_ai_loras_cap.setVisible(self._is_metadata_enabled("ailoras", True))
+        self.meta_ai_model_edit.setVisible(self._is_metadata_enabled("aimodel", True))
+        self.lbl_ai_model_cap.setVisible(self._is_metadata_enabled("aimodel", True))
+        self.meta_ai_checkpoint_edit.setVisible(self._is_metadata_enabled("aicheckpoint", False))
+        self.lbl_ai_checkpoint_cap.setVisible(self._is_metadata_enabled("aicheckpoint", False))
+        self.meta_ai_sampler_edit.setVisible(self._is_metadata_enabled("aisampler", True))
+        self.lbl_ai_sampler_cap.setVisible(self._is_metadata_enabled("aisampler", True))
+        self.meta_ai_scheduler_edit.setVisible(self._is_metadata_enabled("aischeduler", True))
+        self.lbl_ai_scheduler_cap.setVisible(self._is_metadata_enabled("aischeduler", True))
+        self.meta_ai_cfg_edit.setVisible(self._is_metadata_enabled("aicfg", True))
+        self.lbl_ai_cfg_cap.setVisible(self._is_metadata_enabled("aicfg", True))
+        self.meta_ai_steps_edit.setVisible(self._is_metadata_enabled("aisteps", True))
+        self.lbl_ai_steps_cap.setVisible(self._is_metadata_enabled("aisteps", True))
+        self.meta_ai_seed_edit.setVisible(self._is_metadata_enabled("aiseed", True))
+        self.lbl_ai_seed_cap.setVisible(self._is_metadata_enabled("aiseed", True))
+        self.meta_ai_upscaler_edit.setVisible(self._is_metadata_enabled("aiupscaler", False))
+        self.lbl_ai_upscaler_cap.setVisible(self._is_metadata_enabled("aiupscaler", False))
+        self.meta_ai_denoise_edit.setVisible(self._is_metadata_enabled("aidenoise", False))
+        self.lbl_ai_denoise_cap.setVisible(self._is_metadata_enabled("aidenoise", False))
         self.meta_ai_prompt_edit.setVisible(self._is_metadata_enabled("aiprompt", True))
         self.lbl_ai_prompt_cap.setVisible(self._is_metadata_enabled("aiprompt", True))
         self.meta_ai_negative_prompt_edit.setVisible(self._is_metadata_enabled("ainegprompt", True))
         self.lbl_ai_negative_prompt_cap.setVisible(self._is_metadata_enabled("ainegprompt", True))
         self.meta_ai_params_edit.setVisible(self._is_metadata_enabled("aiparams", True))
         self.lbl_ai_params_cap.setVisible(self._is_metadata_enabled("aiparams", True))
+        self.meta_ai_workflows_edit.setVisible(self._is_metadata_enabled("aiworkflows", False))
+        self.lbl_ai_workflows_cap.setVisible(self._is_metadata_enabled("aiworkflows", False))
+        self.meta_ai_provenance_edit.setVisible(self._is_metadata_enabled("aiprovenance", False))
+        self.lbl_ai_provenance_cap.setVisible(self._is_metadata_enabled("aiprovenance", False))
+        self.meta_ai_character_cards_edit.setVisible(self._is_metadata_enabled("aicharcards", False))
+        self.lbl_ai_character_cards_cap.setVisible(self._is_metadata_enabled("aicharcards", False))
+        self.meta_ai_raw_paths_edit.setVisible(self._is_metadata_enabled("airawpaths", False))
+        self.lbl_ai_raw_paths_cap.setVisible(self._is_metadata_enabled("airawpaths", False))
         
         self.meta_embedded_tool_edit.setVisible(self._is_metadata_enabled("embeddedtool", True))
         self.lbl_embedded_tool_cap.setVisible(self._is_metadata_enabled("embeddedtool", True))
