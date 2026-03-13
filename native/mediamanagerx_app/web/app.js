@@ -16,6 +16,7 @@ let gExternalEditors = {};
 let gCurrentDragCount = 0;
 let gPlayingInplaceCard = null;
 let gActiveMetadataMode = 'image';
+let gUpdateToastTimer = null;
 
 const METADATA_SETTINGS_CONFIG = {
   image: {
@@ -1974,15 +1975,40 @@ async function main() {
     if (bridge.updateAvailable) {
       bridge.updateAvailable.connect(function (newVer, manual) {
         const toast = document.getElementById('updateToast');
+        const label = document.getElementById('updateToastLabel');
         const text = document.getElementById('updateToastText');
+        const actions = document.getElementById('updateToastActions');
         const statusText = document.getElementById('updateStatusText');
 
         if (newVer) {
-          if (text) text.textContent = `Version ${newVer} is available!`;
-          if (toast) toast.hidden = false;
           if (statusText) statusText.textContent = `Version ${newVer} available!`;
+          if (label) label.textContent = 'Update Available!';
+          if (text) text.textContent = `Version ${newVer} is available!`;
+          if (actions) actions.style.display = 'flex';
+          if (toast) {
+            toast.classList.remove('info-only');
+            toast.hidden = false;
+          }
         } else if (manual) {
           if (statusText) statusText.textContent = 'You are using the latest version.';
+          if (label) label.textContent = 'Up to Date';
+          
+          if (bridge.get_app_version) {
+              bridge.get_app_version(function(v) {
+                  if (text) text.textContent = `Version ${v} is the newest.`;
+              });
+          } else {
+              if (text) text.textContent = 'You are using the newest version.';
+          }
+          
+          if (actions) actions.style.display = 'none';
+          if (toast) {
+            toast.classList.add('info-only');
+            toast.hidden = false;
+            // Auto-hide after 5 seconds if it's just an info toast
+            if (gUpdateToastTimer) clearTimeout(gUpdateToastTimer);
+            gUpdateToastTimer = setTimeout(() => { toast.hidden = true; }, 5000);
+          }
         }
       });
     }
@@ -1998,6 +2024,17 @@ async function main() {
       });
     }
 
+    // Dismiss toast on click if it's info only
+    const toast = document.getElementById('updateToast');
+    if (toast) {
+      toast.addEventListener('click', () => {
+        if (toast.classList.contains('info-only')) {
+           toast.hidden = true;
+           if (gUpdateToastTimer) clearTimeout(gUpdateToastTimer);
+        }
+      });
+    }
+
     const btnUpdateLater = document.getElementById('btnUpdateLater');
     if (btnUpdateLater) {
       btnUpdateLater.addEventListener('click', () => {
@@ -2008,6 +2045,10 @@ async function main() {
 
     if (bridge.updateDownloadProgress) {
       bridge.updateDownloadProgress.connect(function (pct) {
+        // Hide the update toast as soon as we start seeing download progress
+        const toast = document.getElementById('updateToast');
+        if (toast) toast.hidden = true;
+        
         setGlobalLoading(true, 'Downloading update...', pct);
       });
     }

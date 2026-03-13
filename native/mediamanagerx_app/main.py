@@ -2290,6 +2290,11 @@ class MainWindow(QMainWindow):
 
         self._setup_shortcuts()
 
+        # Check for updates on launch if enabled
+        if self.bridge.settings.value("updates/check_on_launch", True, type=bool):
+            # Short delay to let the UI finish rendering before the network request
+            QTimer.singleShot(1500, lambda: self.bridge.check_for_updates(manual=False))
+
     def _setup_shortcuts(self) -> None:
         """Standard Windows-style keyboard shortcuts."""
         self.act_copy = QAction("Copy", self)
@@ -5466,16 +5471,8 @@ class MainWindow(QMainWindow):
         self._show_markdown_dialog("What's New", "CHANGELOG.md")
 
     def _on_update_available(self, version: str, manual: bool) -> None:
-        if version:
-            ret = QMessageBox.question(
-                self, "Update Available",
-                f"A new version ({version}) is available. Would you like to download and install it now?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            if ret == QMessageBox.StandardButton.Yes:
-                self.bridge.download_and_install_update()
-        elif manual:
-            QMessageBox.information(self, "No Updates", "You are already using the latest version.")
+        """Handled in web frontend (toast popup)."""
+        pass
 
     def _on_update_error(self, message: str) -> None:
         QMessageBox.warning(self, "Update Error", message)
