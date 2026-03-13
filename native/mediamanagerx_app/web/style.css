@@ -1432,8 +1432,11 @@ body:not(.no-glass).light-mode .lightbox-backdrop {
   border-radius: 12px;
   padding: 12px 16px;
   box-shadow: 0 8px 32px var(--shadow);
-  cursor: pointer;
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s linear;
+}
+
+.scan-indicator.info-only {
+  cursor: pointer;
 }
 
 .scan-indicator:hover {
@@ -1470,7 +1473,7 @@ body:not(.no-glass).light-mode .lightbox-backdrop {
 
 .scan-label {
   font-weight: 700;
-  color: var(--accent);
+  color: color-mix(in srgb, var(--fg), var(--accent) 65%);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
