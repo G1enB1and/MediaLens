@@ -28,6 +28,7 @@ def build_exe():
         "pyinstaller",
         "--noconfirm",
         "--onedir",
+        "--noupx",
         "--windowed", # Don't open a console window for the GUI app
         "--icon=app.ico",
         "--add-data=native;native",
