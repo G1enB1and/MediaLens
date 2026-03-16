@@ -1400,15 +1400,18 @@ function refreshFromBridge(bridge, resetPage = false) {
 
     // ── 1. Fast Path Reconcile (Hybrid Load) ─────────────────────────────
     // This loads the synthesized candidates from disk + DB without waiting for scan.
-    bridge.count_media(gSelectedFolders, gFilter, gSearchQuery || '', function (count) {
-      gTotal = count || 0;
-      bridge.list_media(gSelectedFolders, PAGE_SIZE, gPage * PAGE_SIZE, gSort, gFilter, gSearchQuery || '', function (items) {
-        renderMediaList(items, true);
-        renderPager();
-        // Hide the "Starting..." or "Loading..." overlay once we have the first batch of results.
-        setGlobalLoading(false);
+      bridge.count_media(gSelectedFolders, gFilter, gSearchQuery || '', function (count) {
+        gTotal = count || 0;
+        bridge.list_media(gSelectedFolders, PAGE_SIZE, gPage * PAGE_SIZE, gSort, gFilter, gSearchQuery || '', function (items) {
+          renderMediaList(items, true);
+          renderPager();
+          // Hide the "Starting..." or "Loading..." overlay once we have the first batch of results.
+          setGlobalLoading(false);
+          if (bridge.start_scan_paths) {
+            bridge.start_scan_paths((items || []).map(item => item.path).filter(Boolean));
+          }
+        });
       });
-    });
 
     // ── 2. Background Enrichment Scan ────────────────────────────────────
     // This fills in hashes and metadata in the DB.

@@ -941,6 +941,7 @@ class Bridge(QObject):
         # Hybrid Fast-Load Cache
         self._disk_cache: dict[str, Path] = {}
         self._disk_cache_key: str = "" # Hash of selected folders list
+        self._last_full_scan_key: str = ""
 
         # Connect blocking signal for cross-thread dialogs
         self.conflictDialogRequested.connect(self._invoke_conflict_dialog, Qt.BlockingQueuedConnection)
@@ -2147,6 +2148,9 @@ class Bridge(QObject):
     def start_scan(self, folders: list, search_query: str = "") -> None:
         if not folders:
             return
+        scan_key = hashlib.sha1(",".join(sorted(str(folder) for folder in folders)).encode()).hexdigest()
+        if self._last_full_scan_key == scan_key:
+            return
         self._scan_abort = True
         def work():
             try:
@@ -2161,7 +2165,8 @@ class Bridge(QObject):
                     if not paths and folders:
                         self._get_reconciled_candidates(folders, "all", search_query)
                         paths = list(self._disk_cache.values())
-                    self._do_full_scan(paths, scan_conn)
+                    self._do_full_scan(paths, scan_conn, emit_progress=True)
+                    self._last_full_scan_key = scan_key
                     self.scanFinished.emit(primary, len(self._get_reconciled_candidates(folders, "all", search_query)))
                 finally:
                     scan_conn.close()
@@ -2172,7 +2177,27 @@ class Bridge(QObject):
                     pass
         threading.Thread(target=work, daemon=True).start()
 
-    def _do_full_scan(self, paths: list[Path], conn) -> int:
+    @Slot(list)
+    def start_scan_paths(self, paths: list[str]) -> None:
+        clean_paths = [Path(path) for path in paths if str(path or "").strip()]
+        if not clean_paths:
+            return
+        def work():
+            try:
+                from app.mediamanager.db.connect import connect_db
+                scan_conn = connect_db(str(self.db_path))
+                try:
+                    self._do_full_scan(clean_paths, scan_conn, emit_progress=False)
+                finally:
+                    scan_conn.close()
+            except Exception as exc:
+                try:
+                    self._log(f"Page scan failed: {exc}")
+                except Exception:
+                    pass
+        threading.Thread(target=work, daemon=True).start()
+
+    def _do_full_scan(self, paths: list[Path], conn, emit_progress: bool = True) -> int:
         from app.mediamanager.db.media_repo import get_media_by_path, upsert_media_item
         from app.mediamanager.metadata.persistence import inspect_and_persist_if_supported
         from app.mediamanager.utils.hashing import calculate_file_hash
@@ -2181,7 +2206,8 @@ class Bridge(QObject):
         total, count = len(paths), 0
         for i, p in enumerate(paths):
             if self._scan_abort: break
-            self.scanProgress.emit(p.name, int(((i + 1) / total) * 100) if total > 0 else 100)
+            if emit_progress:
+                self.scanProgress.emit(p.name, int(((i + 1) / total) * 100) if total > 0 else 100)
             try:
                 stat = p.stat()
                 existing, skip = get_media_by_path(conn, str(p)), False
