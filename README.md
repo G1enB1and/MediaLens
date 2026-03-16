@@ -1,6 +1,6 @@
 # MediaManagerX
 
-A powerful, local-first media asset manager designed for privacy, speed, and premium aesthetics.
+A powerful media asset manager designed for large collections of images, videos, and GIFs. Find deeply embedded metadata such as AI prompts, camera settings, and more. Edit tags and notes in bulk. Organize your library with ease.
 
 ## 🚀 Getting Started
 

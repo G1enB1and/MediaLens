@@ -1,6 +1,17 @@
 # Change Log
 
-## v1.0.9 (Current)
+## v1.0.10 (Current)
+
+### Changed in v1.0.10
+
+- **Update Notifications**: Refined the update notification system with stylized overlays for both automatic and manual checks.
+- **Improved Toast Notifications**: Removed redundant native Windows dialogs and implemented a stylized "Up to Date" overlay that auto-hides.
+- **UI Color Selectivity**: Adjusted colors to be more neutral and apply accent color more selectively.
+- **Setup Installer**: Dissabled UPX to improve speed of installed app at the cost of installer file size.
+
+---
+
+## v1.0.9
 
 ### Added in v1.0.9
 
