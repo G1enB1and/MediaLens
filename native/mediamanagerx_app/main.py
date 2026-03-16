@@ -512,11 +512,19 @@ class CustomSplitterHandle(QSplitterHandle):
         accent_str = str(self.parent().window().bridge.settings.value("ui/accent_color", "#8ab4f8"))
         accent = QColor(accent_str)
         
-        # Idle color is a very subtle tinted grey
-        idle = QColor("#555555") if not Theme.get_is_light() else QColor("#cccccc")
+        idle = QColor(Theme.get_splitter_idle(accent))
         color = accent if self.underMouse() else idle
-        
-        painter.fillRect(self.rect(), color)
+
+        painter.fillRect(self.rect(), Qt.GlobalColor.transparent)
+        pen = QPen(color)
+        pen.setWidth(1)
+        painter.setPen(pen)
+        mid_x = self.rect().center().x()
+        mid_y = self.rect().center().y()
+        if self.orientation() == Qt.Orientation.Horizontal:
+            painter.drawLine(mid_x, self.rect().top(), mid_x, self.rect().bottom())
+        else:
+            painter.drawLine(self.rect().left(), mid_y, self.rect().right(), mid_y)
 
     def enterEvent(self, event: QEnterEvent) -> None:
         self.update()
@@ -2667,9 +2675,7 @@ class MainWindow(QMainWindow):
         self.left_panel = QWidget()
         left_layout = QVBoxLayout(self.left_panel)
         left_layout.setContentsMargins(10, 10, 10, 10)
-        left_layout.setSpacing(8)
-
-        left_layout.addWidget(QLabel("Folders"))
+        left_layout.setSpacing(0)
 
         # Choose initial root based on settings.
         default_root = None
@@ -2746,18 +2752,41 @@ class MainWindow(QMainWindow):
         # Connect to directoryLoaded so we can refresh icons/expansion once ready
         self.fs_model.directoryLoaded.connect(self._on_directory_loaded)
 
-        left_layout.addWidget(self.tree, 1)
+        self.left_sections_splitter = CustomSplitter(Qt.Orientation.Vertical)
+        self.left_sections_splitter.setObjectName("leftSectionsSplitter")
+        self.left_sections_splitter.setChildrenCollapsible(False)
+        self.left_sections_splitter.setHandleWidth(5)
 
+        folders_section = QWidget()
+        folders_layout = QVBoxLayout(folders_section)
+        folders_layout.setContentsMargins(0, 0, 0, 0)
+        folders_layout.setSpacing(6)
+        folders_layout.addWidget(QLabel("Folders"))
+        folders_layout.addWidget(self.tree, 1)
+
+        collections_section = QWidget()
+        collections_layout = QVBoxLayout(collections_section)
+        collections_layout.setContentsMargins(0, 8, 0, 0)
+        collections_layout.setSpacing(6)
         self.collections_header = QLabel("Collections")
-        left_layout.addWidget(self.collections_header)
+        collections_layout.addWidget(self.collections_header)
 
         self.collections_list = CollectionListWidget()
         self.collections_list.setObjectName("collectionsList")
-        self.collections_list.setMinimumHeight(120)
+        self.collections_list.setMinimumHeight(0)
         self.collections_list.itemSelectionChanged.connect(self._on_collection_selection_changed)
         self.collections_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.collections_list.customContextMenuRequested.connect(self._on_collections_context_menu)
-        left_layout.addWidget(self.collections_list)
+        collections_layout.addWidget(self.collections_list, 1)
+        collections_section.setMinimumHeight(self.collections_header.sizeHint().height() + collections_layout.contentsMargins().top())
+
+        self.left_sections_splitter.addWidget(folders_section)
+        self.left_sections_splitter.addWidget(collections_section)
+        self.left_sections_splitter.setStretchFactor(0, 1)
+        self.left_sections_splitter.setStretchFactor(1, 0)
+        self.left_sections_splitter.setSizes([430, 170])
+
+        left_layout.addWidget(self.left_sections_splitter, 1)
 
         self.bridge.collectionsChanged.connect(self._reload_collections)
         self._reload_collections()
