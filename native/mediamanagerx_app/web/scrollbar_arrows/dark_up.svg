@@ -1,1 +1,7 @@
-<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' fill='none'><path d='M50 35L25 65H75L50 35Z' fill='#999999'/></svg>
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg width="100%" height="100%" viewBox="0 0 100 100" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" xmlns:serif="http://www.serif.com/" style="fill-rule:evenodd;clip-rule:evenodd;stroke-linejoin:round;stroke-miterlimit:2;">
+    <g transform="matrix(1.547535,0,0,1.614261,-27.376759,-30.713067)">
+        <path d="M50,35L25,65L75,65L50,35Z" style="fill:rgb(136,136,136);fill-rule:nonzero;stroke:rgb(135,135,135);stroke-width:3.52px;"/>
+    </g>
+</svg>

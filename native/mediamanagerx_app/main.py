@@ -4835,7 +4835,7 @@ class MainWindow(QMainWindow):
             return
         
         self._current_accent = accent_color
-        self.splitter.setHandleWidth(5)
+        self.splitter.setHandleWidth(1)
         
         # We no longer need stylesheets or manual loops here because 
         # CustomSplitterHandle.paintEvent handles everything natively.
@@ -5362,10 +5362,8 @@ class MainWindow(QMainWindow):
     def _show_themed_dialog(self, title: str, content: str, is_markdown: bool = False) -> None:
         """Helper to show content in a scrollable, themed dialog."""
         accent_q = QColor(self._current_accent)
-        # Use a slightly stronger tint (0.10) than the main gallery (0.04) 
-        # to ensure it's visibly tinted and not "pure" black/white.
-        base_color = Theme.BASE_BG_LIGHT if Theme.get_is_light() else Theme.BASE_BG_DARK
-        bg = Theme.mix(base_color, accent_q, 0.10)
+        bg = Theme.get_bg(accent_q)
+        content_bg = Theme.get_control_bg(accent_q)
         fg = Theme.get_text_color()
         border = Theme.get_border(accent_q)
         btn_bg = Theme.get_btn_save_bg(accent_q)
@@ -5382,13 +5380,14 @@ class MainWindow(QMainWindow):
                 color: {fg};
             }}
             QTextEdit {{
-                background-color: {bg};
+                background-color: {content_bg};
                 color: {fg};
                 border: 1px solid {border};
                 border-radius: 6px;
                 padding: 20px;
                 font-size: 11pt;
                 line-height: 1.4;
+                selection-background-color: {accent_q.name()};
             }}
             QPushButton {{
                 background-color: {btn_bg};
@@ -5408,6 +5407,8 @@ class MainWindow(QMainWindow):
         
         view = QTextEdit()
         view.setReadOnly(True)
+        view.setFrameShape(QFrame.Shape.NoFrame)
+        view.viewport().setAutoFillBackground(False)
         if is_markdown:
             view.setMarkdown(content)
         else:
