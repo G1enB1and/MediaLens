@@ -1186,6 +1186,7 @@ class Bridge(QObject):
                 "ui.accent_color": str(self.settings.value("ui/accent_color", "#8ab4f8", type=str) or "#8ab4f8"),
                 "ui.show_left_panel": bool(self.settings.value("ui/show_left_panel", True, type=bool)),
                 "ui.show_right_panel": bool(self.settings.value("ui/show_right_panel", True, type=bool)),
+                "ui.enable_glassmorphism": bool(self.settings.value("ui/enable_glassmorphism", True, type=bool)),
                 "ui.theme_mode": str(self.settings.value("ui/theme_mode", "dark", type=str) or "dark"),
                 "metadata.display.res": bool(self.settings.value("metadata/display/res", True, type=bool)),
                 "metadata.display.size": bool(self.settings.value("metadata/display/size", True, type=bool)),
@@ -1239,6 +1240,7 @@ class Bridge(QObject):
                 "ui.accent_color": "#8ab4f8",
                 "ui.show_left_panel": True,
                 "ui.show_right_panel": True,
+                "ui.enable_glassmorphism": True,
                 "ui.theme_mode": "dark",
             }
 
@@ -1319,7 +1321,7 @@ class Bridge(QObject):
     @Slot(str, bool, result=bool)
     def set_setting_bool(self, key: str, value: bool) -> bool:
         try:
-            if key not in ("gallery.randomize", "gallery.restore_last", "gallery.hide_dot", "ui.show_left_panel", "ui.show_right_panel", "updates.check_on_launch") and not key.startswith("metadata.display."):
+            if key not in ("gallery.randomize", "gallery.restore_last", "gallery.hide_dot", "ui.show_left_panel", "ui.show_right_panel", "ui.enable_glassmorphism", "updates.check_on_launch") and not key.startswith("metadata.display."):
                 return False
             qkey = key.replace(".", "/")
             self.settings.setValue(qkey, bool(value))
@@ -2821,7 +2823,12 @@ class MainWindow(QMainWindow):
         self.left_sections_splitter.addWidget(collections_section)
         self.left_sections_splitter.setStretchFactor(0, 1)
         self.left_sections_splitter.setStretchFactor(1, 0)
-        self.left_sections_splitter.setSizes([430, 170])
+        left_sections_state = self.bridge.settings.value("ui/left_sections_splitter_state")
+        if left_sections_state:
+            self.left_sections_splitter.restoreState(left_sections_state)
+        else:
+            self.left_sections_splitter.setSizes([430, 170])
+        self.left_sections_splitter.splitterMoved.connect(lambda *args: self._save_splitter_state())
 
         left_layout.addWidget(self.left_sections_splitter, 1)
 
@@ -5589,6 +5596,8 @@ class MainWindow(QMainWindow):
     def _save_splitter_state(self) -> None:
         try:
             self.bridge.settings.setValue("ui/splitter_state", self.splitter.saveState())
+            if hasattr(self, "left_sections_splitter"):
+                self.bridge.settings.setValue("ui/left_sections_splitter_state", self.left_sections_splitter.saveState())
         except Exception:
             pass
 
