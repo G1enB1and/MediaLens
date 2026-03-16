@@ -1877,10 +1877,14 @@ class Bridge(QObject):
             return (0, 0, False)
         except Exception: return (0, 0, False)
 
-    @Slot(str, bool, bool, bool, result=bool)
-    def open_native_video(self, video_path: str, autoplay: bool, loop: bool, muted: bool) -> bool:
+    @Slot(str, bool, bool, bool, int, int, result=bool)
+    def open_native_video(self, video_path: str, autoplay: bool, loop: bool, muted: bool, w: int = 0, h: int = 0) -> bool:
         try:
-            w, h, is_malformed = self._probe_video_size(video_path)
+            if w <= 0 or h <= 0:
+                w, h, is_malformed = self._probe_video_size(video_path)
+            else:
+                is_malformed = (w % 2 != 0 or h % 2 != 0)
+                
             if is_malformed:
                 self.videoPreprocessingStatus.emit("Preparing video...")
                 def work():
@@ -1897,15 +1901,19 @@ class Bridge(QObject):
             return True
         except Exception: return False
 
-    @Slot(str, int, int, int, int, bool, bool, bool)
-    def open_native_video_inplace(self, video_path: str, x: int, y: int, w: int, h: int, autoplay: bool, loop: bool, muted: bool) -> None:
+    @Slot(str, int, int, int, int, bool, bool, bool, int, int)
+    def open_native_video_inplace(self, video_path: str, x: int, y: int, w: int, h: int, autoplay: bool, loop: bool, muted: bool, vw: int = 0, vh: int = 0) -> None:
         # If loop is false, double check duration (for previously scanned files without duration metadata)
         if not loop:
             d_s = self.get_video_duration_seconds(video_path)
             if 0 < d_s < 60:
                 loop = True
         try:
-            vw, vh, is_malformed = self._probe_video_size(video_path)
+            if vw <= 0 or vh <= 0:
+                vw, vh, is_malformed = self._probe_video_size(video_path)
+            else:
+                is_malformed = (vw % 2 != 0 or vh % 2 != 0)
+
             if is_malformed:
                 self.videoPreprocessingStatus.emit("Preparing video...")
                 def work():
@@ -1922,6 +1930,27 @@ class Bridge(QObject):
                 self.openVideoInPlaceRequested.emit(str(video_path), int(x), int(y), int(w), int(h), bool(autoplay), bool(loop), bool(muted), int(vw), int(vh))
         except Exception:
             pass
+
+    @Slot(str, int, int)
+    def preload_video(self, video_path: str, w: int = 0, h: int = 0) -> None:
+        """Proactively prepare a video for playback in the background."""
+        def work():
+            try:
+                # 1. Probe if dimensions unknown
+                nonlocal w, h
+                if w <= 0 or h <= 0:
+                    w, h, is_malformed = self._probe_video_size(video_path)
+                else:
+                    is_malformed = (w % 2 != 0 or h % 2 != 0)
+                
+                # 2. Trigger "safety gate" preprocessing ahead of time if malformed
+                if is_malformed:
+                    self._preprocess_to_even_dims(video_path, w, h)
+                    
+                # 3. Future: Warm up QMediaPlayer instance if needed
+            except Exception:
+                pass
+        threading.Thread(target=work, daemon=True).start()
 
     @Slot(int, int, int, int)
     def update_native_video_rect(self, x, y, w, h):

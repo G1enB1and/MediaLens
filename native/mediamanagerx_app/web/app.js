@@ -147,6 +147,9 @@ function flushBackgroundQueue() {
       loadImage(item.el, item.imgSrc);
     } else if (item.type === 'video') {
       loadVideoPoster(item.el, item.path);
+      if (gBridge && gBridge.preload_video) {
+        gBridge.preload_video(item.path, item.width || 0, item.height || 0);
+      }
     }
   }
 
@@ -233,6 +236,13 @@ function ensureMediaObserver() {
           loadImage(el, imgSrc);
         } else if (path) {
           loadVideoPoster(el, path);
+          if (gBridge && gBridge.preload_video) {
+            // Find the original item to get width/height
+            const item = gMedia.find(m => m.path === path);
+            if (item) {
+              gBridge.preload_video(path, item.width || 0, item.height || 0);
+            }
+          }
         }
       }
     },
@@ -887,7 +897,6 @@ function renderMediaList(items, scrollToTop = true) {
       playIndicator.className = 'video-play-indicator';
       playIndicator.innerHTML = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'><path d='M8 5v14l11-7z'/></svg>`;
       card.appendChild(playIndicator);
-
       playIndicator.addEventListener('click', (e) => {
         e.stopPropagation();
         const path = item.path || '';
@@ -903,9 +912,15 @@ function renderMediaList(items, scrollToTop = true) {
           card.classList.add('playing-inplace', 'playing-inprogress');
           gPlayingInplaceCard = card;
           const shouldLoop = (item.duration && item.duration < 60) || false;
-          gBridge.open_native_video_inplace(path, rect.x, rect.y, rect.width, rect.height, true, shouldLoop, true);
+          gBridge.open_native_video_inplace(path, rect.x, rect.y, rect.width, rect.height, true, shouldLoop, true, item.width || 0, item.height || 0);
         } else {
-          gBridge.open_native_video(path, true, false, true);
+          gBridge.open_native_video(path, true, false, true, item.width || 0, item.height || 0);
+        }
+      });
+
+      card.addEventListener('mouseenter', () => {
+        if (gBridge && gBridge.preload_video && item.path) {
+          gBridge.preload_video(item.path, item.width || 0, item.height || 0);
         }
       });
 
@@ -1034,10 +1049,11 @@ function renderMediaList(items, scrollToTop = true) {
       if (gPosterRequested.has(img)) return;
       const imgSrc = img.getAttribute('data-src');
       const path = img.getAttribute('data-video-path');
+      const item = gMedia.find(m => m.path === path || m.url === imgSrc); // Find the original item to get width/height
       if (imgSrc) {
         gBackgroundQueue.push({ type: 'image', el: img, imgSrc });
-      } else if (path) {
-        gBackgroundQueue.push({ type: 'video', el: img, path });
+      } else if (path && item) {
+        gBackgroundQueue.push({ type: 'video', el: img, path, width: item.width, height: item.height });
       }
     });
     scheduleBackgroundDrain();
@@ -1189,7 +1205,7 @@ function openLightboxByIndex(idx) {
         const seconds = Number(dur || 0);
         const loop = seconds > 0 && seconds < 60;
         // Always autoplay, always muted, loop only if short
-        gBridge.open_native_video(item.path, true, loop, true);
+        gBridge.open_native_video(item.path, true, loop, true, item.width || 0, item.height || 0);
       });
     }
     return;
