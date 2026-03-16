@@ -2,6 +2,7 @@ import sqlite3
 import unittest
 from pathlib import Path
 
+from app.mediamanager.db.collections_repo import create_collection, add_media_paths_to_collection
 from app.mediamanager.db.media_repo import add_media_item, list_media_in_scope
 from app.mediamanager.db.migrations import init_db
 
@@ -99,6 +100,30 @@ class TestMediaRepo(unittest.TestCase):
         self.assertEqual(scoped[0]["model_name"], "dreamshaper")
         self.assertEqual(scoped[0]["sampler"], "Euler")
         self.assertEqual(scoped[0]["ai_loras"], "anime-helper")
+
+    def test_list_media_in_scope_includes_collection_names(self) -> None:
+        media_dir = self.tmp_dir / "collection-search"
+        media_dir.mkdir(exist_ok=True)
+        media_path = media_dir / "sunset.jpg"
+        media_path.write_bytes(b"jpg")
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("PRAGMA journal_mode=MEMORY;")
+                add_media_item(conn, str(media_path), "image")
+                collection = create_collection(conn, "Vacation Picks")
+                add_media_paths_to_collection(conn, collection["id"], [str(media_path)])
+
+                scoped = list_media_in_scope(conn, [str(media_dir)])
+
+            self.assertEqual(scoped[0]["collection_names"], "Vacation Picks")
+        finally:
+            try:
+                if media_path.exists():
+                    media_path.unlink()
+                if media_dir.exists():
+                    media_dir.rmdir()
+            except Exception:
+                pass
 
 
 if __name__ == '__main__':

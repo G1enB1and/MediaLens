@@ -2140,78 +2140,8 @@ class Bridge(QObject):
         return candidates
 
     def _matches_media_search(self, row: dict, search_query: str) -> bool:
-        try:
-            terms = shlex.split(search_query)
-        except Exception:
-            terms = search_query.split()
-        if not terms:
-            return True
-
-        def _text(value) -> str:
-            return str(value or "").strip().lower()
-
-        generic_fields = [
-            row.get("path"),
-            row.get("title"),
-            row.get("description"),
-            row.get("notes"),
-            row.get("tags"),
-            row.get("ai_prompt"),
-            row.get("ai_negative_prompt"),
-            row.get("tool_name_found"),
-            row.get("tool_name_inferred"),
-            row.get("model_name"),
-            row.get("checkpoint_name"),
-            row.get("sampler"),
-            row.get("scheduler"),
-            row.get("cfg_scale"),
-            row.get("steps"),
-            row.get("seed"),
-            row.get("source_formats"),
-            row.get("metadata_families"),
-            row.get("ai_loras"),
-        ]
-        generic_haystack = "\n".join(_text(value) for value in generic_fields if value not in (None, ""))
-
-        field_map = {
-            "path": [row.get("path")],
-            "title": [row.get("title")],
-            "description": [row.get("description")],
-            "notes": [row.get("notes")],
-            "tags": [row.get("tags")],
-            "prompt": [row.get("ai_prompt")],
-            "negative": [row.get("ai_negative_prompt")],
-            "negprompt": [row.get("ai_negative_prompt")],
-            "tool": [row.get("tool_name_found"), row.get("tool_name_inferred")],
-            "model": [row.get("model_name")],
-            "checkpoint": [row.get("checkpoint_name")],
-            "sampler": [row.get("sampler")],
-            "scheduler": [row.get("scheduler")],
-            "cfg": [row.get("cfg_scale")],
-            "steps": [row.get("steps")],
-            "seed": [row.get("seed")],
-            "source": [row.get("source_formats")],
-            "family": [row.get("metadata_families")],
-            "lora": [row.get("ai_loras")],
-        }
-
-        for raw_term in terms:
-            term = raw_term.strip()
-            if not term:
-                continue
-            if ":" in term:
-                key, value = term.split(":", 1)
-                key = key.strip().lower()
-                value = value.strip().lower()
-                if not value:
-                    continue
-                haystack = "\n".join(_text(item) for item in field_map.get(key, []))
-                if value not in haystack:
-                    return False
-            else:
-                if term.lower() not in generic_haystack:
-                    return False
-        return True
+        from app.mediamanager.search_query import matches_media_search
+        return matches_media_search(row, search_query)
 
     @Slot(list, str)
     def start_scan(self, folders: list, search_query: str = "") -> None:
@@ -2590,6 +2520,9 @@ class MainWindow(QMainWindow):
         whats_new_action = QAction("&What's New", self)
         whats_new_action.triggered.connect(self.show_whats_new)
         help_menu.addAction(whats_new_action)
+        search_help_action = QAction("&Search Syntax Help", self)
+        search_help_action.triggered.connect(self.show_search_syntax_help)
+        help_menu.addAction(search_help_action)
         
         help_menu.addSeparator()
 
@@ -5832,6 +5765,9 @@ class MainWindow(QMainWindow):
 
     def show_whats_new(self) -> None:
         self._show_markdown_dialog("What's New", "CHANGELOG.md")
+
+    def show_search_syntax_help(self) -> None:
+        self._show_markdown_dialog("Search Syntax Help", "SEARCH_SYNTAX.md")
 
     def _on_update_available(self, version: str, manual: bool) -> None:
         """Handled in web frontend (toast popup)."""

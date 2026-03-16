@@ -249,7 +249,13 @@ def _list_media_with_where(
                 FROM tags t
                 JOIN media_tags mt ON t.id = mt.tag_id
                 WHERE mt.media_id = m.id
-            ) as tags
+            ) as tags,
+            (
+                SELECT GROUP_CONCAT(c.name, ', ')
+                FROM collections c
+                JOIN collection_items ci ON c.id = ci.collection_id
+                WHERE ci.media_id = m.id
+            ) as collection_names
         FROM media_items m
         LEFT JOIN media_metadata meta ON m.id = meta.media_id
         LEFT JOIN media_ai_metadata ai ON m.id = ai.media_id
@@ -290,6 +296,7 @@ def _media_row_to_dict(row) -> dict:
         "metadata_families": row[23],
         "ai_loras": row[24],
         "tags": row[25],
+        "collection_names": row[26],
     }
 
 
