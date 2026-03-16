@@ -1,52 +1,63 @@
 :root {
-  /* Default Dark Mode Constants (near-neutrals) */
-  --bg-neutral: #111111;
-  --panel-neutral: #191919;
-  --border-neutral: #2d2d2d;
-  --fg-neutral: #e6e6e6;
-  --muted-neutral: #9a9a9a;
-  --thumb-neutral: #0a0a0a;
+  /* Default Dark Mode Constants: neutral-first surface ladder */
+  --bg-neutral: #1e1e1e;
+  --panel-neutral: #252526;
+  --surface-neutral: #2d2d30;
+  --border-neutral: #3b3b40;
+  --border-strong: #4a4a50;
+  --fg-neutral: #f2f2f3;
+  --muted-neutral: #b4b7bd;
+  --thumb-neutral: #141414;
   --shadow-color: rgba(0, 0, 0, 0.5);
 
   /* User Accent (Default) */
   --accent: #3a257d;
 
-  /* Dynamic Tinted Surfaces */
-  --bg: color-mix(in srgb, var(--bg-neutral), var(--accent) 10%);
-  --panel: color-mix(in srgb, var(--panel-neutral), var(--accent) 15%);
-  --border: color-mix(in srgb, var(--border-neutral), var(--accent) 18%);
+  /* Neutral surfaces with accent reserved for interaction */
+  --bg: var(--bg-neutral);
+  --panel: var(--panel-neutral);
+  --border: var(--border-neutral);
   --fg: var(--fg-neutral);
-  --muted: color-mix(in srgb, var(--muted-neutral), var(--accent) 15%);
-  --card-bg: color-mix(in srgb, var(--panel), white 2%);
-  --input-bg: color-mix(in srgb, var(--panel), black 4%);
-  --hover-bg: color-mix(in srgb, var(--accent), transparent 88%);
-  --modal-bg: color-mix(in srgb, var(--panel), black 5%);
+  --muted: var(--muted-neutral);
+  --card-bg: var(--surface-neutral);
+  --input-bg: color-mix(in srgb, var(--surface-neutral), black 6%);
+  --hover-bg: color-mix(in srgb, var(--surface-neutral), white 7%);
+  --accent-soft: color-mix(in srgb, var(--accent), transparent 86%);
+  --accent-soft-strong: color-mix(in srgb, var(--accent), transparent 80%);
+  --modal-bg: color-mix(in srgb, var(--panel-neutral), black 2%);
   --shadow: var(--shadow-color);
   --thumb-bg: var(--thumb-neutral);
-  --scrollbar-track: #080808;
+  --scrollbar-track: #181818;
+  --scrollbar-thumb: #4a4a50;
+  --scrollbar-thumb-hover: #5a5a61;
   --scrollbar-arrow: #999;
 }
 
 :root.light-mode {
-  /* Light Mode Constants (near-neutrals) */
-  --bg-neutral: #f5f5f5;
-  --panel-neutral: #eeeeee;
-  --border-neutral: #d5d5d5;
-  --fg-neutral: #202124;
-  --muted-neutral: #5f5f5f;
-  --thumb-neutral: #e0e0e0;
+  /* Light Mode Constants: neutral-first surface ladder */
+  --bg-neutral: #f4f5f7;
+  --panel-neutral: #fbfbfc;
+  --surface-neutral: #ffffff;
+  --border-neutral: #d9dde3;
+  --border-strong: #c2c7d0;
+  --fg-neutral: #1f2329;
+  --muted-neutral: #60656f;
+  --thumb-neutral: #eef0f3;
   --shadow-color: rgba(0, 0, 0, 0.15);
 
-  /* Overrides for dynamic surfaces to feel "light" but still tinted */
-  --bg: color-mix(in srgb, var(--bg-neutral), var(--accent) 8%);
-  --panel: color-mix(in srgb, var(--panel-neutral), var(--accent) 15%);
-  --border: color-mix(in srgb, var(--border-neutral), var(--accent) 22%);
-  --card-bg: color-mix(in srgb, var(--panel), white 5%);
-  --input-bg: color-mix(in srgb, var(--panel), white 2%);
-  --hover-bg: color-mix(in srgb, var(--accent), transparent 90%);
+  --bg: var(--bg-neutral);
+  --panel: var(--panel-neutral);
+  --border: var(--border-neutral);
+  --card-bg: var(--surface-neutral);
+  --input-bg: var(--surface-neutral);
+  --hover-bg: color-mix(in srgb, var(--surface-neutral), black 4%);
+  --accent-soft: color-mix(in srgb, var(--accent), white 82%);
+  --accent-soft-strong: color-mix(in srgb, var(--accent), white 74%);
   --modal-bg: #ffffff;
   --thumb-bg: var(--thumb-neutral);
-  --scrollbar-track: #fcfcfc;
+  --scrollbar-track: #f1f2f4;
+  --scrollbar-thumb: #c3c8d1;
+  --scrollbar-thumb-hover: #aeb5bf;
   --scrollbar-arrow: #666;
 }
 
@@ -79,13 +90,13 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
+  background: var(--scrollbar-thumb);
   border-radius: 10px;
   border: 2px solid var(--scrollbar-track);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--muted);
+  background: var(--scrollbar-thumb-hover);
 }
 
 ::-webkit-scrollbar-button {
@@ -135,7 +146,7 @@ body {
 /* Firefox support (arrows not supported in standard CSS properties) */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--border) var(--scrollbar-track);
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 
 /* Prevent a white flash while the page/app initializes */
@@ -163,8 +174,7 @@ header {
   display: flex;
   flex-direction: column;
   border-bottom: 1px solid var(--border);
-  /* Ultra-transparent glass: ~85% transparent (15% opaque) with 8% accent tint */
-  background: color-mix(in srgb, var(--panel) 62%, var(--accent) 10%);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   /* Hardware acceleration & Flicker reduction */
@@ -345,7 +355,7 @@ body.no-glass header {
 }
 
 .settings-nav-item:hover {
-  background: color-mix(in srgb, var(--panel), var(--accent) 15%);
+  background: var(--hover-bg);
 }
 
 .settings-nav-item.active {
@@ -356,7 +366,7 @@ body.no-glass header {
 
 .light-mode .settings-nav-item.active {
   color: #000;
-  background: color-mix(in srgb, var(--accent), white 60%);
+  background: var(--accent-soft-strong);
 }
 
 .modal-actions-sidebar {
@@ -423,7 +433,7 @@ body.no-glass header {
   align-items: center;
   gap: 8px;
   padding: 10px 12px;
-  background: color-mix(in srgb, var(--hover-bg), transparent 35%);
+  background: var(--hover-bg);
 }
 
 .metadata-group-title {
@@ -501,7 +511,7 @@ body.no-glass header {
 }
 
 .sortable-item.drag-over {
-  background: color-mix(in srgb, var(--accent), transparent 90%);
+  background: var(--accent-soft);
   outline: 1px dashed var(--accent);
 }
 
@@ -586,13 +596,8 @@ body.no-glass header {
 
 .segmented-control label:hover {
   color: var(--fg);
-  border-color: color-mix(in srgb, var(--accent), white 30%);
-  background: color-mix(in srgb, var(--hover-bg), white 10%);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--accent), transparent 70%);
-}
-
-.light-mode .segmented-control label:hover {
-  box-shadow: none;
+  border-color: var(--border-strong);
+  background: var(--hover-bg);
 }
 
 .segmented-control input[type="radio"]:checked+label {
@@ -600,14 +605,12 @@ body.no-glass header {
   color: #fff;
   font-weight: 600;
   border-color: var(--accent);
-  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent), transparent 60%);
 }
 
 .light-mode .segmented-control input[type="radio"]:checked+label {
   color: #000;
-  border-color: color-mix(in srgb, var(--accent), transparent 50%);
-  background: color-mix(in srgb, var(--accent), white 60%);
-  box-shadow: none;
+  border-color: var(--accent);
+  background: var(--accent-soft-strong);
 }
 
 .field {
@@ -814,17 +817,12 @@ body.lightbox-open .toolbar {
 
 .tb-btn:not(:disabled):hover {
   color: var(--fg);
-  border-color: color-mix(in srgb, var(--accent), white 30%);
-  background: color-mix(in srgb, var(--hover-bg), white 10%);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--accent), transparent 70%);
-}
-
-.light-mode .tb-btn:hover {
-  box-shadow: none;
+  border-color: var(--border-strong);
+  background: var(--hover-bg);
 }
 
 .tb-btn.highlight {
-  background: color-mix(in oklch, var(--accent), transparent 85%);
+  background: var(--accent-soft);
   border-color: var(--accent);
   color: var(--fg);
 }
@@ -856,13 +854,8 @@ body.lightbox-open .toolbar {
 
 .tb-page:hover {
   color: var(--fg);
-  border-color: color-mix(in srgb, var(--accent), white 30%);
-  background: color-mix(in srgb, var(--hover-bg), white 10%);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--accent), transparent 70%);
-}
-
-.light-mode .tb-page:hover {
-  box-shadow: none;
+  border-color: var(--border-strong);
+  background: var(--hover-bg);
 }
 
 .tb-page[aria-current="page"] {
@@ -874,8 +867,8 @@ body.lightbox-open .toolbar {
 
 .light-mode .tb-page[aria-current="page"] {
   color: #000;
-  border-color: color-mix(in srgb, var(--accent), transparent 50%);
-  background: color-mix(in srgb, var(--accent), white 60%);
+  border-color: var(--accent);
+  background: var(--accent-soft-strong);
 }
 
 .tb-ellipsis {
@@ -1012,13 +1005,13 @@ p {
 .masonry {
   /* Responsive columns: browser chooses column-count based on available width */
   column-width: 240px;
-  column-gap: 10px;
+  column-gap: 12px;
 }
 
 .card {
   position: relative;
   break-inside: avoid;
-  margin: 0 0 10px 0;
+  margin: 0 0 12px 0;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--card-bg);
@@ -1195,7 +1188,7 @@ body.no-glass.lightbox-open main {
 
 /* If glassmorphism is enabled, unhide gallery and use ultra-transparent glass */
 body:not(.no-glass) .lightbox-backdrop {
-  background: color-mix(in srgb, #000 45%, var(--accent) 8%);
+  background: rgba(0, 0, 0, 0.78);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
 }
@@ -1206,7 +1199,7 @@ body:not(.no-glass) .lightbox-backdrop {
 }
 
 body:not(.no-glass).light-mode .lightbox-backdrop {
-  background: color-mix(in srgb, #fff 45%, var(--accent) 8%);
+  background: rgba(255, 255, 255, 0.78);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
 }
@@ -1242,14 +1235,12 @@ body:not(.no-glass).light-mode .lightbox-backdrop {
 }
 
 .lb-btn:hover {
-  color: #fff;
-  scale: 1.15 !important;
-  text-shadow: 0 0 12px color-mix(in srgb, var(--accent), transparent 50%);
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .light-mode .lb-btn:hover {
   color: var(--accent);
-  text-shadow: none;
 }
 
 #lbPrev {
@@ -1425,13 +1416,13 @@ body:not(.no-glass).light-mode .lightbox-backdrop {
   transform: translateX(-50%);
   z-index: 9000;
   width: min(400px, calc(100vw - 40px));
-  background: color-mix(in srgb, var(--panel) 75%, var(--accent) 15%);
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 12px 16px;
-  box-shadow: 0 8px 32px var(--shadow);
+  box-shadow: 0 8px 24px var(--shadow);
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s linear;
 }
 
@@ -1440,7 +1431,7 @@ body:not(.no-glass).light-mode .lightbox-backdrop {
 }
 
 .scan-indicator:hover {
-  background: color-mix(in srgb, var(--panel) 85%, var(--accent) 20%);
+  background: color-mix(in srgb, var(--panel) 96%, transparent);
 }
 
 .scan-indicator[hidden] {
@@ -1473,7 +1464,7 @@ body:not(.no-glass).light-mode .lightbox-backdrop {
 
 .scan-label {
   font-weight: 700;
-  color: color-mix(in srgb, var(--fg), var(--accent) 65%);
+  color: var(--fg);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -1504,9 +1495,9 @@ body:not(.no-glass).light-mode .lightbox-backdrop {
   align-items: center;
   gap: 8px;
   padding: 10px 20px !important;
-  background: color-mix(in srgb, var(--accent) 80%, #222) !important;
+  background: var(--surface-neutral) !important;
   color: #fff !important;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid var(--border);
   border-radius: 20px !important;
   font-size: 15px !important;
   font-weight: 500;
@@ -1519,8 +1510,8 @@ body:not(.no-glass).light-mode .lightbox-backdrop {
 }
 
 .light-mode #mmxDragTooltip {
-  background: color-mix(in srgb, var(--accent) 80%, #eee) !important;
+  background: var(--surface-neutral) !important;
   color: #000 !important;
-  border-color: rgba(0, 0, 0, 0.1);
+  border-color: var(--border);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15) !important;
 }

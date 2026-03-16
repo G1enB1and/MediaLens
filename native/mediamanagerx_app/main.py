@@ -152,7 +152,7 @@ from ctypes import wintypes
 
 
 class Theme:
-    """Centralized theme system for dynamic accent tinting."""
+    """Centralized theme system with neutral surfaces and restrained accent usage."""
     @staticmethod
     def mix(base_hex: str, accent_color: QColor | str, strength: float) -> str:
         """Mix a base hex color with an accent QColor (or hex string)."""
@@ -163,14 +163,15 @@ class Theme:
         b = int(base.blue() + (acc.blue() - base.blue()) * strength)
         return QColor(r, g, b).name()
 
-    # Base Palette (Used as starting point for tinting)
-    BASE_BG_DARK = "#111111"
-    BASE_SIDEBAR_BG_DARK = "#191919"
-    BASE_BORDER_DARK = "#2d2d2d"
+    BASE_BG_DARK = "#1e1e1e"
+    BASE_SIDEBAR_BG_DARK = "#252526"
+    BASE_CONTROL_BG_DARK = "#2d2d30"
+    BASE_BORDER_DARK = "#3b3b40"
 
-    BASE_BG_LIGHT = "#f5f5f5"
-    BASE_SIDEBAR_BG_LIGHT = "#eeeeee"
-    BASE_BORDER_LIGHT = "#d5d5d5"
+    BASE_BG_LIGHT = "#f4f5f7"
+    BASE_SIDEBAR_BG_LIGHT = "#fbfbfc"
+    BASE_CONTROL_BG_LIGHT = "#ffffff"
+    BASE_BORDER_LIGHT = "#d9dde3"
     
     @staticmethod
     def get_is_light() -> bool:
@@ -181,73 +182,62 @@ class Theme:
 
     @staticmethod
     def get_bg(accent: QColor) -> str:
-        base = Theme.BASE_BG_LIGHT if Theme.get_is_light() else Theme.BASE_BG_DARK
-        return Theme.mix(base, accent, 0.04)
+        return Theme.BASE_BG_LIGHT if Theme.get_is_light() else Theme.BASE_BG_DARK
 
     @staticmethod
     def get_sidebar_bg(accent: QColor) -> str:
-        base = Theme.BASE_SIDEBAR_BG_LIGHT if Theme.get_is_light() else Theme.BASE_SIDEBAR_BG_DARK
-        return Theme.mix(base, accent, 0.15) # Increased from 0.10 for visibility
+        return Theme.BASE_SIDEBAR_BG_LIGHT if Theme.get_is_light() else Theme.BASE_SIDEBAR_BG_DARK
+
+    @staticmethod
+    def get_control_bg(accent: QColor) -> str:
+        return Theme.BASE_CONTROL_BG_LIGHT if Theme.get_is_light() else Theme.BASE_CONTROL_BG_DARK
 
     @staticmethod
     def get_border(accent: QColor) -> str:
-        base = Theme.BASE_BORDER_LIGHT if Theme.get_is_light() else Theme.BASE_BORDER_DARK
-        return Theme.mix(base, accent, 0.15)
+        return Theme.BASE_BORDER_LIGHT if Theme.get_is_light() else Theme.BASE_BORDER_DARK
 
     @staticmethod
     def get_scrollbar_track(accent: QColor) -> str:
-        # User requested very dark grey (dark) and very light offwhite (light)
-        return "#080808" if not Theme.get_is_light() else "#fcfcfc"
+        return "#181818" if not Theme.get_is_light() else "#f1f2f4"
 
     @staticmethod
     def get_scrollbar_thumb(accent: QColor) -> str:
-        base = "#e0e0e0" if Theme.get_is_light() else "#333333"
-        return Theme.mix(base, accent, 0.20)
+        return "#c3c8d1" if Theme.get_is_light() else "#4a4a50"
 
     @staticmethod
     def get_scrollbar_thumb_hover(accent: QColor) -> str:
-        base = "#d0d0d0" if Theme.get_is_light() else "#444444"
-        return Theme.mix(base, accent, 0.30)
+        return "#aeb5bf" if Theme.get_is_light() else "#5a5a61"
 
     @staticmethod
     def get_splitter_idle(accent: QColor) -> str:
-        base = "#cccccc" if Theme.get_is_light() else "#444444"
-        return Theme.mix(base, accent, 0.12)
+        return "#c8ccd3" if Theme.get_is_light() else "#4a4a50"
+
+    @staticmethod
+    def get_accent_soft(accent: QColor) -> str:
+        base = Theme.get_control_bg(accent)
+        strength = 0.18 if Theme.get_is_light() else 0.16
+        return Theme.mix(base, accent, strength)
 
     # UI constants
     @staticmethod
     def get_text_color() -> str:
-        return "#202124" if Theme.get_is_light() else "#ccc"
+        return "#1f2329" if Theme.get_is_light() else "#f2f2f3"
 
     @staticmethod
     def get_text_muted() -> str:
-        return "#5f6368" if Theme.get_is_light() else "#bbb"
+        return "#60656f" if Theme.get_is_light() else "#b4b7bd"
 
     @staticmethod
     def get_btn_save_bg(accent: QColor) -> str:
-        """Matched to .tb-page:hover (faint tinted ghost style)"""
-        sb_bg = Theme.get_sidebar_bg(accent)
-        # Use a slightly stronger tint than sidebar bg (8%)
-        return Theme.mix(sb_bg, accent, 0.12)
+        return Theme.get_control_bg(accent)
 
     @staticmethod
     def get_btn_save_hover(accent: QColor) -> str:
-        """Matched to active pagination page (accent-themed)"""
-        if Theme.get_is_light():
-            # Match CSS: color-mix(in srgb, var(--accent), white 60%)
-            return Theme.mix("#ffffff", accent, 0.40)
-        else:
-            # Match CSS: var(--accent) but slightly muted/balanced if 'pure' is unreadable
-            return Theme.mix(Theme.get_sidebar_bg(accent), accent, 0.85)
+        return Theme.get_accent_soft(accent)
 
     @staticmethod
     def get_input_bg(accent: QColor) -> str:
-        if Theme.get_is_light():
-            # Very faint dark tint for white-ish backgrounds
-            return "rgba(0, 0, 0, 15)"
-        else:
-            # Very faint white tint for dark backgrounds
-            return "rgba(255, 255, 255, 10)"
+        return Theme.get_control_bg(accent)
 
     @staticmethod
     def get_input_border(accent: QColor) -> str:
@@ -341,19 +331,16 @@ class FileConflictDialog(QDialog):
         
         if is_light:
             darker_border = Theme.mix(border_color, QColor("#000000"), 0.4)
-            other_btn_bg = Theme.mix("#ffffff", accent_q, 0.2)
-            replace_btn_bg = Theme.mix("#ffffff", accent_q, 0.4)
+            other_btn_bg = Theme.get_control_bg(accent_q)
+            replace_btn_bg = Theme.get_accent_soft(accent_q)
             other_btn_style = f"background-color: {other_btn_bg}; color: #000; border: 1px solid {darker_border};"
             replace_btn_style = f"background-color: {replace_btn_bg}; color: #000; border: 1px solid {darker_border};"
             
-            # Hover styles: more accent, darker than base
-            other_hover_bg = Theme.mix(other_btn_bg, accent_q, 0.2)
-            other_hover_bg = Theme.mix(other_hover_bg, QColor("#000000"), 0.1) # Darken slightly
+            # Hover styles stay restrained and only introduce a soft accent.
+            other_hover_bg = Theme.mix(other_btn_bg, accent_q, 0.12)
             other_hover_style = f"background-color: {other_hover_bg}; border: 1px solid {accent_str};"
             
-            # Replace hover: darker than others
-            replace_hover_bg = Theme.mix(replace_btn_bg, accent_q, 0.2)
-            replace_hover_bg = Theme.mix(replace_hover_bg, QColor("#000000"), 0.1) # Darker
+            replace_hover_bg = Theme.mix(replace_btn_bg, accent_q, 0.08)
             replace_hover_style = f"background-color: {replace_hover_bg}; color: #000; border: 1px solid {accent_str};"
         else:
             replace_hover_style = f"background-color: {replace_hover_bg}; border: 1px solid {accent_str};"
@@ -2109,9 +2096,9 @@ class NativeDragTooltip(QLabel):
         """)
 
     def update_style(self, accent_color: QColor, is_light: bool):
-        bg = Theme.mix("#222222", accent_color, 0.8) if not is_light else Theme.mix("#eeeeee", accent_color, 0.8)
-        fg = "#ffffff" if not is_light else "#000000"
-        border = "rgba(255,255,255,0.2)" if not is_light else "rgba(0,0,0,0.1)"
+        bg = Theme.get_control_bg(accent_color)
+        fg = Theme.get_text_color()
+        border = Theme.get_border(accent_color)
         
         self.setStyleSheet(f"""
             #nativeDragTooltip {{
@@ -4935,7 +4922,7 @@ class MainWindow(QMainWindow):
             pass
 
     def _update_native_styles(self, accent_str: str) -> None:
-        """Apply tinted styles to sidebars, metadata, and global native elements."""
+        """Apply neutral native surfaces and reserve accent for interaction states."""
         accent = QColor(accent_str)
         sb_bg_str = Theme.get_sidebar_bg(accent)
         sb_bg = QColor(sb_bg_str)
@@ -5047,7 +5034,7 @@ class MainWindow(QMainWindow):
         border = Theme.get_border(accent)
         text = Theme.get_text_color()
         is_light = Theme.get_is_light()
-        highlight_bg = "rgba(0, 0, 0, 0.05)" if is_light else "rgba(255, 255, 255, 0.05)"
+        highlight_bg = Theme.get_accent_soft(accent)
         
         QApplication.instance().setStyleSheet(f"""
             QMenuBar {{
@@ -5082,7 +5069,7 @@ class MainWindow(QMainWindow):
         """)
 
     def _get_native_scrollbar_style(self, accent: QColor) -> str:
-        """Generate a QSS string for tinted native scrollbars that match the web gallery aesthetics exactly."""
+        """Generate neutral native scrollbars with accent reserved for content states."""
         track = Theme.get_scrollbar_track(accent)
         is_light = Theme.get_is_light()
         
@@ -5096,8 +5083,8 @@ class MainWindow(QMainWindow):
         lt_path = f"{base_svg_path}/{mode}_left.svg"
         rt_path = f"{base_svg_path}/{mode}_right.svg"
 
-        # Thumb handle background matched to web's var(--border)
-        thumb_bg = Theme.get_border(accent)
+        thumb_bg = Theme.get_scrollbar_thumb(accent)
+        thumb_hover_bg = Theme.get_scrollbar_thumb_hover(accent)
         
         return f"""
             QScrollBar:vertical {{
@@ -5112,8 +5099,7 @@ class MainWindow(QMainWindow):
                 border: 2px solid {track};
             }}
             QScrollBar::handle:vertical:hover, QScrollBar::handle:vertical:pressed {{
-                /* Gallery uses no hover on thumb; matching that for parity */
-                background: {thumb_bg};
+                background: {thumb_hover_bg};
             }}
             QScrollBar::add-line:vertical {{
                 background: {track};
@@ -5150,7 +5136,7 @@ class MainWindow(QMainWindow):
                 border: 2px solid {track};
             }}
             QScrollBar::handle:horizontal:hover, QScrollBar::handle:horizontal:pressed {{
-                background: {thumb_bg};
+                background: {thumb_hover_bg};
             }}
             QScrollBar::add-line:horizontal {{
                 background: {track};
