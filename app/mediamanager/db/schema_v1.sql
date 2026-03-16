@@ -171,3 +171,24 @@ CREATE TABLE IF NOT EXISTS folder_selection_state (
   path TEXT PRIMARY KEY,
   selected_at_utc TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS collections (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  created_at_utc TEXT NOT NULL,
+  updated_at_utc TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_collections_name ON collections(name);
+
+CREATE TABLE IF NOT EXISTS collection_items (
+  collection_id INTEGER NOT NULL,
+  media_id INTEGER NOT NULL,
+  created_at_utc TEXT NOT NULL,
+  PRIMARY KEY (collection_id, media_id),
+  FOREIGN KEY(collection_id) REFERENCES collections(id) ON DELETE CASCADE,
+  FOREIGN KEY(media_id) REFERENCES media_items(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_collection_items_collection ON collection_items(collection_id);
+CREATE INDEX IF NOT EXISTS idx_collection_items_media ON collection_items(media_id);

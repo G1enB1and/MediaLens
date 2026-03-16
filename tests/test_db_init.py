@@ -36,6 +36,8 @@ class TestDbInit(unittest.TestCase):
         self.assertIn("media_tags", tables)
         self.assertIn("folder_nodes", tables)
         self.assertIn("folder_selection_state", tables)
+        self.assertIn("collections", tables)
+        self.assertIn("collection_items", tables)
 
 
 if __name__ == "__main__":

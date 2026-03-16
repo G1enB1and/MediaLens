@@ -6,6 +6,7 @@ const PAGE_SIZE = 100;
 let gTotal = 0;
 let gMedia = []; // Current page items
 let gSelectedFolders = [];
+let gActiveCollection = null;
 let gBridge = null;
 let gPosterRequested = new Set();
 let gPosterObserver = null;
@@ -112,9 +113,13 @@ function setStatus(text) {
   if (el) el.textContent = text;
 }
 
-function setSelectedFolder(paths) {
+function setSelectedFolder(paths, activeCollection = null) {
   const el = document.getElementById('selectedFolder');
   if (!el) return;
+  if (activeCollection && activeCollection.name) {
+    el.textContent = activeCollection.name;
+    return;
+  }
   if (!paths || paths.length === 0) {
     el.textContent = '(none)';
     return;
@@ -1357,19 +1362,21 @@ function refreshFromBridge(bridge, resetPage = false) {
   if (!bridge) return;
   bridge.get_selected_folders(function (folders) {
     gSelectedFolders = folders || [];
-    setSelectedFolder(gSelectedFolders);
+    bridge.get_active_collection(function (activeCollection) {
+      gActiveCollection = activeCollection && activeCollection.id ? activeCollection : null;
+      setSelectedFolder(gSelectedFolders, gActiveCollection);
 
-    if (gSelectedFolders.length === 0) {
-      gTotal = 0;
-      setGlobalLoading(false);
-      renderMediaList([]);
-      renderPager();
-      return;
-    }
+      if (gSelectedFolders.length === 0 && !gActiveCollection) {
+        gTotal = 0;
+        setGlobalLoading(false);
+        renderMediaList([]);
+        renderPager();
+        return;
+      }
 
-    if (resetPage) {
-      gPage = 0;
-    }
+      if (resetPage) {
+        gPage = 0;
+      }
 
     // ── 1. Fast Path Reconcile (Hybrid Load) ─────────────────────────────
     // This loads the synthesized candidates from disk + DB without waiting for scan.
@@ -1385,7 +1392,10 @@ function refreshFromBridge(bridge, resetPage = false) {
 
     // ── 2. Background Enrichment Scan ────────────────────────────────────
     // This fills in hashes and metadata in the DB.
-    bridge.start_scan(gSelectedFolders, gSearchQuery || '');
+    if (gSelectedFolders.length > 0) {
+      bridge.start_scan(gSelectedFolders, gSearchQuery || '');
+    }
+    });
   });
 }
 

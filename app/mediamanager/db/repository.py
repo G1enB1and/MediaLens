@@ -3,8 +3,15 @@ from __future__ import annotations
 import sqlite3
 from typing import Iterable
 
+from app.mediamanager.db.collections_repo import (
+    add_media_paths_to_collection,
+    create_collection,
+    delete_collection,
+    list_collections,
+    rename_collection,
+)
 from app.mediamanager.db.ai_metadata_repo import get_media_ai_metadata, replace_media_ai_metadata
-from app.mediamanager.db.media_repo import add_media_item, list_media_in_scope
+from app.mediamanager.db.media_repo import add_media_item, list_media_in_collection, list_media_in_scope
 from app.mediamanager.db.metadata_repo import get_media_metadata, upsert_media_metadata
 from app.mediamanager.db.selection_state import get_selection, replace_selection
 from app.mediamanager.db.tags_repo import attach_tags, list_media_tags
@@ -36,6 +43,30 @@ class MediaRepository:
     ) -> list[dict]:
         roots = selected_roots if selected_roots is not None else self.current_selection()
         return list_media_in_scope(self.conn, roots, limit=limit, offset=offset)
+
+    def list_collections(self) -> list[dict]:
+        return list_collections(self.conn)
+
+    def create_collection(self, name: str) -> dict:
+        return create_collection(self.conn, name)
+
+    def rename_collection(self, collection_id: int, name: str) -> bool:
+        return rename_collection(self.conn, collection_id, name)
+
+    def delete_collection(self, collection_id: int) -> bool:
+        return delete_collection(self.conn, collection_id)
+
+    def add_paths_to_collection(self, collection_id: int, paths: Iterable[str]) -> int:
+        return add_media_paths_to_collection(self.conn, collection_id, paths)
+
+    def collection_media(
+        self,
+        collection_id: int,
+        *,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> list[dict]:
+        return list_media_in_collection(self.conn, collection_id, limit=limit, offset=offset)
 
     def save_metadata(self, media_id: int, title: str | None = None, description: str | None = None, notes: str | None = None) -> None:
         upsert_media_metadata(self.conn, media_id, title=title, description=description, notes=notes)

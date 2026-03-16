@@ -181,16 +181,38 @@ def list_media_in_scope(
     offset: Optional[int] = None,
 ) -> list[dict]:
     where_sql, params = build_scope_where(selected_roots)
-    
+    return _list_media_with_where(conn, where_sql, params, limit=limit, offset=offset)
+
+
+def list_media_in_collection(
+    conn: sqlite3.Connection,
+    collection_id: int,
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
+) -> list[dict]:
+    where_sql = """
+        m.id IN (
+          SELECT ci.media_id
+          FROM collection_items ci
+          WHERE ci.collection_id = ?
+        )
+    """
+    return _list_media_with_where(conn, where_sql, [int(collection_id)], limit=limit, offset=offset)
+
+
+def _list_media_with_where(
+    conn: sqlite3.Connection,
+    where_sql: str,
+    params: list,
+    *,
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
+) -> list[dict]:
     if limit is not None:
         limit_sql = f" LIMIT {limit} OFFSET {offset or 0}"
     else:
         limit_sql = ""
 
-    # ... rest of the SQL building ...
-
-    # We use a LEFT JOIN for metadata and a GROUP_CONCAT subquery for tags
-    # to keep it to one row per media item.
     sql = f"""
         SELECT 
             m.id, 
@@ -237,37 +259,38 @@ def list_media_in_scope(
     """
 
     rows = conn.execute(sql, params).fetchall()
-    return [
-        {
-            "id": r[0],
-            "path": r[1],
-            "media_type": r[2],
-            "file_size": r[3],
-            "modified_time": r[4],
-            "width": r[5],
-            "height": r[6],
-            "duration": (r[7] / 1000.0) if r[7] else None, # Seconds for JS bridge
-            "title": r[8],
-            "description": r[9],
-            "notes": r[10],
-            "ai_prompt": r[11],
-            "ai_negative_prompt": r[12],
-            "tool_name_found": r[13],
-            "tool_name_inferred": r[14],
-            "model_name": r[15],
-            "checkpoint_name": r[16],
-            "sampler": r[17],
-            "scheduler": r[18],
-            "cfg_scale": r[19],
-            "steps": r[20],
-            "seed": r[21],
-            "source_formats": r[22],
-            "metadata_families": r[23],
-            "ai_loras": r[24],
-            "tags": r[25],
-        }
-        for r in rows
-    ]
+    return [_media_row_to_dict(r) for r in rows]
+
+
+def _media_row_to_dict(row) -> dict:
+    return {
+        "id": row[0],
+        "path": row[1],
+        "media_type": row[2],
+        "file_size": row[3],
+        "modified_time": row[4],
+        "width": row[5],
+        "height": row[6],
+        "duration": (row[7] / 1000.0) if row[7] else None,
+        "title": row[8],
+        "description": row[9],
+        "notes": row[10],
+        "ai_prompt": row[11],
+        "ai_negative_prompt": row[12],
+        "tool_name_found": row[13],
+        "tool_name_inferred": row[14],
+        "model_name": row[15],
+        "checkpoint_name": row[16],
+        "sampler": row[17],
+        "scheduler": row[18],
+        "cfg_scale": row[19],
+        "steps": row[20],
+        "seed": row[21],
+        "source_formats": row[22],
+        "metadata_families": row[23],
+        "ai_loras": row[24],
+        "tags": row[25],
+    }
 
 
 def list_media_page(

@@ -139,6 +139,8 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QGridLayout,
     QAbstractItemView,
+    QListWidget,
+    QListWidgetItem,
 )
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -687,6 +689,76 @@ class FolderTreeView(QTreeView):
             event.ignore()
 
 
+class CollectionListWidget(QListWidget):
+    """Flat collection list with right-click context menu and gallery drop support."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDragEnabled(False)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.setMouseTracking(True)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        item = self.itemAt(event.position().toPoint())
+        self.setCursor(Qt.CursorShape.PointingHandCursor if item else Qt.CursorShape.ArrowCursor)
+        super().mouseMoveEvent(event)
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if event.mimeData().hasUrls() or bool(getattr(self.window().bridge, "drag_paths", [])):
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        bridge = getattr(self.window(), "bridge", None)
+        item = self.itemAt(event.position().toPoint())
+        if item and bridge:
+            count = len(bridge.drag_paths) if bridge.drag_paths else max(1, len(event.mimeData().urls()))
+            bridge.update_drag_tooltip(count, True, item.text())
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
+            return
+        if bridge:
+            bridge.update_drag_tooltip(len(bridge.drag_paths) or 1, True, "")
+        super().dragMoveEvent(event)
+
+    def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:
+        bridge = getattr(self.window(), "bridge", None)
+        if bridge:
+            bridge.hide_drag_tooltip()
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        bridge = getattr(self.window(), "bridge", None)
+        if bridge:
+            bridge.hide_drag_tooltip()
+
+        item = self.itemAt(event.position().toPoint())
+        if not item or not bridge:
+            event.ignore()
+            return
+
+        src_paths = list(bridge.drag_paths) if bridge.drag_paths else []
+        if not src_paths and event.mimeData().hasUrls():
+            src_paths = [url.toLocalFile() for url in event.mimeData().urls() if url.toLocalFile()]
+        if not src_paths:
+            event.ignore()
+            return
+
+        collection_id = int(item.data(Qt.ItemDataRole.UserRole) or 0)
+        if collection_id <= 0:
+            event.ignore()
+            return
+
+        if bridge.add_paths_to_collection(collection_id, src_paths) > 0:
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+
 class RootFilterProxyModel(QSortFilterProxyModel):
     """Filters a QFileSystemModel to only show a specific root folder and its children.
     
@@ -781,6 +853,7 @@ class Bridge(QObject):
     updateError = Signal(str)
     
     dragOverFolder = Signal(str)
+    collectionsChanged = Signal()
     # Native Tooltip Controls
     updateTooltipRequested = Signal(int, bool, str) # count, isCopy, targetFolder
     hideTooltipRequested = Signal()
@@ -790,6 +863,8 @@ class Bridge(QObject):
         super().__init__(parent)
         print("Bridge: Initializing...")
         self._selected_folders: list[str] = []
+        self._active_collection_id: int | None = None
+        self._active_collection_name: str = ""
         self._scan_abort = False
         self._scan_lock = threading.Lock()
         self.drag_paths: list[str] = []
@@ -927,6 +1002,9 @@ class Bridge(QObject):
         if folders == self._selected_folders:
             return
         self._selected_folders = folders
+        if folders:
+            self._active_collection_id = None
+            self._active_collection_name = ""
         try:
             # Persistent settings
             settings = QSettings("G1enB1and", "MediaManagerX")
@@ -953,6 +1031,89 @@ class Bridge(QObject):
     @Slot(result=list)
     def get_selected_folders(self) -> list:
         return self._selected_folders
+
+    @Slot(int, result=bool)
+    def set_active_collection(self, collection_id: int) -> bool:
+        from app.mediamanager.db.collections_repo import get_collection
+        try:
+            collection = get_collection(self.conn, int(collection_id))
+            if not collection:
+                return False
+            self._active_collection_id = int(collection["id"])
+            self._active_collection_name = str(collection["name"])
+            self._selected_folders = []
+            self.selectionChanged.emit([])
+            return True
+        except Exception:
+            return False
+
+    @Slot(result=dict)
+    def get_active_collection(self) -> dict:
+        if self._active_collection_id is None:
+            return {}
+        return {"id": self._active_collection_id, "name": self._active_collection_name}
+
+    @Slot(result=list)
+    def list_collections(self) -> list:
+        from app.mediamanager.db.collections_repo import list_collections
+        try:
+            return list_collections(self.conn)
+        except Exception:
+            return []
+
+    @Slot(str, result=dict)
+    def create_collection(self, name: str) -> dict:
+        from app.mediamanager.db.collections_repo import create_collection
+        try:
+            created = create_collection(self.conn, name)
+            self.collectionsChanged.emit()
+            return created
+        except Exception:
+            return {}
+
+    @Slot(int, str, result=bool)
+    def rename_collection(self, collection_id: int, name: str) -> bool:
+        from app.mediamanager.db.collections_repo import rename_collection, get_collection
+        try:
+            ok = rename_collection(self.conn, int(collection_id), name)
+            if not ok:
+                return False
+            if self._active_collection_id == int(collection_id):
+                collection = get_collection(self.conn, int(collection_id))
+                self._active_collection_name = str(collection["name"]) if collection else ""
+                self.selectionChanged.emit([])
+            self.collectionsChanged.emit()
+            return True
+        except Exception:
+            return False
+
+    @Slot(int, result=bool)
+    def delete_collection(self, collection_id: int) -> bool:
+        from app.mediamanager.db.collections_repo import delete_collection
+        try:
+            ok = delete_collection(self.conn, int(collection_id))
+            if not ok:
+                return False
+            if self._active_collection_id == int(collection_id):
+                self._active_collection_id = None
+                self._active_collection_name = ""
+                self.selectionChanged.emit([])
+            self.collectionsChanged.emit()
+            return True
+        except Exception:
+            return False
+
+    @Slot(int, list, result=int)
+    def add_paths_to_collection(self, collection_id: int, paths: list[str]) -> int:
+        from app.mediamanager.db.collections_repo import add_media_paths_to_collection
+        try:
+            added = add_media_paths_to_collection(self.conn, int(collection_id), paths)
+            self.collectionsChanged.emit()
+            if added and self._active_collection_id == int(collection_id):
+                self.selectionChanged.emit([])
+            return int(added)
+        except Exception:
+            return 0
 
     def _randomize_enabled(self) -> bool:
         return bool(self.settings.value("gallery/randomize", False, type=bool))
@@ -1834,7 +1995,12 @@ class Bridge(QObject):
     @Slot(list, int, int, str, str, str, result=list)
     def list_media(self, folders, limit=100, offset=0, sort_by="name_asc", filter_type="all", search_query="") -> list:
         try:
-            candidates = self._get_reconciled_candidates(folders, filter_type, search_query)
+            if folders:
+                candidates = self._get_reconciled_candidates(folders, filter_type, search_query)
+            elif self._active_collection_id is not None:
+                candidates = self._get_collection_candidates(self._active_collection_id, filter_type, search_query)
+            else:
+                candidates = []
             if self._randomize_enabled() and sort_by == "name_asc": random.Random(self._session_shuffle_seed).shuffle(candidates)
             elif sort_by == "name_desc": candidates.sort(key=lambda r: r["path"].lower(), reverse=True)
             elif sort_by == "date_desc": candidates.sort(key=lambda r: r.get("modified_time") or "", reverse=True)
@@ -1866,7 +2032,12 @@ class Bridge(QObject):
 
     @Slot(list, str, str, result=int)
     def count_media(self, folders: list, filter_type: str = "all", search_query: str = "") -> int:
-        try: return len(self._get_reconciled_candidates(folders, filter_type, search_query))
+        try:
+            if folders:
+                return len(self._get_reconciled_candidates(folders, filter_type, search_query))
+            if self._active_collection_id is not None:
+                return len(self._get_collection_candidates(self._active_collection_id, filter_type, search_query))
+            return 0
         except Exception: return 0
 
     def _get_reconciled_candidates(self, folders: list, filter_type: str = "all", search_query: str = "") -> list[dict]:
@@ -1903,6 +2074,20 @@ class Bridge(QObject):
         if filter_type == "image": candidates = [r for r in candidates if r["path"].lower().endswith(tuple(image_exts)) and not self._is_animated(Path(r["path"]))]
         elif filter_type == "video": candidates = [r for r in candidates if not r["path"].lower().endswith(tuple(image_exts))]
         elif filter_type == "animated": candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
+        if search_query.strip():
+            candidates = [r for r in candidates if self._matches_media_search(r, search_query)]
+        return candidates
+
+    def _get_collection_candidates(self, collection_id: int, filter_type: str = "all", search_query: str = "") -> list[dict]:
+        from app.mediamanager.db.media_repo import list_media_in_collection
+        image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+        candidates = [r for r in list_media_in_collection(self.conn, int(collection_id)) if Path(r["path"]).exists()]
+        if filter_type == "image":
+            candidates = [r for r in candidates if r["path"].lower().endswith(tuple(image_exts)) and not self._is_animated(Path(r["path"]))]
+        elif filter_type == "video":
+            candidates = [r for r in candidates if not r["path"].lower().endswith(tuple(image_exts))]
+        elif filter_type == "animated":
+            candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
         if search_query.strip():
             candidates = [r for r in candidates if self._matches_media_search(r, search_query)]
         return candidates
@@ -1983,6 +2168,8 @@ class Bridge(QObject):
 
     @Slot(list, str)
     def start_scan(self, folders: list, search_query: str = "") -> None:
+        if not folders:
+            return
         self._scan_abort = True
         def work():
             try:
@@ -2480,6 +2667,7 @@ class MainWindow(QMainWindow):
         self.left_panel = QWidget()
         left_layout = QVBoxLayout(self.left_panel)
         left_layout.setContentsMargins(10, 10, 10, 10)
+        left_layout.setSpacing(8)
 
         left_layout.addWidget(QLabel("Folders"))
 
@@ -2559,6 +2747,20 @@ class MainWindow(QMainWindow):
         self.fs_model.directoryLoaded.connect(self._on_directory_loaded)
 
         left_layout.addWidget(self.tree, 1)
+
+        self.collections_header = QLabel("Collections")
+        left_layout.addWidget(self.collections_header)
+
+        self.collections_list = CollectionListWidget()
+        self.collections_list.setObjectName("collectionsList")
+        self.collections_list.setMinimumHeight(120)
+        self.collections_list.itemSelectionChanged.connect(self._on_collection_selection_changed)
+        self.collections_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.collections_list.customContextMenuRequested.connect(self._on_collections_context_menu)
+        left_layout.addWidget(self.collections_list)
+
+        self.bridge.collectionsChanged.connect(self._reload_collections)
+        self._reload_collections()
 
         self._set_selected_folders([str(default_root)])
 
@@ -3088,7 +3290,86 @@ class MainWindow(QMainWindow):
                     paths.append(path)
         
         if paths:
+            if hasattr(self, "collections_list"):
+                self.collections_list.blockSignals(True)
+                self.collections_list.clearSelection()
+                self.collections_list.blockSignals(False)
             self._set_selected_folders(paths)
+
+    def _reload_collections(self) -> None:
+        if not hasattr(self, "collections_list"):
+            return
+        try:
+            collections = self.bridge.list_collections()
+            active = self.bridge.get_active_collection()
+            active_id = int(active.get("id", 0) or 0)
+        except Exception:
+            collections = []
+            active_id = 0
+
+        self.collections_list.blockSignals(True)
+        self.collections_list.clear()
+        for collection in collections:
+            count = int(collection.get("item_count", 0) or 0)
+            label = str(collection.get("name", ""))
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, int(collection.get("id", 0)))
+            item.setToolTip(f"{label} ({count} items)")
+            self.collections_list.addItem(item)
+            if int(collection.get("id", 0)) == active_id:
+                item.setSelected(True)
+                self.collections_list.setCurrentItem(item)
+        self.collections_list.blockSignals(False)
+
+    def _on_collection_selection_changed(self) -> None:
+        if not hasattr(self, "collections_list"):
+            return
+        item = self.collections_list.currentItem()
+        if not item:
+            return
+        collection_id = int(item.data(Qt.ItemDataRole.UserRole) or 0)
+        if collection_id <= 0:
+            return
+        self.tree.selectionModel().clearSelection()
+        self.bridge.set_active_collection(collection_id)
+
+    def _on_collections_context_menu(self, pos: QPoint) -> None:
+        item = self.collections_list.itemAt(pos)
+        menu = QMenu(self)
+        act_new = menu.addAction("New Collection...")
+        act_rename = None
+        act_delete = None
+        if item:
+            act_rename = menu.addAction("Rename...")
+            act_delete = menu.addAction("Delete")
+
+        chosen = menu.exec(self.collections_list.viewport().mapToGlobal(pos))
+        if chosen == act_new:
+            name, ok = QInputDialog.getText(self, "New Collection", "Collection Name:")
+            if ok and name.strip():
+                created = self.bridge.create_collection(name)
+                if created:
+                    self._reload_collections()
+                    self.bridge.set_active_collection(int(created.get("id", 0) or 0))
+                    self._reload_collections()
+        elif item and chosen == act_rename:
+            collection_id = int(item.data(Qt.ItemDataRole.UserRole) or 0)
+            current_name = item.text()
+            name, ok = QInputDialog.getText(self, "Rename Collection", "Collection Name:", text=current_name)
+            if ok and name.strip() and name.strip() != current_name:
+                if self.bridge.rename_collection(collection_id, name):
+                    self._reload_collections()
+        elif item and chosen == act_delete:
+            collection_id = int(item.data(Qt.ItemDataRole.UserRole) or 0)
+            reply = QMessageBox.question(
+                self,
+                "Delete Collection",
+                f"Delete collection '{item.text()}'?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                if self.bridge.delete_collection(collection_id):
+                    self._reload_collections()
 
     def _apply_ui_flag(self, key: str, value: bool) -> None:
         try:
@@ -4958,6 +5239,26 @@ class MainWindow(QMainWindow):
         self.left_panel.setStyleSheet(f"""
             QWidget {{ background-color: {sb_bg_str}; color: {text}; }}
             QTreeView {{ background-color: {sb_bg_str}; border: none; color: {text}; }}
+            QListWidget {{
+                background-color: {Theme.get_control_bg(accent)};
+                border: 1px solid {Theme.get_border(accent)};
+                border-radius: 8px;
+                color: {text};
+                padding: 4px;
+            }}
+            QListWidget::item {{
+                padding: 6px 8px;
+                border-radius: 6px;
+            }}
+            QListWidget::item:selected {{
+                background-color: {Theme.get_accent_soft(accent)};
+                border: 1px solid {accent_str};
+                color: {text};
+            }}
+            QListWidget::item:hover {{
+                background-color: {Theme.get_control_bg(accent)};
+                border: 1px solid {Theme.get_border(accent)};
+            }}
             QLabel {{ color: {text}; font-weight: bold; background: transparent; }}
             {scrollbar_style}
         """)
