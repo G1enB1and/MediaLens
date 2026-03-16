@@ -1123,6 +1123,43 @@ class Bridge(QObject):
         except Exception:
             return 0
 
+    @Slot(list, result=bool)
+    def add_paths_to_collection_interactive(self, paths: list[str]) -> bool:
+        from app.mediamanager.db.collections_repo import create_collection, list_collections
+        clean_paths = [str(path or "").strip() for path in paths if str(path or "").strip()]
+        if not clean_paths:
+            return False
+        try:
+            collections = list_collections(self.conn)
+            options = ["New collection..."] + [str(collection["name"]) for collection in collections]
+            choice, ok = QInputDialog.getItem(
+                None,
+                "Add to Collection",
+                "Collection:",
+                options,
+                0,
+                False,
+            )
+            if not ok or not choice:
+                return False
+
+            if choice == "New collection...":
+                name, created_ok = QInputDialog.getText(None, "New Collection", "Collection Name:")
+                if not created_ok or not name.strip():
+                    return False
+                created = create_collection(self.conn, name)
+                collection_id = int(created["id"])
+            else:
+                selected = next((c for c in collections if str(c["name"]) == choice), None)
+                if not selected:
+                    return False
+                collection_id = int(selected["id"])
+
+            added = self.add_paths_to_collection(collection_id, clean_paths)
+            return added > 0
+        except Exception:
+            return False
+
     def _randomize_enabled(self) -> bool:
         return bool(self.settings.value("gallery/randomize", False, type=bool))
 

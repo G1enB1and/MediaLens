@@ -437,6 +437,7 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
   const hideBtn = document.getElementById('ctxHide');
   const unhideBtn = document.getElementById('ctxUnhide');
   const renameBtn = document.getElementById('ctxRename');
+  const addToCollectionBtn = document.getElementById('ctxAddToCollection');
 
   // Position clamped to viewport
   const vw = window.innerWidth;
@@ -469,6 +470,7 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
     const el = document.getElementById(id);
     if (el) el.style.display = hasItem ? 'block' : 'none';
   });
+  if (addToCollectionBtn) addToCollectionBtn.style.display = (hasItem || gSelectedPaths.size > 0) ? 'block' : 'none';
   
   const isRotatable = hasItem && (item.media_type === 'image' || item.media_type === 'video');
   ['ctxRotCW', 'ctxRotCCW', 'ctxRotSep'].forEach(id => {
@@ -552,6 +554,16 @@ function wireCtxMenu() {
     const item = gCtxItem;
     const fromLb = gCtxFromLightbox;
 
+    const getTargetPaths = () => {
+      if (item && item.path) {
+        if (gSelectedPaths.has(item.path)) {
+          return Array.from(gSelectedPaths);
+        }
+        return [item.path];
+      }
+      return Array.from(gSelectedPaths);
+    };
+
     if (gBridge && gBridge.debug_log) {
       gBridge.debug_log(`ctx mousedown: id=${btn.id} path=${item ? item.path : 'null'}`);
     }
@@ -612,6 +624,14 @@ function wireCtxMenu() {
             if (fromLb) closeLightbox();
             setGlobalLoading(true, 'Renaming…', 25);
             gBridge.rename_path_async(item.path, next, () => { });
+          }
+        }
+        break;
+      case 'ctxAddToCollection':
+        if (gBridge && gBridge.add_paths_to_collection_interactive) {
+          const paths = getTargetPaths();
+          if (paths.length > 0) {
+            gBridge.add_paths_to_collection_interactive(paths, function () { });
           }
         }
         break;
