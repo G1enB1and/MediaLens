@@ -1438,15 +1438,6 @@ body:not(.no-glass).light-mode .lightbox-backdrop {
   display: none;
 }
 
-.scan-indicator.minimized {
-  transform: translateX(-50%) translateY(calc(100% - 10px));
-  opacity: 0.6;
-}
-
-.scan-indicator.minimized:hover {
-  transform: translateX(-50%) translateY(0);
-  opacity: 1;
-}
 
 .scan-content {
   display: flex;

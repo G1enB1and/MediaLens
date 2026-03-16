@@ -17,6 +17,7 @@ let gCurrentDragCount = 0;
 let gPlayingInplaceCard = null;
 let gActiveMetadataMode = 'image';
 let gUpdateToastTimer = null;
+let gScanManuallyHidden = false;
 
 const METADATA_SETTINGS_CONFIG = {
   image: {
@@ -307,17 +308,13 @@ function wireScanIndicator() {
   if (!el || !file || !bar) return;
 
   el.onclick = () => {
-    // Single click minimizes, but we'll also allow double click to hide completely?
-    // User said "hideable by clicking", so let's toggle hidden if already minimized or just hide.
-    if (el.classList.contains('minimized')) {
-      el.hidden = true;
-    } else {
-      el.classList.add('minimized');
-    }
+    gScanManuallyHidden = true;
+    el.hidden = true;
   };
 
   if (gBridge.scanProgress) {
     gBridge.scanProgress.connect((fileName, percent) => {
+      if (gScanManuallyHidden) return;
       el.hidden = false;
       file.textContent = fileName;
       bar.style.width = `${percent}%`;
@@ -326,6 +323,7 @@ function wireScanIndicator() {
 
   if (gBridge.scanStarted) {
     gBridge.scanStarted.connect(() => {
+      gScanManuallyHidden = false;
       el.hidden = false;
       bar.style.width = '0%';
       file.textContent = 'Initializing...';
