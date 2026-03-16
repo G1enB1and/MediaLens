@@ -1,13 +1,26 @@
 # Change Log
 
-## v1.0.10 (Current)
+## v1.0.11 (Current)
 
-### Changed in v1.0.10
+### Added in v1.0.11
 
-- **Update Notifications**: Refined the update notification system with stylized overlays for both automatic and manual checks.
-- **Improved Toast Notifications**: Removed redundant native Windows dialogs and implemented a stylized "Up to Date" overlay that auto-hides.
-- **UI Color Selectivity**: Adjusted colors to be more neutral and apply accent color more selectively.
-- **Setup Installer**: Dissabled UPX to improve speed of installed app at the cost of installer file size.
+- **Collections System**: Introduced a new system to organize media into collections. Collections appear in the left sidebar, are resizable, and persist across sessions.
+- **Enhanced Search Syntax**: Overhauled the search engine to support collections, wildcards, mathematical expressions, exclusions, phrases, and complex operators (+ - ? * | OR).
+- **Search Help**: Added a detailed search syntax guide accessible via the Help menu.
+- **Collection Context Menu**: Added "Add to Collection..." to the gallery context menu, supporting both individual and bulk actions with the ability to create new collections on the fly.
+
+### Changed in v1.0.11
+
+- **Scanning Progress Bar**: The progress bar is now stationary at the bottom of the screen and hides completely when clicked.
+- **Sidebar Resize Handles**: Refined the UI by reducing the sidebar resize handle width from 5px to 1px.
+
+### Fixed in v1.0.11
+
+- **Glass Morphism Persistence**: Fixed an issue where the glass morphism setting was not correctly restored on application launch.
+
+---
+
+## v1.0.10
 
 ---
 
