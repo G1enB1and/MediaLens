@@ -772,8 +772,9 @@ class RootFilterProxyModel(QSortFilterProxyModel):
     
     Siblings of the root folder are hidden.
     """
-    def __init__(self, parent: QObject | None = None) -> None:
+    def __init__(self, bridge: Bridge, parent: QObject | None = None) -> None:
         super().__init__(parent)
+        self.bridge = bridge
         self._root_path = ""
         self._fallback_icon: QIcon | None = None
 
@@ -787,25 +788,30 @@ class RootFilterProxyModel(QSortFilterProxyModel):
             
         fs_model = self.sourceModel()
         source_index = fs_model.index(source_row, 0, source_parent)
-        path = fs_model.filePath(source_index).replace("\\", "/").lower()
+        raw_path = fs_model.filePath(source_index)
         
-        # Normalize trailing slashes for comparison logic.
-        # QFileSystemModel often returns drive roots like "C:/" while Path.absolute() might not have it.
-        # We ensure consistent behavior by stripping trailing slashes for the equality/startswith checks
-        # except for the drive root itself if needed.
-        root = self._root_path.rstrip("/")
-        normalized_path = path.rstrip("/")
+        # Consistent normalization for all path checks
+        from app.mediamanager.utils.pathing import normalize_windows_path
+        normalized_path = normalize_windows_path(raw_path)
+        
+        # Hidden logic: if show_hidden is False, skip database-marked hidden paths
+        # This check must come before the root path inclusion logic.
+        if not self.bridge._show_hidden_enabled():
+            if self.bridge.repo.is_path_hidden(raw_path):
+                return False
+
+        root = normalize_windows_path(self._root_path).rstrip("/")
 
         # Show the root path itself
         if normalized_path == root:
             return True
             
         # Show children/descendants of the root path
-        if path.startswith(self._root_path + "/") or path.startswith(root + "/"):
+        if normalized_path.startswith(root + "/"):
             return True
             
         # Show ancestors of the root path (so we can reach it from the top)
-        if (root + "/").startswith(path + "/"):
+        if (root + "/").startswith(normalized_path + "/"):
             return True
             
         # Special case: show Windows drives if they are ancestors
@@ -899,6 +905,8 @@ class Bridge(QObject):
         self.db_path = appdata / "mediamanagerx.db"
         self._log(f"DB Path = {self.db_path}")
         self.conn = connect_db(str(self.db_path))
+        from app.mediamanager.db.repository import MediaRepository
+        self.repo = MediaRepository(self.conn)
 
         # Migration for AI EXIF fields -> Embedded
         try:
@@ -1167,8 +1175,8 @@ class Bridge(QObject):
     def _restore_last_enabled(self) -> bool:
         return bool(self.settings.value("gallery/restore_last", False, type=bool))
 
-    def _hide_dot_enabled(self) -> bool:
-        return bool(self.settings.value("gallery/hide_dot", True, type=bool))
+    def _show_hidden_enabled(self) -> bool:
+        return bool(self.settings.value("gallery/show_hidden", False, type=bool))
 
     def _start_folder_setting(self) -> str:
         return str(self.settings.value("gallery/start_folder", "", type=str) or "")
@@ -1181,8 +1189,8 @@ class Bridge(QObject):
         try:
             data = {
                 "gallery.randomize": self._randomize_enabled(),
-                "gallery.restore_last": self._restore_last_enabled(),
-                "gallery.hide_dot": self._hide_dot_enabled(),
+                "gallery.restore_last": self._last_folder() != "",
+                "gallery.show_hidden": self._show_hidden_enabled(),
                 "gallery.start_folder": self._start_folder_setting(),
                 "ui.accent_color": str(self.settings.value("ui/accent_color", "#8ab4f8", type=str) or "#8ab4f8"),
                 "ui.show_left_panel": bool(self.settings.value("ui/show_left_panel", True, type=bool)),
@@ -1236,7 +1244,7 @@ class Bridge(QObject):
             return {
                 "gallery.randomize": False,
                 "gallery.restore_last": False,
-                "gallery.hide_dot": True,
+                "gallery.show_hidden": False,
                 "gallery.start_folder": "",
                 "ui.accent_color": "#8ab4f8",
                 "ui.show_left_panel": True,
@@ -1322,11 +1330,20 @@ class Bridge(QObject):
     @Slot(str, bool, result=bool)
     def set_setting_bool(self, key: str, value: bool) -> bool:
         try:
-            if key not in ("gallery.randomize", "gallery.restore_last", "gallery.hide_dot", "ui.show_left_panel", "ui.show_right_panel", "ui.enable_glassmorphism", "updates.check_on_launch") and not key.startswith("metadata.display."):
+            allowed = (
+                "gallery.randomize", 
+                "gallery.restore_last", 
+                "gallery.show_hidden",
+                "ui.show_left_panel", 
+                "ui.show_right_panel", 
+                "ui.enable_glassmorphism", 
+                "updates.check_on_launch"
+            )
+            if key not in allowed and not key.startswith("metadata.display."):
                 return False
             qkey = key.replace(".", "/")
             self.settings.setValue(qkey, bool(value))
-            if key.startswith("ui.") or key.startswith("metadata.display."):
+            if key.startswith("ui.") or key.startswith("metadata.display.") or key == "gallery.show_hidden":
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, bool(value))
             return True
@@ -1374,11 +1391,33 @@ class Bridge(QObject):
             i += 1
 
     def _hide_by_renaming_dot(self, path: str) -> str:
+        """DEPRECATED: Use set_media_hidden instead."""
         p = Path(path)
         if not p.exists() or p.name.startswith("."): return str(p)
         target = self._unique_path(p.with_name(f".{p.name}"))
         p.rename(target)
         return str(target)
+
+    @Slot(str, bool, result=bool)
+    def set_media_hidden(self, path: str, hidden: bool) -> bool:
+        success = self.repo.set_media_hidden(path, hidden)
+        self.fileOpFinished.emit("hide" if hidden else "unhide", success, path, path)
+        return success
+
+    @Slot(str, bool, result=bool)
+    def set_folder_hidden(self, path: str, hidden: bool) -> bool:
+        success = self.repo.set_folder_hidden(path, hidden)
+        self.fileOpFinished.emit("hide" if hidden else "unhide", success, path, path)
+        return success
+
+    @Slot(int, bool, result=bool)
+    def set_collection_hidden(self, collection_id: int, hidden: bool) -> bool:
+        success = self.repo.set_collection_hidden(collection_id, hidden)
+        if success:
+            # Emit a signal that collections updated if we have one
+            # self.collectionsUpdated.emit()
+            pass
+        return success
 
     @Slot(result="QVariantMap")
     def get_external_editors(self):
@@ -2140,17 +2179,26 @@ class Bridge(QObject):
             self._disk_cache, self._disk_cache_key = disk_files, current_key
         db_candidates = list_media_in_scope(self.conn, folders)
         surviving, covered = [], set()
+        show_hidden = self._show_hidden_enabled()
+        
         for r in db_candidates:
             norm = normalize_windows_path(r["path"])
+            covered.add(norm)
+            if not show_hidden and r.get("is_hidden"):
+                continue
             if norm in disk_files or Path(r["path"]).exists():
-                surviving.append(r); covered.add(norm)
+                surviving.append(r)
+        
         for norm, p_obj in disk_files.items():
             if norm not in covered:
+                # Items only on disk are not hidden yet
                 surviving.append({"id": -1, "path": norm, "media_type": ("image" if p_obj.suffix.lower() in image_exts else "video"), "file_size": None, "modified_time": None, "duration": None, "_real_path": p_obj})
+        
         candidates = surviving
         if filter_type == "image": candidates = [r for r in candidates if r["path"].lower().endswith(tuple(image_exts)) and not self._is_animated(Path(r["path"]))]
         elif filter_type == "video": candidates = [r for r in candidates if not r["path"].lower().endswith(tuple(image_exts))]
         elif filter_type == "animated": candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
+        
         if search_query.strip():
             candidates = [r for r in candidates if self._matches_media_search(r, search_query)]
         return candidates
@@ -2158,13 +2206,23 @@ class Bridge(QObject):
     def _get_collection_candidates(self, collection_id: int, filter_type: str = "all", search_query: str = "") -> list[dict]:
         from app.mediamanager.db.media_repo import list_media_in_collection
         image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
-        candidates = [r for r in list_media_in_collection(self.conn, int(collection_id)) if Path(r["path"]).exists()]
+        show_hidden = self._show_hidden_enabled()
+        
+        raw_candidates = list_media_in_collection(self.conn, int(collection_id))
+        candidates = []
+        for r in raw_candidates:
+            if not show_hidden and r.get("is_hidden"):
+                continue
+            if Path(r["path"]).exists():
+                candidates.append(r)
+                
         if filter_type == "image":
             candidates = [r for r in candidates if r["path"].lower().endswith(tuple(image_exts)) and not self._is_animated(Path(r["path"]))]
         elif filter_type == "video":
             candidates = [r for r in candidates if not r["path"].lower().endswith(tuple(image_exts))]
         elif filter_type == "animated":
             candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
+            
         if search_query.strip():
             candidates = [r for r in candidates if self._matches_media_search(r, search_query)]
         return candidates
@@ -2734,7 +2792,7 @@ class MainWindow(QMainWindow):
         self.fs_model.setRootPath(str(default_root))
 
         # Use a proxy model to show the root folder itself at the top.
-        self.proxy_model = RootFilterProxyModel(self)
+        self.proxy_model = RootFilterProxyModel(self.bridge, self)
         self.proxy_model.setSourceModel(self.fs_model)
         self.proxy_model.setRootPath(str(default_root))
 
@@ -3373,9 +3431,24 @@ class MainWindow(QMainWindow):
         for collection in collections:
             count = int(collection.get("item_count", 0) or 0)
             label = str(collection.get("name", ""))
+            is_hidden = bool(collection.get("is_hidden", 0))
+            
+            # If show_hidden is False, skip hidden collections in the list
+            if not self.bridge._show_hidden_enabled() and is_hidden:
+                continue
+
             item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, int(collection.get("id", 0)))
+            item.setData(Qt.ItemDataRole.UserRole + 1, is_hidden)
             item.setToolTip(f"{label} ({count} items)")
+            
+            if is_hidden:
+                # Dim the text for hidden collections if they are shown
+                font = item.font()
+                font.setItalic(True)
+                item.setFont(font)
+                item.setForeground(QColor(128, 128, 128))
+
             self.collections_list.addItem(item)
             if int(collection.get("id", 0)) == active_id:
                 item.setSelected(True)
@@ -3400,7 +3473,15 @@ class MainWindow(QMainWindow):
         act_new = menu.addAction("New Collection...")
         act_rename = None
         act_delete = None
+        act_hide = None
+        act_unhide = None
         if item:
+            is_hidden = item.data(Qt.ItemDataRole.UserRole + 1)
+            if is_hidden:
+                act_unhide = menu.addAction("Unhide Collection")
+            else:
+                act_hide = menu.addAction("Hide Collection")
+            
             act_rename = menu.addAction("Rename...")
             act_delete = menu.addAction("Delete")
 
@@ -3420,6 +3501,14 @@ class MainWindow(QMainWindow):
             if ok and name.strip() and name.strip() != current_name:
                 if self.bridge.rename_collection(collection_id, name):
                     self._reload_collections()
+        elif item and chosen == act_hide:
+            collection_id = int(item.data(Qt.ItemDataRole.UserRole) or 0)
+            if self.bridge.set_collection_hidden(collection_id, True):
+                self._reload_collections()
+        elif item and chosen == act_unhide:
+            collection_id = int(item.data(Qt.ItemDataRole.UserRole) or 0)
+            if self.bridge.set_collection_hidden(collection_id, False):
+                self._reload_collections()
         elif item and chosen == act_delete:
             collection_id = int(item.data(Qt.ItemDataRole.UserRole) or 0)
             reply = QMessageBox.question(
@@ -3453,6 +3542,9 @@ class MainWindow(QMainWindow):
                     self._show_metadata_for_path(self._current_paths)
                 else:
                     self._clear_metadata_panel()
+            elif key == "gallery.show_hidden":
+                if hasattr(self, "proxy_model"):
+                    self.proxy_model.invalidateFilter()
         except Exception:
             pass
 
@@ -4943,7 +5035,7 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
 
         name = Path(folder_path).name
-        is_hidden = name.startswith(".")
+        is_hidden = self.bridge.repo.is_path_hidden(folder_path)
 
         act_hide = None
         act_unhide = None
@@ -4974,18 +5066,14 @@ class MainWindow(QMainWindow):
         chosen = menu.exec(self.tree.viewport().mapToGlobal(pos))
 
         if chosen == act_hide:
-            new_path = self.bridge.hide_by_renaming_dot(folder_path)
-            if new_path:
-                parent = str(Path(folder_path).parent)
-                self.tree.setCurrentIndex(self.proxy_model.mapFromSource(self.fs_model.index(parent)))
-                self._set_selected_folders([parent])
+            success = self.bridge.set_folder_hidden(folder_path, True)
+            if success:
+                self.proxy_model.invalidateFilter()
 
         if chosen == act_unhide:
-            new_path = self.bridge.unhide_by_renaming_dot(folder_path)
-            if new_path:
-                parent = str(Path(new_path).parent)
-                self.tree.setCurrentIndex(self.proxy_model.mapFromSource(self.fs_model.index(parent)))
-                self._set_selected_folders([parent])
+            success = self.bridge.set_folder_hidden(folder_path, False)
+            if success:
+                self.proxy_model.invalidateFilter()
 
         if chosen == act_select_all:
              self.web.page().runJavaScript("if(window.selectAll) window.selectAll();")

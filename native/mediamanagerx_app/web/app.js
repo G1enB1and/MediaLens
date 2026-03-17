@@ -519,7 +519,7 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
 
   // Refine Hide/Unhide display
   if (hasItem) {
-    const isHidden = item && item.path && item.path.split(/[/\\]/).pop().startsWith('.');
+    const isHidden = item && item.is_hidden;
     if (hideBtn) hideBtn.style.display = isHidden ? 'none' : 'block';
     if (unhideBtn) unhideBtn.style.display = isHidden ? 'block' : 'none';
   }
@@ -613,17 +613,28 @@ function wireCtxMenu() {
         hideCtx();
         break;
       case 'ctxHide':
-        if (item && item.path && gBridge && gBridge.hide_by_renaming_dot_async) {
+        if (item && item.path && gBridge && gBridge.set_media_hidden) {
           if (fromLb) closeLightbox();
           setGlobalLoading(true, 'Hiding…', 25);
-          gBridge.hide_by_renaming_dot_async(item.path, () => { });
+          gBridge.set_media_hidden(item.path, true, (success) => {
+             if (success) {
+                 // Refresh or update local state
+                 item.is_hidden = true;
+                 refreshFromBridge(gBridge);
+             }
+          });
         }
         break;
       case 'ctxUnhide':
-        if (item && item.path && gBridge && gBridge.unhide_by_renaming_dot_async) {
+        if (item && item.path && gBridge && gBridge.set_media_hidden) {
           if (fromLb) closeLightbox();
           setGlobalLoading(true, 'Unhiding…', 25);
-          gBridge.unhide_by_renaming_dot_async(item.path, () => { });
+          gBridge.set_media_hidden(item.path, false, (success) => {
+             if (success) {
+                 item.is_hidden = false;
+                 refreshFromBridge(gBridge);
+             }
+          });
         }
         break;
       case 'ctxRename':
@@ -1540,7 +1551,7 @@ function wireSettings() {
 
   const startInput = document.getElementById('startFolder');
   const restoreToggle = document.getElementById('toggleRestoreLast');
-  const hideDotToggle = document.getElementById('toggleHideDot');
+  const toggleShowHidden = document.getElementById('toggleShowHidden');
   const accentInput = document.getElementById('accentColor');
 
   if (browse) {
@@ -1582,10 +1593,10 @@ function wireSettings() {
     });
   }
 
-  if (hideDotToggle) {
-    hideDotToggle.addEventListener('change', () => {
+  if (toggleShowHidden) {
+    toggleShowHidden.addEventListener('change', () => {
       if (!gBridge || !gBridge.set_setting_bool) return;
-      gBridge.set_setting_bool('gallery.hide_dot', !!hideDotToggle.checked, function () {
+      gBridge.set_setting_bool('gallery.show_hidden', !!toggleShowHidden.checked, function () {
         gPage = 0;
         refreshFromBridge(gBridge);
       });
@@ -2180,8 +2191,8 @@ async function main() {
       // keep start folder UI in sync
       syncStartFolderEnabled && syncStartFolderEnabled();
 
-      const hd = document.getElementById('toggleHideDot');
-      if (hd) hd.checked = !!(s && s['gallery.hide_dot']);
+      const hd = document.getElementById('toggleShowHidden');
+      if (hd) hd.checked = !!(s && s['gallery.show_hidden']);
 
       const sf = document.getElementById('startFolder');
       if (sf) sf.value = (s && s['gallery.start_folder']) || '';
@@ -2265,6 +2276,14 @@ async function main() {
       bridge.videoSuppressed.connect(function (suppressed) {
         if (gPlayingInplaceCard) {
           gPlayingInplaceCard.classList.toggle('suppressed-poster', suppressed);
+        }
+      });
+    }
+
+    if (bridge.uiFlagChanged) {
+      bridge.uiFlagChanged.connect(function (key, value) {
+        if (key === 'gallery.show_hidden') {
+          refreshFromBridge(bridge, false);
         }
       });
     }

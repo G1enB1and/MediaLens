@@ -45,6 +45,23 @@ def _ensure_media_metadata_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE media_metadata ADD COLUMN ai_params TEXT")
 
 
+def _ensure_is_hidden_columns(conn: sqlite3.Connection) -> None:
+    # 1. media_items
+    caps = {row[1] for row in conn.execute("PRAGMA table_info(media_items)").fetchall()}
+    if "is_hidden" not in caps:
+        conn.execute("ALTER TABLE media_items ADD COLUMN is_hidden INTEGER DEFAULT 0")
+
+    # 2. folder_nodes
+    caps = {row[1] for row in conn.execute("PRAGMA table_info(folder_nodes)").fetchall()}
+    if "is_hidden" not in caps:
+        conn.execute("ALTER TABLE folder_nodes ADD COLUMN is_hidden INTEGER DEFAULT 0")
+
+    # 3. collections
+    caps = {row[1] for row in conn.execute("PRAGMA table_info(collections)").fetchall()}
+    if "is_hidden" not in caps:
+        conn.execute("ALTER TABLE collections ADD COLUMN is_hidden INTEGER DEFAULT 0")
+
+
 def init_db(db_path: str) -> None:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     sql = SCHEMA_PATH.read_text(encoding="utf-8")
@@ -56,4 +73,5 @@ def init_db(db_path: str) -> None:
         conn.execute("PRAGMA journal_mode=MEMORY;")
         conn.executescript(sql)
         _ensure_media_metadata_columns(conn)
+        _ensure_is_hidden_columns(conn)
         conn.commit()

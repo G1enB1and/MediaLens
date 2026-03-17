@@ -9,9 +9,16 @@ from app.mediamanager.db.collections_repo import (
     delete_collection,
     list_collections,
     rename_collection,
+    set_collection_hidden,
 )
 from app.mediamanager.db.ai_metadata_repo import get_media_ai_metadata, replace_media_ai_metadata
-from app.mediamanager.db.media_repo import add_media_item, list_media_in_collection, list_media_in_scope
+from app.mediamanager.db.media_repo import (
+    add_media_item,
+    list_media_in_collection,
+    list_media_in_scope,
+    set_media_hidden,
+    set_folder_hidden,
+)
 from app.mediamanager.db.metadata_repo import get_media_metadata, upsert_media_metadata
 from app.mediamanager.db.selection_state import get_selection, replace_selection
 from app.mediamanager.db.tags_repo import attach_tags, list_media_tags
@@ -88,3 +95,16 @@ class MediaRepository:
 
     def get_tags(self, media_id: int) -> list[str]:
         return list_media_tags(self.conn, media_id)
+
+    def set_media_hidden(self, path: str, hidden: bool) -> bool:
+        return set_media_hidden(self.conn, path, hidden)
+
+    def set_folder_hidden(self, path: str, hidden: bool) -> bool:
+        return set_folder_hidden(self.conn, path, hidden)
+
+    def set_collection_hidden(self, collection_id: int, hidden: bool) -> bool:
+        return set_collection_hidden(self.conn, collection_id, hidden)
+
+    def is_path_hidden(self, path: str) -> bool:
+        from app.mediamanager.db.media_repo import is_path_hidden
+        return is_path_hidden(self.conn, path)

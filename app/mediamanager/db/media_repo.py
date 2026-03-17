@@ -22,6 +22,7 @@ def add_media_item(
     width: Optional[int] = None,
     height: Optional[int] = None,
     duration_ms: Optional[int] = None,
+    is_hidden: int = 0,
 ) -> int:
     now = _utc_now_iso()
     normalized = normalize_windows_path(path)
@@ -33,8 +34,8 @@ def add_media_item(
 
     conn.execute(
         """
-        INSERT INTO media_items(path, content_hash, media_type, file_size_bytes, modified_time_utc, width, height, duration_ms, created_at_utc, updated_at_utc)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO media_items(path, content_hash, media_type, file_size_bytes, modified_time_utc, width, height, duration_ms, is_hidden, created_at_utc, updated_at_utc)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(path) DO UPDATE SET
           content_hash=COALESCE(excluded.content_hash, content_hash),
           media_type=excluded.media_type,
@@ -43,9 +44,10 @@ def add_media_item(
           width=COALESCE(excluded.width, width),
           height=COALESCE(excluded.height, height),
           duration_ms=COALESCE(excluded.duration_ms, duration_ms),
+          is_hidden=COALESCE(excluded.is_hidden, is_hidden),
           updated_at_utc=excluded.updated_at_utc
         """,
-        (normalized, content_hash, media_type, size, mtime, width, height, duration_ms, now, now),
+        (normalized, content_hash, media_type, size, mtime, width, height, duration_ms, is_hidden, now, now),
     )
     row = conn.execute("SELECT id FROM media_items WHERE path = ?", (normalized,)).fetchone()
     if not row:
@@ -57,7 +59,7 @@ def add_media_item(
 def get_media_by_path(conn: sqlite3.Connection, path: str) -> Optional[dict]:
     normalized = normalize_windows_path(path)
     row = conn.execute(
-        "SELECT id, path, media_type, file_size_bytes, modified_time_utc, width, height, duration_ms FROM media_items WHERE path = ?",
+        "SELECT id, path, media_type, file_size_bytes, modified_time_utc, width, height, duration_ms, is_hidden FROM media_items WHERE path = ?",
         (normalized,),
     ).fetchone()
     if not row:
@@ -71,6 +73,7 @@ def get_media_by_path(conn: sqlite3.Connection, path: str) -> Optional[dict]:
         "width": row[5],
         "height": row[6],
         "duration_ms": row[7],
+        "is_hidden": bool(row[8]),
     }
 
 
@@ -223,6 +226,7 @@ def _list_media_with_where(
             m.width,
             m.height,
             m.duration_ms,
+            m.is_hidden,
             meta.title,
             meta.description,
             meta.notes,
@@ -278,25 +282,26 @@ def _media_row_to_dict(row) -> dict:
         "width": row[5],
         "height": row[6],
         "duration": (row[7] / 1000.0) if row[7] else None,
-        "title": row[8],
-        "description": row[9],
-        "notes": row[10],
-        "ai_prompt": row[11],
-        "ai_negative_prompt": row[12],
-        "tool_name_found": row[13],
-        "tool_name_inferred": row[14],
-        "model_name": row[15],
-        "checkpoint_name": row[16],
-        "sampler": row[17],
-        "scheduler": row[18],
-        "cfg_scale": row[19],
-        "steps": row[20],
-        "seed": row[21],
-        "source_formats": row[22],
-        "metadata_families": row[23],
-        "ai_loras": row[24],
-        "tags": row[25],
-        "collection_names": row[26],
+        "is_hidden": bool(row[8]),
+        "title": row[9],
+        "description": row[10],
+        "notes": row[11],
+        "ai_prompt": row[12],
+        "ai_negative_prompt": row[13],
+        "tool_name_found": row[14],
+        "tool_name_inferred": row[15],
+        "model_name": row[16],
+        "checkpoint_name": row[17],
+        "sampler": row[18],
+        "scheduler": row[19],
+        "cfg_scale": row[20],
+        "steps": row[21],
+        "seed": row[22],
+        "source_formats": row[23],
+        "metadata_families": row[24],
+        "ai_loras": row[25],
+        "tags": row[26],
+        "collection_names": row[27],
     }
 
 
@@ -348,3 +353,73 @@ def move_directory_in_db(conn: sqlite3.Connection, old_path: str, new_path: str)
     
     conn.commit()
     return cur.rowcount > 0
+
+
+def set_media_hidden(conn: sqlite3.Connection, path: str, hidden: bool) -> bool:
+    """Update the is_hidden status for a specific media item in the database.
+    If the item is not in the database, it will be added.
+    """
+    normalized = normalize_windows_path(path)
+    cursor = conn.cursor()
+    val = 1 if hidden else 0
+    
+    # Try updating existing
+    cursor.execute("UPDATE media_items SET is_hidden = ?, updated_at_utc = ? WHERE path = ?", (val, _utc_now_iso(), normalized))
+    if cursor.rowcount > 0:
+        conn.commit()
+        return True
+    
+    # If not found and we want to hide it, insert it
+    if hidden:
+        # Infer media type
+        image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+        p = Path(path)
+        mtype = "image" if p.suffix.lower() in image_exts else "video"
+        try:
+            add_media_item(conn, path, mtype, is_hidden=1)
+            return True
+        except Exception:
+            return False
+            
+    return False
+
+
+def set_folder_hidden(conn: sqlite3.Connection, path: str, hidden: bool) -> bool:
+    """Update the is_hidden status for a folder and all its contents in the database."""
+    normalized = normalize_windows_path(path)
+    cursor = conn.cursor()
+    val = 1 if hidden else 0
+    
+    # Ensure the folder node exists and update its status
+    # We don't have all the info for depth/parent_path here, so we just focus on the path and hidden status
+    # If it's a new entry, depth and parent_path will be default/null which is acceptable for hiding logic
+    cursor.execute(
+        "INSERT INTO folder_nodes(path, is_hidden) VALUES (?, ?) ON CONFLICT(path) DO UPDATE SET is_hidden = excluded.is_hidden",
+        (normalized, val)
+    )
+    
+    # Update all media items within this folder (recursively)
+    # We use LIKE for path prefix matching
+    prefix = normalized
+    if not prefix.endswith("/"):
+        prefix += "/"
+    cursor.execute("UPDATE media_items SET is_hidden = ? WHERE path LIKE ?", (val, prefix + "%"))
+    conn.commit()
+    return True
+
+
+def is_path_hidden(conn: sqlite3.Connection, path: str) -> bool:
+    """Check if a path is marked as hidden in the database (media or folder)."""
+    normalized = normalize_windows_path(path)
+    cursor = conn.cursor()
+    # Check if it's a media item
+    cursor.execute("SELECT is_hidden FROM media_items WHERE path = ?", (normalized,))
+    row = cursor.fetchone()
+    if row and row[0]:
+        return True
+    # Check if it's a folder
+    cursor.execute("SELECT is_hidden FROM folder_nodes WHERE path = ?", (normalized,))
+    row = cursor.fetchone()
+    if row and row[0]:
+        return True
+    return False

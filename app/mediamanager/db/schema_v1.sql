@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS media_items (
   duration_ms INTEGER,
   thumb_path TEXT,
   preview_path TEXT,
+  is_hidden INTEGER DEFAULT 0,
   created_at_utc TEXT NOT NULL,
   updated_at_utc TEXT NOT NULL
 );
@@ -161,7 +162,8 @@ CREATE TABLE IF NOT EXISTS folder_nodes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   path TEXT NOT NULL UNIQUE,
   parent_path TEXT,
-  depth INTEGER NOT NULL DEFAULT 0
+  depth INTEGER NOT NULL DEFAULT 0,
+  is_hidden INTEGER DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_folder_nodes_parent ON folder_nodes(parent_path);
@@ -175,6 +177,7 @@ CREATE TABLE IF NOT EXISTS folder_selection_state (
 CREATE TABLE IF NOT EXISTS collections (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
+  is_hidden INTEGER DEFAULT 0,
   created_at_utc TEXT NOT NULL,
   updated_at_utc TEXT NOT NULL
 );
