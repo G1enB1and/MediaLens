@@ -1,6 +1,19 @@
 # Change Log
 
-## v1.0.11 (Current)
+## v1.0.12 (Current)
+
+### Added in v1.0.12
+
+- **Update Notification Enhancements**: Improved update notifications by replacing redundant native OS dialogues with stylized toasts for a more consistent and modern UI experience.
+
+### Changed in v1.0.12
+
+- **Video Loading Optimization**: Refined the video loading mechanism to significantly reduce delay, ensuring a smoother playback experience in the gallery.
+- **Scanning Efficiency**: Optimized the file tree scanning process to ensure full scans only occur when necessary, improving overall application responsiveness.
+
+---
+
+## v1.0.11
 
 ### Added in v1.0.11
 
