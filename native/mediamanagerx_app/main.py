@@ -478,19 +478,31 @@ class FileConflictDialog(QDialog):
             reader = QImageReader(str(path))
             reader.setAutoTransform(True)
             img = reader.read()
+            
+            # Fallback for AVIF or other formats Qt can't read natively
+            if img.isNull() and ext == ".avif":
+                poster = self.bridge._ensure_video_poster(path)
+                if poster and poster.exists():
+                    img = QImageReader(str(poster)).read()
+
             if not img.isNull():
                 pix = QPixmap.fromImage(img).scaled(240, 180, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
                 label.setPixmap(pix)
             else:
                 label.setText("Image Corrupt")
         else:
-            # Try to get poster for video
-            try:
-                # We need to use bridge here, but bridge might be a web channel object.
-                # Bridge has its own thumb dir.
-                label.setText("Video")
-            except:
-                label.setText("File")
+            # Try to get poster for video or AVIF that failed direct read
+            poster = self.bridge._ensure_video_poster(path)
+            if poster and poster.exists():
+                img = QImageReader(str(poster)).read()
+                if not img.isNull():
+                    pix = QPixmap.fromImage(img).scaled(240, 180, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                    label.setPixmap(pix)
+                else:
+                    label.setText("Thumb Fail")
+            else:
+                is_vid = path.suffix.lower() in {".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}
+                label.setText("Video" if is_vid else "File")
 
     @property
     def new_existing_name(self):
@@ -670,11 +682,9 @@ class FolderTreeView(QTreeView):
         # Priority 0: Side-channel from Bridge (Reliable for internal Gallery -> Tree)
         if bridge and hasattr(bridge, "drag_paths") and bridge.drag_paths:
             src_paths = list(bridge.drag_paths)
-            print(f"DEBUG: dropEvent using side-channel: count={len(src_paths)}")
         
         # Priority 1: fallback to MIME data for tree-to-tree or external drops
         if not src_paths:
-            print(f"DEBUG: dropEvent falling back to MIME: formats={mime.formats()}")
             if mime.hasUrls():
                 src_paths = [url.toLocalFile() for url in mime.urls() if url.toLocalFile()]
 
@@ -981,7 +991,7 @@ class Bridge(QObject):
         return shutil.which("ffprobe")
 
     def _ensure_video_poster(self, video_path: Path) -> Path | None:
-        """Generate a poster jpg for a video using ffmpeg (if missing)."""
+        """Generate a poster jpg for a video or image using ffmpeg (if missing)."""
         out = self._video_poster_path(video_path)
         if out.exists():
             return out
@@ -990,19 +1000,23 @@ class Bridge(QObject):
             return None
         try:
             out.parent.mkdir(parents=True, exist_ok=True)
-            vf = "thumbnail,scale=min(640\\,iw):-2"
-            cmd = [
-                ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
-                "-ss", "0.5", "-i", str(video_path),
-                "-frames:v", "1", "-vf", vf, "-q:v", "4", str(out),
-            ]
+            ext = video_path.suffix.lower()
+            is_vid = ext in {".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}
+            # For images, don't use -ss as it can fail for 0-duration files
+            vf = "thumbnail,scale=min(640\\,iw):-2" if is_vid else "scale=min(640\\,iw):-2"
+            
+            cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error"]
+            if is_vid:
+                cmd += ["-ss", "0.5"]
+            cmd += ["-i", str(video_path), "-frames:v", "1", "-vf", vf, "-q:v", "4", str(out)]
+            
             r = subprocess.run(cmd, capture_output=True, text=True)
             if r.returncode != 0:
                 return None
             return out if out.exists() else None
-        except Exception:
+        except Exception as e:
             return None
-
+        
     def _is_animated(self, path: Path) -> bool:
         """Check if image is animated (GIF or animated WebP)."""
         suffix = path.suffix.lower()
@@ -1040,7 +1054,6 @@ class Bridge(QObject):
     def set_drag_paths(self, paths: list[str]) -> None:
         """Called from JS to register the actual files being dragged."""
         self.drag_paths = [str(p) for p in paths]
-        print(f"DEBUG: Bridge set_drag_paths: count={len(self.drag_paths)}")
 
     @Slot(int, bool, str)
     def update_drag_tooltip(self, count: int, is_copy: bool, target_folder: str) -> None:
@@ -1716,7 +1729,7 @@ class Bridge(QObject):
 
         def work():
             from app.mediamanager.db.media_repo import rename_media_path, move_directory_in_db, add_media_item
-            print(f"DEBUG: _process_file_op START: op={op_type}, count={len(src_paths)}")
+            
             
             is_move = op_type in ("move", "paste_move")
             sticky_action = None
@@ -1725,14 +1738,16 @@ class Bridge(QObject):
             try:
                 for src in src_paths:
                     if not src.exists():
-                        print(f"DEBUG: Source does not exist: {src}")
                         continue
                     
                     dst = target_dir / src.name
                     action = "keep_both"
                     final_dst = dst
                     
-                    if dst.exists() and not dst.samefile(src):
+                    if dst.exists():
+                        if dst.samefile(src):
+                            continue
+                        
                         if sticky_action:
                             res = {"action": sticky_action, "new_incoming": src.name}
                         else:
@@ -1762,23 +1777,19 @@ class Bridge(QObject):
                     
                     # Execute with correct atomic logic
                     try:
-                        print(f"DEBUG: {op_type} {src.name} -> {final_dst.name} (action={action})")
                         if is_move:
                             try:
                                 # Try atomic os.replace (removes source, overwrites target if exists)
                                 os.replace(src, final_dst)
-                                print(f"DEBUG: os.replace (MOVE) success")
                             except OSError:
                                 # Cross-device move fallback
                                 shutil.move(src, final_dst)
-                                print(f"DEBUG: shutil.move fallback success")
                             
                             # Double check: ensure source is gone (as requested by user)
                             if src.exists():
                                 try:
                                     if src.is_dir(): shutil.rmtree(src)
                                     else: src.unlink()
-                                    print(f"DEBUG: Explicit delete success for {src.name}")
                                 except: pass
                             
                             if src.is_dir(): move_directory_in_db(self.conn, str(src), str(final_dst))
@@ -1794,12 +1805,11 @@ class Bridge(QObject):
                         
                         any_ok = True
                     except Exception as e:
-                        print(f"DEBUG: Op fail for {src.name}: {e}")
+                        pass
 
                 op_signal = "paste" if "paste" in op_type else op_type
                 self.fileOpFinished.emit(op_signal, any_ok, "", str(target_dir))
             except Exception as e:
-                print(f"DEBUG: _process_file_op GLOBAL ERROR: {e}")
                 self.fileOpFinished.emit(op_type, False, "", "")
             
             self._disk_cache = {}; self._disk_cache_key = ""
@@ -2466,6 +2476,12 @@ class Bridge(QObject):
                             sz = reader.size()
                             if sz.isValid():
                                 width, height = sz.width(), sz.height()
+                        
+                        # Fallback for formats like AVIF that Qt can't read natively
+                        if width is None or height is None:
+                            w, h, _ = self._probe_video_size(str(p))
+                            if w > 0 and h > 0:
+                                width, height = w, h
                     else:
                         w, h, _ = self._probe_video_size(str(p))
                         if w > 0 and h > 0:
@@ -3957,6 +3973,16 @@ class MainWindow(QMainWindow):
         reader = QImageReader(str(preview_path))
         reader.setAutoTransform(True)
         size = reader.size()
+        
+        # Fallback for AVIF/unsupported formats
+        if suffix == ".avif":
+            # Native QImageReader usually fails for AVIF without plugins
+            poster = self.bridge._ensure_video_poster(p)
+            if poster and poster.exists():
+                preview_path = poster
+                reader = QImageReader(str(preview_path))
+                size = reader.size()
+
         aspect_ratio = max(0.2, size.width() / max(1, size.height())) if size.isValid() else 1.0
         if suffix == ".gif":
             self._set_preview_movie(p, aspect_ratio)
@@ -4519,7 +4545,7 @@ class MainWindow(QMainWindow):
         if not p.exists(): return
 
         ext = p.suffix.lower()
-        if ext not in {".jpg", ".jpeg", ".png", ".webp"}:
+        if ext not in {".jpg", ".jpeg", ".png", ".webp", ".avif"}:
             self.meta_status_lbl.setText("Embed not supported for this file type.")
             return
 
