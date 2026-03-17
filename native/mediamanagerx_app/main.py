@@ -38,6 +38,8 @@ def _install_stderr_filter() -> None:
     """
     _SUPPRESS = (
         b"deprecated pixel format used",
+        b"Could not parse stylesheet of object QProgressBar",
+        b"Could not update timestamps for skipped samples.",
     )
 
     try:
@@ -98,6 +100,7 @@ from PySide6.QtCore import (
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 from PySide6.QtGui import (
     QAction,
+    QActionGroup,
     QColor,
     QImageReader,
     QIcon,
@@ -1184,6 +1187,20 @@ class Bridge(QObject):
     def _last_folder(self) -> str:
         return str(self.settings.value("gallery/last_folder", "", type=str) or "")
 
+    def _gallery_view_mode(self) -> str:
+        mode = str(self.settings.value("gallery/view_mode", "masonry", type=str) or "masonry")
+        allowed = {
+            "masonry",
+            "grid_small",
+            "grid_medium",
+            "grid_large",
+            "grid_xlarge",
+            "list",
+            "content",
+            "details",
+        }
+        return mode if mode in allowed else "masonry"
+
     @Slot(result=dict)
     def get_settings(self) -> dict:
         try:
@@ -1192,6 +1209,7 @@ class Bridge(QObject):
                 "gallery.restore_last": self._last_folder() != "",
                 "gallery.show_hidden": self._show_hidden_enabled(),
                 "gallery.start_folder": self._start_folder_setting(),
+                "gallery.view_mode": self._gallery_view_mode(),
                 "ui.accent_color": str(self.settings.value("ui/accent_color", "#8ab4f8", type=str) or "#8ab4f8"),
                 "ui.show_left_panel": bool(self.settings.value("ui/show_left_panel", True, type=bool)),
                 "ui.show_right_panel": bool(self.settings.value("ui/show_right_panel", True, type=bool)),
@@ -1246,6 +1264,7 @@ class Bridge(QObject):
                 "gallery.restore_last": False,
                 "gallery.show_hidden": False,
                 "gallery.start_folder": "",
+                "gallery.view_mode": "masonry",
                 "ui.accent_color": "#8ab4f8",
                 "ui.show_left_panel": True,
                 "ui.show_right_panel": True,
@@ -1353,8 +1372,12 @@ class Bridge(QObject):
     @Slot(str, str, result=bool)
     def set_setting_str(self, key: str, value: str) -> bool:
         try:
-            if key not in ("gallery.start_folder", "ui.accent_color", "ui.theme_mode", "metadata.display.order") and not key.startswith("metadata.layout."):
+            if key not in ("gallery.start_folder", "gallery.view_mode", "ui.accent_color", "ui.theme_mode", "metadata.display.order") and not key.startswith("metadata.layout."):
                 return False
+            if key == "gallery.view_mode":
+                allowed = {"masonry", "grid_small", "grid_medium", "grid_large", "grid_xlarge", "list", "content", "details"}
+                if value not in allowed:
+                    return False
             qkey = key.replace(".", "/")
             self.settings.setValue(qkey, str(value or ""))
             if key == "ui.accent_color":
@@ -1362,6 +1385,9 @@ class Bridge(QObject):
             elif key == "ui.theme_mode":
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, value == "light")
+            elif key == "gallery.view_mode":
+                self.settings.sync()
+                self.uiFlagChanged.emit(key, True)
             elif key == "metadata.display.order" or key.startswith("metadata.layout."):
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, True)
@@ -1919,6 +1945,10 @@ class Bridge(QObject):
     @Slot(str, bool, bool, bool, int, int, result=bool)
     def open_native_video(self, video_path: str, autoplay: bool, loop: bool, muted: bool, w: int = 0, h: int = 0) -> bool:
         try:
+            path_obj = Path(video_path)
+            if not path_obj.exists() or not path_obj.is_file():
+                self._log(f"Rejected open_native_video for non-file path: {video_path}")
+                return False
             if w <= 0 or h <= 0:
                 w, h, is_malformed = self._probe_video_size(video_path)
             else:
@@ -1948,6 +1978,10 @@ class Bridge(QObject):
             if 0 < d_s < 60:
                 loop = True
         try:
+            path_obj = Path(video_path)
+            if not path_obj.exists() or not path_obj.is_file():
+                self._log(f"Rejected open_native_video_inplace for non-file path: {video_path}")
+                return
             if vw <= 0 or vh <= 0:
                 vw, vh, is_malformed = self._probe_video_size(video_path)
             else:
@@ -2111,22 +2145,27 @@ class Bridge(QObject):
     @Slot(list, int, int, str, str, str, result=list)
     def list_media(self, folders, limit=100, offset=0, sort_by="name_asc", filter_type="all", search_query="") -> list:
         try:
-            if folders:
-                candidates = self._get_reconciled_candidates(folders, filter_type, search_query)
-            elif self._active_collection_id is not None:
-                candidates = self._get_collection_candidates(self._active_collection_id, filter_type, search_query)
-            else:
-                candidates = []
-            if self._randomize_enabled() and sort_by == "name_asc": random.Random(self._session_shuffle_seed).shuffle(candidates)
-            elif sort_by == "name_desc": candidates.sort(key=lambda r: r["path"].lower(), reverse=True)
-            elif sort_by == "date_desc": candidates.sort(key=lambda r: r.get("modified_time") or "", reverse=True)
-            elif sort_by == "date_asc": candidates.sort(key=lambda r: r.get("modified_time") or "")
-            elif sort_by == "size_desc": candidates.sort(key=lambda r: r.get("file_size") or 0, reverse=True)
-            elif sort_by == "size_asc": candidates.sort(key=lambda r: r.get("file_size") or 0)
-            else: candidates.sort(key=lambda r: r["path"].lower())
+            candidates = self._get_gallery_entries(folders, sort_by, filter_type, search_query)
             start, end = max(0, int(offset)), max(0, int(offset)) + max(0, int(limit))
             out = []
             for r in candidates[start:end]:
+                if r.get("is_folder"):
+                    out.append(
+                        {
+                            "path": str(r["path"]),
+                            "url": "",
+                            "media_type": "folder",
+                            "is_folder": True,
+                            "is_hidden": bool(r.get("is_hidden")),
+                            "is_animated": False,
+                            "width": None,
+                            "height": None,
+                            "duration": None,
+                            "modified_time": r.get("modified_time"),
+                            "file_size": None,
+                        }
+                    )
+                    continue
                 real = r.get("_real_path")
                 p = real if isinstance(real, Path) else Path(r["path"])
                 try:
@@ -2138,10 +2177,14 @@ class Bridge(QObject):
                     "path": str(p), 
                     "url": f"{QUrl.fromLocalFile(str(p)).toString()}?t={mtime}", 
                     "media_type": r["media_type"], 
+                    "is_folder": False,
+                    "is_hidden": bool(r.get("is_hidden")),
                     "is_animated": self._is_animated(p),
                     "width": r.get("width"),
                     "height": r.get("height"),
-                    "duration": r.get("duration")
+                    "duration": r.get("duration"),
+                    "modified_time": mtime,
+                    "file_size": r.get("file_size"),
                 })
             return out
         except Exception: return []
@@ -2149,11 +2192,7 @@ class Bridge(QObject):
     @Slot(list, str, str, result=int)
     def count_media(self, folders: list, filter_type: str = "all", search_query: str = "") -> int:
         try:
-            if folders:
-                return len(self._get_reconciled_candidates(folders, filter_type, search_query))
-            if self._active_collection_id is not None:
-                return len(self._get_collection_candidates(self._active_collection_id, filter_type, search_query))
-            return 0
+            return len(self._get_gallery_entries(folders, "name_asc", filter_type, search_query))
         except Exception: return 0
 
     def _get_reconciled_candidates(self, folders: list, filter_type: str = "all", search_query: str = "") -> list[dict]:
@@ -2186,7 +2225,13 @@ class Bridge(QObject):
             covered.add(norm)
             if not show_hidden and r.get("is_hidden"):
                 continue
-            if norm in disk_files or Path(r["path"]).exists():
+            path_obj = disk_files.get(norm) or Path(r["path"])
+            if path_obj.exists() and path_obj.is_dir():
+                continue
+            if norm in disk_files or path_obj.exists():
+                if norm in disk_files:
+                    r = dict(r)
+                    r["_real_path"] = disk_files[norm]
                 surviving.append(r)
         
         for norm, p_obj in disk_files.items():
@@ -2213,7 +2258,8 @@ class Bridge(QObject):
         for r in raw_candidates:
             if not show_hidden and r.get("is_hidden"):
                 continue
-            if Path(r["path"]).exists():
+            path_obj = Path(r["path"])
+            if path_obj.exists() and path_obj.is_file():
                 candidates.append(r)
                 
         if filter_type == "image":
@@ -2230,6 +2276,103 @@ class Bridge(QObject):
     def _matches_media_search(self, row: dict, search_query: str) -> bool:
         from app.mediamanager.search_query import matches_media_search
         return matches_media_search(row, search_query)
+
+    def _list_folder_entries(self, folders: list[str], search_query: str = "") -> list[dict]:
+        if not folders:
+            return []
+
+        show_hidden = self._show_hidden_enabled()
+        query = (search_query or "").strip().lower()
+        seen: set[str] = set()
+        entries: list[dict] = []
+
+        for folder in folders:
+            root = Path(folder)
+            if not root.is_dir():
+                continue
+            try:
+                for child in root.iterdir():
+                    if not child.is_dir():
+                        continue
+                    norm = str(child).lower().replace("\\", "/")
+                    if norm in seen:
+                        continue
+                    is_hidden = self.repo.is_path_hidden(str(child))
+                    if not show_hidden and is_hidden:
+                        continue
+                    if query:
+                        haystack = f"{child.name} {child}".lower()
+                        if query not in haystack:
+                            continue
+                    seen.add(norm)
+                    try:
+                        modified_time = int(child.stat().st_mtime_ns)
+                    except Exception:
+                        modified_time = 0
+                    entries.append(
+                        {
+                            "path": str(child),
+                            "media_type": "folder",
+                            "is_folder": True,
+                            "is_hidden": is_hidden,
+                            "file_size": None,
+                            "modified_time": modified_time,
+                            "width": None,
+                            "height": None,
+                            "duration": None,
+                        }
+                    )
+            except Exception:
+                continue
+
+        return entries
+
+    def _sort_gallery_entries(self, entries: list[dict], sort_by: str) -> list[dict]:
+        name_key = lambda row: Path(str(row.get("path", ""))).name.lower()
+        date_key = lambda row: row.get("modified_time") or 0
+        size_key = lambda row: row.get("file_size") or 0
+        folders = [row for row in entries if row.get("is_folder")]
+        media = [row for row in entries if not row.get("is_folder")]
+
+        if self._randomize_enabled() and sort_by == "name_asc":
+            folders.sort(key=name_key)
+            random.Random(self._session_shuffle_seed).shuffle(media)
+            return folders + media
+
+        if sort_by == "name_desc":
+            folders.sort(key=name_key, reverse=True)
+            media.sort(key=name_key, reverse=True)
+            return folders + media
+        if sort_by == "date_desc":
+            folders.sort(key=lambda row: (date_key(row), name_key(row)), reverse=True)
+            media.sort(key=lambda row: (date_key(row), name_key(row)), reverse=True)
+            return folders + media
+        if sort_by == "date_asc":
+            folders.sort(key=lambda row: (date_key(row), name_key(row)))
+            media.sort(key=lambda row: (date_key(row), name_key(row)))
+            return folders + media
+        if sort_by == "size_desc":
+            folders.sort(key=lambda row: (size_key(row), name_key(row)), reverse=True)
+            media.sort(key=lambda row: (size_key(row), name_key(row)), reverse=True)
+            return folders + media
+        if sort_by == "size_asc":
+            folders.sort(key=lambda row: (size_key(row), name_key(row)))
+            media.sort(key=lambda row: (size_key(row), name_key(row)))
+            return folders + media
+        folders.sort(key=name_key)
+        media.sort(key=name_key)
+        return folders + media
+
+    def _get_gallery_entries(self, folders: list[str], sort_by: str = "name_asc", filter_type: str = "all", search_query: str = "") -> list[dict]:
+        if folders:
+            entries = self._get_reconciled_candidates(folders, filter_type, search_query)
+            if self._gallery_view_mode() != "masonry":
+                entries = self._list_folder_entries(folders, search_query) + entries
+        elif self._active_collection_id is not None:
+            entries = self._get_collection_candidates(self._active_collection_id, filter_type, search_query)
+        else:
+            entries = []
+        return self._sort_gallery_entries(entries, sort_by)
 
     @Slot(list, str)
     def start_scan(self, folders: list, search_query: str = "") -> None:
@@ -2339,6 +2482,8 @@ class Bridge(QObject):
     def get_video_poster(self, video_path: str) -> str:
         try:
             p = Path(video_path)
+            if not p.exists() or not p.is_file():
+                return ""
             out = self._ensure_video_poster(p)
             if out:
                 try:
@@ -2613,6 +2758,29 @@ class MainWindow(QMainWindow):
 
         view_menu = menubar.addMenu("&View")
 
+        self.gallery_view_group = QActionGroup(self)
+        self.gallery_view_group.setExclusive(True)
+        self.gallery_view_actions: dict[str, QAction] = {}
+        for mode, label in (
+            ("grid_small", "Grid (Small)"),
+            ("grid_medium", "Grid (Medium)"),
+            ("grid_large", "Grid (Large)"),
+            ("grid_xlarge", "Grid (Extra Large)"),
+            ("list", "List"),
+            ("details", "Details"),
+            ("content", "Content"),
+            ("masonry", "Masonry"),
+        ):
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.triggered.connect(lambda checked=False, mode=mode: self._set_gallery_view_mode(mode))
+            self.gallery_view_group.addAction(action)
+            self.gallery_view_actions[mode] = action
+            view_menu.addAction(action)
+        self._sync_gallery_view_actions()
+
+        view_menu.addSeparator()
+
         toggle_left = QAction("Toggle Left Panel", self)
         toggle_left.triggered.connect(lambda: self._toggle_panel_setting("ui/show_left_panel"))
         view_menu.addAction(toggle_left)
@@ -2665,6 +2833,15 @@ class MainWindow(QMainWindow):
 
         for m in (file_menu, edit_menu, view_menu, help_menu):
             m.aboutToShow.connect(self._dismiss_web_menus)
+
+    def _set_gallery_view_mode(self, mode: str) -> None:
+        self.bridge.set_setting_str("gallery.view_mode", mode)
+        self._sync_gallery_view_actions()
+
+    def _sync_gallery_view_actions(self) -> None:
+        mode = self.bridge._gallery_view_mode()
+        for key, action in getattr(self, "gallery_view_actions", {}).items():
+            action.setChecked(key == mode)
 
     def _get_focused_paths(self) -> list[str]:
         """Get selected paths from whichever view (Tree or Gallery) has focus."""
@@ -3523,7 +3700,9 @@ class MainWindow(QMainWindow):
 
     def _apply_ui_flag(self, key: str, value: bool) -> None:
         try:
-            if key == "ui.show_left_panel":
+            if key == "gallery.view_mode":
+                self._sync_gallery_view_actions()
+            elif key == "ui.show_left_panel":
                 self.left_panel.setVisible(bool(value))
             elif key == "ui.show_right_panel":
                 self.right_panel.setVisible(bool(value))

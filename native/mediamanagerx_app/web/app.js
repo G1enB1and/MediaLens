@@ -19,6 +19,18 @@ let gPlayingInplaceCard = null;
 let gActiveMetadataMode = 'image';
 let gUpdateToastTimer = null;
 let gScanManuallyHidden = false;
+let gGalleryViewMode = 'masonry';
+
+const GALLERY_VIEW_MODES = new Set(['masonry', 'grid_small', 'grid_medium', 'grid_large', 'grid_xlarge', 'list', 'content', 'details']);
+const DETAILS_COLUMN_CONFIG = [
+  { key: 'thumb', label: '', min: 72, width: 72, resizable: false },
+  { key: 'name', label: 'File Name', min: 25, width: 260, resizable: true },
+  { key: 'folder', label: 'Folder', min: 25, width: 280, resizable: true },
+  { key: 'type', label: 'Type', min: 25, width: 120, resizable: true },
+  { key: 'modified', label: 'Date modified', min: 25, width: 170, resizable: true },
+  { key: 'size', label: 'Size', min: 25, width: 110, resizable: true },
+];
+let gDetailsColumnWidths = Object.fromEntries(DETAILS_COLUMN_CONFIG.map(col => [col.key, col.width]));
 
 const METADATA_SETTINGS_CONFIG = {
   image: {
@@ -198,10 +210,16 @@ function loadVideoPoster(el, path) {
       if (posterUrl) {
         // Preload via tempImg so the browser caches it — then show instantly
         const tempImg = new Image();
-        tempImg.onload = tempImg.onerror = () => {
+        tempImg.onload = () => {
           el.src = posterUrl;
           gLoadedOnPage++;
           // Push opacity change one frame out so the CSS transition fires
+          requestAnimationFrame(() => { el.style.opacity = '1'; });
+          if (card) { card.classList.remove('loading'); card.classList.add('ready'); }
+        };
+        tempImg.onerror = () => {
+          el.removeAttribute('src');
+          gLoadedOnPage++;
           requestAnimationFrame(() => { el.style.opacity = '1'; });
           if (card) { card.classList.remove('loading'); card.classList.add('ready'); }
         };
@@ -436,6 +454,427 @@ function syncMetadataToBridge() {
   }
 }
 
+function getItemName(item) {
+  if (!item || !item.path) return '';
+  const parts = item.path.split(/[/\\]/);
+  return parts[parts.length - 1] || item.path;
+}
+
+function getItemFolder(item) {
+  if (!item || !item.path) return '';
+  const parts = item.path.split(/[/\\]/);
+  parts.pop();
+  return parts.join('\\');
+}
+
+function getItemFolderDisplay(item) {
+  const folder = getItemFolder(item);
+  if (!folder) return '';
+  const parts = folder.split(/[/\\]/).filter(Boolean);
+  const tail = parts.length > 0 ? parts[parts.length - 1] : folder;
+  return `.../${tail}`;
+}
+
+function formatFileSize(bytes) {
+  const value = Number(bytes || 0);
+  if (!Number.isFinite(value) || value <= 0) return '';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  const digits = size >= 10 || unitIndex === 0 ? 0 : 1;
+  return `${size.toFixed(digits)} ${units[unitIndex]}`;
+}
+
+function formatModifiedTime(value) {
+  const ts = Number(value || 0);
+  if (!Number.isFinite(ts) || ts <= 0) return '';
+  const millis = ts > 1e12 ? Math.floor(ts / 1000000) : ts;
+  try {
+    return new Date(millis).toLocaleString();
+  } catch (_) {
+    return '';
+  }
+}
+
+function applyGalleryViewMode(mode) {
+  const nextMode = GALLERY_VIEW_MODES.has(mode) ? mode : 'masonry';
+  gGalleryViewMode = nextMode;
+  const el = document.getElementById('mediaList');
+  if (!el) return;
+  el.className = 'gallery';
+  if (nextMode === 'masonry') {
+    el.classList.add('masonry');
+    return;
+  }
+  if (nextMode.startsWith('grid_')) {
+    el.classList.add('gallery-grid', `view-${nextMode.replace('_', '-')}`);
+    return;
+  }
+  if (nextMode === 'details') {
+    el.classList.add('gallery-details');
+  } else if (nextMode === 'content') {
+    el.classList.add('gallery-content');
+  } else {
+    el.classList.add('gallery-list');
+  }
+}
+
+function viewUsesThumbnails() {
+  return gGalleryViewMode !== 'list';
+}
+
+function viewSupportsInlineVideoPlayback() {
+  return gGalleryViewMode === 'masonry' || gGalleryViewMode === 'grid_large' || gGalleryViewMode === 'grid_xlarge';
+}
+
+function getDetailsColumnConfig(key) {
+  return DETAILS_COLUMN_CONFIG.find(col => col.key === key) || null;
+}
+
+function fitDetailsColumnsToContainer(container) {
+  if (!container) return;
+  const availableWidth = Math.max(container.clientWidth - 24, 0);
+  const fixedWidth = DETAILS_COLUMN_CONFIG.filter(col => !col.resizable).reduce((sum, col) => sum + col.width, 0);
+  const gapsWidth = 14 * (DETAILS_COLUMN_CONFIG.length - 1);
+  const targetWidth = Math.max(availableWidth - fixedWidth - gapsWidth, 0);
+  const resizable = DETAILS_COLUMN_CONFIG.filter(col => col.resizable);
+  const widths = Object.fromEntries(resizable.map(col => [col.key, Math.max(col.min, gDetailsColumnWidths[col.key] || col.width)]));
+  const totalCurrent = Object.values(widths).reduce((sum, value) => sum + value, 0);
+  const totalMin = resizable.reduce((sum, col) => sum + col.min, 0);
+
+  if (targetWidth <= 0) {
+    resizable.forEach(col => { gDetailsColumnWidths[col.key] = col.min; });
+    return;
+  }
+
+  if (targetWidth >= totalCurrent) {
+    return;
+  }
+
+  if (targetWidth <= totalMin) {
+    resizable.forEach(col => { gDetailsColumnWidths[col.key] = col.min; });
+    return;
+  }
+
+  let remainingShrink = totalCurrent - targetWidth;
+  const nextWidths = { ...widths };
+  let adjustable = resizable.filter(col => nextWidths[col.key] > col.min);
+  while (remainingShrink > 0.5 && adjustable.length > 0) {
+    const totalSlack = adjustable.reduce((sum, col) => sum + (nextWidths[col.key] - col.min), 0);
+    if (totalSlack <= 0) break;
+    adjustable.forEach(col => {
+      const slack = nextWidths[col.key] - col.min;
+      if (slack <= 0) return;
+      const shrink = Math.min(slack, remainingShrink * (slack / totalSlack));
+      nextWidths[col.key] -= shrink;
+    });
+    const achievedShrink = Object.keys(widths).reduce((sum, key) => sum + (widths[key] - nextWidths[key]), 0);
+    remainingShrink = Math.max(0, (totalCurrent - targetWidth) - achievedShrink);
+    adjustable = resizable.filter(col => nextWidths[col.key] > col.min + 0.5);
+  }
+
+  resizable.forEach(col => {
+    gDetailsColumnWidths[col.key] = Math.round(Math.max(col.min, nextWidths[col.key]));
+  });
+}
+
+function applyDetailsColumnWidths(container) {
+  if (!container) return;
+  fitDetailsColumnsToContainer(container);
+  DETAILS_COLUMN_CONFIG.forEach(col => {
+    const width = col.resizable ? (gDetailsColumnWidths[col.key] || col.width) : col.width;
+    container.style.setProperty(`--details-col-${col.key}`, `${Math.round(width)}px`);
+  });
+}
+
+function wireDetailsColumnResize(handle, container) {
+  const key = handle.dataset.colKey;
+  const config = getDetailsColumnConfig(key);
+  if (!config || !config.resizable) return;
+
+  handle.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startWidth = gDetailsColumnWidths[key] || config.width;
+
+    const onMove = (moveEvent) => {
+      const nextWidth = Math.max(config.min, Math.round(startWidth + (moveEvent.clientX - startX)));
+      gDetailsColumnWidths[key] = nextWidth;
+      applyDetailsColumnWidths(container);
+    };
+
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  });
+}
+
+function renderDetailsHeader(container) {
+  const header = document.createElement('div');
+  header.className = 'details-header';
+  DETAILS_COLUMN_CONFIG.forEach(col => {
+    const cell = document.createElement('div');
+    cell.className = `details-header-cell${col.resizable ? ' is-resizable' : ''}`;
+    cell.textContent = col.label;
+    if (col.resizable) {
+      const handle = document.createElement('div');
+      handle.className = 'details-resize-handle';
+      handle.dataset.colKey = col.key;
+      cell.appendChild(handle);
+      wireDetailsColumnResize(handle, container);
+    }
+    header.appendChild(cell);
+  });
+  container.appendChild(header);
+}
+
+function hasSelectedMediaCards() {
+  return Array.from(document.querySelectorAll('.card.selected')).some(card => card.getAttribute('data-is-folder') !== 'true');
+}
+
+function updateCtxViewState() {
+  document.querySelectorAll('.ctx-view-item').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.viewMode === gGalleryViewMode);
+  });
+}
+
+function handleCardSelection(card, item, idx, e) {
+  e.stopPropagation();
+  const path = item.path || '';
+
+  if (e.ctrlKey || e.metaKey) {
+    if (card.classList.contains('selected')) {
+      card.classList.remove('selected');
+      gSelectedPaths.delete(path);
+    } else {
+      card.classList.add('selected');
+      gSelectedPaths.add(path);
+    }
+    gLastSelectionIdx = idx;
+  } else if (e.shiftKey && gLastSelectionIdx !== -1) {
+    const start = Math.min(gLastSelectionIdx, idx);
+    const end = Math.max(gLastSelectionIdx, idx);
+    const cards = document.querySelectorAll('.card');
+    for (let i = start; i <= end; i++) {
+      const current = cards[i];
+      const currentPath = current.getAttribute('data-path');
+      current.classList.add('selected');
+      if (currentPath) gSelectedPaths.add(currentPath);
+    }
+  } else {
+    deselectAll();
+    card.classList.add('selected');
+    gSelectedPaths.add(path);
+    gLastSelectionIdx = idx;
+  }
+
+  gLockedCard = card;
+  syncMetadataToBridge();
+}
+
+function openFolderItem(path) {
+  if (gBridge && gBridge.set_selected_folders && path) {
+    deselectAll();
+    gBridge.set_selected_folders([path]);
+  }
+}
+
+function createStructuredCard(item, idx) {
+  const card = document.createElement('div');
+  const isFolder = !!item.is_folder;
+  const usesThumbnails = viewUsesThumbnails();
+  const supportsInlinePlayback = !isFolder && item.media_type === 'video' && viewSupportsInlineVideoPlayback();
+  card.className = `card structured-card${isFolder ? ' folder-card ready' : ' loading'}`;
+  card.tabIndex = 0;
+  card.setAttribute('data-path', item.path || '');
+  card.setAttribute('data-is-folder', isFolder ? 'true' : 'false');
+
+  const thumbWrap = document.createElement('div');
+  thumbWrap.className = 'structured-thumb';
+  card.appendChild(thumbWrap);
+
+  if (isFolder) {
+    const folderThumb = document.createElement('div');
+    folderThumb.className = 'folder-thumb';
+    folderThumb.innerHTML = '<div class="folder-glyph"></div>';
+    thumbWrap.appendChild(folderThumb);
+  } else if (!usesThumbnails) {
+    const icon = document.createElement('div');
+    icon.className = `media-icon ${item.media_type === 'video' ? 'video-icon' : 'image-icon'}`;
+    thumbWrap.appendChild(icon);
+    card.classList.add('ready');
+  } else if (item.media_type === 'image') {
+    const img = document.createElement('img');
+    img.className = 'thumb';
+    img.setAttribute('data-src', item.url);
+    img.alt = '';
+    if (item.is_animated) {
+      img.setAttribute('data-animated', 'true');
+      img.setAttribute('data-path', item.path || '');
+    }
+    thumbWrap.appendChild(img);
+    gPosterObserver.observe(img);
+  } else {
+    const img = document.createElement('img');
+    img.className = 'thumb poster';
+    img.alt = '';
+    img.setAttribute('data-video-path', item.path || '');
+    thumbWrap.appendChild(img);
+    gPosterObserver.observe(img);
+
+    if (supportsInlinePlayback) {
+      const playIndicator = document.createElement('div');
+      playIndicator.className = 'video-play-indicator';
+      playIndicator.innerHTML = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'><path d='M8 5v14l11-7z'/></svg>`;
+      thumbWrap.appendChild(playIndicator);
+      playIndicator.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const path = item.path || '';
+        if (!path || !gBridge) return;
+        if (gPlayingInplaceCard) {
+          gPlayingInplaceCard.classList.remove('playing-inplace', 'playing-inprogress', 'playing-confirmed');
+          gPlayingInplaceCard.removeAttribute('data-paused');
+        }
+        const rect = thumbWrap.getBoundingClientRect();
+        if (gBridge.open_native_video_inplace) {
+          card.classList.add('playing-inplace', 'playing-inprogress');
+          gPlayingInplaceCard = card;
+          const shouldLoop = (item.duration && item.duration < 60) || false;
+          gBridge.open_native_video_inplace(path, rect.x, rect.y, rect.width, rect.height, true, shouldLoop, true, item.width || 0, item.height || 0);
+        } else {
+          gBridge.open_native_video(path, true, false, true, item.width || 0, item.height || 0);
+        }
+      });
+    }
+  }
+
+  const content = document.createElement('div');
+  content.className = 'structured-content';
+
+  const title = document.createElement('div');
+  title.className = 'entry-name';
+  title.textContent = getItemName(item);
+  title.title = getItemName(item);
+  content.appendChild(title);
+
+  const folder = document.createElement('div');
+  folder.className = 'entry-folder';
+  folder.textContent = getItemFolderDisplay(item);
+  folder.title = getItemFolder(item);
+  content.appendChild(folder);
+
+  if (gGalleryViewMode === 'details') {
+    const typeCell = document.createElement('div');
+    typeCell.className = 'entry-detail';
+    typeCell.textContent = isFolder ? 'Folder' : (item.media_type === 'video' ? 'Video' : 'Image');
+    content.appendChild(typeCell);
+
+    const modifiedCell = document.createElement('div');
+    modifiedCell.className = 'entry-detail';
+    modifiedCell.textContent = formatModifiedTime(item.modified_time);
+    content.appendChild(modifiedCell);
+
+    const sizeCell = document.createElement('div');
+    sizeCell.className = 'entry-detail';
+    sizeCell.textContent = isFolder ? '' : formatFileSize(item.file_size);
+    content.appendChild(sizeCell);
+  } else if (gGalleryViewMode === 'content') {
+    const meta = document.createElement('div');
+    meta.className = 'entry-detail';
+    meta.textContent = isFolder ? 'Folder' : [item.media_type === 'video' ? 'Video' : 'Image', formatFileSize(item.file_size)].filter(Boolean).join(' • ');
+    content.appendChild(meta);
+  } else if (gGalleryViewMode === 'list') {
+    folder.remove();
+  }
+
+  card.appendChild(content);
+
+  card.addEventListener('click', (e) => handleCardSelection(card, item, idx, e));
+  card.addEventListener('dblclick', () => {
+    if (isFolder) openFolderItem(item.path);
+    else openLightboxByIndex(idx);
+  });
+  card.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (isFolder) openFolderItem(item.path);
+      else openLightboxByIndex(idx);
+    }
+  });
+  card.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    showCtx(e.clientX, e.clientY, item, idx, false);
+  });
+
+  if (!isFolder) {
+    card.draggable = true;
+    card.addEventListener('dragstart', (e) => {
+      const path = item.path || '';
+      if (!path) return;
+      const paths = gSelectedPaths.has(path) ? Array.from(gSelectedPaths) : [path];
+      const urls = paths.map(p => 'file:///' + p.replace(/\\/g, '/'));
+      const pathsJson = JSON.stringify(paths);
+      e.dataTransfer.setData('text/uri-list', urls.join('\r\n'));
+      e.dataTransfer.setData('text/plain', pathsJson);
+      e.dataTransfer.setData('web/mmx-paths', pathsJson);
+      e.dataTransfer.setData('application/x-mmx-type', 'file');
+      if (window.qt && gBridge && gBridge.set_drag_paths) gBridge.set_drag_paths(paths);
+      gCurrentDragCount = paths.length;
+      e.dataTransfer.effectAllowed = 'copyMove';
+    });
+    card.addEventListener('drag', (e) => {
+      if (gBridge && gBridge.update_drag_tooltip && e.clientX > 0 && e.clientY > 0) {
+        const isCopy = e.ctrlKey || e.metaKey;
+        const count = gCurrentDragCount || 1;
+        gBridge.update_drag_tooltip(count, isCopy, gCurrentTargetFolderName);
+      }
+    });
+    card.addEventListener('dragend', () => {
+      if (gBridge && gBridge.hide_drag_tooltip) gBridge.hide_drag_tooltip();
+      if (window.qt && gBridge && gBridge.set_drag_paths) gBridge.set_drag_paths([]);
+      gCurrentDragCount = 0;
+    });
+  }
+
+  return card;
+}
+
+function renderStructuredMediaList(el, items) {
+  if (gGalleryViewMode === 'details') {
+    applyDetailsColumnWidths(el);
+    renderDetailsHeader(el);
+  }
+
+  items.forEach((item, idx) => {
+    el.appendChild(createStructuredCard(item, idx));
+  });
+
+  requestAnimationFrame(() => {
+    const unobserved = el.querySelectorAll('img[data-src]:not([src]), img[data-video-path]:not([src])');
+    unobserved.forEach(img => {
+      if (gPosterRequested.has(img)) return;
+      const imgSrc = img.getAttribute('data-src');
+      const path = img.getAttribute('data-video-path');
+      const item = gMedia.find(m => m.path === path || m.url === imgSrc);
+      if (imgSrc) {
+        gBackgroundQueue.push({ type: 'image', el: img, imgSrc });
+      } else if (path && item) {
+        gBackgroundQueue.push({ type: 'video', el: img, path, width: item.width, height: item.height });
+      }
+    });
+    scheduleBackgroundDrain();
+  });
+}
+
 function showCtx(x, y, item, idx, fromLightbox = false) {
   const ctx = document.getElementById('ctx');
   if (!ctx) return;
@@ -476,13 +915,16 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
 
   // Show/hide per-item actions
   const hasItem = !!item;
-  ['ctxHide', 'ctxUnhide', 'ctxRename', 'ctxDelete', 'ctxMeta', 'ctxExplorer', 'ctxCut', 'ctxCopy'].forEach(id => {
+  const isFolder = hasItem && !!item.is_folder;
+  ['ctxHide', 'ctxUnhide', 'ctxRename', 'ctxDelete', 'ctxExplorer', 'ctxCut', 'ctxCopy'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = hasItem ? 'block' : 'none';
   });
-  if (addToCollectionBtn) addToCollectionBtn.style.display = (hasItem || gSelectedPaths.size > 0) ? 'block' : 'none';
+  const metaBtn = document.getElementById('ctxMeta');
+  if (metaBtn) metaBtn.style.display = hasItem && !isFolder ? 'block' : 'none';
+  if (addToCollectionBtn) addToCollectionBtn.style.display = (hasItem && !isFolder) || (!hasItem && hasSelectedMediaCards()) ? 'block' : 'none';
   
-  const isRotatable = hasItem && (item.media_type === 'image' || item.media_type === 'video');
+  const isRotatable = hasItem && !isFolder && (item.media_type === 'image' || item.media_type === 'video');
   ['ctxRotCW', 'ctxRotCCW', 'ctxRotSep'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = isRotatable ? 'block' : 'none';
@@ -494,12 +936,12 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
   const edSep = document.getElementById('ctxEditorSep');
   let hasEd = false;
   if (psBtn) {
-      const showPs = hasItem && !!gExternalEditors.photoshop;
+      const showPs = hasItem && !isFolder && !!gExternalEditors.photoshop;
       psBtn.style.display = showPs ? 'block' : 'none';
       if (showPs) hasEd = true;
   }
   if (affBtn) {
-      const showAff = hasItem && !!gExternalEditors.affinity;
+      const showAff = hasItem && !isFolder && !!gExternalEditors.affinity;
       affBtn.style.display = showAff ? 'block' : 'none';
       if (showAff) hasEd = true;
   }
@@ -516,6 +958,12 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
   // New folder is shown only when right-clicking background (no item)
   const newFolderBtn = document.getElementById('ctxNewFolder');
   if (newFolderBtn) newFolderBtn.style.display = hasItem ? 'none' : 'block';
+  const viewSep = document.getElementById('ctxViewSep');
+  if (viewSep) viewSep.style.display = hasItem ? 'none' : 'block';
+  document.querySelectorAll('.ctx-view-item').forEach(btn => {
+    btn.style.display = hasItem ? 'none' : 'block';
+  });
+  updateCtxViewState();
 
   // Refine Hide/Unhide display
   if (hasItem) {
@@ -578,6 +1026,16 @@ function wireCtxMenu() {
       gBridge.debug_log(`ctx mousedown: id=${btn.id} path=${item ? item.path : 'null'}`);
     }
 
+    if (btn.dataset.viewMode && gBridge && gBridge.set_setting_str) {
+      applyGalleryViewMode(btn.dataset.viewMode);
+      updateCtxViewState();
+      gBridge.set_setting_str('gallery.view_mode', btn.dataset.viewMode, function () {
+        refreshFromBridge(gBridge, true);
+      });
+      hideCtx();
+      return;
+    }
+
     switch (btn.id) {
       case 'ctxExplorer':
         if (item && item.path && gBridge && gBridge.open_in_explorer) {
@@ -613,10 +1071,11 @@ function wireCtxMenu() {
         hideCtx();
         break;
       case 'ctxHide':
-        if (item && item.path && gBridge && gBridge.set_media_hidden) {
+        if (item && item.path && gBridge && (item.is_folder ? gBridge.set_folder_hidden : gBridge.set_media_hidden)) {
           if (fromLb) closeLightbox();
           setGlobalLoading(true, 'Hiding…', 25);
-          gBridge.set_media_hidden(item.path, true, (success) => {
+          const hideFn = item.is_folder ? gBridge.set_folder_hidden : gBridge.set_media_hidden;
+          hideFn.call(gBridge, item.path, true, (success) => {
              if (success) {
                  // Refresh or update local state
                  item.is_hidden = true;
@@ -626,10 +1085,11 @@ function wireCtxMenu() {
         }
         break;
       case 'ctxUnhide':
-        if (item && item.path && gBridge && gBridge.set_media_hidden) {
+        if (item && item.path && gBridge && (item.is_folder ? gBridge.set_folder_hidden : gBridge.set_media_hidden)) {
           if (fromLb) closeLightbox();
           setGlobalLoading(true, 'Unhiding…', 25);
-          gBridge.set_media_hidden(item.path, false, (success) => {
+          const unhideFn = item.is_folder ? gBridge.set_folder_hidden : gBridge.set_media_hidden;
+          unhideFn.call(gBridge, item.path, false, (success) => {
              if (success) {
                  item.is_hidden = false;
                  refreshFromBridge(gBridge);
@@ -650,14 +1110,17 @@ function wireCtxMenu() {
         break;
       case 'ctxAddToCollection':
         if (gBridge && gBridge.add_paths_to_collection_interactive) {
-          const paths = getTargetPaths();
+          const paths = getTargetPaths().filter(path => {
+            const card = document.querySelector(`.card[data-path="${CSS.escape(path)}"]`);
+            return !(card && card.getAttribute('data-is-folder') === 'true');
+          });
           if (paths.length > 0) {
             gBridge.add_paths_to_collection_interactive(paths, function () { });
           }
         }
         break;
       case 'ctxMeta':
-        if (item && item.path && gBridge && gBridge.show_metadata) {
+        if (item && item.path && gBridge && gBridge.show_metadata && !item.is_folder) {
           const pathForMeta = item.path;
           hideCtx();
           // Ensure the right panel is visible (void slot - no callback)
@@ -690,10 +1153,10 @@ function wireCtxMenu() {
         }
         break;
       case 'ctxPaste':
-        if (gBridge && gBridge.paste_into_folder_async && gSelectedFolders.length > 0) {
-          const folder = gSelectedFolders[0];
+        if (gBridge && gBridge.paste_into_folder_async) {
+          const folder = item && item.is_folder ? item.path : (gSelectedFolders.length > 0 ? gSelectedFolders[0] : '');
           setGlobalLoading(true, 'Pasting…', 25);
-          gBridge.paste_into_folder_async(folder);
+          if (folder) gBridge.paste_into_folder_async(folder);
         }
         break;
       case 'ctxNewFolder':
@@ -720,6 +1183,7 @@ function wireCtxMenu() {
 function renderMediaList(items, scrollToTop = true) {
   const el = document.getElementById('mediaList');
   if (!el) return;
+  applyGalleryViewMode(gGalleryViewMode);
 
   el.innerHTML = '';
   const main = document.querySelector('main');
@@ -755,6 +1219,11 @@ function renderMediaList(items, scrollToTop = true) {
     div.className = 'empty';
     div.textContent = 'No results.';
     el.appendChild(div);
+    return;
+  }
+
+  if (gGalleryViewMode !== 'masonry') {
+    renderStructuredMediaList(el, viewItems);
     return;
   }
 
@@ -1152,7 +1621,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Lazy poster loading for videos
 
+let gIndex = -1;
 let gLightboxNativeVideo = false;
+
+function findNearestMediaIndex(idx, direction = 1) {
+  if (!Array.isArray(gMedia) || gMedia.length === 0) return -1;
+  let cursor = Math.max(0, Math.min(idx, gMedia.length - 1));
+  while (cursor >= 0 && cursor < gMedia.length) {
+    if (gMedia[cursor] && !gMedia[cursor].is_folder) return cursor;
+    cursor += direction >= 0 ? 1 : -1;
+  }
+  return -1;
+}
 
 function openLightboxByIndex(idx) {
   const lb = document.getElementById('lightbox');
@@ -1183,6 +1663,8 @@ function openLightboxByIndex(idx) {
   if (!gMedia || gMedia.length === 0) return;
   if (idx < 0) idx = 0;
   if (idx >= gMedia.length) idx = gMedia.length - 1;
+  idx = findNearestMediaIndex(idx, 1);
+  if (idx < 0) return;
 
   gIndex = idx;
 
@@ -1294,13 +1776,15 @@ window.__mmx_closeLightboxFromNative = function () {
 
 function lightboxPrev() {
   if (gIndex <= 0) return;
-  openLightboxByIndex(gIndex - 1);
+  const prevIndex = findNearestMediaIndex(gIndex - 1, -1);
+  if (prevIndex >= 0) openLightboxByIndex(prevIndex);
 }
 window.lightboxPrev = lightboxPrev;
 
 function lightboxNext() {
   if (gMedia && gIndex >= 0 && gIndex < gMedia.length - 1) {
-    openLightboxByIndex(gIndex + 1);
+    const nextIndex = findNearestMediaIndex(gIndex + 1, 1);
+    if (nextIndex >= 0) openLightboxByIndex(nextIndex);
   }
 }
 window.lightboxNext = lightboxNext;
@@ -1435,7 +1919,7 @@ function refreshFromBridge(bridge, resetPage = false) {
           // Hide the "Starting..." or "Loading..." overlay once we have the first batch of results.
           setGlobalLoading(false);
           if (bridge.start_scan_paths) {
-            bridge.start_scan_paths((items || []).map(item => item.path).filter(Boolean));
+            bridge.start_scan_paths((items || []).filter(item => !item.is_folder).map(item => item.path).filter(Boolean));
           }
         });
       });
@@ -1982,13 +2466,21 @@ function wireGalleryBackground() {
 
   main.addEventListener('scroll', () => {
     if (gPlayingInplaceCard && gBridge && gBridge.update_native_video_rect) {
-      const rect = gPlayingInplaceCard.getBoundingClientRect();
+      const target = gPlayingInplaceCard.querySelector('.structured-thumb') || gPlayingInplaceCard;
+      const rect = target.getBoundingClientRect();
       // If it scrolls off-screen, we might want to stop it, 
       // but let's first try just moving it.
       gBridge.update_native_video_rect(rect.x, rect.y, rect.width, rect.height);
     }
   });
 }
+
+window.addEventListener('resize', () => {
+  const mediaList = document.getElementById('mediaList');
+  if (mediaList && mediaList.classList.contains('gallery-details')) {
+    applyDetailsColumnWidths(mediaList);
+  }
+});
 
 async function main() {
   wirePager();
@@ -2197,6 +2689,14 @@ async function main() {
       const sf = document.getElementById('startFolder');
       if (sf) sf.value = (s && s['gallery.start_folder']) || '';
 
+      const nextViewMode = (s && s['gallery.view_mode']) || 'masonry';
+      const viewModeChanged = nextViewMode !== gGalleryViewMode;
+      applyGalleryViewMode(nextViewMode);
+      updateCtxViewState();
+      if (viewModeChanged && gBridge) {
+        refreshFromBridge(gBridge, false);
+      }
+
       const ac = document.getElementById('accentColor');
       const v = (s && s['ui.accent_color']) || '#8ab4f8';
       document.documentElement.style.setProperty('--accent', v);
@@ -2282,7 +2782,15 @@ async function main() {
 
     if (bridge.uiFlagChanged) {
       bridge.uiFlagChanged.connect(function (key, value) {
-        if (key === 'gallery.show_hidden') {
+        if (key === 'gallery.show_hidden' || key === 'gallery.view_mode') {
+          if (key === 'gallery.view_mode' && bridge.get_settings) {
+            bridge.get_settings(function (s) {
+              applyGalleryViewMode((s && s['gallery.view_mode']) || 'masonry');
+              updateCtxViewState();
+              refreshFromBridge(bridge, true);
+            });
+            return;
+          }
           refreshFromBridge(bridge, false);
         }
       });
