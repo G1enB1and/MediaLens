@@ -1,6 +1,14 @@
 # Change Log
 
-## v1.0.13 (Current)
+## v1.0.14 (Current)
+
+### Changed
+
+- **Installer Build**: Updated the packaged Windows app so background media scanning and related `ffmpeg`/`ffprobe` work no longer opens console windows while scanning folders.
+
+---
+
+## v1.0.13
 
 ### Added in v1.0.13
 
