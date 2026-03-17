@@ -4,7 +4,7 @@ try:
     with open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "VERSION"), "r") as f:
         __version__ = f.read().strip()
 except Exception:
-    __version__ = "v1.0.12"
+    __version__ = "v1.0.13"
 
 
 import sys
@@ -816,9 +816,10 @@ class RootFilterProxyModel(QSortFilterProxyModel):
                 return False
 
         root = normalize_windows_path(self._root_path).rstrip("/")
+        norm_path = normalized_path.rstrip("/")
 
         # Show the root path itself
-        if normalized_path == root:
+        if norm_path == root:
             return True
             
         # Show children/descendants of the root path
@@ -826,11 +827,11 @@ class RootFilterProxyModel(QSortFilterProxyModel):
             return True
             
         # Show ancestors of the root path (so we can reach it from the top)
-        if (root + "/").startswith(normalized_path + "/"):
+        if (root + "/").startswith(norm_path + "/"):
             return True
             
         # Special case: show Windows drives if they are ancestors
-        if len(normalized_path) == 2 and normalized_path[1] == ":" and root.startswith(normalized_path):
+        if len(norm_path) == 2 and norm_path[1] == ":" and root.startswith(norm_path):
             return True
 
         return False

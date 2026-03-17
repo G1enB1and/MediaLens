@@ -1,15 +1,36 @@
 # Change Log
 
-## v1.0.12 (Current)
+## v1.0.13 (Current)
 
-### Added in v1.0.12
+### Added in v1.0.13
 
-- **Update Notification Enhancements**: Improved update notifications by replacing redundant native OS dialogues with stylized toasts for a more consistent and modern UI experience.
+- **AVIF Support**: Introduced support for AVIF image files.
+- **New Gallery Views**: Added several new view modes including List, Details, Content, and multiple Grid sizes (Small, Medium, Large, Extra Large) alongside the default Masonry layout.
+- **Sidebar Preview Section**: Added a new preview panel at the top of the right sidebar that displays a thumbnail of the selected item above the metadata details.
+- **View Menu**: Added a new "View" menu to toggle panels and switch between different gallery view modes.
+
+### Changed in v1.0.13
+
+- **Video Controls**: Reduced the time video controls remain visible after mouse-over to 500ms for a more responsive feel.
+- **Details Panel Responsiveness**: Improved the responsiveness of the metadata details panel.
+- **Hidden Files Logic**: Updated hidden files, folders, and collections logic to use hidden status in database rather than filenames starting with a dot.
+
+### Fixed in v1.0.13
+
+- **File Tree**: Fixed a critical issue where the folder tree appeared empty in the installed application when the root was a drive path (e.g., `C:/Pictures`).
+- **AVIF Previews**: Implemented FFmpeg-based fallback for AVIF sidebar previews, resolving the issue where native Qt support was missing.
+- **AVIF Dimensions**: Added ffprobe-based dimension retrieval for AVIF files to ensure correct aspect ratios and details rendering.
+- **Conflict Dialog**: Improved conflict detection and thumbnail rendering in the conflict dialog for AVIF files.
+
+---
+
+## v1.0.12
 
 ### Changed in v1.0.12
 
 - **Video Loading Optimization**: Refined the video loading mechanism to significantly reduce delay, ensuring a smoother playback experience in the gallery.
 - **Scanning Efficiency**: Optimized the file tree scanning process to ensure full scans only occur when necessary, improving overall application responsiveness.
+- **Update Notification Enhancements**: Improved update notifications by replacing redundant native OS dialogues with stylized toasts for a more consistent and modern UI experience.
 
 ---
 
