@@ -102,8 +102,10 @@ from PySide6.QtGui import (
     QAction,
     QActionGroup,
     QColor,
+    QFontMetrics,
     QImageReader,
     QIcon,
+    QMovie,
     QPainter,
     QCursor,
     QPixmap,
@@ -1181,6 +1183,9 @@ class Bridge(QObject):
     def _show_hidden_enabled(self) -> bool:
         return bool(self.settings.value("gallery/show_hidden", False, type=bool))
 
+    def _preview_above_details_enabled(self) -> bool:
+        return bool(self.settings.value("ui/preview_above_details", True, type=bool))
+
     def _start_folder_setting(self) -> str:
         return str(self.settings.value("gallery/start_folder", "", type=str) or "")
 
@@ -1213,6 +1218,7 @@ class Bridge(QObject):
                 "ui.accent_color": str(self.settings.value("ui/accent_color", "#8ab4f8", type=str) or "#8ab4f8"),
                 "ui.show_left_panel": bool(self.settings.value("ui/show_left_panel", True, type=bool)),
                 "ui.show_right_panel": bool(self.settings.value("ui/show_right_panel", True, type=bool)),
+                "ui.preview_above_details": self._preview_above_details_enabled(),
                 "ui.enable_glassmorphism": bool(self.settings.value("ui/enable_glassmorphism", True, type=bool)),
                 "ui.theme_mode": str(self.settings.value("ui/theme_mode", "dark", type=str) or "dark"),
                 "metadata.display.res": bool(self.settings.value("metadata/display/res", True, type=bool)),
@@ -1268,6 +1274,7 @@ class Bridge(QObject):
                 "ui.accent_color": "#8ab4f8",
                 "ui.show_left_panel": True,
                 "ui.show_right_panel": True,
+                "ui.preview_above_details": True,
                 "ui.enable_glassmorphism": True,
                 "ui.theme_mode": "dark",
             }
@@ -1355,6 +1362,7 @@ class Bridge(QObject):
                 "gallery.show_hidden",
                 "ui.show_left_panel", 
                 "ui.show_right_panel", 
+                "ui.preview_above_details",
                 "ui.enable_glassmorphism", 
                 "updates.check_on_launch"
             )
@@ -2554,8 +2562,7 @@ class NativeSeparator(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        text_color_str = Theme.get_text_color()
-        pen = QPen(QColor(text_color_str))
+        pen = QPen(QColor(Theme.get_border(QColor(Theme.ACCENT_DEFAULT))))
         pen.setWidth(1)
         pen.setCosmetic(True)
         painter.setPen(pen)
@@ -2788,6 +2795,12 @@ class MainWindow(QMainWindow):
         toggle_right = QAction("Toggle Right Panel", self)
         toggle_right.triggered.connect(lambda: self._toggle_panel_setting("ui/show_right_panel"))
         view_menu.addAction(toggle_right)
+
+        self.act_preview_above_details = QAction("Preview Image Above Details", self)
+        self.act_preview_above_details.setCheckable(True)
+        self.act_preview_above_details.setChecked(self.bridge._preview_above_details_enabled())
+        self.act_preview_above_details.triggered.connect(lambda checked=False: self._toggle_panel_setting("ui/preview_above_details"))
+        view_menu.addAction(self.act_preview_above_details)
 
         view_menu.addSeparator()
 
@@ -3126,6 +3139,7 @@ class MainWindow(QMainWindow):
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.scroll_area.setObjectName("metaScrollArea")
         
         self.scroll_container = QWidget()
@@ -3133,6 +3147,44 @@ class MainWindow(QMainWindow):
         right_layout = QVBoxLayout(self.scroll_container)
         right_layout.setContentsMargins(12, 12, 12, 12)
         right_layout.setSpacing(6)
+        self.right_layout = right_layout
+
+        self.preview_header_row = QWidget()
+        self.preview_header_row.setObjectName("previewHeaderRow")
+        preview_header_layout = QHBoxLayout(self.preview_header_row)
+        preview_header_layout.setContentsMargins(0, 0, 0, 0)
+        preview_header_layout.setSpacing(6)
+        self.preview_header_lbl = QLabel("Preview")
+        self.preview_header_lbl.setObjectName("previewHeaderLabel")
+        preview_header_layout.addWidget(self.preview_header_lbl)
+        preview_header_layout.addStretch(1)
+        self.btn_close_preview = QPushButton("×")
+        self.btn_close_preview.setObjectName("btnClosePreview")
+        self.btn_close_preview.setText("x")
+        self.btn_close_preview.setToolTip("Hide preview")
+        self.btn_close_preview.setFixedSize(QSize(22, 22))
+        self.btn_close_preview.clicked.connect(lambda: self.bridge.set_setting_bool("ui.preview_above_details", False))
+        preview_header_layout.addWidget(self.btn_close_preview)
+        right_layout.addWidget(self.preview_header_row)
+
+        self.preview_image_lbl = QLabel()
+        self.preview_image_lbl.setObjectName("previewImageLabel")
+        self.preview_image_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_image_lbl.setMinimumHeight(0)
+        self.preview_image_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.preview_image_lbl.setText("No preview")
+        self.preview_image_lbl.setWordWrap(True)
+        self._preview_source_pixmap: QPixmap | None = None
+        self._preview_movie: QMovie | None = None
+        self._preview_aspect_ratio = 1.0
+        right_layout.addWidget(self.preview_image_lbl)
+
+        self.preview_sep = self._add_sep("preview_sep_line")
+        right_layout.addWidget(self.preview_sep)
+
+        self.details_header_lbl = QLabel("Details")
+        self.details_header_lbl.setObjectName("detailsHeaderLabel")
+        right_layout.addWidget(self.details_header_lbl)
 
         self.scroll_area.setWidget(self.scroll_container)
         outer_right_layout.addWidget(self.scroll_area)
@@ -3392,7 +3444,9 @@ class MainWindow(QMainWindow):
 
         self.btn_clear_bulk_tags = QPushButton("Clear All Tags")
         self.btn_clear_bulk_tags.setObjectName("btnClearBulkTags")
+        self.btn_clear_bulk_tags.setProperty("baseText", "Clear All Tags")
         self.btn_clear_bulk_tags.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_clear_bulk_tags.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.btn_clear_bulk_tags.clicked.connect(self._clear_bulk_tags)
         self.btn_clear_bulk_tags.setStyleSheet("QPushButton { color: #f28b82; }") # Subtle red
         right_layout.addWidget(self.btn_clear_bulk_tags)
@@ -3400,8 +3454,10 @@ class MainWindow(QMainWindow):
 
         self.btn_save_meta = QPushButton("Save Changes to Database")
         self.btn_save_meta.setObjectName("btnSaveMeta")
+        self.btn_save_meta.setProperty("baseText", "Save Changes to Database")
         self.btn_save_meta.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_save_meta.clicked.connect(self._save_native_metadata)
+        self.btn_save_meta.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         right_layout.addWidget(self.btn_save_meta)
 
         # AI/EXIF Actions
@@ -3410,25 +3466,28 @@ class MainWindow(QMainWindow):
         action_layout.setSpacing(6)
         self.btn_import_exif = QPushButton("Import Metadata")
         self.btn_import_exif.setObjectName("btnImportExif")
+        self.btn_import_exif.setProperty("baseText", "Import Metadata")
         self.btn_import_exif.setToolTip("Append tags/comments from file to database")
         self.btn_import_exif.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_import_exif.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.btn_import_exif.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.btn_import_exif.clicked.connect(self._import_exif_to_db)
         action_layout.addWidget(self.btn_import_exif)
 
         self.btn_merge_hidden_meta = QPushButton("Merge Hidden Metadata Into Visible Comments Field")
         self.btn_merge_hidden_meta.setObjectName("btnMergeHiddenMeta")
+        self.btn_merge_hidden_meta.setProperty("baseText", "Merge Hidden Metadata Into Visible Comments Field")
         self.btn_merge_hidden_meta.setToolTip("Write combined hidden metadata into the Windows-visible comments field using the existing embed path")
         self.btn_merge_hidden_meta.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_merge_hidden_meta.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.btn_merge_hidden_meta.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.btn_merge_hidden_meta.clicked.connect(self._merge_hidden_metadata_into_visible_comments)
         action_layout.addWidget(self.btn_merge_hidden_meta)
 
         self.btn_save_to_exif = QPushButton("Embed Data in File")
         self.btn_save_to_exif.setObjectName("btnSaveToExif")
+        self.btn_save_to_exif.setProperty("baseText", "Embed Data in File")
         self.btn_save_to_exif.setToolTip("Write tags and comments from these fields into the file's embedded metadata")
         self.btn_save_to_exif.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_save_to_exif.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.btn_save_to_exif.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.btn_save_to_exif.clicked.connect(self._save_to_exif_cmd)
         action_layout.addWidget(self.btn_save_to_exif)
         right_layout.addLayout(action_layout)
@@ -3437,6 +3496,8 @@ class MainWindow(QMainWindow):
         self.meta_status_lbl.setObjectName("metaStatusLabel")
         self.meta_status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         right_layout.addWidget(self.meta_status_lbl)
+        self._update_sidebar_action_buttons()
+        self._update_sidebar_input_widths()
 
         self._update_native_styles(accent_val)
         self._update_splitter_style(accent_val)
@@ -3506,6 +3567,7 @@ class MainWindow(QMainWindow):
         # Initial clear/hide based on default settings
         # Must be at the very end to ensure all UI attributes (meta_desc, etc.) are initialized.
         self._setup_metadata_layout()
+        self._update_preview_visibility()
         self._clear_metadata_panel()
 
     def _set_selected_folders(self, folder_paths: list[str]) -> None:
@@ -3706,6 +3768,14 @@ class MainWindow(QMainWindow):
                 self.left_panel.setVisible(bool(value))
             elif key == "ui.show_right_panel":
                 self.right_panel.setVisible(bool(value))
+            elif key == "ui.preview_above_details":
+                if hasattr(self, "preview_header_row"):
+                    visible = bool(value)
+                    self.preview_header_row.setVisible(visible)
+                    self.preview_image_lbl.setVisible(visible)
+                    self.preview_sep.setVisible(visible)
+                if hasattr(self, "act_preview_above_details"):
+                    self.act_preview_above_details.setChecked(bool(value))
             elif key == "ui.theme_mode":
                 self._update_native_styles(self._current_accent)
                 self._update_splitter_style(self._current_accent)
@@ -3726,6 +3796,176 @@ class MainWindow(QMainWindow):
                     self.proxy_model.invalidateFilter()
         except Exception:
             pass
+
+    def _update_preview_visibility(self) -> None:
+        visible = self.bridge._preview_above_details_enabled()
+        self.preview_header_row.setVisible(visible)
+        self.preview_image_lbl.setVisible(visible)
+        self.preview_sep.setVisible(visible)
+        if hasattr(self, "act_preview_above_details"):
+            self.act_preview_above_details.setChecked(visible)
+
+    def _wrap_button_text(self, button: QPushButton, base_text: str, max_width: int) -> None:
+        metrics = QFontMetrics(button.font())
+        inner_width = max(40, max_width - 22)
+        words = base_text.split()
+        if not words:
+            if button.text() != base_text:
+                button.setText(base_text)
+            return
+
+        lines: list[str] = []
+        current = words[0]
+        for word in words[1:]:
+            candidate = f"{current} {word}"
+            if metrics.horizontalAdvance(candidate) <= inner_width:
+                current = candidate
+            else:
+                lines.append(current)
+                current = word
+        lines.append(current)
+        wrapped = "\n".join(lines)
+        if button.text() != wrapped:
+            button.setText(wrapped)
+
+    def _right_panel_content_width(self) -> int:
+        if not hasattr(self, "scroll_area"):
+            return 180
+        margins = self.right_layout.contentsMargins() if hasattr(self, "right_layout") else None
+        left = margins.left() if margins else 12
+        right = margins.right() if margins else 12
+        viewport_w = self.scroll_area.viewport().width()
+        return max(90, viewport_w - left - right)
+
+    def _update_sidebar_action_buttons(self) -> None:
+        if not hasattr(self, "scroll_area"):
+            return
+        available_w = self._right_panel_content_width()
+        buttons = [
+            getattr(self, "btn_clear_bulk_tags", None),
+            getattr(self, "btn_save_meta", None),
+            getattr(self, "btn_import_exif", None),
+            getattr(self, "btn_merge_hidden_meta", None),
+            getattr(self, "btn_save_to_exif", None),
+        ]
+        for button in buttons:
+            if button is None:
+                continue
+            base_text = str(button.property("baseText") or button.text()).replace("\n", " ").strip()
+            button.setProperty("baseText", base_text)
+            button.setMinimumWidth(0)
+            button.setMaximumWidth(16777215)
+            button.setFixedWidth(available_w)
+            self._wrap_button_text(button, base_text, available_w)
+            button.updateGeometry()
+
+    def _update_sidebar_input_widths(self) -> None:
+        if not hasattr(self, "scroll_container"):
+            return
+        available_w = self._right_panel_content_width()
+        self.preview_image_lbl.setFixedWidth(available_w)
+        for widget in self.scroll_container.findChildren(QWidget):
+            if not isinstance(widget, (QLineEdit, QTextEdit)):
+                continue
+            widget.setMinimumWidth(0)
+            widget.setMaximumWidth(16777215)
+            widget.setFixedWidth(available_w)
+            widget.setSizePolicy(QSizePolicy.Policy.Ignored, widget.sizePolicy().verticalPolicy())
+            widget.updateGeometry()
+
+    def _clear_preview_media(self) -> None:
+        if self._preview_movie is not None:
+            self._preview_movie.stop()
+            self.preview_image_lbl.setMovie(None)
+            self._preview_movie.deleteLater()
+            self._preview_movie = None
+        self._preview_source_pixmap = None
+        self._preview_aspect_ratio = 1.0
+        self.preview_image_lbl.setPixmap(QPixmap())
+
+    def _update_preview_display(self, placeholder: str = "No preview") -> None:
+        available_w = max(120, self._right_panel_content_width() - 8)
+        self.preview_image_lbl.setFixedWidth(self._right_panel_content_width())
+        target_h = max(96, min(320, int(available_w / max(0.2, self._preview_aspect_ratio))))
+
+        if self._preview_movie is not None:
+            self.preview_image_lbl.setText("")
+            self.preview_image_lbl.setFixedHeight(target_h)
+            self._preview_movie.setScaledSize(QSize(available_w, target_h))
+            if self._preview_movie.state() != QMovie.MovieState.Running:
+                self._preview_movie.start()
+            return
+
+        if self._preview_source_pixmap is not None and not self._preview_source_pixmap.isNull():
+            self.preview_image_lbl.setText("")
+            scaled = self._preview_source_pixmap.scaled(
+                available_w,
+                target_h,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self.preview_image_lbl.setFixedHeight(max(96, scaled.height()))
+            self.preview_image_lbl.setPixmap(scaled)
+            return
+
+        self.preview_image_lbl.setFixedHeight(96)
+        self.preview_image_lbl.setText(placeholder)
+
+    def _set_preview_pixmap(self, pixmap: QPixmap | None, placeholder: str = "No preview") -> None:
+        self._clear_preview_media()
+        self._preview_source_pixmap = pixmap if pixmap and not pixmap.isNull() else None
+        if self._preview_source_pixmap is not None:
+            self._preview_aspect_ratio = max(
+                0.2,
+                self._preview_source_pixmap.width() / max(1, self._preview_source_pixmap.height()),
+            )
+        self._update_preview_display(placeholder)
+
+    def _set_preview_movie(self, path: Path, aspect_ratio: float) -> None:
+        self._clear_preview_media()
+        movie = QMovie(str(path))
+        if not movie.isValid():
+            self._set_preview_pixmap(None)
+            return
+        movie.setCacheMode(QMovie.CacheMode.CacheAll)
+        movie.setSpeed(100)
+        movie.finished.connect(movie.start)
+        self._preview_movie = movie
+        self._preview_aspect_ratio = max(0.2, aspect_ratio)
+        self.preview_image_lbl.setText("")
+        self.preview_image_lbl.setMovie(movie)
+        self._update_preview_display("No preview")
+
+    def _refresh_preview_for_path(self, path: str | None) -> None:
+        if not hasattr(self, "preview_image_lbl"):
+            return
+        if not path:
+            self._set_preview_pixmap(None)
+            return
+        p = Path(path)
+        if not p.exists() or p.is_dir():
+            self._set_preview_pixmap(None)
+            return
+        suffix = p.suffix.lower()
+        preview_path = p
+        if suffix in {".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}:
+            poster = self.bridge._ensure_video_poster(p)
+            if not poster or not poster.exists():
+                self._set_preview_pixmap(None, "No video preview")
+                return
+            preview_path = poster
+        reader = QImageReader(str(preview_path))
+        reader.setAutoTransform(True)
+        size = reader.size()
+        aspect_ratio = max(0.2, size.width() / max(1, size.height())) if size.isValid() else 1.0
+        if suffix == ".gif":
+            self._set_preview_movie(p, aspect_ratio)
+            return
+        img = reader.read()
+        if img.isNull():
+            self._set_preview_pixmap(None)
+            return
+        self._set_preview_pixmap(QPixmap.fromImage(img))
 
 
     def _rename_from_panel(self) -> None:
@@ -4453,6 +4693,7 @@ class MainWindow(QMainWindow):
         is_bulk = len(paths) > 1
         self._current_paths = paths # Store list for bulk save
         self._current_path = paths[0] if not is_bulk else None
+        self._refresh_preview_for_path(paths[0] if not is_bulk else None)
         metadata_kind = self._metadata_kind_for_path(paths[0] if paths else None)
         self._current_metadata_kind = metadata_kind
         self._setup_metadata_layout(metadata_kind)
@@ -4790,12 +5031,14 @@ class MainWindow(QMainWindow):
                 if video_meta.get("audio"):
                     self.meta_audio_lbl.setText(f"Audio: {video_meta['audio']}")
         
-            self.btn_save_meta.setText("Save Changes to Database")
+            self.btn_save_meta.setProperty("baseText", "Save Changes to Database")
+            self._update_sidebar_action_buttons()
         else:
             # Bulk mode
             self.meta_tags.setText("")
             self.meta_tags.setPlaceholderText("Add tags to all selected...")
-            self.btn_save_meta.setText(f"Add Tags to {len(paths)} Items")
+            self.btn_save_meta.setProperty("baseText", f"Add Tags to {len(paths)} Items")
+            self._update_sidebar_action_buttons()
 
         self.meta_filename_edit.blockSignals(False)
         self.meta_desc.blockSignals(False)
@@ -5089,6 +5332,7 @@ class MainWindow(QMainWindow):
         self._current_paths = []
         kind = getattr(self, "_current_metadata_kind", "image")
         self._setup_metadata_layout(kind)
+        self._refresh_preview_for_path(None)
         
         self.meta_filename_edit.setText("")
         self.meta_path_lbl.setText("Folder: ")
@@ -5190,12 +5434,15 @@ class MainWindow(QMainWindow):
     def _on_splitter_moved(self) -> None:
         """Save splitter state and re-apply card selection if the resize caused a deselect."""
         self._save_splitter_state()
+        self._update_sidebar_action_buttons()
+        self._update_sidebar_input_widths()
+        self._update_preview_display()
         # Re-apply card selection via JS so resize doesn't visually deselect the last item
         if hasattr(self, "_current_path") and self._current_path:
             escaped = self._current_path.replace("\\", "\\\\").replace('"', '\\"')
             self.web.page().runJavaScript(
                 f'(function(){{'  
-                f'  var c = document.querySelector(\'.card[data-path="{escaped}"]\')'  
+                f'  var c = document.querySelector(\'.card[data-path="{escaped}"]\');'  
                 f'  if (c) {{ document.querySelectorAll(\'.card.selected\').forEach(function(x){{x.classList.remove(\'selected\')}});'  
                 f'    c.classList.add(\'selected\'); }}'
                 f'}})();'
@@ -5603,6 +5850,13 @@ class MainWindow(QMainWindow):
         self.scroll_container.setStyleSheet(f"""
             QWidget#rightPanelScrollContainer {{ background-color: {sb_bg_str}; color: {text}; }}
             QLabel {{ color: {text}; background: transparent; }}
+            QLabel#previewHeaderLabel, QLabel#detailsHeaderLabel {{ font-weight: bold; }}
+            QLabel#previewImageLabel {{
+                background-color: {Theme.get_control_bg(accent)};
+                border: 1px solid {Theme.get_border(accent)};
+                border-radius: 8px;
+                padding: 6px;
+            }}
             QLineEdit, QTextEdit {{
                 background-color: {Theme.get_input_bg(accent)};
                 border: 1px solid {Theme.get_input_border(accent)};
@@ -5933,6 +6187,8 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         super().resizeEvent(event)
+        self._update_sidebar_action_buttons()
+        self._update_sidebar_input_widths()
         # Keep overlays pinned to the web view.
         if hasattr(self, "web_loading"):
             self.web_loading.setGeometry(self.web.rect())
@@ -5945,6 +6201,8 @@ class MainWindow(QMainWindow):
             if not self.video_overlay.is_inplace_mode():
                 self.video_overlay.setGeometry(self.web.rect())
             self.video_overlay.raise_()
+        if hasattr(self, "preview_image_lbl"):
+            self._update_preview_display()
 
     def about(self) -> None:
         st = self.bridge.get_tools_status()
