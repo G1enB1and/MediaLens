@@ -266,7 +266,7 @@ class LightboxVideoOverlay(QWidget):
         # Auto-hide controls (we'll keep them visible longer; some Windows video
         # surfaces don't reliably emit mouse move events)
         self._hide_timer = QTimer(self)
-        self._hide_timer.setInterval(2000)
+        self._hide_timer.setInterval(500)
         self._hide_timer.setSingleShot(True)
         self._hide_timer.timeout.connect(self._hide_controls)
 

@@ -474,7 +474,7 @@ class FileConflictDialog(QDialog):
 
     def _set_thumb(self, label, path: Path):
         ext = path.suffix.lower()
-        if ext in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}:
+        if ext in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"}:
             reader = QImageReader(str(path))
             reader.setAutoTransform(True)
             img = reader.read()
@@ -1789,7 +1789,7 @@ class Bridge(QObject):
                             else: shutil.copy2(src, final_dst)
                             
                             ext = final_dst.suffix.lower()
-                            mtype = "image" if ext in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"} else "video"
+                            mtype = "image" if ext in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"} else "video"
                             add_media_item(self.conn, str(final_dst), mtype)
                         
                         any_ok = True
@@ -2068,7 +2068,7 @@ class Bridge(QObject):
 
     @Slot(str, result=dict)
     def get_media_metadata(self, path: str) -> dict:
-        image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+        image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"}
         from app.mediamanager.db.media_repo import get_media_by_path
         from app.mediamanager.db.ai_metadata_repo import (
             build_media_ai_ui_fields,
@@ -2206,8 +2206,8 @@ class Bridge(QObject):
     def _get_reconciled_candidates(self, folders: list, filter_type: str = "all", search_query: str = "") -> list[dict]:
         from app.mediamanager.db.media_repo import list_media_in_scope
         from app.mediamanager.utils.pathing import normalize_windows_path
-        ALL_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}
-        image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+        ALL_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif", ".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}
+        image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"}
         if not folders: return []
         current_key = hashlib.sha1(",".join(sorted(folders)).encode()).hexdigest()
         if self._disk_cache and self._disk_cache_key == current_key: disk_files = self._disk_cache
@@ -2258,7 +2258,7 @@ class Bridge(QObject):
 
     def _get_collection_candidates(self, collection_id: int, filter_type: str = "all", search_query: str = "") -> list[dict]:
         from app.mediamanager.db.media_repo import list_media_in_collection
-        image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+        image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"}
         show_hidden = self._show_hidden_enabled()
         
         raw_candidates = list_media_in_collection(self.conn, int(collection_id))
@@ -2440,7 +2440,7 @@ class Bridge(QObject):
         from app.mediamanager.metadata.persistence import inspect_and_persist_if_supported
         from app.mediamanager.utils.hashing import calculate_file_hash
         from datetime import datetime, timezone
-        image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+        image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"}
         total, count = len(paths), 0
         for i, p in enumerate(paths):
             if self._scan_abort: break
@@ -4363,7 +4363,7 @@ class MainWindow(QMainWindow):
                 res = self._harvest_universal_metadata(img)
             media = get_media_by_path(self.bridge.conn, path)
             if not media:
-                media_type = "image" if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"} else "video"
+                media_type = "image" if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"} else "video"
                 add_media_item(self.bridge.conn, path, media_type)
                 media = get_media_by_path(self.bridge.conn, path)
             ai_ui = {}
@@ -5100,7 +5100,7 @@ class MainWindow(QMainWindow):
         p = Path(path)
         if self.bridge._is_animated(p):
             return "gif"
-        if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}:
+        if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".avif"}:
             return "image"
         return "video"
 

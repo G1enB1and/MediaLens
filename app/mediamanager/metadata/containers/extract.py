@@ -28,6 +28,8 @@ def extract_raw_metadata(path: str | Path) -> RawMetadataEnvelope:
         file_type = "jpeg"
         jpeg_segments, jpeg_warnings = parse_jpeg_segments(file_path)
         warnings.extend(jpeg_warnings)
+    elif suffix == ".avif":
+        file_type = "avif"
 
     pillow_info, exif_data, iptc_data, xmp_packets, pillow_warnings = extract_pillow_metadata(file_path)
     warnings.extend(pillow_warnings)

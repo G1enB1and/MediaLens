@@ -9,7 +9,7 @@ from app.mediamanager.metadata.models import InspectionResult
 from app.mediamanager.metadata.service import inspect_file
 
 
-INSPECTABLE_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+INSPECTABLE_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"}
 
 
 def should_inspect_media(path: str | Path, media_type: str | None = None) -> bool:

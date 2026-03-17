@@ -372,7 +372,7 @@ def set_media_hidden(conn: sqlite3.Connection, path: str, hidden: bool) -> bool:
     # If not found and we want to hide it, insert it
     if hidden:
         # Infer media type
-        image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+        image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"}
         p = Path(path)
         mtype = "image" if p.suffix.lower() in image_exts else "video"
         try:
