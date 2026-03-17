@@ -18,12 +18,13 @@ def list_collections(conn: sqlite3.Connection) -> list[dict]:
         SELECT
           c.id,
           c.name,
+          c.is_hidden,
           c.created_at_utc,
           c.updated_at_utc,
           COUNT(ci.media_id) AS item_count
         FROM collections c
         LEFT JOIN collection_items ci ON ci.collection_id = c.id
-        GROUP BY c.id, c.name, c.created_at_utc, c.updated_at_utc
+        GROUP BY c.id, c.name, c.is_hidden, c.created_at_utc, c.updated_at_utc
         ORDER BY LOWER(c.name), c.id
         """
     ).fetchall()
@@ -31,9 +32,10 @@ def list_collections(conn: sqlite3.Connection) -> list[dict]:
         {
             "id": int(row[0]),
             "name": row[1],
-            "created_at_utc": row[2],
-            "updated_at_utc": row[3],
-            "item_count": int(row[4] or 0),
+            "is_hidden": bool(row[2]),
+            "created_at_utc": row[3],
+            "updated_at_utc": row[4],
+            "item_count": int(row[5] or 0),
         }
         for row in rows
     ]
@@ -42,7 +44,7 @@ def list_collections(conn: sqlite3.Connection) -> list[dict]:
 def get_collection(conn: sqlite3.Connection, collection_id: int) -> dict | None:
     row = conn.execute(
         """
-        SELECT id, name, created_at_utc, updated_at_utc
+        SELECT id, name, is_hidden, created_at_utc, updated_at_utc
         FROM collections
         WHERE id = ?
         """,
@@ -53,8 +55,9 @@ def get_collection(conn: sqlite3.Connection, collection_id: int) -> dict | None:
     return {
         "id": int(row[0]),
         "name": row[1],
-        "created_at_utc": row[2],
-        "updated_at_utc": row[3],
+        "is_hidden": bool(row[2]),
+        "created_at_utc": row[3],
+        "updated_at_utc": row[4],
     }
 
 
@@ -153,3 +156,13 @@ def add_media_paths_to_collection(conn: sqlite3.Connection, collection_id: int, 
     )
     conn.commit()
     return max(0, conn.total_changes - before - 1)
+
+
+def set_collection_hidden(conn: sqlite3.Connection, collection_id: int, hidden: bool) -> bool:
+    now = _utc_now_iso()
+    cur = conn.execute(
+        "UPDATE collections SET is_hidden = ?, updated_at_utc = ? WHERE id = ?",
+        (1 if hidden else 0, now, int(collection_id))
+    )
+    conn.commit()
+    return cur.rowcount > 0
