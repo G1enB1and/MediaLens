@@ -4,7 +4,7 @@ try:
     with open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "VERSION"), "r") as f:
         __version__ = f.read().strip()
 except Exception:
-    __version__ = "v1.0.13"
+    __version__ = "v1.0.14"
 
 
 import sys
@@ -156,6 +156,27 @@ from PySide6.QtCore import QSortFilterProxyModel, QModelIndex
 
 import ctypes
 from ctypes import wintypes
+
+
+_WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS: dict[str, object] = {}
+if os.name == "nt":
+    try:
+        _WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS["creationflags"] = subprocess.CREATE_NO_WINDOW
+    except AttributeError:
+        pass
+    try:
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0
+        _WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS["startupinfo"] = startupinfo
+    except AttributeError:
+        pass
+
+
+def _run_hidden_subprocess(cmd: list[str], **kwargs):
+    if _WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS:
+        kwargs = {**_WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS, **kwargs}
+    return subprocess.run(cmd, **kwargs)
 
 
 class Theme:
@@ -1011,7 +1032,7 @@ class Bridge(QObject):
                 cmd += ["-ss", "0.5"]
             cmd += ["-i", str(video_path), "-frames:v", "1", "-vf", vf, "-q:v", "4", str(out)]
             
-            r = subprocess.run(cmd, capture_output=True, text=True)
+            r = _run_hidden_subprocess(cmd, capture_output=True, text=True)
             if r.returncode != 0:
                 return None
             return out if out.exists() else None
@@ -1538,7 +1559,7 @@ class Bridge(QObject):
                     current_ccw_rot = 0.0
                     try:
                         cmd_probe = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', path]
-                        res = subprocess.run(cmd_probe, capture_output=True, text=True)
+                        res = _run_hidden_subprocess(cmd_probe, capture_output=True, text=True)
                         data = json.loads(res.stdout)
                         for st in data.get('streams', []):
                             if st.get('codec_type') == 'video': # check video stream
@@ -1575,7 +1596,7 @@ class Bridge(QObject):
                     ]
                     
                     # hide ffmpeg output
-                    subprocess.run(cmd_ffmpeg, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    _run_hidden_subprocess(cmd_ffmpeg, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     
                     # 3. Replace original file
                     import shutil
@@ -1922,7 +1943,7 @@ class Bridge(QObject):
             ffprobe = self._ffprobe_bin()
             if not ffprobe: return 0.0
             cmd = [ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(video_path)]
-            r = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            r = _run_hidden_subprocess(cmd, capture_output=True, text=True, check=True)
             return float((r.stdout or "").strip() or 0.0)
         except Exception: return 0.0
 
@@ -1932,7 +1953,7 @@ class Bridge(QObject):
         cmd = [ffprobe, "-v", "quiet", "-print_format", "json", "-show_streams", str(video_path)]
         try:
             import json
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            r = _run_hidden_subprocess(cmd, capture_output=True, text=True, timeout=5)
             data = json.loads(r.stdout)
             streams = data.get("streams", [])
             if not streams: return (0, 0, False)
@@ -2068,7 +2089,7 @@ class Bridge(QObject):
         vf = f"scale={ew}:{eh},setsar=1,format=yuv420p"
         cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "warning", "-i", str(video_path), "-vf", vf, "-c:v", "mjpeg", "-q:v", "3", "-c:a", "copy", out_path]
         try:
-            if subprocess.run(cmd, capture_output=True, timeout=60).returncode == 0: return out_path
+            if _run_hidden_subprocess(cmd, capture_output=True, timeout=60).returncode == 0: return out_path
         except Exception: pass
         return None
 
@@ -5226,7 +5247,7 @@ class MainWindow(QMainWindow):
             return {}
         cmd = [ffprobe, "-v", "quiet", "-print_format", "json", "-show_streams", "-show_format", str(video_path)]
         try:
-            probe = json.loads(subprocess.run(cmd, capture_output=True, text=True, timeout=5).stdout or "{}")
+            probe = json.loads(_run_hidden_subprocess(cmd, capture_output=True, text=True, timeout=5).stdout or "{}")
         except Exception:
             return {}
         video_stream = None
