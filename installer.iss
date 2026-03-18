@@ -1,5 +1,5 @@
 #define MyAppName "MediaManagerX"
-#define MyAppVersion "v1.0.16" ; Source of Truth: \VERSION
+#define MyAppVersion "v1.0.17" ; Source of Truth: \VERSION
 #define MyAppPublisher "G1enB1and"
 #define MyAppExeName "MediaManagerX.exe"
 
@@ -18,8 +18,8 @@ SetupIconFile=app.ico
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
-ArchitecturesAllowed=x64
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
 DisableProgramGroupPage=yes
 
 [Languages]

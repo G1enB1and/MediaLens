@@ -4,7 +4,7 @@ try:
     with open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "VERSION"), "r") as f:
         __version__ = f.read().strip()
 except Exception:
-    __version__ = "v1.0.16"
+    __version__ = "v1.0.17"
 
 
 import sys

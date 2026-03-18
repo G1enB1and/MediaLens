@@ -1,6 +1,20 @@
 # Change Log
 
-## v1.0.16 (Current)
+## v1.0.17 (Current)
+
+### Added
+
+- **Crash Diagnostics**: Added local crash-report generation, `faulthandler` logging, and Help menu actions to create a diagnostic report or open the crash-report folder for troubleshooting installed builds on other machines.
+
+### Changed
+
+- **Packaged Runtime Stability**: Hardened packaged startup/runtime behavior by normalizing AI metadata values before JSON persistence, preventing scan-time failures from non-serializable EXIF values like Pillow `IFDRational`.
+- **Details Panel States**: Updated the right sidebar so it shows a true empty-state prompt when nothing is selected and switches to a dedicated bulk tag editor when multiple files are selected.
+- **Bulk Tag Editing**: Refined bulk tag save/embed behavior so entered tags append to existing DB and embedded file tags instead of replacing them.
+
+---
+
+## v1.0.16
 
 ### Changed
 
