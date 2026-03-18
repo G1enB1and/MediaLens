@@ -4,7 +4,10 @@ CREATE TABLE IF NOT EXISTS media_items (
   content_hash TEXT,                         -- SHA-256 for identity/dedupe
   media_type TEXT NOT NULL,                -- image|gif|video
   file_size_bytes INTEGER,
+  file_created_time_utc TEXT,
   modified_time_utc TEXT,
+  exif_date_taken TEXT,
+  metadata_date TEXT,
   width INTEGER,
   height INTEGER,
   duration_ms INTEGER,

@@ -14,6 +14,23 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def _file_time_iso(timestamp: float) -> str:
+    return datetime.fromtimestamp(timestamp, tz=timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _collect_file_stats(path: str) -> tuple[int, str, str]:
+    p_obj = Path(path)
+    if not p_obj.exists():
+        now = _utc_now_iso()
+        return 0, now, now
+    stat = p_obj.stat()
+    size = stat.st_size
+    modified = _file_time_iso(stat.st_mtime)
+    # On Windows, st_ctime is creation time. This app is Windows-first today.
+    created = _file_time_iso(stat.st_ctime)
+    return size, created, modified
+
+
 def add_media_item(
     conn: sqlite3.Connection,
     path: str,
@@ -28,18 +45,17 @@ def add_media_item(
     normalized = normalize_windows_path(path)
     
     # Simple stat collection for discovery
-    p_obj = Path(path)
-    size = p_obj.stat().st_size if p_obj.exists() else 0
-    mtime = datetime.fromtimestamp(p_obj.stat().st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat() if p_obj.exists() else now
+    size, created_time, mtime = _collect_file_stats(path)
 
     conn.execute(
         """
-        INSERT INTO media_items(path, content_hash, media_type, file_size_bytes, modified_time_utc, width, height, duration_ms, is_hidden, created_at_utc, updated_at_utc)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO media_items(path, content_hash, media_type, file_size_bytes, file_created_time_utc, modified_time_utc, width, height, duration_ms, is_hidden, created_at_utc, updated_at_utc)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(path) DO UPDATE SET
           content_hash=COALESCE(excluded.content_hash, content_hash),
           media_type=excluded.media_type,
           file_size_bytes=excluded.file_size_bytes,
+          file_created_time_utc=COALESCE(excluded.file_created_time_utc, file_created_time_utc),
           modified_time_utc=excluded.modified_time_utc,
           width=COALESCE(excluded.width, width),
           height=COALESCE(excluded.height, height),
@@ -47,7 +63,7 @@ def add_media_item(
           is_hidden=COALESCE(excluded.is_hidden, is_hidden),
           updated_at_utc=excluded.updated_at_utc
         """,
-        (normalized, content_hash, media_type, size, mtime, width, height, duration_ms, is_hidden, now, now),
+        (normalized, content_hash, media_type, size, created_time, mtime, width, height, duration_ms, is_hidden, now, now),
     )
     row = conn.execute("SELECT id FROM media_items WHERE path = ?", (normalized,)).fetchone()
     if not row:
@@ -59,7 +75,7 @@ def add_media_item(
 def get_media_by_path(conn: sqlite3.Connection, path: str) -> Optional[dict]:
     normalized = normalize_windows_path(path)
     row = conn.execute(
-        "SELECT id, path, media_type, file_size_bytes, modified_time_utc, width, height, duration_ms, is_hidden FROM media_items WHERE path = ?",
+        "SELECT id, path, media_type, file_size_bytes, file_created_time_utc, modified_time_utc, exif_date_taken, metadata_date, width, height, duration_ms, is_hidden FROM media_items WHERE path = ?",
         (normalized,),
     ).fetchone()
     if not row:
@@ -69,11 +85,14 @@ def get_media_by_path(conn: sqlite3.Connection, path: str) -> Optional[dict]:
         "path": row[1],
         "media_type": row[2],
         "file_size": row[3],
-        "modified_time": row[4],
-        "width": row[5],
-        "height": row[6],
-        "duration_ms": row[7],
-        "is_hidden": bool(row[8]),
+        "file_created_time": row[4],
+        "modified_time": row[5],
+        "exif_date_taken": row[6],
+        "metadata_date": row[7],
+        "width": row[8],
+        "height": row[9],
+        "duration_ms": row[10],
+        "is_hidden": bool(row[11]),
     }
 
 
@@ -118,9 +137,7 @@ def upsert_media_item(
     normalized = normalize_windows_path(path)
 
     # Collect current stats to keep DB in sync
-    p_obj = Path(path)
-    size = p_obj.stat().st_size if p_obj.exists() else 0
-    mtime = datetime.fromtimestamp(p_obj.stat().st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat() if p_obj.exists() else now
+    size, created_time, mtime = _collect_file_stats(path)
 
     # 1. Check if we already have this exact path
     existing_by_path = conn.execute(
@@ -131,11 +148,11 @@ def upsert_media_item(
         # Path exists. Update hash AND stats
         conn.execute(
             """
-            UPDATE media_items 
-            SET content_hash = ?, file_size_bytes = ?, modified_time_utc = ?, width = ?, height = ?, duration_ms = ?, updated_at_utc = ? 
+                UPDATE media_items 
+            SET content_hash = ?, file_size_bytes = ?, file_created_time_utc = ?, modified_time_utc = ?, width = ?, height = ?, duration_ms = ?, updated_at_utc = ? 
             WHERE id = ?
             """,
-            (content_hash, size, mtime, width, height, duration_ms, now, existing_by_path[0]),
+            (content_hash, size, created_time, mtime, width, height, duration_ms, now, existing_by_path[0]),
         )
         conn.commit()
         return int(existing_by_path[0])
@@ -161,10 +178,10 @@ def upsert_media_item(
             conn.execute(
                 """
                 UPDATE media_items 
-                SET path = ?, file_size_bytes = ?, modified_time_utc = ?, width = ?, height = ?, duration_ms = ?, updated_at_utc = ? 
+                SET path = ?, file_size_bytes = ?, file_created_time_utc = ?, modified_time_utc = ?, width = ?, height = ?, duration_ms = ?, updated_at_utc = ? 
                 WHERE id = ?
                 """,
-                (normalized, size, mtime, width, height, duration_ms, now, media_id),
+                (normalized, size, created_time, mtime, width, height, duration_ms, now, media_id),
             )
             conn.commit()
             return int(media_id)
@@ -222,7 +239,10 @@ def _list_media_with_where(
             m.path, 
             m.media_type, 
             m.file_size_bytes, 
+            m.file_created_time_utc,
             m.modified_time_utc,
+            m.exif_date_taken,
+            m.metadata_date,
             m.width,
             m.height,
             m.duration_ms,
@@ -278,31 +298,52 @@ def _media_row_to_dict(row) -> dict:
         "path": row[1],
         "media_type": row[2],
         "file_size": row[3],
-        "modified_time": row[4],
-        "width": row[5],
-        "height": row[6],
-        "duration": (row[7] / 1000.0) if row[7] else None,
-        "is_hidden": bool(row[8]),
-        "title": row[9],
-        "description": row[10],
-        "notes": row[11],
-        "ai_prompt": row[12],
-        "ai_negative_prompt": row[13],
-        "tool_name_found": row[14],
-        "tool_name_inferred": row[15],
-        "model_name": row[16],
-        "checkpoint_name": row[17],
-        "sampler": row[18],
-        "scheduler": row[19],
-        "cfg_scale": row[20],
-        "steps": row[21],
-        "seed": row[22],
-        "source_formats": row[23],
-        "metadata_families": row[24],
-        "ai_loras": row[25],
-        "tags": row[26],
-        "collection_names": row[27],
+        "file_created_time": row[4],
+        "modified_time": row[5],
+        "exif_date_taken": row[6],
+        "metadata_date": row[7],
+        "width": row[8],
+        "height": row[9],
+        "duration": (row[10] / 1000.0) if row[10] else None,
+        "is_hidden": bool(row[11]),
+        "title": row[12],
+        "description": row[13],
+        "notes": row[14],
+        "ai_prompt": row[15],
+        "ai_negative_prompt": row[16],
+        "tool_name_found": row[17],
+        "tool_name_inferred": row[18],
+        "model_name": row[19],
+        "checkpoint_name": row[20],
+        "sampler": row[21],
+        "scheduler": row[22],
+        "cfg_scale": row[23],
+        "steps": row[24],
+        "seed": row[25],
+        "source_formats": row[26],
+        "metadata_families": row[27],
+        "ai_loras": row[28],
+        "tags": row[29],
+        "collection_names": row[30],
     }
+
+
+def update_media_dates(
+    conn: sqlite3.Connection,
+    media_id: int,
+    *,
+    exif_date_taken: str | None = None,
+    metadata_date: str | None = None,
+) -> None:
+    conn.execute(
+        """
+        UPDATE media_items
+        SET exif_date_taken = ?, metadata_date = ?, updated_at_utc = ?
+        WHERE id = ?
+        """,
+        (exif_date_taken, metadata_date, _utc_now_iso(), int(media_id)),
+    )
+    conn.commit()
 
 
 def list_media_page(
