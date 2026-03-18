@@ -24,6 +24,12 @@ let gGroupBy = 'none';
 let gGroupDateGranularity = 'day';
 let gCollapsedGroupKeys = new Set();
 let gTimelineScrubActive = false;
+let gTimelineScrubPointerId = null;
+const TIMELINE_INSET_PX = 20;
+const TIMELINE_THUMB_SIZE_PX = 14;
+const TIMELINE_TOP_YEAR_TOP_PX = 20;
+const TIMELINE_TOP_MONTH_TOP_PX = 35;
+const TIMELINE_THUMB_OFFSET_PX = 8;
 
 const GALLERY_VIEW_MODES = new Set(['masonry', 'grid_small', 'grid_medium', 'grid_large', 'grid_xlarge', 'list', 'content', 'details']);
 const DETAILS_COLUMN_CONFIG = [
@@ -699,7 +705,7 @@ function handleCardSelection(card, item, idx, e) {
 }
 
 function getDateFromItem(item) {
-  const ts = Number(item && item.modified_time || 0);
+  const ts = Number(item && (item.auto_date || item.exif_date_taken || item.metadata_date || item.file_created_time || item.modified_time) || 0);
   if (!Number.isFinite(ts) || ts <= 0) return null;
   const millis = ts > 1e12 ? Math.floor(ts / 1000000) : ts;
   const date = new Date(millis);
@@ -807,50 +813,134 @@ function scrollToGroup(groupKey) {
   target.scrollIntoView({ block: 'start', behavior: gTimelineScrubActive ? 'auto' : 'smooth' });
 }
 
+function updateTimelineThumb(index, total) {
+  const thumb = document.querySelector('#timelineRail .timeline-scrubber-thumb');
+  if (!thumb || total <= 0) return;
+  const ratio = total <= 1 ? 0 : index / (total - 1);
+  thumb.style.top = `calc(${TIMELINE_TOP_YEAR_TOP_PX + TIMELINE_THUMB_OFFSET_PX}px + ${Math.max(0, Math.min(1, ratio))} * (100% - ${TIMELINE_INSET_PX * 2}px) - ${TIMELINE_THUMB_SIZE_PX / 2}px)`;
+}
+
+function scrubTimelineAt(clientY) {
+  const rail = document.getElementById('timelineRail');
+  const track = rail && rail.querySelector('.timeline-scrubber-track');
+  if (!rail || !track) return;
+  const targets = Array.isArray(rail.__scrubGroups) ? rail.__scrubGroups : [];
+  if (!targets.length) return;
+  const rect = track.getBoundingClientRect();
+  const rawRatio = rect.height <= 0 ? 0 : (clientY - rect.top) / rect.height;
+  const ratio = Math.max(0, Math.min(1, rawRatio));
+  const index = Math.max(0, Math.min(targets.length - 1, Math.round(ratio * (targets.length - 1))));
+  const targetKey = targets[index];
+  if (!targetKey) return;
+  updateTimelineThumb(index, targets.length);
+  scrollToGroup(targetKey);
+}
+
 function renderTimelineRail(groups) {
   const rail = document.getElementById('timelineRail');
   if (!rail) return;
   rail.innerHTML = '';
+  rail.__scrubGroups = [];
 
   if (gGroupBy !== 'date' || !Array.isArray(groups) || groups.length === 0) {
     rail.hidden = true;
     return;
   }
 
-  const frag = document.createDocumentFragment();
-  let lastYear = null;
+  rail.__scrubGroups = groups.map(group => group.key);
+  const scale = document.createElement('div');
+  scale.className = 'timeline-scale';
+  const entryPositions = [];
+  const entryMarkers = [];
+
+  const years = new Map();
   let lastMonthTitle = null;
-  groups.forEach(group => {
-    if (group.timelineYear !== lastYear) {
-      const yearLabel = document.createElement('div');
-      yearLabel.className = 'timeline-year';
-      yearLabel.textContent = group.timelineYear;
-      frag.appendChild(yearLabel);
-      lastYear = group.timelineYear;
-      lastMonthTitle = null;
+  const toInsetTop = (ratio) => `calc(${TIMELINE_INSET_PX}px + ${Math.max(0, Math.min(1, ratio))} * (100% - ${TIMELINE_INSET_PX * 2}px))`;
+  groups.forEach((group, groupIndex) => {
+    const ratio = groups.length <= 1 ? 0 : groupIndex / (groups.length - 1);
+    if (!years.has(group.timelineYear)) {
+      years.set(group.timelineYear, { key: group.key, ratio });
     }
     const duplicateMonth = gGroupDateGranularity === 'day' && group.timelineTitle === lastMonthTitle;
     if (!duplicateMonth || gGroupDateGranularity !== 'day') {
-      const entry = document.createElement('button');
-      entry.type = 'button';
-      entry.className = 'timeline-entry';
-      entry.textContent = group.timelineLabel;
-      entry.title = group.timelineTitle;
-      entry.dataset.groupKey = group.key;
-      entry.addEventListener('click', () => scrollToGroup(group.key));
-      entry.addEventListener('pointerdown', () => {
-        gTimelineScrubActive = true;
-        scrollToGroup(group.key);
-      });
-      entry.addEventListener('pointerenter', () => {
-        if (gTimelineScrubActive) scrollToGroup(group.key);
-      });
-      frag.appendChild(entry);
+      const marker = document.createElement('button');
+      marker.type = 'button';
+      marker.className = 'timeline-marker timeline-entry';
+      marker.textContent = group.timelineLabel;
+      marker.title = group.timelineTitle;
+      marker.dataset.groupKey = group.key;
+      marker.style.top = toInsetTop(ratio);
+      marker.addEventListener('click', () => scrollToGroup(group.key));
+      scale.appendChild(marker);
+      entryPositions.push(ratio);
+      entryMarkers.push({ key: group.key, ratio, marker });
       lastMonthTitle = group.timelineTitle;
     }
   });
 
-  rail.appendChild(frag);
+  const firstEntryRatio = entryPositions.length ? Math.min(...entryPositions) : null;
+  const lastEntryRatio = entryPositions.length ? Math.max(...entryPositions) : null;
+
+  const findClearRatio = (ratio) => {
+    const minGap = 0.055;
+    let nextRatio = ratio;
+    const nearby = entryPositions
+      .filter(value => Math.abs(value - ratio) < minGap)
+      .sort((a, b) => Math.abs(a - ratio) - Math.abs(b - ratio));
+    nearby.forEach((value) => {
+      if (Math.abs(nextRatio - value) < minGap) {
+        if (value < 0.12) {
+          nextRatio = Math.max(0.01, value - minGap);
+        } else if (value <= 0.5) {
+          nextRatio = Math.min(0.98, value + minGap);
+        } else {
+          nextRatio = Math.max(0.02, value - minGap);
+        }
+      }
+    });
+    return Math.max(0.01, Math.min(0.98, nextRatio));
+  };
+
+  const yearMarkers = [];
+  years.forEach(({ key, ratio }, year) => {
+    const yearBtn = document.createElement('button');
+    yearBtn.type = 'button';
+    yearBtn.className = 'timeline-marker timeline-year';
+    yearBtn.textContent = year;
+    yearBtn.dataset.groupKey = key;
+    const resolvedRatio = findClearRatio(ratio);
+    yearBtn.style.top = toInsetTop(resolvedRatio);
+    if (lastEntryRatio !== null && Math.abs(ratio - lastEntryRatio) < 0.001) {
+      yearBtn.classList.add('is-above');
+      yearBtn.style.top = toInsetTop(lastEntryRatio);
+    }
+    yearBtn.addEventListener('click', () => scrollToGroup(key));
+    scale.appendChild(yearBtn);
+    yearMarkers.push({ key, ratio, marker: yearBtn });
+  });
+
+  const firstEntry = entryMarkers[0];
+  const firstYear = yearMarkers[0];
+  if (firstEntry && firstYear) {
+    firstYear.marker.classList.remove('is-above');
+    firstYear.marker.classList.add('is-top-year');
+    firstYear.marker.style.top = `${TIMELINE_TOP_YEAR_TOP_PX}px`;
+    firstEntry.marker.classList.add('is-top-month');
+    firstEntry.marker.style.top = `${TIMELINE_TOP_MONTH_TOP_PX}px`;
+  }
+
+  const scrubber = document.createElement('div');
+  scrubber.className = 'timeline-scrubber';
+  scrubber.innerHTML = '<div class="timeline-scrubber-track"></div><div class="timeline-scrubber-thumb"></div>';
+  scrubber.addEventListener('pointerdown', (e) => {
+    gTimelineScrubActive = true;
+    gTimelineScrubPointerId = e.pointerId;
+    scrubTimelineAt(e.clientY);
+  });
+  scale.appendChild(scrubber);
+
+  rail.appendChild(scale);
+  updateTimelineThumb(0, rail.__scrubGroups.length);
   rail.hidden = !rail.childElementCount;
 }
 
@@ -1258,8 +1348,22 @@ function renderStructuredMediaList(el, items) {
 }
 
 function renderGroupedMediaList(el, items) {
-  const groups = buildGroupedItems(items);
+  const folderItems = items.filter(item => !!item.is_folder);
+  const mediaItems = items.filter(item => !item.is_folder);
+  const groups = buildGroupedItems(mediaItems);
   el.classList.add('gallery-grouped');
+
+  if (folderItems.length > 0) {
+    const prefix = document.createElement('div');
+    prefix.className = 'gallery-group-prefix';
+    applyGalleryClasses(prefix, gGalleryViewMode);
+    if (gGalleryViewMode === 'masonry') {
+      folderItems.forEach((item, idx) => prefix.appendChild(createMasonryCard(item, idx)));
+    } else {
+      renderStructuredMediaList(prefix, folderItems);
+    }
+    el.appendChild(prefix);
+  }
 
   groups.forEach(group => {
     const section = document.createElement('section');
@@ -1272,7 +1376,7 @@ function renderGroupedMediaList(el, items) {
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.className = 'gallery-group-toggle';
-    toggle.innerHTML = `<span class="gallery-group-title">${group.label}</span><span class="gallery-group-count">${group.items.length}</span>`;
+    toggle.innerHTML = `<span class="gallery-group-chevron" aria-hidden="true"></span><span class="gallery-group-title">${group.label}</span><span class="gallery-group-count">${group.items.length}</span>`;
     toggle.addEventListener('click', () => toggleGroupCollapsed(group.key));
     toggle.addEventListener('contextmenu', (e) => {
       e.preventDefault();
@@ -1780,6 +1884,12 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   window.addEventListener('pointerup', () => {
     gTimelineScrubActive = false;
+    gTimelineScrubPointerId = null;
+  });
+  window.addEventListener('pointermove', (e) => {
+    if (!gTimelineScrubActive) return;
+    if (gTimelineScrubPointerId !== null && e.pointerId !== gTimelineScrubPointerId) return;
+    scrubTimelineAt(e.clientY);
   });
 
   setupCustomSelect('sortSelect', (val) => {

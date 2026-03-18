@@ -19,6 +19,7 @@ import re
 import json
 import html
 import shlex
+from datetime import datetime, timezone
 from packaging.version import Version
 from pathlib import Path
 
@@ -2210,6 +2211,9 @@ class Bridge(QObject):
             out = []
             for r in candidates[start:end]:
                 if r.get("is_folder"):
+                    created_time = int(r.get("file_created_time") or 0)
+                    modified_time = int(r.get("modified_time") or 0)
+                    auto_date = int(r.get("preferred_date") or created_time or modified_time)
                     out.append(
                         {
                             "path": str(r["path"]),
@@ -2221,7 +2225,11 @@ class Bridge(QObject):
                             "width": None,
                             "height": None,
                             "duration": None,
-                            "modified_time": r.get("modified_time"),
+                            "file_created_time": created_time,
+                            "modified_time": modified_time,
+                            "exif_date_taken": None,
+                            "metadata_date": None,
+                            "auto_date": auto_date,
                             "file_size": None,
                         }
                     )
@@ -2229,9 +2237,13 @@ class Bridge(QObject):
                 real = r.get("_real_path")
                 p = real if isinstance(real, Path) else Path(r["path"])
                 try:
-                    mtime = int(p.stat().st_mtime_ns)
+                    stat = p.stat()
+                    mtime = int(stat.st_mtime_ns)
+                    ctime = int(stat.st_ctime_ns)
                 except Exception:
-                    mtime = int(r.get("modified_time") or 0)
+                    mtime = self._iso_to_ns(r.get("modified_time"))
+                    ctime = self._iso_to_ns(r.get("file_created_time"))
+                auto_date = int(r.get("preferred_date") or self._preferred_date_ns(r))
                     
                 out.append({
                     "path": str(p), 
@@ -2243,7 +2255,11 @@ class Bridge(QObject):
                     "width": r.get("width"),
                     "height": r.get("height"),
                     "duration": r.get("duration"),
+                    "file_created_time": ctime,
                     "modified_time": mtime,
+                    "exif_date_taken": r.get("exif_date_taken"),
+                    "metadata_date": r.get("metadata_date"),
+                    "auto_date": auto_date,
                     "file_size": r.get("file_size"),
                 })
             return out
@@ -2337,6 +2353,33 @@ class Bridge(QObject):
         from app.mediamanager.search_query import matches_media_search
         return matches_media_search(row, search_query)
 
+    @staticmethod
+    def _iso_to_ns(value) -> int:
+        if value is None:
+            return 0
+        text = str(value).strip()
+        if not text:
+            return 0
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            dt = datetime.fromisoformat(text)
+            if dt.tzinfo is None:
+                return int(dt.timestamp() * 1_000_000_000)
+            return int(dt.astimezone(timezone.utc).timestamp() * 1_000_000_000)
+        except Exception:
+            return 0
+
+    def _preferred_date_ns(self, row: dict) -> int:
+        for key in ("exif_date_taken", "metadata_date", "file_created_time"):
+            value = self._iso_to_ns(row.get(key))
+            if value > 0:
+                return value
+        raw_modified = row.get("modified_time")
+        if isinstance(raw_modified, int):
+            return raw_modified
+        return self._iso_to_ns(raw_modified)
+
     def _list_folder_entries(self, folders: list[str], search_query: str = "") -> list[dict]:
         if not folders:
             return []
@@ -2366,9 +2409,12 @@ class Bridge(QObject):
                             continue
                     seen.add(norm)
                     try:
-                        modified_time = int(child.stat().st_mtime_ns)
+                        stat = child.stat()
+                        modified_time = int(stat.st_mtime_ns)
+                        created_time = int(stat.st_ctime_ns)
                     except Exception:
                         modified_time = 0
+                        created_time = 0
                     entries.append(
                         {
                             "path": str(child),
@@ -2376,7 +2422,9 @@ class Bridge(QObject):
                             "is_folder": True,
                             "is_hidden": is_hidden,
                             "file_size": None,
+                            "file_created_time": created_time,
                             "modified_time": modified_time,
+                            "preferred_date": created_time or modified_time,
                             "width": None,
                             "height": None,
                             "duration": None,
@@ -2389,7 +2437,7 @@ class Bridge(QObject):
 
     def _sort_gallery_entries(self, entries: list[dict], sort_by: str) -> list[dict]:
         name_key = lambda row: Path(str(row.get("path", ""))).name.lower()
-        date_key = lambda row: row.get("modified_time") or 0
+        date_key = lambda row: row.get("preferred_date") or self._preferred_date_ns(row)
         size_key = lambda row: row.get("file_size") or 0
         folders = [row for row in entries if row.get("is_folder")]
         media = [row for row in entries if not row.get("is_folder")]

@@ -62,6 +62,16 @@ def _ensure_is_hidden_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE collections ADD COLUMN is_hidden INTEGER DEFAULT 0")
 
 
+def _ensure_media_item_date_columns(conn: sqlite3.Connection) -> None:
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(media_items)").fetchall()}
+    if "file_created_time_utc" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN file_created_time_utc TEXT")
+    if "exif_date_taken" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN exif_date_taken TEXT")
+    if "metadata_date" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN metadata_date TEXT")
+
+
 def init_db(db_path: str) -> None:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     sql = SCHEMA_PATH.read_text(encoding="utf-8")
@@ -74,4 +84,5 @@ def init_db(db_path: str) -> None:
         conn.executescript(sql)
         _ensure_media_metadata_columns(conn)
         _ensure_is_hidden_columns(conn)
+        _ensure_media_item_date_columns(conn)
         conn.commit()
