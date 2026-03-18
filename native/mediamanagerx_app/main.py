@@ -1241,6 +1241,16 @@ class Bridge(QObject):
         }
         return mode if mode in allowed else "masonry"
 
+    def _gallery_group_by(self) -> str:
+        value = str(self.settings.value("gallery/group_by", "none", type=str) or "none")
+        allowed = {"none", "date"}
+        return value if value in allowed else "none"
+
+    def _gallery_group_date_granularity(self) -> str:
+        value = str(self.settings.value("gallery/group_date_granularity", "day", type=str) or "day")
+        allowed = {"day", "month", "year"}
+        return value if value in allowed else "day"
+
     @Slot(result=dict)
     def get_settings(self) -> dict:
         try:
@@ -1250,6 +1260,8 @@ class Bridge(QObject):
                 "gallery.show_hidden": self._show_hidden_enabled(),
                 "gallery.start_folder": self._start_folder_setting(),
                 "gallery.view_mode": self._gallery_view_mode(),
+                "gallery.group_by": self._gallery_group_by(),
+                "gallery.group_date_granularity": self._gallery_group_date_granularity(),
                 "ui.accent_color": str(self.settings.value("ui/accent_color", "#8ab4f8", type=str) or "#8ab4f8"),
                 "ui.show_left_panel": bool(self.settings.value("ui/show_left_panel", True, type=bool)),
                 "ui.show_right_panel": bool(self.settings.value("ui/show_right_panel", True, type=bool)),
@@ -1306,6 +1318,8 @@ class Bridge(QObject):
                 "gallery.show_hidden": False,
                 "gallery.start_folder": "",
                 "gallery.view_mode": "masonry",
+                "gallery.group_by": "none",
+                "gallery.group_date_granularity": "day",
                 "ui.accent_color": "#8ab4f8",
                 "ui.show_left_panel": True,
                 "ui.show_right_panel": True,
@@ -1415,11 +1429,17 @@ class Bridge(QObject):
     @Slot(str, str, result=bool)
     def set_setting_str(self, key: str, value: str) -> bool:
         try:
-            if key not in ("gallery.start_folder", "gallery.view_mode", "ui.accent_color", "ui.theme_mode", "metadata.display.order") and not key.startswith("metadata.layout."):
+            if key not in ("gallery.start_folder", "gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "ui.accent_color", "ui.theme_mode", "metadata.display.order") and not key.startswith("metadata.layout."):
                 return False
             if key == "gallery.view_mode":
                 allowed = {"masonry", "grid_small", "grid_medium", "grid_large", "grid_xlarge", "list", "content", "details"}
                 if value not in allowed:
+                    return False
+            elif key == "gallery.group_by":
+                if value not in {"none", "date"}:
+                    return False
+            elif key == "gallery.group_date_granularity":
+                if value not in {"day", "month", "year"}:
                     return False
             qkey = key.replace(".", "/")
             self.settings.setValue(qkey, str(value or ""))
@@ -1428,7 +1448,7 @@ class Bridge(QObject):
             elif key == "ui.theme_mode":
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, value == "light")
-            elif key == "gallery.view_mode":
+            elif key in ("gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity"):
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, True)
             elif key == "metadata.display.order" or key.startswith("metadata.layout."):

@@ -20,6 +20,10 @@ let gActiveMetadataMode = 'image';
 let gUpdateToastTimer = null;
 let gScanManuallyHidden = false;
 let gGalleryViewMode = 'masonry';
+let gGroupBy = 'none';
+let gGroupDateGranularity = 'day';
+let gCollapsedGroupKeys = new Set();
+let gTimelineScrubActive = false;
 
 const GALLERY_VIEW_MODES = new Set(['masonry', 'grid_small', 'grid_medium', 'grid_large', 'grid_xlarge', 'list', 'content', 'details']);
 const DETAILS_COLUMN_CONFIG = [
@@ -500,27 +504,40 @@ function formatModifiedTime(value) {
   }
 }
 
+function getItemIndex(item, fallbackIdx = 0) {
+  const candidate = Number(item && item.__galleryIndex);
+  return Number.isInteger(candidate) && candidate >= 0 ? candidate : fallbackIdx;
+}
+
+function getGalleryContainerClasses(mode) {
+  const nextMode = GALLERY_VIEW_MODES.has(mode) ? mode : 'masonry';
+  if (nextMode === 'masonry') {
+    return ['masonry'];
+  }
+  if (nextMode.startsWith('grid_')) {
+    return ['gallery-grid', `view-${nextMode.replace('_', '-')}`];
+  }
+  if (nextMode === 'details') {
+    return ['gallery-details'];
+  }
+  if (nextMode === 'content') {
+    return ['gallery-content'];
+  }
+  return ['gallery-list'];
+}
+
+function applyGalleryClasses(el, mode) {
+  if (!el) return;
+  el.className = 'gallery';
+  getGalleryContainerClasses(mode).forEach(cls => el.classList.add(cls));
+}
+
 function applyGalleryViewMode(mode) {
   const nextMode = GALLERY_VIEW_MODES.has(mode) ? mode : 'masonry';
   gGalleryViewMode = nextMode;
   const el = document.getElementById('mediaList');
   if (!el) return;
-  el.className = 'gallery';
-  if (nextMode === 'masonry') {
-    el.classList.add('masonry');
-    return;
-  }
-  if (nextMode.startsWith('grid_')) {
-    el.classList.add('gallery-grid', `view-${nextMode.replace('_', '-')}`);
-    return;
-  }
-  if (nextMode === 'details') {
-    el.classList.add('gallery-details');
-  } else if (nextMode === 'content') {
-    el.classList.add('gallery-content');
-  } else {
-    el.classList.add('gallery-list');
-  }
+  applyGalleryClasses(el, nextMode);
 }
 
 function viewUsesThumbnails() {
@@ -681,6 +698,180 @@ function handleCardSelection(card, item, idx, e) {
   syncMetadataToBridge();
 }
 
+function getDateFromItem(item) {
+  const ts = Number(item && item.modified_time || 0);
+  if (!Number.isFinite(ts) || ts <= 0) return null;
+  const millis = ts > 1e12 ? Math.floor(ts / 1000000) : ts;
+  const date = new Date(millis);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getDateGroupMeta(item) {
+  const date = getDateFromItem(item);
+  if (!date) {
+    return {
+      key: 'unknown',
+      label: 'Unknown Date',
+      timelineYear: 'Unknown',
+      timelineLabel: 'Unknown',
+      timelineTitle: 'Unknown Date',
+      sortValue: -1,
+    };
+  }
+
+  const year = date.getFullYear();
+  const month = date.getMonth();
+  const day = date.getDate();
+  const monthLabel = date.toLocaleDateString(undefined, { month: 'short' });
+  const monthLong = date.toLocaleDateString(undefined, { month: 'long' });
+
+  if (gGroupDateGranularity === 'year') {
+    return {
+      key: `${year}`,
+      label: `${year}`,
+      timelineYear: `${year}`,
+      timelineLabel: `${year}`,
+      timelineTitle: `${year}`,
+      sortValue: Date.UTC(year, 0, 1),
+    };
+  }
+
+  if (gGroupDateGranularity === 'month') {
+    return {
+      key: `${year}-${String(month + 1).padStart(2, '0')}`,
+      label: `${monthLong} ${year}`,
+      timelineYear: `${year}`,
+      timelineLabel: monthLabel,
+      timelineTitle: `${monthLong} ${year}`,
+      sortValue: Date.UTC(year, month, 1),
+    };
+  }
+
+  return {
+    key: `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+    label: date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }),
+    timelineYear: `${year}`,
+    timelineLabel: monthLabel,
+    timelineTitle: `${monthLong} ${year}`,
+    sortValue: Date.UTC(year, month, day),
+  };
+}
+
+function buildGroupedItems(items) {
+  const groups = [];
+  const seen = new Map();
+  items.forEach((item) => {
+    const meta = getDateGroupMeta(item);
+    let group = seen.get(meta.key);
+    if (!group) {
+      group = { ...meta, items: [] };
+      seen.set(meta.key, group);
+      groups.push(group);
+    }
+    group.items.push(item);
+  });
+  const ascending = gSort === 'date_asc';
+  groups.sort((a, b) => {
+    if (a.sortValue === b.sortValue) return a.label.localeCompare(b.label);
+    if (a.sortValue < 0) return 1;
+    if (b.sortValue < 0) return -1;
+    return ascending ? a.sortValue - b.sortValue : b.sortValue - a.sortValue;
+  });
+  return groups;
+}
+
+function toggleGroupCollapsed(groupKey, forceCollapsed = null) {
+  const shouldCollapse = forceCollapsed === null ? !gCollapsedGroupKeys.has(groupKey) : !!forceCollapsed;
+  if (shouldCollapse) gCollapsedGroupKeys.add(groupKey);
+  else gCollapsedGroupKeys.delete(groupKey);
+  document.querySelectorAll(`.gallery-group[data-group-key="${CSS.escape(groupKey)}"]`).forEach(section => {
+    const body = section.querySelector('.gallery-group-body');
+    const toggle = section.querySelector('.gallery-group-toggle');
+    const collapsed = gCollapsedGroupKeys.has(groupKey);
+    section.classList.toggle('is-collapsed', collapsed);
+    if (body) body.hidden = collapsed;
+    if (toggle) toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  });
+}
+
+function setAllGroupsCollapsed(collapsed) {
+  document.querySelectorAll('.gallery-group').forEach(section => {
+    const key = section.dataset.groupKey;
+    if (key) toggleGroupCollapsed(key, collapsed);
+  });
+}
+
+function scrollToGroup(groupKey) {
+  const target = document.querySelector(`.gallery-group[data-group-key="${CSS.escape(groupKey)}"]`);
+  if (!target) return;
+  target.scrollIntoView({ block: 'start', behavior: gTimelineScrubActive ? 'auto' : 'smooth' });
+}
+
+function renderTimelineRail(groups) {
+  const rail = document.getElementById('timelineRail');
+  if (!rail) return;
+  rail.innerHTML = '';
+
+  if (gGroupBy !== 'date' || !Array.isArray(groups) || groups.length === 0) {
+    rail.hidden = true;
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+  let lastYear = null;
+  let lastMonthTitle = null;
+  groups.forEach(group => {
+    if (group.timelineYear !== lastYear) {
+      const yearLabel = document.createElement('div');
+      yearLabel.className = 'timeline-year';
+      yearLabel.textContent = group.timelineYear;
+      frag.appendChild(yearLabel);
+      lastYear = group.timelineYear;
+      lastMonthTitle = null;
+    }
+    const duplicateMonth = gGroupDateGranularity === 'day' && group.timelineTitle === lastMonthTitle;
+    if (!duplicateMonth || gGroupDateGranularity !== 'day') {
+      const entry = document.createElement('button');
+      entry.type = 'button';
+      entry.className = 'timeline-entry';
+      entry.textContent = group.timelineLabel;
+      entry.title = group.timelineTitle;
+      entry.dataset.groupKey = group.key;
+      entry.addEventListener('click', () => scrollToGroup(group.key));
+      entry.addEventListener('pointerdown', () => {
+        gTimelineScrubActive = true;
+        scrollToGroup(group.key);
+      });
+      entry.addEventListener('pointerenter', () => {
+        if (gTimelineScrubActive) scrollToGroup(group.key);
+      });
+      frag.appendChild(entry);
+      lastMonthTitle = group.timelineTitle;
+    }
+  });
+
+  rail.appendChild(frag);
+  rail.hidden = !rail.childElementCount;
+}
+
+function setCustomSelectValue(selectId, value) {
+  const el = document.getElementById(selectId);
+  if (!el) return;
+  const trigger = el.querySelector('.select-trigger');
+  const option = el.querySelector(`[data-value="${CSS.escape(value)}"]`);
+  if (!trigger || !option) return;
+  trigger.textContent = option.textContent;
+  el.querySelectorAll('.selected').forEach(node => node.classList.remove('selected'));
+  option.classList.add('selected');
+}
+
+function syncGroupByUi() {
+  const granularitySelect = document.getElementById('dateGranularitySelect');
+  if (granularitySelect) {
+    granularitySelect.hidden = gGroupBy !== 'date';
+  }
+}
+
 function openFolderItem(path) {
   if (gBridge && gBridge.set_selected_folders && path) {
     deselectAll();
@@ -689,6 +880,7 @@ function openFolderItem(path) {
 }
 
 function createStructuredCard(item, idx) {
+  const mediaIdx = getItemIndex(item, idx);
   const card = document.createElement('div');
   const isFolder = !!item.is_folder;
   const usesThumbnails = viewUsesThumbnails();
@@ -798,21 +990,21 @@ function createStructuredCard(item, idx) {
 
   card.appendChild(content);
 
-  card.addEventListener('click', (e) => handleCardSelection(card, item, idx, e));
+  card.addEventListener('click', (e) => handleCardSelection(card, item, mediaIdx, e));
   card.addEventListener('dblclick', () => {
     if (isFolder) openFolderItem(item.path);
-    else openLightboxByIndex(idx);
+    else openLightboxByIndex(mediaIdx);
   });
   card.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       if (isFolder) openFolderItem(item.path);
-      else openLightboxByIndex(idx);
+      else openLightboxByIndex(mediaIdx);
     }
   });
   card.addEventListener('contextmenu', (e) => {
     e.preventDefault();
-    showCtx(e.clientX, e.clientY, item, idx, false);
+    showCtx(e.clientX, e.clientY, item, mediaIdx, false);
   });
 
   if (!isFolder) {
@@ -848,6 +1040,196 @@ function createStructuredCard(item, idx) {
   return card;
 }
 
+function createMasonryCard(item, idx) {
+  const mediaIdx = getItemIndex(item, idx);
+  const card = document.createElement('div');
+  card.className = 'card loading';
+  card.tabIndex = 0;
+  if (item.width && item.height) {
+    card.style.aspectRatio = `${item.width} / ${item.height}`;
+  }
+
+  if (item.media_type === 'image') {
+    const img = document.createElement('img');
+    img.className = 'thumb';
+    img.setAttribute('data-src', item.url);
+    img.alt = '';
+    if (item.is_animated) {
+      img.setAttribute('data-animated', 'true');
+      img.setAttribute('data-path', item.path || '');
+    }
+    card.appendChild(img);
+    gPosterObserver.observe(img);
+
+    card.setAttribute('data-path', item.path || '');
+
+    card.addEventListener('click', (e) => handleCardSelection(card, item, mediaIdx, e));
+    card.addEventListener('dblclick', () => openLightboxByIndex(mediaIdx));
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        openLightboxByIndex(mediaIdx);
+      }
+    });
+
+    card.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      showCtx(e.clientX, e.clientY, item, mediaIdx, false);
+    });
+
+    card.draggable = true;
+    card.addEventListener('dragstart', (e) => {
+      const path = item.path || '';
+      if (!path) return;
+
+      let paths = [];
+      if (gSelectedPaths.has(path)) {
+        paths = Array.from(gSelectedPaths);
+      } else {
+        paths = [path];
+      }
+
+      if (window.qt && gBridge && gBridge.debug_log) {
+        gBridge.debug_log("JS DragStart Image: SelectedCount=" + gSelectedPaths.size + " Dragging=" + path + " FinalCount=" + paths.length);
+      }
+      console.log("JS DragStart Image:", paths);
+
+      const urls = paths.map(p => 'file:///' + p.replace(/\\/g, '/'));
+      const pathsJson = JSON.stringify(paths);
+
+      e.dataTransfer.setData('text/uri-list', urls.join('\r\n'));
+      e.dataTransfer.setData('text/plain', pathsJson);
+      e.dataTransfer.setData('web/mmx-paths', pathsJson);
+      e.dataTransfer.setData('application/x-mmx-type', 'file');
+
+      if (window.qt && gBridge && gBridge.set_drag_paths) {
+        gBridge.set_drag_paths(paths);
+      }
+      gCurrentDragCount = paths.length;
+
+      e.dataTransfer.effectAllowed = 'copyMove';
+
+      const previewImg = card.querySelector('img');
+      if (previewImg) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 64;
+        canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(previewImg, 0, 0, 64, 64);
+        e.dataTransfer.setDragImage(canvas, -10, -10);
+      }
+    });
+    card.addEventListener('drag', (e) => {
+      if (gBridge && gBridge.update_drag_tooltip && e.clientX > 0 && e.clientY > 0) {
+        const isCopy = e.ctrlKey || e.metaKey;
+        const count = gCurrentDragCount || 1;
+        gBridge.update_drag_tooltip(count, isCopy, gCurrentTargetFolderName);
+      }
+    });
+    card.addEventListener('dragend', (e) => {
+      if (gBridge && gBridge.hide_drag_tooltip) {
+        gBridge.hide_drag_tooltip();
+      }
+      if (window.qt && gBridge && gBridge.set_drag_paths) {
+        gBridge.set_drag_paths([]);
+      }
+      gCurrentDragCount = 0;
+      e.preventDefault();
+    });
+    return card;
+  }
+
+  const img = document.createElement('img');
+  img.className = 'thumb poster';
+  img.alt = '';
+  img.setAttribute('data-video-path', item.path || '');
+  card.appendChild(img);
+  gPosterObserver.observe(img);
+
+  const playIndicator = document.createElement('div');
+  playIndicator.className = 'video-play-indicator';
+  playIndicator.innerHTML = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'><path d='M8 5v14l11-7z'/></svg>`;
+  card.appendChild(playIndicator);
+  playIndicator.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const path = item.path || '';
+    if (!path || !gBridge) return;
+
+    if (gPlayingInplaceCard) {
+      gPlayingInplaceCard.classList.remove('playing-inplace', 'playing-inprogress', 'playing-confirmed');
+      gPlayingInplaceCard.removeAttribute('data-paused');
+    }
+
+    const rect = card.getBoundingClientRect();
+    if (gBridge.open_native_video_inplace) {
+      card.classList.add('playing-inplace', 'playing-inprogress');
+      gPlayingInplaceCard = card;
+      const shouldLoop = (item.duration && item.duration < 60) || false;
+      gBridge.open_native_video_inplace(path, rect.x, rect.y, rect.width, rect.height, true, shouldLoop, true, item.width || 0, item.height || 0);
+    } else {
+      gBridge.open_native_video(path, true, false, true, item.width || 0, item.height || 0);
+    }
+  });
+
+  card.addEventListener('mouseenter', () => {
+    if (gBridge && gBridge.preload_video && item.path) {
+      gBridge.preload_video(item.path, item.width || 0, item.height || 0);
+    }
+  });
+
+  card.setAttribute('data-path', item.path || '');
+
+  card.addEventListener('click', (e) => handleCardSelection(card, item, mediaIdx, e));
+  card.addEventListener('dblclick', () => openLightboxByIndex(mediaIdx));
+  card.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      openLightboxByIndex(mediaIdx);
+    }
+  });
+  card.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    showCtx(e.clientX, e.clientY, item, mediaIdx, false);
+  });
+
+  card.draggable = true;
+  card.addEventListener('dragstart', (e) => {
+    const path = item.path || '';
+    if (!path) return;
+
+    const paths = gSelectedPaths.has(path) ? Array.from(gSelectedPaths) : [path];
+    const urls = paths.map(p => 'file:///' + p.replace(/\\/g, '/'));
+    const pathsJson = JSON.stringify(paths);
+
+    e.dataTransfer.setData('text/uri-list', urls.join('\r\n'));
+    e.dataTransfer.setData('text/plain', pathsJson);
+    e.dataTransfer.setData('web/mmx-paths', pathsJson);
+    e.dataTransfer.setData('application/x-mmx-type', 'file');
+
+    if (window.qt && gBridge && gBridge.set_drag_paths) {
+      gBridge.set_drag_paths(paths);
+    }
+    gCurrentDragCount = paths.length;
+    e.dataTransfer.effectAllowed = 'copyMove';
+  });
+  card.addEventListener('drag', (e) => {
+    if (gBridge && gBridge.update_drag_tooltip && e.clientX > 0 && e.clientY > 0) {
+      const isCopy = e.ctrlKey || e.metaKey;
+      const count = gCurrentDragCount || 1;
+      gBridge.update_drag_tooltip(count, isCopy, gCurrentTargetFolderName);
+    }
+  });
+  card.addEventListener('dragend', () => {
+    if (gBridge && gBridge.hide_drag_tooltip) {
+      gBridge.hide_drag_tooltip();
+    }
+    if (window.qt && gBridge && gBridge.set_drag_paths) {
+      gBridge.set_drag_paths([]);
+    }
+    gCurrentDragCount = 0;
+  });
+
+  return card;
+}
+
 function renderStructuredMediaList(el, items) {
   if (gGalleryViewMode === 'details') {
     applyDetailsColumnWidths(el);
@@ -858,6 +1240,63 @@ function renderStructuredMediaList(el, items) {
     el.appendChild(createStructuredCard(item, idx));
   });
 
+  requestAnimationFrame(() => {
+    const unobserved = el.querySelectorAll('img[data-src]:not([src]), img[data-video-path]:not([src])');
+    unobserved.forEach(img => {
+      if (gPosterRequested.has(img)) return;
+      const imgSrc = img.getAttribute('data-src');
+      const path = img.getAttribute('data-video-path');
+      const item = gMedia.find(m => m.path === path || m.url === imgSrc);
+      if (imgSrc) {
+        gBackgroundQueue.push({ type: 'image', el: img, imgSrc });
+      } else if (path && item) {
+        gBackgroundQueue.push({ type: 'video', el: img, path, width: item.width, height: item.height });
+      }
+    });
+    scheduleBackgroundDrain();
+  });
+}
+
+function renderGroupedMediaList(el, items) {
+  const groups = buildGroupedItems(items);
+  el.classList.add('gallery-grouped');
+
+  groups.forEach(group => {
+    const section = document.createElement('section');
+    section.className = 'gallery-group';
+    section.dataset.groupKey = group.key;
+
+    const header = document.createElement('div');
+    header.className = 'gallery-group-header';
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'gallery-group-toggle';
+    toggle.innerHTML = `<span class="gallery-group-title">${group.label}</span><span class="gallery-group-count">${group.items.length}</span>`;
+    toggle.addEventListener('click', () => toggleGroupCollapsed(group.key));
+    toggle.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      showCtx(e.clientX, e.clientY, null, -1, false);
+    });
+    header.appendChild(toggle);
+
+    const body = document.createElement('div');
+    applyGalleryClasses(body, gGalleryViewMode);
+    body.classList.add('gallery-group-body');
+
+    if (gGalleryViewMode === 'masonry') {
+      group.items.forEach((item, idx) => body.appendChild(createMasonryCard(item, idx)));
+    } else {
+      renderStructuredMediaList(body, group.items);
+    }
+
+    section.appendChild(header);
+    section.appendChild(body);
+    el.appendChild(section);
+    toggleGroupCollapsed(group.key, gCollapsedGroupKeys.has(group.key));
+  });
+
+  renderTimelineRail(groups);
   requestAnimationFrame(() => {
     const unobserved = el.querySelectorAll('img[data-src]:not([src]), img[data-video-path]:not([src])');
     unobserved.forEach(img => {
@@ -954,6 +1393,11 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
   if (selectAllBtn) selectAllBtn.style.display = hasItem ? 'none' : 'block';
   const clearSelectionBtn = document.getElementById('ctxSelectNone');
   if (clearSelectionBtn) clearSelectionBtn.style.display = (gSelectedPaths.size > 0) ? 'block' : 'none';
+  const collapseAllBtn = document.getElementById('ctxCollapseAll');
+  const expandAllBtn = document.getElementById('ctxExpandAll');
+  const showGroupActions = gGroupBy === 'date';
+  if (collapseAllBtn) collapseAllBtn.style.display = showGroupActions ? 'block' : 'none';
+  if (expandAllBtn) expandAllBtn.style.display = showGroupActions ? 'block' : 'none';
 
   // New folder is shown only when right-clicking background (no item)
   const newFolderBtn = document.getElementById('ctxNewFolder');
@@ -1173,6 +1617,12 @@ function wireCtxMenu() {
         deselectAll();
         syncMetadataToBridge();
         break;
+      case 'ctxCollapseAll':
+        setAllGroupsCollapsed(true);
+        break;
+      case 'ctxExpandAll':
+        setAllGroupsCollapsed(false);
+        break;
     }
     hideCtx();
   });
@@ -1191,6 +1641,7 @@ function renderMediaList(items, scrollToTop = true) {
     main.scrollTop = 0;
   }
   gMedia = Array.isArray(items) ? items : [];
+  gMedia.forEach((item, idx) => { item.__galleryIndex = idx; });
   const viewItems = gMedia;
 
   resetMediaState();
@@ -1211,6 +1662,7 @@ function renderMediaList(items, scrollToTop = true) {
     div.className = 'empty';
     div.textContent = 'No media discovered yet.';
     el.appendChild(div);
+    renderTimelineRail([]);
     return;
   }
 
@@ -1219,304 +1671,23 @@ function renderMediaList(items, scrollToTop = true) {
     div.className = 'empty';
     div.textContent = 'No results.';
     el.appendChild(div);
+    renderTimelineRail([]);
+    return;
+  }
+
+  if (gGroupBy === 'date') {
+    renderGroupedMediaList(el, viewItems);
     return;
   }
 
   if (gGalleryViewMode !== 'masonry') {
     renderStructuredMediaList(el, viewItems);
+    renderTimelineRail([]);
     return;
   }
 
   viewItems.forEach((item, idx) => {
-    const card = document.createElement('div');
-    card.className = 'card loading';
-    card.tabIndex = 0;
-    if (item.width && item.height) {
-      card.style.aspectRatio = `${item.width} / ${item.height}`;
-    }
-
-    if (item.media_type === 'image') {
-      const img = document.createElement('img');
-      img.className = 'thumb';
-      // Use IntersectionObserver to control src injection accurately,
-      // avoiding browser's default loading="lazy" black-box behavior.
-      img.setAttribute('data-src', item.url);
-      img.alt = '';
-      if (item.is_animated) {
-        img.setAttribute('data-animated', 'true');
-        img.setAttribute('data-path', item.path || '');
-      }
-      card.appendChild(img);
-      gPosterObserver.observe(img);
-
-      card.setAttribute('data-path', item.path || '');
-      // ... rest of image listeners
-
-      card.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const path = item.path || '';
-
-        if (e.ctrlKey || e.metaKey) {
-          if (card.classList.contains('selected')) {
-            card.classList.remove('selected');
-            gSelectedPaths.delete(path);
-          } else {
-            card.classList.add('selected');
-            gSelectedPaths.add(path);
-          }
-          gLastSelectionIdx = idx;
-        } else if (e.shiftKey && gLastSelectionIdx !== -1) {
-          const start = Math.min(gLastSelectionIdx, idx);
-          const end = Math.max(gLastSelectionIdx, idx);
-          const cards = document.querySelectorAll('.card');
-          for (let i = start; i <= end; i++) {
-            const c = cards[i];
-            const p = c.getAttribute('data-path');
-            c.classList.add('selected');
-            if (p) gSelectedPaths.add(p);
-          }
-        } else {
-          deselectAll();
-          card.classList.add('selected');
-          gSelectedPaths.add(path);
-          gLastSelectionIdx = idx;
-        }
-
-        gLockedCard = card;
-        syncMetadataToBridge();
-      });
-      card.addEventListener('dblclick', () => openLightboxByIndex(idx));
-      card.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          openLightboxByIndex(idx);
-        }
-      });
-
-      card.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        showCtx(e.clientX, e.clientY, item, idx, false);
-      });
-
-      card.draggable = true;
-      card.addEventListener('dragstart', (e) => {
-        const path = item.path || '';
-        if (!path) return;
-
-        let paths = [];
-        if (gSelectedPaths.has(path)) {
-          paths = Array.from(gSelectedPaths);
-        } else {
-          paths = [path];
-        }
-
-        if (window.qt && gBridge && gBridge.debug_log) {
-          gBridge.debug_log("JS DragStart Image: SelectedCount=" + gSelectedPaths.size + " Dragging=" + path + " FinalCount=" + paths.length);
-        }
-        console.log("JS DragStart Image:", paths);
-
-        const urls = paths.map(p => 'file:///' + p.replace(/\\/g, '/'));
-        const pathsJson = JSON.stringify(paths);
-
-        // 1. text/uri-list (for Explorer/External)
-        e.dataTransfer.setData('text/uri-list', urls.join('\r\n'));
-
-        // 2. text/plain (Fallback and internal)
-        // We put JSON here too because WebEngine might drop custom types
-        e.dataTransfer.setData('text/plain', pathsJson);
-
-        // 3. custom formats (with web prefix for better compatibility)
-        e.dataTransfer.setData('web/mmx-paths', pathsJson);
-        e.dataTransfer.setData('application/x-mmx-type', 'file');
-
-        if (window.qt && gBridge && gBridge.set_drag_paths) {
-          gBridge.set_drag_paths(paths);
-        }
-        gCurrentDragCount = paths.length;
-
-        e.dataTransfer.effectAllowed = 'copyMove';
-
-        // Smaller Drag Thumbnail (64x64) offset to bottom-right of cursor
-        const img = card.querySelector('img');
-        if (img) {
-          const canvas = document.createElement('canvas');
-          canvas.width = 64;
-          canvas.height = 64;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0, 64, 64);
-          // -10, -10 offset means the cursor is at roughly top-left of the 64x64 thumbnail
-          e.dataTransfer.setDragImage(canvas, -10, -10);
-        }
-      });
-      card.addEventListener('drag', (e) => {
-        if (gBridge && gBridge.update_drag_tooltip && e.clientX > 0 && e.clientY > 0) {
-          const isCopy = e.ctrlKey || e.metaKey;
-          const count = gCurrentDragCount || 1;
-          gBridge.update_drag_tooltip(count, isCopy, gCurrentTargetFolderName);
-        }
-      });
-      card.addEventListener('dragend', (e) => {
-        if (gBridge && gBridge.hide_drag_tooltip) {
-          gBridge.hide_drag_tooltip();
-        }
-        if (window.qt && gBridge && gBridge.set_drag_paths) {
-          gBridge.set_drag_paths([]);
-        }
-        gCurrentDragCount = 0;
-      });
-    } else {
-      // Video tile: lazy poster load only when near viewport.
-      const img = document.createElement('img');
-      img.className = 'thumb poster';
-      img.alt = '';
-      img.setAttribute('data-video-path', item.path || '');
-
-      card.appendChild(img);
-
-      // --- Simple Play Indicator ---
-      const playIndicator = document.createElement('div');
-      playIndicator.className = 'video-play-indicator';
-      playIndicator.innerHTML = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'><path d='M8 5v14l11-7z'/></svg>`;
-      card.appendChild(playIndicator);
-      playIndicator.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const path = item.path || '';
-        if (!path || !gBridge) return;
-
-        if (gPlayingInplaceCard) {
-          gPlayingInplaceCard.classList.remove('playing-inplace', 'playing-inprogress', 'playing-confirmed');
-          gPlayingInplaceCard.removeAttribute('data-paused');
-        }
-
-        const rect = card.getBoundingClientRect();
-        if (gBridge.open_native_video_inplace) {
-          card.classList.add('playing-inplace', 'playing-inprogress');
-          gPlayingInplaceCard = card;
-          const shouldLoop = (item.duration && item.duration < 60) || false;
-          gBridge.open_native_video_inplace(path, rect.x, rect.y, rect.width, rect.height, true, shouldLoop, true, item.width || 0, item.height || 0);
-        } else {
-          gBridge.open_native_video(path, true, false, true, item.width || 0, item.height || 0);
-        }
-      });
-
-      card.addEventListener('mouseenter', () => {
-        if (gBridge && gBridge.preload_video && item.path) {
-          gBridge.preload_video(item.path, item.width || 0, item.height || 0);
-        }
-      });
-
-      if (item.path) {
-        // Fallback for path string observation if img fails to exist
-        gPosterObserver.observe(img);
-      }
-
-      card.setAttribute('data-path', item.path || '');
-      // ... rest of video listeners
-
-      card.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const path = item.path || '';
-
-        if (e.ctrlKey || e.metaKey) {
-          if (card.classList.contains('selected')) {
-            card.classList.remove('selected');
-            gSelectedPaths.delete(path);
-          } else {
-            card.classList.add('selected');
-            gSelectedPaths.add(path);
-          }
-          gLastSelectionIdx = idx;
-        } else if (e.shiftKey && gLastSelectionIdx !== -1) {
-          const start = Math.min(gLastSelectionIdx, idx);
-          const end = Math.max(gLastSelectionIdx, idx);
-          const cards = document.querySelectorAll('.card');
-          for (let i = start; i <= end; i++) {
-            const c = cards[i];
-            const p = c.getAttribute('data-path');
-            c.classList.add('selected');
-            if (p) gSelectedPaths.add(p);
-          }
-        } else {
-          deselectAll();
-          card.classList.add('selected');
-          gSelectedPaths.add(path);
-          gLastSelectionIdx = idx;
-        }
-
-        gLockedCard = card;
-        syncMetadataToBridge();
-      });
-      card.addEventListener('dblclick', () => openLightboxByIndex(idx));
-      card.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          openLightboxByIndex(idx);
-        }
-      });
-
-      card.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        showCtx(e.clientX, e.clientY, item, idx, false);
-      });
-
-      card.draggable = true;
-      card.addEventListener('dragstart', (e) => {
-        const path = item.path || '';
-        if (!path) return;
-
-        let paths = [];
-        if (gSelectedPaths.has(path)) {
-          paths = Array.from(gSelectedPaths);
-        } else {
-          paths = [path];
-        }
-
-        const urls = paths.map(p => 'file:///' + p.replace(/\\/g, '/'));
-        const pathsJson = JSON.stringify(paths);
-
-        // 1. text/uri-list
-        e.dataTransfer.setData('text/uri-list', urls.join('\r\n'));
-
-        // 2. text/plain
-        e.dataTransfer.setData('text/plain', pathsJson);
-
-        // 3. custom formats
-        e.dataTransfer.setData('web/mmx-paths', pathsJson);
-        e.dataTransfer.setData('application/x-mmx-type', 'file');
-
-        if (window.qt && gBridge && gBridge.set_drag_paths) {
-          gBridge.set_drag_paths(paths);
-        }
-        gCurrentDragCount = paths.length;
-
-        e.dataTransfer.effectAllowed = 'copyMove';
-
-        if (img) {
-          const canvas = document.createElement('canvas');
-          canvas.width = 64;
-          canvas.height = 64;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0, 64, 64);
-          e.dataTransfer.setDragImage(canvas, -10, -10);
-        }
-      });
-      card.addEventListener('drag', (e) => {
-        if (gBridge && gBridge.update_drag_tooltip && e.clientX > 0 && e.clientY > 0) {
-          const isCopy = e.ctrlKey || e.metaKey;
-          const count = gCurrentDragCount || 1;
-          gBridge.update_drag_tooltip(count, isCopy, gCurrentTargetFolderName);
-        }
-      });
-      card.addEventListener('dragend', (e) => {
-        if (gBridge && gBridge.hide_drag_tooltip) {
-          gBridge.hide_drag_tooltip();
-        }
-        if (window.qt && gBridge && gBridge.set_drag_paths) {
-          gBridge.set_drag_paths([]);
-        }
-        gCurrentDragCount = 0;
-      });
-    }
-
-    el.appendChild(card);
+    el.appendChild(createMasonryCard(item, idx));
   });
 
   // After building all cards, queue the items NOT yet visible into the
@@ -1538,6 +1709,7 @@ function renderMediaList(items, scrollToTop = true) {
     });
     scheduleBackgroundDrain();
   });
+  renderTimelineRail([]);
 }
 
 
@@ -1606,6 +1778,9 @@ document.addEventListener('DOMContentLoaded', () => {
       deselectAll();
     }
   });
+  window.addEventListener('pointerup', () => {
+    gTimelineScrubActive = false;
+  });
 
   setupCustomSelect('sortSelect', (val) => {
     gSort = val;
@@ -1616,6 +1791,29 @@ document.addEventListener('DOMContentLoaded', () => {
     gFilter = val;
     gPage = 0; // Reset page on filter change
     if (gBridge) refreshFromBridge(gBridge, true);
+  });
+
+  setupCustomSelect('groupBySelect', (val) => {
+    gGroupBy = val === 'date' ? 'date' : 'none';
+    syncGroupByUi();
+    if (gBridge && gBridge.set_setting_str) {
+      gBridge.set_setting_str('gallery.group_by', gGroupBy, function () {
+        refreshFromBridge(gBridge, true);
+      });
+    } else if (gBridge) {
+      refreshFromBridge(gBridge, true);
+    }
+  });
+
+  setupCustomSelect('dateGranularitySelect', (val) => {
+    gGroupDateGranularity = ['day', 'month', 'year'].includes(val) ? val : 'day';
+    if (gBridge && gBridge.set_setting_str) {
+      gBridge.set_setting_str('gallery.group_date_granularity', gGroupDateGranularity, function () {
+        refreshFromBridge(gBridge, true);
+      });
+    } else if (gBridge) {
+      refreshFromBridge(gBridge, true);
+    }
   });
 });
 
@@ -2693,6 +2891,11 @@ async function main() {
       const viewModeChanged = nextViewMode !== gGalleryViewMode;
       applyGalleryViewMode(nextViewMode);
       updateCtxViewState();
+      gGroupBy = ((s && s['gallery.group_by']) || 'none') === 'date' ? 'date' : 'none';
+      gGroupDateGranularity = (s && s['gallery.group_date_granularity']) || 'day';
+      setCustomSelectValue('groupBySelect', gGroupBy);
+      setCustomSelectValue('dateGranularitySelect', gGroupDateGranularity);
+      syncGroupByUi();
       if (viewModeChanged && gBridge) {
         refreshFromBridge(gBridge, false);
       }
@@ -2782,11 +2985,27 @@ async function main() {
 
     if (bridge.uiFlagChanged) {
       bridge.uiFlagChanged.connect(function (key, value) {
-        if (key === 'gallery.show_hidden' || key === 'gallery.view_mode') {
+        if (key === 'gallery.show_hidden' || key === 'gallery.view_mode' || key === 'gallery.group_by' || key === 'gallery.group_date_granularity') {
           if (key === 'gallery.view_mode' && bridge.get_settings) {
             bridge.get_settings(function (s) {
               applyGalleryViewMode((s && s['gallery.view_mode']) || 'masonry');
+              gGroupBy = ((s && s['gallery.group_by']) || 'none') === 'date' ? 'date' : 'none';
+              gGroupDateGranularity = (s && s['gallery.group_date_granularity']) || 'day';
+              setCustomSelectValue('groupBySelect', gGroupBy);
+              setCustomSelectValue('dateGranularitySelect', gGroupDateGranularity);
+              syncGroupByUi();
               updateCtxViewState();
+              refreshFromBridge(bridge, true);
+            });
+            return;
+          }
+          if ((key === 'gallery.group_by' || key === 'gallery.group_date_granularity') && bridge.get_settings) {
+            bridge.get_settings(function (s) {
+              gGroupBy = ((s && s['gallery.group_by']) || 'none') === 'date' ? 'date' : 'none';
+              gGroupDateGranularity = (s && s['gallery.group_date_granularity']) || 'day';
+              setCustomSelectValue('groupBySelect', gGroupBy);
+              setCustomSelectValue('dateGranularitySelect', gGroupDateGranularity);
+              syncGroupByUi();
               refreshFromBridge(bridge, true);
             });
             return;

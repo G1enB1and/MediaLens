@@ -41,6 +41,21 @@
               <div data-value="animated">Animated</div>
             </div>
           </div>
+          <div class="custom-select" id="groupBySelect" tabindex="0">
+            <div class="select-trigger">Group By: None</div>
+            <div class="select-options">
+              <div data-value="none" class="selected">Group By: None</div>
+              <div data-value="date">Group By: Date</div>
+            </div>
+          </div>
+          <div class="custom-select" id="dateGranularitySelect" tabindex="0" hidden>
+            <div class="select-trigger">Date: Day</div>
+            <div class="select-options">
+              <div data-value="day" class="selected">Date: Day</div>
+              <div data-value="month">Date: Month</div>
+              <div data-value="year">Date: Year</div>
+            </div>
+          </div>
           <button class="icon-btn" id="toggleLeftPanel" title="Toggle Left Sidebar">
             <img src="left-sidebar-opened.png" alt="" id="iconLeftPanel" />
           </button>
@@ -87,6 +102,8 @@
       <button class="ctx-item" id="ctxPaste">Paste</button>
       <button class="ctx-item" id="ctxSelectAll">Select all</button>
       <button class="ctx-item" id="ctxSelectNone">Clear selection</button>
+      <button class="ctx-item" id="ctxCollapseAll">Collapse all groups</button>
+      <button class="ctx-item" id="ctxExpandAll">Expand all groups</button>
       <div class="ctx-sep" id="ctxViewSep"></div>
       <button class="ctx-item ctx-view-item" data-view-mode="grid_small">Grid (Small)</button>
       <button class="ctx-item ctx-view-item" data-view-mode="grid_medium">Grid (Medium)</button>
@@ -104,6 +121,7 @@
       <main>
 
         <div class="masonry" id="mediaList"></div>
+        <div class="timeline-rail" id="timelineRail" hidden></div>
 
 
         <div class="loading" id="globalLoading">
