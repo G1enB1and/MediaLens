@@ -1271,6 +1271,10 @@ class Bridge(QObject):
                 "ui.theme_mode": str(self.settings.value("ui/theme_mode", "dark", type=str) or "dark"),
                 "metadata.display.res": bool(self.settings.value("metadata/display/res", True, type=bool)),
                 "metadata.display.size": bool(self.settings.value("metadata/display/size", True, type=bool)),
+                "metadata.display.exifdatetaken": bool(self.settings.value("metadata/display/exifdatetaken", False, type=bool)),
+                "metadata.display.metadatadate": bool(self.settings.value("metadata/display/metadatadate", False, type=bool)),
+                "metadata.display.filecreateddate": bool(self.settings.value("metadata/display/filecreateddate", False, type=bool)),
+                "metadata.display.filemodifieddate": bool(self.settings.value("metadata/display/filemodifieddate", False, type=bool)),
                 "metadata.display.description": bool(self.settings.value("metadata/display/description", True, type=bool)),
                 "metadata.display.tags": bool(self.settings.value("metadata/display/tags", True, type=bool)),
                 "metadata.display.notes": bool(self.settings.value("metadata/display/notes", True, type=bool)),
@@ -2161,7 +2165,11 @@ class Bridge(QObject):
                 "embedded_tags": meta.get("embedded_tags") or "", "embedded_comments": meta.get("embedded_comments") or "",
                 "ai_prompt": ai_prompt, "ai_negative_prompt": ai_negative_prompt,
                 "ai_params": ai_params, "ai_tool_summary": ai_tool_summary,
-                "tags": list_media_tags(self.conn, m["id"]), "has_metadata": bool(meta or ai_meta)
+                "tags": list_media_tags(self.conn, m["id"]), "has_metadata": bool(meta or ai_meta),
+                "exif_date_taken": m.get("exif_date_taken") or "",
+                "metadata_date": m.get("metadata_date") or "",
+                "file_created_time": m.get("file_created_time") or "",
+                "modified_time": m.get("modified_time") or "",
             }
             payload.update(ai_ui)
             return payload
@@ -3315,6 +3323,18 @@ class MainWindow(QMainWindow):
 
         self.meta_res_lbl = QLabel("")
         self.meta_res_lbl.setObjectName("metaResLabel")
+
+        self.meta_exif_date_taken_lbl = QLabel("")
+        self.meta_exif_date_taken_lbl.setObjectName("metaExifDateTakenLabel")
+
+        self.meta_metadata_date_lbl = QLabel("")
+        self.meta_metadata_date_lbl.setObjectName("metaMetadataDateLabel")
+
+        self.meta_file_created_date_lbl = QLabel("")
+        self.meta_file_created_date_lbl.setObjectName("metaFileCreatedDateLabel")
+
+        self.meta_file_modified_date_lbl = QLabel("")
+        self.meta_file_modified_date_lbl.setObjectName("metaFileModifiedDateLabel")
         
         self.meta_fields_layout = QVBoxLayout()
         self.meta_fields_layout.setSpacing(6)
@@ -4827,6 +4847,10 @@ class MainWindow(QMainWindow):
         }
         show_res = "res" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "res", True)
         show_size = "size" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "size", True)
+        show_exif_date_taken = "exifdatetaken" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "exifdatetaken", False)
+        show_metadata_date = "metadatadate" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "metadatadate", False)
+        show_file_created_date = "filecreateddate" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "filecreateddate", False)
+        show_file_modified_date = "filemodifieddate" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "filemodifieddate", False)
         show_duration = "duration" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "duration", True)
         show_fps = "fps" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "fps", True)
         show_codec = "codec" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "codec", True)
@@ -4868,6 +4892,10 @@ class MainWindow(QMainWindow):
 
         self.meta_res_lbl.setVisible(not is_bulk and show_res)
         self.meta_size_lbl.setVisible(not is_bulk and show_size)
+        self.meta_exif_date_taken_lbl.setVisible(not is_bulk and show_exif_date_taken)
+        self.meta_metadata_date_lbl.setVisible(not is_bulk and show_metadata_date)
+        self.meta_file_created_date_lbl.setVisible(not is_bulk and show_file_created_date)
+        self.meta_file_modified_date_lbl.setVisible(not is_bulk and show_file_modified_date)
         self.meta_duration_lbl.setVisible(not is_bulk and show_duration)
         self.meta_fps_lbl.setVisible(not is_bulk and show_fps)
         self.meta_codec_lbl.setVisible(not is_bulk and show_codec)
@@ -4934,6 +4962,10 @@ class MainWindow(QMainWindow):
         # Set default text prefixes so they show even if blank
         self.meta_res_lbl.setText("Resolution: ")
         self.meta_size_lbl.setText("File Size: ")
+        self.meta_exif_date_taken_lbl.setText("EXIF Date Taken: ")
+        self.meta_metadata_date_lbl.setText("Metadata Date: ")
+        self.meta_file_created_date_lbl.setText("File Created Date: ")
+        self.meta_file_modified_date_lbl.setText("File Modified Date: ")
         self.meta_duration_lbl.setText("Duration: ")
         self.meta_fps_lbl.setText("FPS: ")
         self.meta_codec_lbl.setText("Codec: ")
@@ -5027,6 +5059,18 @@ class MainWindow(QMainWindow):
                 self.meta_ai_raw_paths_edit.setPlainText(data.get("ai_raw_paths_summary", ""))
                 
                 self.meta_tags.setText(", ".join(data.get("tags", [])))
+                exif_date_taken = self._format_sidebar_datetime(data.get("exif_date_taken"))
+                if exif_date_taken:
+                    self.meta_exif_date_taken_lbl.setText(f"EXIF Date Taken: {exif_date_taken}")
+                metadata_date = self._format_sidebar_datetime(data.get("metadata_date"))
+                if metadata_date:
+                    self.meta_metadata_date_lbl.setText(f"Metadata Date: {metadata_date}")
+                file_created_date = self._format_sidebar_datetime(data.get("file_created_time"))
+                if file_created_date:
+                    self.meta_file_created_date_lbl.setText(f"File Created Date: {file_created_date}")
+                file_modified_date = self._format_sidebar_datetime(data.get("modified_time"))
+                if file_modified_date:
+                    self.meta_file_modified_date_lbl.setText(f"File Modified Date: {file_modified_date}")
                 
             except Exception:
                 pass
@@ -5221,7 +5265,7 @@ class MainWindow(QMainWindow):
         return "video"
 
     def _metadata_group_fields(self, kind: str) -> dict[str, list[str]]:
-        image_general = ["res", "size", "description", "tags", "notes", "embeddedtags", "embeddedcomments"]
+        image_general = ["res", "size", "exifdatetaken", "metadatadate", "filecreateddate", "filemodifieddate", "description", "tags", "notes", "embeddedtags", "embeddedcomments"]
         image_camera = ["camera", "location", "iso", "shutter", "aperture", "software", "lens", "dpi"]
         image_ai = [
             "aistatus", "aisource", "aifamilies", "aidetectionreasons", "ailoras", "aimodel", "aicheckpoint",
@@ -5230,12 +5274,12 @@ class MainWindow(QMainWindow):
         ]
         if kind == "video":
             return {
-                "general": ["res", "size", "duration", "fps", "codec", "audio", "description", "tags", "notes"],
+                "general": ["res", "size", "exifdatetaken", "metadatadate", "filecreateddate", "filemodifieddate", "duration", "fps", "codec", "audio", "description", "tags", "notes"],
                 "ai": image_ai,
             }
         if kind == "gif":
             return {
-                "general": ["res", "size", "duration", "fps", "description", "tags", "notes", "embeddedtags", "embeddedcomments"],
+                "general": ["res", "size", "exifdatetaken", "metadatadate", "filecreateddate", "filemodifieddate", "duration", "fps", "description", "tags", "notes", "embeddedtags", "embeddedcomments"],
                 "ai": image_ai,
             }
         return {"general": image_general, "camera": image_camera, "ai": image_ai}
@@ -5296,6 +5340,21 @@ class MainWindow(QMainWindow):
             return bool(val)
         except Exception:
             return default
+
+    @staticmethod
+    def _format_sidebar_datetime(value: str | None) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            dt = datetime.fromisoformat(text)
+            if dt.tzinfo is not None:
+                dt = dt.astimezone()
+            return dt.strftime("%Y-%m-%d %I:%M %p").lstrip("0").replace(" 0", " ")
+        except Exception:
+            return str(value or "")
 
     @staticmethod
     def _format_duration_seconds(seconds: float | None) -> str:
@@ -5380,6 +5439,10 @@ class MainWindow(QMainWindow):
         self._meta_groups = {
             "res": [self.meta_res_lbl],
             "size": [self.meta_size_lbl],
+            "exifdatetaken": [self.meta_exif_date_taken_lbl],
+            "metadatadate": [self.meta_metadata_date_lbl],
+            "filecreateddate": [self.meta_file_created_date_lbl],
+            "filemodifieddate": [self.meta_file_modified_date_lbl],
             "duration": [self.meta_duration_lbl],
             "fps": [self.meta_fps_lbl],
             "codec": [self.meta_codec_lbl],
@@ -5454,6 +5517,10 @@ class MainWindow(QMainWindow):
         self.meta_path_lbl.setText("Folder: ")
         self.meta_size_lbl.setText("File Size: ")
         self.meta_res_lbl.setText("Resolution: ")
+        self.meta_exif_date_taken_lbl.setText("EXIF Date Taken: ")
+        self.meta_metadata_date_lbl.setText("Metadata Date: ")
+        self.meta_file_created_date_lbl.setText("File Created Date: ")
+        self.meta_file_modified_date_lbl.setText("File Modified Date: ")
         self.meta_duration_lbl.setText("Duration: ")
         self.meta_fps_lbl.setText("FPS: ")
         self.meta_codec_lbl.setText("Codec: ")
@@ -5469,6 +5536,10 @@ class MainWindow(QMainWindow):
         }
         self.meta_res_lbl.setVisible("res" in active_fields and self._is_metadata_enabled_for_kind(kind, "res", True))
         self.meta_size_lbl.setVisible("size" in active_fields and self._is_metadata_enabled_for_kind(kind, "size", True))
+        self.meta_exif_date_taken_lbl.setVisible("exifdatetaken" in active_fields and self._is_metadata_enabled_for_kind(kind, "exifdatetaken", False))
+        self.meta_metadata_date_lbl.setVisible("metadatadate" in active_fields and self._is_metadata_enabled_for_kind(kind, "metadatadate", False))
+        self.meta_file_created_date_lbl.setVisible("filecreateddate" in active_fields and self._is_metadata_enabled_for_kind(kind, "filecreateddate", False))
+        self.meta_file_modified_date_lbl.setVisible("filemodifieddate" in active_fields and self._is_metadata_enabled_for_kind(kind, "filemodifieddate", False))
         self.meta_duration_lbl.setVisible("duration" in active_fields and self._is_metadata_enabled_for_kind(kind, "duration", True))
         self.meta_fps_lbl.setVisible("fps" in active_fields and self._is_metadata_enabled_for_kind(kind, "fps", True))
         self.meta_codec_lbl.setVisible("codec" in active_fields and self._is_metadata_enabled_for_kind(kind, "codec", True))

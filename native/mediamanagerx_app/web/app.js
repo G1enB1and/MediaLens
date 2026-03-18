@@ -48,7 +48,10 @@ const METADATA_SETTINGS_CONFIG = {
       general: {
         label: 'General',
         fields: [
-          ['res', 'Resolution', true], ['size', 'File Size', true], ['description', 'Description', true],
+          ['res', 'Resolution', true], ['size', 'File Size', true],
+          ['exifdatetaken', 'EXIF Date Taken', false], ['metadatadate', 'Metadata Date', false],
+          ['filecreateddate', 'File Created Date', false], ['filemodifieddate', 'File Modified Date', false],
+          ['description', 'Description', true],
           ['tags', 'Tags', true], ['notes', 'Notes', true], ['embeddedtags', 'Embedded Tags', true],
           ['embeddedcomments', 'Embedded Comments', true],
         ],
@@ -81,7 +84,10 @@ const METADATA_SETTINGS_CONFIG = {
       general: {
         label: 'General',
         fields: [
-          ['res', 'Resolution', true], ['size', 'File Size', true], ['duration', 'Duration', true], ['fps', 'Frames Per Second', true],
+          ['res', 'Resolution', true], ['size', 'File Size', true],
+          ['exifdatetaken', 'EXIF Date Taken', false], ['metadatadate', 'Metadata Date', false],
+          ['filecreateddate', 'File Created Date', false], ['filemodifieddate', 'File Modified Date', false],
+          ['duration', 'Duration', true], ['fps', 'Frames Per Second', true],
           ['codec', 'Codec', true], ['audio', 'Audio', true], ['description', 'Description', true], ['tags', 'Tags', true], ['notes', 'Notes', true],
         ],
       },
@@ -103,7 +109,10 @@ const METADATA_SETTINGS_CONFIG = {
       general: {
         label: 'General',
         fields: [
-          ['res', 'Resolution', true], ['size', 'File Size', true], ['duration', 'Duration', true], ['fps', 'Frames Per Second', true],
+          ['res', 'Resolution', true], ['size', 'File Size', true],
+          ['exifdatetaken', 'EXIF Date Taken', false], ['metadatadate', 'Metadata Date', false],
+          ['filecreateddate', 'File Created Date', false], ['filemodifieddate', 'File Modified Date', false],
+          ['duration', 'Duration', true], ['fps', 'Frames Per Second', true],
           ['description', 'Description', true], ['tags', 'Tags', true], ['notes', 'Notes', true], ['embeddedtags', 'Embedded Tags', true],
           ['embeddedcomments', 'Embedded Comments', true],
         ],
