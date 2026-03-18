@@ -3325,6 +3325,13 @@ class MainWindow(QMainWindow):
         self.details_header_lbl.setObjectName("detailsHeaderLabel")
         right_layout.addWidget(self.details_header_lbl)
 
+        self.meta_empty_state_lbl = QLabel("Select a file to show details")
+        self.meta_empty_state_lbl.setObjectName("metaEmptyStateLabel")
+        self.meta_empty_state_lbl.setWordWrap(True)
+        self.meta_empty_state_lbl.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        right_layout.addWidget(self.meta_empty_state_lbl)
+        self.meta_empty_state_lbl.setVisible(False)
+
         self.scroll_area.setWidget(self.scroll_container)
         outer_right_layout.addWidget(self.scroll_area)
 
@@ -4030,6 +4037,85 @@ class MainWindow(QMainWindow):
             widget.setSizePolicy(QSizePolicy.Policy.Ignored, widget.sizePolicy().verticalPolicy())
             widget.updateGeometry()
 
+    def _metadata_content_widgets(self) -> list[QWidget]:
+        widgets: list[QWidget] = [
+            self.preview_header_row,
+            self.preview_image_lbl,
+            self.preview_sep,
+            self.details_header_lbl,
+            self.lbl_fn_cap,
+            self.meta_filename_edit,
+            self.meta_path_lbl,
+            self.btn_clear_bulk_tags,
+            self.btn_save_meta,
+            self.btn_import_exif,
+            self.btn_merge_hidden_meta,
+            self.btn_save_to_exif,
+            self.meta_status_lbl,
+        ]
+        seen: set[int] = set()
+        for group_widgets in getattr(self, "_meta_groups", {}).values():
+            for widget in group_widgets:
+                ident = id(widget)
+                if ident in seen:
+                    continue
+                seen.add(ident)
+                widgets.append(widget)
+        return widgets
+
+    def _set_metadata_empty_state(self, visible: bool) -> None:
+        if not hasattr(self, "meta_empty_state_lbl"):
+            return
+        self.meta_empty_state_lbl.setVisible(visible)
+        if visible:
+            self._clear_preview_media()
+            self.preview_image_lbl.setText("")
+            for widget in self._metadata_content_widgets():
+                widget.setVisible(False)
+
+    def _configure_bulk_tag_editor(self, selection_count: int) -> None:
+        self.preview_header_row.setVisible(False)
+        self.preview_image_lbl.setVisible(False)
+        self.preview_sep.setVisible(False)
+        self.details_header_lbl.setVisible(False)
+        self.lbl_fn_cap.setVisible(False)
+        self.meta_filename_edit.setVisible(False)
+        self.meta_path_lbl.setVisible(False)
+        self.btn_import_exif.setVisible(False)
+        self.btn_merge_hidden_meta.setVisible(False)
+        self.lbl_tags_cap.setText("Tags (comma or semicolon separated):")
+        self.lbl_tags_cap.setVisible(True)
+        self.meta_tags.setVisible(True)
+        self.meta_tags.setPlaceholderText("tag1, tag2, tag3")
+        self.btn_save_meta.setVisible(True)
+        self.btn_save_meta.setProperty("baseText", f"Save Tags to DB for {selection_count} Items")
+        self.btn_clear_bulk_tags.setVisible(True)
+        self.btn_clear_bulk_tags.setProperty("baseText", f"Clear Tags from DB for {selection_count} Items")
+        self.btn_save_to_exif.setVisible(True)
+        self.btn_save_to_exif.setProperty("baseText", f"Embed Tags in {selection_count} Files")
+        self.btn_save_to_exif.setToolTip("Write only the entered tags into each selected file's embedded metadata")
+        self._update_sidebar_action_buttons()
+
+    @staticmethod
+    def _normalize_tag_list(text: str) -> list[str]:
+        parts = re.split(r"[;,]", str(text or ""))
+        return [part.strip() for part in parts if part.strip()]
+
+    @staticmethod
+    def _merge_tag_lists(existing: list[str] | None, new_tags: list[str] | None) -> list[str]:
+        merged: list[str] = []
+        seen: set[str] = set()
+        for tag in list(existing or []) + list(new_tags or []):
+            normalized = str(tag or "").strip()
+            if not normalized:
+                continue
+            key = normalized.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(normalized)
+        return merged
+
     def _clear_preview_media(self) -> None:
         if self._preview_movie is not None:
             self._preview_movie.stop()
@@ -4164,7 +4250,7 @@ class MainWindow(QMainWindow):
 
         is_bulk = len(paths) > 1
         tags_str = self.meta_tags.text()
-        tags = [t.strip() for t in tags_str.split(",") if t.strip()]
+        tags = self._normalize_tag_list(tags_str)
 
         if not is_bulk:
             path = paths[0]
@@ -4199,13 +4285,12 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         else:
-            # Bulk mode: Append tags to all
-            if tags:
-                for p in paths:
-                    try:
-                        self.bridge.attach_media_tags(p, tags)
-                    except Exception:
-                        pass
+            for p in paths:
+                try:
+                    existing = self.bridge.get_media_metadata(p).get("tags", [])
+                    self.bridge.set_media_tags(p, self._merge_tag_lists(existing, tags))
+                except Exception:
+                    pass
 
         # --- Show confirmation then auto-clear after 3s ---
         self.meta_status_lbl.setText(f"✓ {'Tags' if is_bulk else 'Changes'} saved")
@@ -4701,9 +4786,69 @@ class MainWindow(QMainWindow):
         self.meta_embedded_comments_edit.setPlainText(merged)
         self._save_to_exif_cmd()
 
+    def _embed_bulk_tags_to_files(self, paths: list[str], tags: list[str]) -> None:
+        if not paths:
+            return
+        if not tags:
+            self.meta_status_lbl.setText("Enter tags to embed.")
+            return
+
+        original_path = getattr(self, "_current_path", None)
+        original_paths = list(getattr(self, "_current_paths", []))
+        original_embedded_tags = self.meta_embedded_tags_edit.text()
+        original_embedded_comments = self.meta_embedded_comments_edit.toPlainText()
+
+        completed = 0
+        skipped = 0
+        try:
+            for path in paths:
+                p = Path(path)
+                if p.suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp", ".avif"}:
+                    skipped += 1
+                    continue
+                existing_comment = ""
+                existing_tags: list[str] = []
+                try:
+                    from PIL import Image
+                    with Image.open(str(p)) as img:
+                        visible_meta = self._harvest_windows_visible_metadata(img) or {}
+                        existing_comment = visible_meta.get("comment", "") or ""
+                        existing_tags = [str(tag).strip() for tag in visible_meta.get("tags", []) if str(tag).strip()]
+                except Exception:
+                    existing_comment = ""
+                    existing_tags = []
+                merged_tags = self._merge_tag_lists(existing_tags, tags)
+                self.meta_embedded_tags_edit.setText("; ".join(merged_tags))
+                self.meta_embedded_comments_edit.setPlainText(existing_comment)
+                self._current_path = path
+                self._current_paths = [path]
+                try:
+                    self._save_to_exif_cmd()
+                    completed += 1
+                except Exception:
+                    skipped += 1
+        finally:
+            self._current_path = original_path
+            self._current_paths = original_paths
+            self.meta_embedded_tags_edit.setText(original_embedded_tags)
+            self.meta_embedded_comments_edit.setPlainText(original_embedded_comments)
+
+        if completed:
+            message = f"✓ Tags embedded in {completed} file{'s' if completed != 1 else ''}"
+            if skipped:
+                message += f" ({skipped} skipped)"
+            self.meta_status_lbl.setText(message)
+            QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
+        elif skipped:
+            self.meta_status_lbl.setText("No selected files support embedded tags.")
+
     @Slot()
     def _save_to_exif_cmd(self) -> None:
         """Embed tags and comments from the 'Embedded' UI fields INTO the file."""
+        paths = getattr(self, "_current_paths", [])
+        if len(paths) > 1:
+            self._embed_bulk_tags_to_files(paths, self._normalize_tag_list(self.meta_tags.text()))
+            return
         if not self._current_path: return
         p = Path(self._current_path)
         if not p.exists(): return
@@ -4927,12 +5072,24 @@ class MainWindow(QMainWindow):
             return
 
         is_bulk = len(paths) > 1
+        self._set_metadata_empty_state(False)
         self._current_paths = paths # Store list for bulk save
         self._current_path = paths[0] if not is_bulk else None
         self._refresh_preview_for_path(paths[0] if not is_bulk else None)
         metadata_kind = self._metadata_kind_for_path(paths[0] if paths else None)
         self._current_metadata_kind = metadata_kind
         self._setup_metadata_layout(metadata_kind)
+
+        self.preview_header_row.setVisible(not is_bulk and self.bridge._preview_above_details_enabled())
+        self.preview_image_lbl.setVisible(not is_bulk and self.bridge._preview_above_details_enabled())
+        self.preview_sep.setVisible(not is_bulk and self.bridge._preview_above_details_enabled())
+        self.details_header_lbl.setVisible(not is_bulk)
+        self.btn_save_meta.setVisible(True)
+        self.btn_clear_bulk_tags.setVisible(False)
+        self.btn_import_exif.setVisible(not is_bulk)
+        self.btn_merge_hidden_meta.setVisible(not is_bulk)
+        self.btn_save_to_exif.setVisible(not is_bulk)
+        self.meta_status_lbl.setVisible(True)
 
         # Toggle UI for bulk mode
         self.lbl_fn_cap.setVisible(not is_bulk)
@@ -5296,13 +5453,14 @@ class MainWindow(QMainWindow):
                     self.meta_audio_lbl.setText(f"Audio: {video_meta['audio']}")
         
             self.btn_save_meta.setProperty("baseText", "Save Changes to Database")
+            self.btn_clear_bulk_tags.setProperty("baseText", "Clear All Tags")
+            self.btn_save_to_exif.setProperty("baseText", "Embed Data in File")
+            self.btn_save_to_exif.setToolTip("Write tags and comments from these fields into the file's embedded metadata")
             self._update_sidebar_action_buttons()
         else:
             # Bulk mode
             self.meta_tags.setText("")
-            self.meta_tags.setPlaceholderText("Add tags to all selected...")
-            self.btn_save_meta.setProperty("baseText", f"Add Tags to {len(paths)} Items")
-            self._update_sidebar_action_buttons()
+            self._configure_bulk_tag_editor(len(paths))
 
         self.meta_filename_edit.blockSignals(False)
         self.meta_desc.blockSignals(False)
@@ -5778,6 +5936,7 @@ class MainWindow(QMainWindow):
         self.meta_notes.setPlainText("")
         self.meta_tags.setText("")
         self.meta_status_lbl.setText("")
+        self._set_metadata_empty_state(True)
 
     def _on_splitter_moved(self) -> None:
         """Save splitter state and re-apply card selection if the resize caused a deselect."""
