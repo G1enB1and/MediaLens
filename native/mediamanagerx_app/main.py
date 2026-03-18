@@ -2148,6 +2148,16 @@ class Bridge(QObject):
                 m = get_media_by_path(self.conn, path)
                 if not m:
                     return {}
+            p = Path(path)
+            if p.exists():
+                try:
+                    stat = p.stat()
+                    if not m.get("file_created_time"):
+                        m["file_created_time"] = datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc).replace(microsecond=0).isoformat()
+                    if not m.get("modified_time"):
+                        m["modified_time"] = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat()
+                except Exception:
+                    pass
             meta = get_media_metadata(self.conn, m["id"]) or {}
             ai_meta = get_media_ai_metadata(self.conn, m["id"]) or {}
             if not ai_meta:
@@ -2183,6 +2193,21 @@ class Bridge(QObject):
             m = get_media_by_path(self.conn, path)
             if m: upsert_media_metadata(self.conn, m["id"], title, desc, notes, etags, ecomm, aip, ainp, aiparam)
         except Exception: pass
+
+    @Slot(str, str, str)
+    def update_media_dates(self, path: str, exif_date_taken: str, metadata_date: str) -> None:
+        from app.mediamanager.db.media_repo import get_media_by_path, update_media_dates
+        try:
+            m = get_media_by_path(self.conn, path)
+            if m:
+                update_media_dates(
+                    self.conn,
+                    m["id"],
+                    exif_date_taken=exif_date_taken.strip() or None,
+                    metadata_date=metadata_date.strip() or None,
+                )
+        except Exception:
+            pass
 
     @Slot(str, list)
     def set_media_tags(self, path: str, tags: list) -> None:
@@ -3324,11 +3349,17 @@ class MainWindow(QMainWindow):
         self.meta_res_lbl = QLabel("")
         self.meta_res_lbl.setObjectName("metaResLabel")
 
-        self.meta_exif_date_taken_lbl = QLabel("")
-        self.meta_exif_date_taken_lbl.setObjectName("metaExifDateTakenLabel")
+        self.lbl_exif_date_taken_cap = QLabel("Date Taken:")
+        self.lbl_exif_date_taken_cap.setObjectName("metaExifDateTakenCaption")
+        self.meta_exif_date_taken_edit = QLineEdit()
+        self.meta_exif_date_taken_edit.setObjectName("metaExifDateTakenEdit")
+        self.meta_exif_date_taken_edit.setPlaceholderText("YYYY-MM-DD HH:MM:SS")
 
-        self.meta_metadata_date_lbl = QLabel("")
-        self.meta_metadata_date_lbl.setObjectName("metaMetadataDateLabel")
+        self.lbl_metadata_date_cap = QLabel("Date Acquired:")
+        self.lbl_metadata_date_cap.setObjectName("metaMetadataDateCaption")
+        self.meta_metadata_date_edit = QLineEdit()
+        self.meta_metadata_date_edit.setObjectName("metaMetadataDateEdit")
+        self.meta_metadata_date_edit.setPlaceholderText("YYYY-MM-DD HH:MM:SS")
 
         self.meta_file_created_date_lbl = QLabel("")
         self.meta_file_created_date_lbl.setObjectName("metaFileCreatedDateLabel")
@@ -4157,10 +4188,13 @@ class MainWindow(QMainWindow):
             ai_prompt = self.meta_ai_prompt_edit.toPlainText()
             ai_neg_prompt = self.meta_ai_negative_prompt_edit.toPlainText()
             ai_params = self.meta_ai_params_edit.toPlainText()
+            exif_date_taken = self._normalize_metadata_datetime(self.meta_exif_date_taken_edit.text())
+            metadata_date = self._normalize_metadata_datetime(self.meta_metadata_date_edit.text())
 
             try:
                 # Save Changes is DB-only. Embedded fields are file-only and should not be persisted here.
                 self.bridge.update_media_metadata(path, "", desc, notes, "", "", ai_prompt, ai_neg_prompt, ai_params)
+                self.bridge.update_media_dates(path, exif_date_taken, metadata_date)
                 self.bridge.set_media_tags(path, tags)
             except Exception:
                 pass
@@ -4337,7 +4371,7 @@ class MainWindow(QMainWindow):
         return str(val).strip()
 
     @staticmethod
-    def _build_png_xmp_packet(comment: str, tags: list[str]) -> str:
+    def _build_png_xmp_packet(comment: str, tags: list[str], exif_date_taken: str = "", metadata_date: str = "") -> str:
         """Build a minimal XMP packet for PNG that Windows/tools can parse.
 
         Windows Explorer reliably reads PNG tags from XMP dc:subject on many systems.
@@ -4347,6 +4381,8 @@ class MainWindow(QMainWindow):
         safe_comment = html.escape(comment or "", quote=False)
         safe_tags = [html.escape(t, quote=False) for t in (tags or []) if str(t).strip()]
         tag_items = "".join(f"<rdf:li>{t}</rdf:li>" for t in safe_tags)
+        safe_exif_date_taken = html.escape(exif_date_taken or "", quote=False)
+        safe_metadata_date = html.escape(metadata_date or "", quote=False)
 
         parts = []
         if safe_comment:
@@ -4360,6 +4396,12 @@ class MainWindow(QMainWindow):
             )
         if tag_items:
             parts.append(f"<dc:subject><rdf:Bag>{tag_items}</rdf:Bag></dc:subject>")
+        if safe_exif_date_taken:
+            parts.append(f"<exif:DateTimeOriginal>{safe_exif_date_taken}</exif:DateTimeOriginal>")
+        if safe_metadata_date:
+            parts.append(f"<xmp:CreateDate>{safe_metadata_date}</xmp:CreateDate>")
+            parts.append(f"<xmp:MetadataDate>{safe_metadata_date}</xmp:MetadataDate>")
+            parts.append(f"<MicrosoftPhoto:DateAcquired>{safe_metadata_date}</MicrosoftPhoto:DateAcquired>")
 
         if not parts:
             return ""
@@ -4371,7 +4413,9 @@ class MainWindow(QMainWindow):
             "<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">"
             "<rdf:Description rdf:about=\"\" "
             "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" "
-            "xmlns:exif=\"http://ns.adobe.com/exif/1.0/\">"
+            "xmlns:exif=\"http://ns.adobe.com/exif/1.0/\" "
+            "xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\" "
+            "xmlns:MicrosoftPhoto=\"http://ns.microsoft.com/photo/1.2/\">"
             f"{body}"
             "</rdf:Description>"
             "</rdf:RDF>"
@@ -4506,6 +4550,7 @@ class MainWindow(QMainWindow):
             ai_tool_summary = ""
             if media:
                 inspect_and_persist_if_supported(self.bridge.conn, media["id"], path, media.get("media_type"))
+                media = get_media_by_path(self.bridge.conn, path) or media
                 ai_meta = get_media_ai_metadata(self.bridge.conn, media["id"]) or {}
                 ai_ui = build_media_ai_ui_fields(ai_meta)
                 ai_tool_summary = summarize_media_ai_tool_metadata(ai_meta) or ""
@@ -4522,7 +4567,8 @@ class MainWindow(QMainWindow):
                     ai_ui.get("ai_raw_paths_summary"),
                 ]
             )
-            if not visible["comment"] and not visible["tags"] and not res["tool_metadata"] and not has_pipeline_data:
+            has_date_data = bool((media or {}).get("exif_date_taken") or (media or {}).get("metadata_date"))
+            if not visible["comment"] and not visible["tags"] and not res["tool_metadata"] and not has_pipeline_data and not has_date_data:
                 self.meta_status_lbl.setText("No metadata found in file.")
                 return
 
@@ -4538,6 +4584,14 @@ class MainWindow(QMainWindow):
             self.meta_ai_provenance_edit.setPlainText(ai_ui.get("ai_provenance_summary", ""))
             self.meta_ai_character_cards_edit.setPlainText(ai_ui.get("ai_character_cards_summary", ""))
             self.meta_ai_raw_paths_edit.setPlainText(ai_ui.get("ai_raw_paths_summary", ""))
+            self.meta_exif_date_taken_edit.setText(self._format_editable_datetime((media or {}).get("exif_date_taken")))
+            self.meta_metadata_date_edit.setText(self._format_editable_datetime((media or {}).get("metadata_date")))
+            file_created_text = self._format_sidebar_datetime((media or {}).get("file_created_time"))
+            if file_created_text:
+                self.meta_file_created_date_lbl.setText(f"Date Created: {file_created_text}")
+            file_modified_text = self._format_sidebar_datetime((media or {}).get("modified_time"))
+            if file_modified_text:
+                self.meta_file_modified_date_lbl.setText(f"Date Modified: {file_modified_text}")
 
             # 2. Status update
             self.meta_status_lbl.setText("Metadata imported to UI. Click 'Save Changes' to persist.")
@@ -4666,6 +4720,12 @@ class MainWindow(QMainWindow):
             # Isolation Rule: Only use the 'Embedded' UI boxes for actual embedding
             tags_raw = self.meta_embedded_tags_edit.text().strip()
             comm_raw = self.meta_embedded_comments_edit.toPlainText().strip()
+            exif_date_taken_raw = self.meta_exif_date_taken_edit.text().strip()
+            metadata_date_raw = self.meta_metadata_date_edit.text().strip()
+            exif_date_taken_exif = self._format_exif_datetime(exif_date_taken_raw)
+            metadata_date_exif = self._format_exif_datetime(metadata_date_raw)
+            exif_date_taken_xmp = self._format_xmp_datetime(exif_date_taken_raw)
+            metadata_date_xmp = self._format_xmp_datetime(metadata_date_raw)
             
             with Image.open(str(p)) as img:
                 if ext == ".png":
@@ -4696,12 +4756,20 @@ class MainWindow(QMainWindow):
                         pnginfo.add_text("Tags", win_tags)
                         if not comm_raw:
                             pnginfo.add_text("Subject", win_tags)
+                    png_date_taken_text = exif_date_taken_xmp or metadata_date_xmp
+                    if png_date_taken_text:
+                        pnginfo.add_text("Creation Time", png_date_taken_text)
 
                     # PNG + Windows Explorer: tags are often read from XMP dc:subject
                     # rather than PNG tEXt or EXIF XP* fields. Emit XMP in addition to
                     # legacy keys for maximum compatibility.
                     parsed_tags = [t.strip() for t in win_tags.split(";") if t.strip()]
-                    xmp_packet = self._build_png_xmp_packet(comm_raw, parsed_tags)
+                    xmp_packet = self._build_png_xmp_packet(
+                        comm_raw,
+                        parsed_tags,
+                        exif_date_taken=exif_date_taken_xmp,
+                        metadata_date=metadata_date_xmp,
+                    )
                     if xmp_packet:
                         try:
                             pnginfo.add_itxt("XML:com.adobe.xmp", xmp_packet)
@@ -4713,7 +4781,7 @@ class MainWindow(QMainWindow):
 
                     # EXIF for Windows 10/11 Explorer compatibility
                     exif = img.getexif()
-                    for tag_id in (0x9C9C, 270, 37510, 0x9C9E, 0x9C9F):
+                    for tag_id in (0x9C9C, 270, 306, 36867, 36868, 37510, 0x9C9E, 0x9C9F):
                         try:
                             del exif[tag_id]
                         except Exception:
@@ -4731,6 +4799,11 @@ class MainWindow(QMainWindow):
                         exif[0x9C9E] = (win_tags + "\x00").encode("utf-16le")
                         # 0x9C9F = XPSubject
                         exif[0x9C9F] = (win_tags + "\x00").encode("utf-16le")
+                    if metadata_date_exif:
+                        exif[306] = metadata_date_exif
+                        exif[36868] = metadata_date_exif
+                    if exif_date_taken_exif:
+                        exif[36867] = exif_date_taken_exif
 
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".png", dir=p.parent) as tmp:
                         tmp_path = Path(tmp.name)
@@ -4759,6 +4832,11 @@ class MainWindow(QMainWindow):
                         exif[0x9C9E] = (win_tags + "\x00").encode("utf-16le")
                         # Tag 0x9C9F = XPSubject
                         exif[0x9C9F] = (win_tags + "\x00").encode("utf-16le")
+                    if metadata_date_exif:
+                        exif[306] = metadata_date_exif
+                        exif[36868] = metadata_date_exif
+                    if exif_date_taken_exif:
+                        exif[36867] = exif_date_taken_exif
                     
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg", dir=p.parent) as tmp:
                         tmp_path = Path(tmp.name)
@@ -4775,6 +4853,11 @@ class MainWindow(QMainWindow):
                         exif[0x9C9C] = (comm_raw + "\x00").encode("utf-16le")
                     if tags_raw:
                         exif[0x9C9E] = (tags_raw.replace(",", ";") + "\x00").encode("utf-16le")
+                    if metadata_date_exif:
+                        exif[306] = metadata_date_exif
+                        exif[36868] = metadata_date_exif
+                    if exif_date_taken_exif:
+                        exif[36867] = exif_date_taken_exif
                     
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".webp", dir=p.parent) as tmp:
                         tmp_path = Path(tmp.name)
@@ -4785,6 +4868,23 @@ class MainWindow(QMainWindow):
                         if tmp_path.exists(): tmp_path.unlink()
                         raise e
 
+            try:
+                from app.mediamanager.db.media_repo import get_media_by_path
+                from app.mediamanager.metadata.persistence import inspect_and_persist_if_supported
+                media = get_media_by_path(self.bridge.conn, str(p))
+                if media:
+                    inspect_and_persist_if_supported(self.bridge.conn, media["id"], str(p), media.get("media_type"))
+                data = self.bridge.get_media_metadata(str(p))
+                self.meta_exif_date_taken_edit.setText(self._format_editable_datetime(data.get("exif_date_taken")))
+                self.meta_metadata_date_edit.setText(self._format_editable_datetime(data.get("metadata_date")))
+                file_created_text = self._format_sidebar_datetime(data.get("file_created_time"))
+                if file_created_text:
+                    self.meta_file_created_date_lbl.setText(f"Date Created: {file_created_text}")
+                file_modified_text = self._format_sidebar_datetime(data.get("modified_time"))
+                if file_modified_text:
+                    self.meta_file_modified_date_lbl.setText(f"Date Modified: {file_modified_text}")
+            except Exception:
+                pass
             self.meta_status_lbl.setText("✓ Metadata embedded in file")
             QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
         except Exception as e:
@@ -4892,8 +4992,10 @@ class MainWindow(QMainWindow):
 
         self.meta_res_lbl.setVisible(not is_bulk and show_res)
         self.meta_size_lbl.setVisible(not is_bulk and show_size)
-        self.meta_exif_date_taken_lbl.setVisible(not is_bulk and show_exif_date_taken)
-        self.meta_metadata_date_lbl.setVisible(not is_bulk and show_metadata_date)
+        self.lbl_exif_date_taken_cap.setVisible(not is_bulk and show_exif_date_taken)
+        self.meta_exif_date_taken_edit.setVisible(not is_bulk and show_exif_date_taken)
+        self.lbl_metadata_date_cap.setVisible(not is_bulk and show_metadata_date)
+        self.meta_metadata_date_edit.setVisible(not is_bulk and show_metadata_date)
         self.meta_file_created_date_lbl.setVisible(not is_bulk and show_file_created_date)
         self.meta_file_modified_date_lbl.setVisible(not is_bulk and show_file_modified_date)
         self.meta_duration_lbl.setVisible(not is_bulk and show_duration)
@@ -4962,10 +5064,10 @@ class MainWindow(QMainWindow):
         # Set default text prefixes so they show even if blank
         self.meta_res_lbl.setText("Resolution: ")
         self.meta_size_lbl.setText("File Size: ")
-        self.meta_exif_date_taken_lbl.setText("EXIF Date Taken: ")
-        self.meta_metadata_date_lbl.setText("Metadata Date: ")
-        self.meta_file_created_date_lbl.setText("File Created Date: ")
-        self.meta_file_modified_date_lbl.setText("File Modified Date: ")
+        self.meta_exif_date_taken_edit.setText("")
+        self.meta_metadata_date_edit.setText("")
+        self.meta_file_created_date_lbl.setText("Date Created: ")
+        self.meta_file_modified_date_lbl.setText("Date Modified: ")
         self.meta_duration_lbl.setText("Duration: ")
         self.meta_fps_lbl.setText("FPS: ")
         self.meta_codec_lbl.setText("Codec: ")
@@ -5016,6 +5118,8 @@ class MainWindow(QMainWindow):
         self.meta_desc.blockSignals(True)
         self.meta_tags.blockSignals(True)
         self.meta_notes.blockSignals(True)
+        self.meta_exif_date_taken_edit.blockSignals(True)
+        self.meta_metadata_date_edit.blockSignals(True)
 
         if not is_bulk:
             path = paths[0]
@@ -5059,18 +5163,18 @@ class MainWindow(QMainWindow):
                 self.meta_ai_raw_paths_edit.setPlainText(data.get("ai_raw_paths_summary", ""))
                 
                 self.meta_tags.setText(", ".join(data.get("tags", [])))
-                exif_date_taken = self._format_sidebar_datetime(data.get("exif_date_taken"))
+                exif_date_taken = self._format_editable_datetime(data.get("exif_date_taken"))
                 if exif_date_taken:
-                    self.meta_exif_date_taken_lbl.setText(f"EXIF Date Taken: {exif_date_taken}")
-                metadata_date = self._format_sidebar_datetime(data.get("metadata_date"))
+                    self.meta_exif_date_taken_edit.setText(exif_date_taken)
+                metadata_date = self._format_editable_datetime(data.get("metadata_date"))
                 if metadata_date:
-                    self.meta_metadata_date_lbl.setText(f"Metadata Date: {metadata_date}")
+                    self.meta_metadata_date_edit.setText(metadata_date)
                 file_created_date = self._format_sidebar_datetime(data.get("file_created_time"))
                 if file_created_date:
-                    self.meta_file_created_date_lbl.setText(f"File Created Date: {file_created_date}")
+                    self.meta_file_created_date_lbl.setText(f"Date Created: {file_created_date}")
                 file_modified_date = self._format_sidebar_datetime(data.get("modified_time"))
                 if file_modified_date:
-                    self.meta_file_modified_date_lbl.setText(f"File Modified Date: {file_modified_date}")
+                    self.meta_file_modified_date_lbl.setText(f"Date Modified: {file_modified_date}")
                 
             except Exception:
                 pass
@@ -5204,6 +5308,8 @@ class MainWindow(QMainWindow):
         self.meta_desc.blockSignals(False)
         self.meta_tags.blockSignals(False)
         self.meta_notes.blockSignals(False)
+        self.meta_exif_date_taken_edit.blockSignals(False)
+        self.meta_metadata_date_edit.blockSignals(False)
 
     def _clear_embedded_labels(self):
         self.meta_camera_lbl.setText("Camera: ")
@@ -5357,6 +5463,59 @@ class MainWindow(QMainWindow):
             return str(value or "")
 
     @staticmethod
+    def _normalize_metadata_datetime(value: str | None) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        for parser in (
+            lambda raw: datetime.fromisoformat(raw),
+            lambda raw: datetime.strptime(raw, "%Y:%m:%d %H:%M:%S"),
+            lambda raw: datetime.strptime(raw, "%Y:%m:%d"),
+            lambda raw: datetime.strptime(raw, "%Y-%m-%d %H:%M:%S"),
+            lambda raw: datetime.strptime(raw, "%Y-%m-%d"),
+        ):
+            try:
+                parsed = parser(text)
+                if parsed.tzinfo is not None:
+                    parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+                return parsed.replace(microsecond=0).isoformat(sep="T")
+            except Exception:
+                continue
+        return text
+
+    @classmethod
+    def _format_editable_datetime(cls, value: str | None) -> str:
+        normalized = cls._normalize_metadata_datetime(value)
+        if not normalized:
+            return ""
+        try:
+            return datetime.fromisoformat(normalized).strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return normalized
+
+    @classmethod
+    def _format_exif_datetime(cls, value: str | None) -> str:
+        normalized = cls._normalize_metadata_datetime(value)
+        if not normalized:
+            return ""
+        try:
+            return datetime.fromisoformat(normalized).strftime("%Y:%m:%d %H:%M:%S")
+        except Exception:
+            return ""
+
+    @classmethod
+    def _format_xmp_datetime(cls, value: str | None) -> str:
+        normalized = cls._normalize_metadata_datetime(value)
+        if not normalized:
+            return ""
+        try:
+            return datetime.fromisoformat(normalized).strftime("%Y-%m-%dT%H:%M:%S")
+        except Exception:
+            return ""
+
+    @staticmethod
     def _format_duration_seconds(seconds: float | None) -> str:
         if not seconds or seconds <= 0:
             return ""
@@ -5439,8 +5598,8 @@ class MainWindow(QMainWindow):
         self._meta_groups = {
             "res": [self.meta_res_lbl],
             "size": [self.meta_size_lbl],
-            "exifdatetaken": [self.meta_exif_date_taken_lbl],
-            "metadatadate": [self.meta_metadata_date_lbl],
+            "exifdatetaken": [self.lbl_exif_date_taken_cap, self.meta_exif_date_taken_edit],
+            "metadatadate": [self.lbl_metadata_date_cap, self.meta_metadata_date_edit],
             "filecreateddate": [self.meta_file_created_date_lbl],
             "filemodifieddate": [self.meta_file_modified_date_lbl],
             "duration": [self.meta_duration_lbl],
@@ -5517,10 +5676,10 @@ class MainWindow(QMainWindow):
         self.meta_path_lbl.setText("Folder: ")
         self.meta_size_lbl.setText("File Size: ")
         self.meta_res_lbl.setText("Resolution: ")
-        self.meta_exif_date_taken_lbl.setText("EXIF Date Taken: ")
-        self.meta_metadata_date_lbl.setText("Metadata Date: ")
-        self.meta_file_created_date_lbl.setText("File Created Date: ")
-        self.meta_file_modified_date_lbl.setText("File Modified Date: ")
+        self.meta_exif_date_taken_edit.setText("")
+        self.meta_metadata_date_edit.setText("")
+        self.meta_file_created_date_lbl.setText("Date Created: ")
+        self.meta_file_modified_date_lbl.setText("Date Modified: ")
         self.meta_duration_lbl.setText("Duration: ")
         self.meta_fps_lbl.setText("FPS: ")
         self.meta_codec_lbl.setText("Codec: ")
@@ -5536,8 +5695,10 @@ class MainWindow(QMainWindow):
         }
         self.meta_res_lbl.setVisible("res" in active_fields and self._is_metadata_enabled_for_kind(kind, "res", True))
         self.meta_size_lbl.setVisible("size" in active_fields and self._is_metadata_enabled_for_kind(kind, "size", True))
-        self.meta_exif_date_taken_lbl.setVisible("exifdatetaken" in active_fields and self._is_metadata_enabled_for_kind(kind, "exifdatetaken", False))
-        self.meta_metadata_date_lbl.setVisible("metadatadate" in active_fields and self._is_metadata_enabled_for_kind(kind, "metadatadate", False))
+        self.lbl_exif_date_taken_cap.setVisible("exifdatetaken" in active_fields and self._is_metadata_enabled_for_kind(kind, "exifdatetaken", False))
+        self.meta_exif_date_taken_edit.setVisible("exifdatetaken" in active_fields and self._is_metadata_enabled_for_kind(kind, "exifdatetaken", False))
+        self.lbl_metadata_date_cap.setVisible("metadatadate" in active_fields and self._is_metadata_enabled_for_kind(kind, "metadatadate", False))
+        self.meta_metadata_date_edit.setVisible("metadatadate" in active_fields and self._is_metadata_enabled_for_kind(kind, "metadatadate", False))
         self.meta_file_created_date_lbl.setVisible("filecreateddate" in active_fields and self._is_metadata_enabled_for_kind(kind, "filecreateddate", False))
         self.meta_file_modified_date_lbl.setVisible("filemodifieddate" in active_fields and self._is_metadata_enabled_for_kind(kind, "filemodifieddate", False))
         self.meta_duration_lbl.setVisible("duration" in active_fields and self._is_metadata_enabled_for_kind(kind, "duration", True))

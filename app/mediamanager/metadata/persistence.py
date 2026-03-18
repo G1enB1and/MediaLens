@@ -18,7 +18,9 @@ DATE_KEYWORDS = (
     "datetimedigitized",
     "datetimecreated",
     "createdate",
+    "creation time",
     "datecreated",
+    "dateacquired",
     "metadatadate",
     "datetime",
     "date",
@@ -86,14 +88,41 @@ def _extract_exif_date(inspection: InspectionResult) -> str | None:
                 parsed = _normalize_date_string(value)
                 if parsed:
                     return parsed
+    for entry in raw.png_text_entries or []:
+        key = str(entry.keyword or "").lower()
+        if "creation time" in key:
+            parsed = _normalize_date_string(entry.text) or _extract_first_date(entry.text)
+            if parsed:
+                return parsed
+    for key, value in (raw.pillow_info or {}).items():
+        if "creation time" in str(key).lower():
+            parsed = _normalize_date_string(value) or _extract_first_date(str(value))
+            if parsed:
+                return parsed
     return None
 
 
 def _extract_metadata_date(inspection: InspectionResult) -> str | None:
     raw = inspection.raw
 
+    packet_preferences = (
+        "microsoftphoto:dateacquired",
+        "xmp:createdate",
+        "photoshop:datecreated",
+        "xmp:metadatadate",
+        "exif:datetimedigitized",
+    )
+
     for packet in raw.xmp_packets or []:
-        parsed = _extract_first_date(packet)
+        packet_text = str(packet or "")
+        lowered = packet_text.lower()
+        for token in packet_preferences:
+            idx = lowered.find(token)
+            if idx >= 0:
+                parsed = _extract_first_date(packet_text[idx : idx + 256])
+                if parsed:
+                    return parsed
+        parsed = _extract_first_date(packet_text)
         if parsed:
             return parsed
 
