@@ -1,6 +1,21 @@
 # Change Log
 
-## v1.0.14 (Current)
+## v1.0.15 (Current)
+
+### Added
+
+- **Date Grouping**: Added `Group By Date` across gallery views with date headers, collapsible sections, and a right-side jump/scrub timeline.
+- **Date Metadata Fields**: Added `Date Taken`, `Date Acquired`, `Date Created`, and `Date Modified` to metadata settings and the Details sidebar for images, GIFs, and videos.
+
+### Changed
+
+- **Timeline UI**: Refined the timeline scrubber layout, spacing, padding, coloring, and docked sizing so it no longer overlaps the gallery and behaves predictably while resizing.
+- **Metadata Dates**: Updated scanning, import, save, and embed flows to extract and persist filesystem dates plus EXIF/XMP-style taken/acquired dates, and made `Date Taken` and `Date Acquired` editable in the sidebar.
+- **Date Labels**: Renamed date labels throughout the app for consistency with Windows Properties and the Details/settings panels.
+
+---
+
+## v1.0.14
 
 ### Changed
 
