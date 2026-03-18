@@ -1329,8 +1329,9 @@ function createMasonryCard(item, idx) {
   return card;
 }
 
-function renderStructuredMediaList(el, items) {
-  if (gGalleryViewMode === 'details') {
+function renderStructuredMediaList(el, items, options = {}) {
+  const { renderHeader = true } = options;
+  if (gGalleryViewMode === 'details' && renderHeader) {
     applyDetailsColumnWidths(el);
     renderDetailsHeader(el);
   }
@@ -1362,6 +1363,11 @@ function renderGroupedMediaList(el, items) {
   const groups = buildGroupedItems(mediaItems);
   el.classList.add('gallery-grouped');
 
+  if (gGalleryViewMode === 'details') {
+    applyDetailsColumnWidths(el);
+    renderDetailsHeader(el);
+  }
+
   if (folderItems.length > 0) {
     const prefix = document.createElement('div');
     prefix.className = 'gallery-group-prefix';
@@ -1369,7 +1375,7 @@ function renderGroupedMediaList(el, items) {
     if (gGalleryViewMode === 'masonry') {
       folderItems.forEach((item, idx) => prefix.appendChild(createMasonryCard(item, idx)));
     } else {
-      renderStructuredMediaList(prefix, folderItems);
+      renderStructuredMediaList(prefix, folderItems, { renderHeader: false });
     }
     el.appendChild(prefix);
   }
@@ -1400,7 +1406,7 @@ function renderGroupedMediaList(el, items) {
     if (gGalleryViewMode === 'masonry') {
       group.items.forEach((item, idx) => body.appendChild(createMasonryCard(item, idx)));
     } else {
-      renderStructuredMediaList(body, group.items);
+      renderStructuredMediaList(body, group.items, { renderHeader: false });
     }
 
     section.appendChild(header);

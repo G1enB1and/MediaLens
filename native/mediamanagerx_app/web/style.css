@@ -259,12 +259,16 @@ body.no-glass header {
 
 .ctx {
   position: fixed;
-  z-index: 12000;
+  z-index: 2147483647 !important;
   min-width: 170px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--modal-bg);
   overflow: hidden;
+  isolation: isolate;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.28);
+  transform: translateZ(0);
+  backface-visibility: hidden;
 }
 
 .ctx[hidden] {
@@ -1065,6 +1069,10 @@ p {
   gap: 22px;
 }
 
+.gallery-grouped.gallery-details {
+  gap: 0;
+}
+
 .gallery-group-prefix {
   min-width: 0;
   margin-bottom: 4px;
@@ -1082,6 +1090,18 @@ p {
   z-index: 24;
   background: linear-gradient(180deg, var(--bg) 78%, color-mix(in srgb, var(--bg), transparent 100%));
   padding-top: 2px;
+}
+
+.gallery-grouped.gallery-details .gallery-group-header {
+  top: 27px;
+  z-index: 18;
+  padding-top: 0;
+  background: var(--bg);
+  box-shadow: 0 -1px 0 var(--bg);
+}
+
+.gallery-grouped.gallery-details .gallery-group {
+  gap: 0;
 }
 
 .gallery-group-toggle {
@@ -1154,6 +1174,10 @@ p {
   min-width: 0;
 }
 
+.gallery-group-body[hidden] {
+  display: none !important;
+}
+
 .gallery-group-body.gallery-details {
   margin: 0;
   padding: 0;
@@ -1161,6 +1185,23 @@ p {
 
 .gallery-group-body.gallery-details .details-header {
   top: 28px;
+}
+
+.gallery-grouped > .details-header {
+  top: -16px;
+  z-index: 20;
+  position: sticky;
+}
+
+.gallery-grouped.gallery-details > .details-header::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -10px;
+  height: 10px;
+  background: var(--bg);
+  pointer-events: none;
 }
 
 .timeline-rail {
@@ -1381,6 +1422,15 @@ p {
   animation: none;
   background: transparent;
   background-image: none;
+  transform: none;
+  backface-visibility: visible;
+}
+
+.gallery-details .card,
+.gallery-details .card.loading,
+.gallery-details .card.ready {
+  transform: none;
+  backface-visibility: visible;
 }
 
 .gallery-details .structured-card {
