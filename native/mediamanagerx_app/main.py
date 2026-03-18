@@ -9,6 +9,7 @@ except Exception:
 
 import sys
 import os
+import faulthandler
 import hashlib
 import subprocess
 import shutil
@@ -19,6 +20,7 @@ import re
 import json
 import html
 import shlex
+import traceback
 from datetime import datetime, timezone
 from packaging.version import Version
 from pathlib import Path
@@ -178,6 +180,78 @@ def _run_hidden_subprocess(cmd: list[str], **kwargs):
     if _WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS:
         kwargs = {**_WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS, **kwargs}
     return subprocess.run(cmd, **kwargs)
+
+
+_FAULT_HANDLER_STREAM = None
+
+
+def _appdata_runtime_dir() -> Path:
+    base = os.getenv("APPDATA")
+    if base:
+        root = Path(base)
+    else:
+        root = Path.home() / "AppData" / "Roaming"
+    out = root / "G1enB1and" / "MediaManagerX"
+    out.mkdir(parents=True, exist_ok=True)
+    return out
+
+
+def _write_crash_report(kind: str, exc_type=None, exc_value=None, exc_tb=None) -> Path | None:
+    try:
+        report_dir = _appdata_runtime_dir() / "crash-reports"
+        report_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        report_path = report_dir / f"{kind}-{stamp}.log"
+        lines = [
+            f"Version: {__version__}",
+            f"Timestamp: {datetime.now().isoformat()}",
+            f"Python: {sys.version}",
+            f"Executable: {sys.executable}",
+            f"Frozen: {bool(getattr(sys, 'frozen', False))}",
+            f"CWD: {os.getcwd()}",
+        ]
+        if exc_type is not None:
+            lines.extend([
+                "",
+                "Traceback:",
+                "".join(traceback.format_exception(exc_type, exc_value, exc_tb)).rstrip(),
+            ])
+        with open(report_path, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+        return report_path
+    except Exception:
+        return None
+
+
+def _install_crash_reporting() -> None:
+    global _FAULT_HANDLER_STREAM
+    try:
+        faulthandler_log = _appdata_runtime_dir() / "faulthandler.log"
+        _FAULT_HANDLER_STREAM = open(faulthandler_log, "a", encoding="utf-8")
+        faulthandler.enable(_FAULT_HANDLER_STREAM)
+    except Exception:
+        pass
+
+    def _handle_exception(exc_type, exc_value, exc_tb):
+        report = _write_crash_report("python-crash", exc_type, exc_value, exc_tb)
+        try:
+            print("Unhandled exception:", file=sys.stderr)
+            traceback.print_exception(exc_type, exc_value, exc_tb)
+            if report:
+                print(f"Crash report written to: {report}", file=sys.stderr)
+        except Exception:
+            pass
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+    def _handle_thread_exception(args):
+        _handle_exception(args.exc_type, args.exc_value, args.exc_traceback)
+
+    sys.excepthook = _handle_exception
+    if hasattr(threading, "excepthook"):
+        threading.excepthook = _handle_thread_exception
+
+
+_install_crash_reporting()
 
 
 class Theme:
@@ -2976,6 +3050,16 @@ class MainWindow(QMainWindow):
         website_action = QAction("&Project Website", self)
         website_action.triggered.connect(lambda: __import__("webbrowser").open("https://github.com/G1enB1and/MediaManagerX"))
         help_menu.addAction(website_action)
+
+        help_menu.addSeparator()
+
+        diagnostics_action = QAction("Create &Diagnostic Report", self)
+        diagnostics_action.triggered.connect(self.create_diagnostic_report)
+        help_menu.addAction(diagnostics_action)
+
+        crash_logs_action = QAction("Open &Crash Report Folder", self)
+        crash_logs_action.triggered.connect(self.open_crash_report_folder)
+        help_menu.addAction(crash_logs_action)
 
         help_menu.addSeparator()
 
@@ -6855,6 +6939,33 @@ class MainWindow(QMainWindow):
 
     def show_search_syntax_help(self) -> None:
         self._show_markdown_dialog("Search Syntax Help", "SEARCH_SYNTAX.md")
+
+    def open_crash_report_folder(self) -> None:
+        folder = _appdata_runtime_dir() / "crash-reports"
+        folder.mkdir(parents=True, exist_ok=True)
+        try:
+            os.startfile(str(folder))
+        except Exception:
+            QMessageBox.information(self, "Crash Reports", f"Crash reports folder:\n{folder}")
+
+    def create_diagnostic_report(self) -> None:
+        report = _write_crash_report("diagnostic")
+        if report is None:
+            QMessageBox.warning(self, "Diagnostic Report", "Unable to create diagnostic report.")
+            return
+        try:
+            lines: list[str] = []
+            if getattr(self.bridge, "log_path", None) and Path(self.bridge.log_path).exists():
+                with open(self.bridge.log_path, "r", encoding="utf-8", errors="replace") as handle:
+                    tail = handle.readlines()[-200:]
+                lines.append("")
+                lines.append("Recent app.log tail:")
+                lines.extend(line.rstrip("\n") for line in tail)
+            with open(report, "a", encoding="utf-8") as handle:
+                handle.write("\n".join(lines) + ("\n" if lines else ""))
+            QMessageBox.information(self, "Diagnostic Report", f"Diagnostic report created:\n{report}")
+        except Exception as exc:
+            QMessageBox.warning(self, "Diagnostic Report", f"Report created but log tail could not be appended:\n{report}\n\n{exc}")
 
     def _on_update_available(self, version: str, manual: bool) -> None:
         """Handled in web frontend (toast popup)."""
