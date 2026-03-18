@@ -49,8 +49,8 @@ const METADATA_SETTINGS_CONFIG = {
         label: 'General',
         fields: [
           ['res', 'Resolution', true], ['size', 'File Size', true],
-          ['exifdatetaken', 'EXIF Date Taken', false], ['metadatadate', 'Metadata Date', false],
-          ['filecreateddate', 'File Created Date', false], ['filemodifieddate', 'File Modified Date', false],
+          ['exifdatetaken', 'Date Taken', false], ['metadatadate', 'Date Acquired', false],
+          ['filecreateddate', 'Date Created', false], ['filemodifieddate', 'Date Modified', false],
           ['description', 'Description', true],
           ['tags', 'Tags', true], ['notes', 'Notes', true], ['embeddedtags', 'Embedded Tags', true],
           ['embeddedcomments', 'Embedded Comments', true],
@@ -85,8 +85,8 @@ const METADATA_SETTINGS_CONFIG = {
         label: 'General',
         fields: [
           ['res', 'Resolution', true], ['size', 'File Size', true],
-          ['exifdatetaken', 'EXIF Date Taken', false], ['metadatadate', 'Metadata Date', false],
-          ['filecreateddate', 'File Created Date', false], ['filemodifieddate', 'File Modified Date', false],
+          ['exifdatetaken', 'Date Taken', false], ['metadatadate', 'Date Acquired', false],
+          ['filecreateddate', 'Date Created', false], ['filemodifieddate', 'Date Modified', false],
           ['duration', 'Duration', true], ['fps', 'Frames Per Second', true],
           ['codec', 'Codec', true], ['audio', 'Audio', true], ['description', 'Description', true], ['tags', 'Tags', true], ['notes', 'Notes', true],
         ],
@@ -110,8 +110,8 @@ const METADATA_SETTINGS_CONFIG = {
         label: 'General',
         fields: [
           ['res', 'Resolution', true], ['size', 'File Size', true],
-          ['exifdatetaken', 'EXIF Date Taken', false], ['metadatadate', 'Metadata Date', false],
-          ['filecreateddate', 'File Created Date', false], ['filemodifieddate', 'File Modified Date', false],
+          ['exifdatetaken', 'Date Taken', false], ['metadatadate', 'Date Acquired', false],
+          ['filecreateddate', 'Date Created', false], ['filemodifieddate', 'Date Modified', false],
           ['duration', 'Duration', true], ['fps', 'Frames Per Second', true],
           ['description', 'Description', true], ['tags', 'Tags', true], ['notes', 'Notes', true], ['embeddedtags', 'Embedded Tags', true],
           ['embeddedcomments', 'Embedded Comments', true],
