@@ -1,6 +1,16 @@
 # Change Log
 
-## v1.0.15 (Current)
+## v1.0.16 (Current)
+
+### Changed
+
+- **Grouped Details View**: Fixed grouped Details mode so only one sticky column header appears at the top, date groups collapse correctly, sticky date headers sit beneath the Details header, and the header seam no longer exposes scrolling content behind it.
+- **List Context Menu**: Refined list-view context menu layering so the custom right-click menu reliably appears above gallery rows instead of being visually overlapped by list items.
+- **Fresh Install Bootstrap**: Updated the packaged database initialization flow to bundle and load the SQL schema correctly in installed builds, preventing first-run launch failures caused by missing `app\\mediamanager\\db` resources.
+
+---
+
+## v1.0.15
 
 ### Added
 

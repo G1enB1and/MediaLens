@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import pkgutil
 import sqlite3
 from pathlib import Path
 
 
 SCHEMA_PATH = Path(__file__).with_name("schema_v1.sql")
+
+
+def _load_schema_sql() -> str:
+    data = pkgutil.get_data("app.mediamanager.db", "schema_v1.sql")
+    if data is not None:
+        return data.decode("utf-8")
+    return SCHEMA_PATH.read_text(encoding="utf-8")
 
 
 def _ensure_media_metadata_columns(conn: sqlite3.Connection) -> None:
@@ -74,7 +82,7 @@ def _ensure_media_item_date_columns(conn: sqlite3.Connection) -> None:
 
 def init_db(db_path: str) -> None:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    sql = SCHEMA_PATH.read_text(encoding="utf-8")
+    sql = _load_schema_sql()
     with sqlite3.connect(db_path) as conn:
         conn.execute("PRAGMA foreign_keys=ON;")
         # The sandboxed Windows environment used in tests can fail when SQLite
