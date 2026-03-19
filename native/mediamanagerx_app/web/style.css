@@ -1549,6 +1549,12 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   padding: 8px 12px;
 }
 
+.folder-card.folder-drop-target {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent), white 18%);
+  background: color-mix(in srgb, var(--card-bg), var(--accent) 10%);
+}
+
 .structured-thumb {
   position: relative;
   width: 100%;
