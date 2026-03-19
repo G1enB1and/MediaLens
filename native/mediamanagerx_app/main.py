@@ -3463,8 +3463,22 @@ class MainWindow(QMainWindow):
         self.meta_file_modified_date_lbl.setObjectName("metaFileModifiedDateLabel")
         
         self.meta_fields_layout = QVBoxLayout()
+        self.meta_fields_layout.setContentsMargins(0, 0, 0, 0)
         self.meta_fields_layout.setSpacing(6)
         right_layout.addLayout(self.meta_fields_layout)
+
+        # --- Group Labels ---
+        self.lbl_group_general = QLabel("General")
+        self.lbl_group_general.setObjectName("metaGroupLabel")
+        self.lbl_group_general.hide()
+
+        self.lbl_group_camera = QLabel("Camera")
+        self.lbl_group_camera.setObjectName("metaGroupLabel")
+        self.lbl_group_camera.hide()
+
+        self.lbl_group_ai = QLabel("AI")
+        self.lbl_group_ai.setObjectName("metaGroupLabel")
+        self.lbl_group_ai.hide()
 
         self.meta_camera_lbl = QLabel("")
         self.meta_camera_lbl.setObjectName("metaCameraLabel")
@@ -3711,6 +3725,16 @@ class MainWindow(QMainWindow):
         self.btn_save_meta.clicked.connect(self._save_native_metadata)
         self.btn_save_meta.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         right_layout.addWidget(self.btn_save_meta)
+
+        for attr_name, widget in self.__dict__.items():
+            if not isinstance(widget, QLabel):
+                continue
+            if not (attr_name.startswith("lbl_") or attr_name.startswith("meta_")):
+                continue
+            if widget is self.preview_image_lbl:
+                continue
+            widget.setIndent(0)
+            widget.setMargin(0)
 
         # AI/EXIF Actions
         action_layout = QVBoxLayout()
@@ -5287,6 +5311,9 @@ class MainWindow(QMainWindow):
         show_ai_character_cards = "aicharcards" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aicharcards", False)
         show_ai_raw_paths = "airawpaths" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "airawpaths", False)
         visible_groups = visible_group_keys
+        self.lbl_group_general.setVisible(not is_bulk and "general" in visible_groups)
+        self.lbl_group_camera.setVisible(not is_bulk and "camera" in visible_groups)
+        self.lbl_group_ai.setVisible(not is_bulk and "ai" in visible_groups)
 
         self.meta_res_lbl.setVisible(not is_bulk and show_res)
         self.meta_size_lbl.setVisible(not is_bulk and show_size)
@@ -5952,10 +5979,19 @@ class MainWindow(QMainWindow):
 
         group_order = self._metadata_group_order(kind)
         visible_groups = [group for group in group_order if self._is_metadata_group_enabled(kind, group, True)]
+        group_labels = {
+            "general": self.lbl_group_general,
+            "camera": self.lbl_group_camera,
+            "ai": self.lbl_group_ai
+        }
         sep_widgets = [self.meta_sep1, self.meta_sep2]
         sep_index = 0
         for index, group in enumerate(visible_groups):
             field_order = self._metadata_field_order(kind, group)
+            label = group_labels.get(group)
+            if label:
+                self.meta_fields_layout.addWidget(label)
+                label.show()
             for key in field_order:
                 for widget in self._meta_groups.get(key, []):
                     self.meta_fields_layout.addWidget(widget)
@@ -5987,6 +6023,9 @@ class MainWindow(QMainWindow):
         
         # UI visibility logic
         visible_groups = [group for group in self._metadata_group_order(kind) if self._is_metadata_group_enabled(kind, group, True)]
+        self.lbl_group_general.setVisible("general" in visible_groups)
+        self.lbl_group_camera.setVisible("camera" in visible_groups)
+        self.lbl_group_ai.setVisible("ai" in visible_groups)
         active_fields = {
             field
             for group in visible_groups
@@ -6497,8 +6536,15 @@ class MainWindow(QMainWindow):
 
         self.scroll_container.setStyleSheet(f"""
             QWidget#rightPanelScrollContainer {{ background-color: {sb_bg_str}; color: {text}; }}
-            QLabel {{ color: {text}; background: transparent; }}
+            QLabel {{
+                color: {text};
+                background: transparent;
+                border: none;
+                padding: 0px;
+                margin: 0px;
+            }}
             QLabel#previewHeaderLabel, QLabel#detailsHeaderLabel {{ font-weight: bold; }}
+            QLabel#metaGroupLabel {{ font-weight: bold; margin-top: 12px; margin-bottom: 4px; }}
             QLabel#previewImageLabel {{
                 background-color: {Theme.get_control_bg(accent)};
                 border: 1px solid {Theme.get_border(accent)};
