@@ -3759,12 +3759,6 @@ class MainWindow(QMainWindow):
         self.video_overlay.on_next = self._on_video_next
         self.video_overlay.raise_()
 
-        # Prevent white flash while the first HTML/CSS loads.
-        try:
-            self.web.page().setBackgroundColor(QColor(Theme.get_bg(accent_q)))
-        except Exception:
-            pass
-
         self.channel = QWebChannel(self.web.page())
         self.channel.registerObject("bridge", self.bridge)
         self.web.page().setWebChannel(self.channel)
@@ -3817,6 +3811,21 @@ class MainWindow(QMainWindow):
         self._setup_metadata_layout()
         self._update_preview_visibility()
         self._clear_metadata_panel()
+        QTimer.singleShot(0, self._apply_initial_web_background)
+
+    def _apply_initial_web_background(self) -> None:
+        # Some Windows installs abort inside Qt WebEngine if this runs during
+        # synchronous layout construction. Defer it until the event loop starts.
+        try:
+            page = self.web.page()
+            if page is None:
+                self.bridge._log("Web background skipped: page unavailable")
+                return
+            accent_q = QColor(self._current_accent)
+            page.setBackgroundColor(QColor(Theme.get_bg(accent_q)))
+            self.bridge._log("Web background applied")
+        except Exception as exc:
+            self.bridge._log(f"Web background apply failed: {exc}")
 
     def _set_selected_folders(self, folder_paths: list[str]) -> None:
         self.bridge.set_selected_folders(folder_paths)
