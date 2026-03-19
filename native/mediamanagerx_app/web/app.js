@@ -42,6 +42,7 @@ const TIMELINE_TOP_YEAR_TOP_PX = 20;
 const TIMELINE_TOP_MONTH_TOP_PX = 35;
 const TIMELINE_THUMB_OFFSET_PX = 8;
 const TIMELINE_MIN_POINT_GAP_PX = 26;
+const TIMELINE_NAV_LANE_PX = 28;
 
 const GALLERY_VIEW_MODES = new Set(['masonry', 'grid_small', 'grid_medium', 'grid_large', 'grid_xlarge', 'list', 'content', 'details']);
 const DETAILS_COLUMN_CONFIG = [
@@ -1015,7 +1016,7 @@ function clampTimelineRatio(ratio) {
 }
 
 function getTimelineTopCss(ratio) {
-  return `calc(${TIMELINE_TOP_YEAR_TOP_PX + TIMELINE_THUMB_OFFSET_PX}px + ${clampTimelineRatio(ratio)} * (100% - ${TIMELINE_INSET_PX * 2}px) - ${TIMELINE_THUMB_SIZE_PX / 2}px)`;
+  return `calc(${TIMELINE_INSET_PX + TIMELINE_NAV_LANE_PX + TIMELINE_THUMB_OFFSET_PX}px + ${clampTimelineRatio(ratio)} * (100% - ${(TIMELINE_INSET_PX + TIMELINE_NAV_LANE_PX) * 2}px) - ${TIMELINE_THUMB_SIZE_PX / 2}px)`;
 }
 
 function updateTimelineViewport(ratio) {
@@ -1042,14 +1043,15 @@ function layoutTimelinePoints() {
   const layer = rail && rail.querySelector('.timeline-anchor-layer');
   const points = rail && Array.isArray(rail.__timelinePoints) ? rail.__timelinePoints : [];
   if (!rail || !layer || !points.length) return;
-  const availableHeight = Math.max(1, rail.clientHeight - (TIMELINE_INSET_PX * 2));
+  const contentInset = TIMELINE_INSET_PX + TIMELINE_NAV_LANE_PX;
+  const availableHeight = Math.max(1, rail.clientHeight - (contentInset * 2));
   const virtualSpan = Math.max(availableHeight, Math.max(0, points.length - 1) * TIMELINE_MIN_POINT_GAP_PX);
   const overflow = Math.max(0, virtualSpan - availableHeight);
   rail.__timelineLayout = { availableHeight, virtualSpan, overflow };
   points.forEach((point, index) => {
     if (!point.marker) return;
     const ratio = points.length <= 1 ? 0 : index / (points.length - 1);
-    point.marker.style.top = `${TIMELINE_INSET_PX + (ratio * virtualSpan)}px`;
+    point.marker.style.top = `${contentInset + (ratio * virtualSpan)}px`;
   });
   updateTimelineViewport(rail.__currentTimelineRatio || 0);
 }
@@ -1067,6 +1069,22 @@ function panTimelineByWheel(deltaY) {
   refreshTimelineTooltip(nextRatio);
   scrollTimelineToRatio(nextRatio);
   return true;
+}
+
+function nudgeTimelineByStep(direction) {
+  const rail = document.getElementById('timelineRail');
+  const points = rail && Array.isArray(rail.__timelinePoints) ? rail.__timelinePoints : [];
+  if (!rail || !points.length) return;
+  beginTimelineNavigationSession();
+  const stepRatio = points.length <= 1 ? 0.08 : Math.max(1 / Math.max(1, points.length - 1), 0.055);
+  const currentRatio = clampTimelineRatio(rail.__currentTimelineRatio || 0);
+  const nextRatio = clampTimelineRatio(currentRatio + (direction * stepRatio));
+  gTimelineHoverActive = true;
+  gTimelineScrubRatio = nextRatio;
+  updateTimelineThumb(nextRatio);
+  refreshTimelineTooltip(nextRatio);
+  scrollTimelineToRatio(nextRatio);
+  endTimelineNavigationSession(220);
 }
 
 function getTimelineHoverPoint(ratio) {
@@ -1096,7 +1114,7 @@ function setTimelineTooltip(visible, ratio = 0, text = '') {
   rail.classList.toggle('is-hovering', shouldShow);
   if (!shouldShow) return;
   tooltip.textContent = text;
-  tooltip.style.top = `calc(${TIMELINE_INSET_PX}px + ${clampTimelineRatio(ratio)} * (100% - ${TIMELINE_INSET_PX * 2}px))`;
+  tooltip.style.top = `calc(${TIMELINE_INSET_PX + TIMELINE_NAV_LANE_PX}px + ${clampTimelineRatio(ratio)} * (100% - ${(TIMELINE_INSET_PX + TIMELINE_NAV_LANE_PX) * 2}px))`;
 }
 
 function showTimelineTooltipForPoint(point) {
@@ -1172,9 +1190,17 @@ function unfreezeTimelineScrollTargets() {
 }
 
 function beginTimelineWheelSession() {
+  beginTimelineNavigationSession();
+  endTimelineNavigationSession(180);
+}
+
+function beginTimelineNavigationSession() {
   const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   gTimelineNavigationActiveUntil = now + 240;
   freezeTimelineScrollTargets();
+}
+
+function endTimelineNavigationSession(delayMs = 180) {
   if (gTimelineWheelSessionTimer) clearTimeout(gTimelineWheelSessionTimer);
   gTimelineWheelSessionTimer = setTimeout(() => {
     gTimelineWheelSessionTimer = 0;
@@ -1183,7 +1209,7 @@ function beginTimelineWheelSession() {
     gTimelineNavigationActiveUntil = settleNow + 240;
     unfreezeTimelineScrollTargets();
     scheduleTimelineScrollTargetRefresh();
-  }, 180);
+  }, delayMs);
 }
 
 function scheduleTimelineScrollTargetRefresh() {
@@ -1346,6 +1372,8 @@ function renderTimelineRail(groups) {
   rail.__snapTargets = [];
   rail.__scrollTargets = [];
   rail.__activeSnapTarget = null;
+  rail.classList.remove('timeline-granularity-day', 'timeline-granularity-month', 'timeline-granularity-year');
+  rail.classList.add(`timeline-granularity-${gGroupDateGranularity}`);
 
   if (gGroupBy !== 'date' || !Array.isArray(groups) || groups.length === 0) {
     rail.hidden = true;
@@ -1357,6 +1385,29 @@ function renderTimelineRail(groups) {
   rail.__snapTargets = timeline.snapTargets;
   const scale = document.createElement('div');
   scale.className = 'timeline-scale';
+
+  const upArrow = document.createElement('button');
+  upArrow.type = 'button';
+  upArrow.className = 'timeline-nav timeline-nav-up';
+  upArrow.setAttribute('aria-label', 'Scroll timeline earlier');
+  upArrow.textContent = '▲';
+  upArrow.addEventListener('click', (e) => {
+    e.preventDefault();
+    nudgeTimelineByStep(-1);
+  });
+  scale.appendChild(upArrow);
+
+  const downArrow = document.createElement('button');
+  downArrow.type = 'button';
+  downArrow.className = 'timeline-nav timeline-nav-down';
+  downArrow.setAttribute('aria-label', 'Scroll timeline later');
+  downArrow.textContent = '▼';
+  downArrow.addEventListener('click', (e) => {
+    e.preventDefault();
+    nudgeTimelineByStep(1);
+  });
+  scale.appendChild(downArrow);
+
   const anchorLayer = document.createElement('div');
   anchorLayer.className = 'timeline-anchor-layer';
   scale.appendChild(anchorLayer);
