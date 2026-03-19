@@ -1,6 +1,26 @@
 # Change Log
 
-## v1.0.19 (Current)
+## v1.0.20 (Current)
+
+### Added
+
+- **Metadata Detail Group Headings**: Added `General`, `Camera`, and `AI` section headings to the single-item metadata details panel so dense metadata is easier to scan.
+
+### Changed
+
+- **Gallery Folder Drag and Drop**: Fixed dragging files from the gallery into folder cards shown inside the gallery, while preserving cancel behavior when dropping back on the same item or gallery background.
+- **Timeline Polish Pass**: Added active/visible/dim anchor emphasis, corrected the bottom-of-gallery anchor edge case, made the timeline resize against the visible gallery viewport, improved its final positioning, and cleaned up the rounded shell rendering.
+- **Metadata Panel Cleanup**: Removed unwanted Qt label indentation/left rules from metadata labels and headings, kept detail-only group headers out of bulk/empty states, and restyled `Clear Tags From DB` to match the other bulk tag editor actions.
+- **Glassmorphism Removal**: Removed the appearance toggle and remaining blur/translucency paths so the header, lightbox, and other surfaces render fully opaque without flicker around animated GIFs and videos.
+- **Sidebar Divider Stability**: Refined the native sidebar splitter/divider rendering so borders and resize hover states render crisply instead of appearing too thin or flickering.
+
+### Removed
+
+- **Glassmorphism Setting**: Removed the `Enable glassmorphism` appearance option and its remaining runtime wiring.
+
+---
+
+## v1.0.19
 
 ### Added
 

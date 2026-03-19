@@ -1,17 +1,16 @@
-## MediaManagerX v1.0.19
+## MediaManagerX v1.0.20
 
 ### Summary
-This release makes the date timeline much more useful for real browsing. Large grouped libraries are easier to navigate, more views now scroll continuously instead of breaking on pages, and installed-build help/settings issues were cleaned up.
+This release focuses on polish and stability. Gallery drag-and-drop now works inside the gallery itself, the date timeline feels more refined and better aligned to the visible viewport, and several UI flicker/cleanup issues were removed from the metadata panel and sidebars.
 
 ### Highlights
-- The timeline now has smoother scrubbing, clearer date anchors, better tooltip behavior, adaptive sizing for day/month/year, and dedicated up/down navigation arrows
-- Grouped browsing is more continuous because several non-masonry views now use infinite scroll instead of pagination
-- The header layout is more responsive, and installed builds now correctly include Search Syntax Help plus release-note content in the app
+- Dragging files from the gallery into folder cards shown in the gallery now works, while dropping back on the same item or empty gallery space cleanly cancels
+- The timeline now has stronger active/visible context styling, better bottom-of-gallery behavior, responsive viewport sizing, and cleaner corner rendering
+- Metadata details gained clearer `General`, `Camera`, and `AI` group headings, while the bulk editor and empty state stay free of those extra headings
+- Glassmorphism has been fully removed so the app renders as solid opaque panels without the flicker seen around animated media
 
 ### Notes
-- Masonry, Large Grid, and Extra Large Grid still keep pagination to better contain rendering cost on very large libraries
+- Sidebar divider rendering and resize hover states were also cleaned up so the side panels feel more stable and crisp during resize
 
----
-
-📄 Full Changelog:
+Full Changelog:
 https://github.com/G1enB1and/MediaManagerX/blob/dev/native/mediamanagerx_app/CHANGELOG.md
