@@ -1331,7 +1331,7 @@ class Bridge(QObject):
         try:
             data = {
                 "gallery.randomize": self._randomize_enabled(),
-                "gallery.restore_last": self._last_folder() != "",
+                "gallery.restore_last": self._restore_last_enabled(),
                 "gallery.show_hidden": self._show_hidden_enabled(),
                 "gallery.start_folder": self._start_folder_setting(),
                 "gallery.view_mode": self._gallery_view_mode(),
