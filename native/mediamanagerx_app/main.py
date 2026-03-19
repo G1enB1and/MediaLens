@@ -4,7 +4,7 @@ try:
     with open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "VERSION"), "r") as f:
         __version__ = f.read().strip()
 except Exception:
-    __version__ = "v1.0.18"
+    __version__ = "v1.0.19"
 
 
 import sys
@@ -6881,20 +6881,27 @@ class MainWindow(QMainWindow):
     def _show_markdown_dialog(self, title: str, file_name: str) -> None:
         """Helper to show a markdown file in a scrollable dialog."""
         try:
-            # In a PyInstaller bundle, data files are at sys._MEIPASS root.
-            # At dev time, they live in the same directory as main.py.
-            if getattr(sys, 'frozen', False):
-                path = Path(sys._MEIPASS) / file_name
-            else:
-                path = Path(__file__).parent / file_name
-            if not path.exists():
+            content = self._read_markdown_file(file_name)
+            if content is None:
                 QMessageBox.warning(self, title, f"File not found: {file_name}")
                 return
-            
-            content = path.read_text(encoding="utf-8")
             self._show_themed_dialog(title, content, is_markdown=True)
         except Exception as e:
             QMessageBox.critical(self, title, f"Error loading {file_name}: {e}")
+
+    def _read_markdown_file(self, file_name: str) -> str | None:
+        """Read a bundled markdown asset from dev or packaged builds."""
+        if getattr(sys, 'frozen', False):
+            path = Path(sys._MEIPASS) / file_name
+        else:
+            candidates = [
+                Path(__file__).parents[2] / file_name,
+                Path(__file__).parent / file_name,
+            ]
+            path = next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+        if not path.exists():
+            return None
+        return path.read_text(encoding="utf-8")
 
     def _show_themed_dialog(self, title: str, content: str, is_markdown: bool = False) -> None:
         """Helper to show content in a scrollable, themed dialog."""
@@ -6992,7 +6999,23 @@ class MainWindow(QMainWindow):
         self._show_markdown_dialog("Terms of Service", "TOS.md")
 
     def show_whats_new(self) -> None:
-        self._show_markdown_dialog("What's New", "CHANGELOG.md")
+        try:
+            release_notes = self._read_markdown_file("ReleaseNotes.md")
+            changelog = self._read_markdown_file("CHANGELOG.md")
+            if release_notes is None and changelog is None:
+                QMessageBox.warning(self, "What's New", "Files not found: ReleaseNotes.md, CHANGELOG.md")
+                return
+
+            parts: list[str] = []
+            if release_notes:
+                parts.append(release_notes.strip())
+            if changelog:
+                if parts:
+                    parts.append("---")
+                parts.append(changelog.strip())
+            self._show_themed_dialog("What's New", "\n\n".join(parts), is_markdown=True)
+        except Exception as e:
+            QMessageBox.critical(self, "What's New", f"Error loading release notes: {e}")
 
     def show_search_syntax_help(self) -> None:
         self._show_markdown_dialog("Search Syntax Help", "SEARCH_SYNTAX.md")

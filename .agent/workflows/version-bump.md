@@ -53,9 +53,9 @@ This workflow automates the version release process.
 
         📄 Full Changelog:
         https://github.com/G1enB1and/MediaManagerX/blob/dev/native/mediamanagerx_app/CHANGELOG.md
-
-        ---
         ```
+
+    * Do not leave a trailing separator at the end of `ReleaseNotes.md`; use only the single separator above the Full Changelog link.
 
     * When appropriate, prefer friendly headings and labels such as:
         * `🚀 New Features`

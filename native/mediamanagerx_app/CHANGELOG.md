@@ -1,6 +1,23 @@
 # Change Log
 
-## v1.0.18 (Current)
+## v1.0.19 (Current)
+
+### Added
+
+- **What's New Release Notes**: The `What's New` dialog now shows the polished `ReleaseNotes.md` summary first, followed by the full bundled changelog for users who want the detailed breakdown.
+- **Timeline Navigation Arrows**: Added dedicated up/down controls to the timeline rail so dense timelines more clearly communicate that extra dates are available above or below the current viewport.
+
+### Changed
+
+- **Timeline Navigation Overhaul**: Rebuilt the grouped-date timeline to use one anchor per real date header, unified tooltip behavior, smoother drag and wheel scrubbing, a hybrid viewported anchor rail for dense timelines, and granularity-specific sizing for day, month, and year modes.
+- **Infinite Scroll Policy**: Switched grouped-date non-masonry views plus `List`, `Details`, `Content`, `Small Grid`, and `Medium Grid` to infinite scroll so timeline navigation and long-form browsing are no longer broken up by pagination.
+- **Header Responsiveness**: Moved the panel toggle and settings buttons beside Search and reworked the header layout so the controls wrap more cleanly on narrower widths instead of clipping off the right edge.
+- **Bundled Help Content**: Packaged `SEARCH_SYNTAX.md` and `ReleaseNotes.md` with installed builds so help/release dialogs work outside the raw development environment.
+- **Startup Folder Settings**: Corrected startup-folder settings state so the Browse button and related controls stay enabled/disabled based on the real `restore_last` setting.
+
+---
+
+## v1.0.18
 
 ### Changed
 
