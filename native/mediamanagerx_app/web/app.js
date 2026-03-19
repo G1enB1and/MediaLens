@@ -13,6 +13,10 @@ let gPosterObserver = null;
 let gSort = 'name_asc';
 let gFilter = 'all';
 let gCurrentTargetFolderName = '';
+let gCurrentDropFolderPath = '';
+let gCurrentDragPaths = [];
+let gCurrentDropFolderCard = null;
+let gGalleryDragHandled = false;
 let gExternalEditors = {};
 let gCurrentDragCount = 0;
 let gPlayingInplaceCard = null;
@@ -1235,6 +1239,12 @@ function disconnectTimelineHeaderObserver() {
   }
 }
 
+function debugGalleryDrag(message) {
+  if (gBridge && gBridge.debug_log) {
+    gBridge.debug_log(`[gallery-dnd] ${message}`);
+  }
+}
+
 function setupTimelineHeaderObserver() {
   disconnectTimelineHeaderObserver();
   gTimelineVisibleGroupKeys = new Set();
@@ -1646,6 +1656,138 @@ function openFolderItem(path) {
   }
 }
 
+function isInternalGalleryDragEvent(e) {
+  if (gBridge && Array.isArray(gBridge.drag_paths) && gBridge.drag_paths.length) return true;
+  const dt = e && e.dataTransfer;
+  if (!dt) return gCurrentDragCount > 0;
+  try {
+    if (dt.types && Array.from(dt.types).includes('web/mmx-paths')) return true;
+    if (dt.getData && dt.getData('web/mmx-paths')) return true;
+  } catch (_err) {
+    // Ignore inaccessible drag data and fall back to local state.
+  }
+  return gCurrentDragCount > 0;
+}
+
+function getDraggedPathsFromDataTransfer(dt) {
+  if (Array.isArray(gCurrentDragPaths) && gCurrentDragPaths.length) {
+    return gCurrentDragPaths.slice();
+  }
+  if (gBridge && Array.isArray(gBridge.drag_paths) && gBridge.drag_paths.length) {
+    return gBridge.drag_paths.slice();
+  }
+  if (!dt) return [];
+  const customPaths = dt.getData('web/mmx-paths');
+  if (customPaths) {
+    try {
+      const parsed = JSON.parse(customPaths);
+      if (Array.isArray(parsed)) return parsed.filter(Boolean);
+    } catch (_err) {
+      // Ignore malformed custom path payloads and fall through.
+    }
+  }
+  if (dt.files && dt.files.length) {
+    return Array.from(dt.files).map((file) => file.path).filter(Boolean);
+  }
+  const uriList = dt.getData('text/uri-list');
+  if (uriList) {
+    return uriList
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('#'))
+      .map((line) => {
+        try {
+          if (!line.startsWith('file:///')) return '';
+          return decodeURIComponent(line.replace('file:///', '').replace(/\//g, '\\'));
+        } catch (_err) {
+          return '';
+        }
+      })
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function getDraggedPathsFromEvent(e) {
+  return getDraggedPathsFromDataTransfer(e && e.dataTransfer);
+}
+
+function clearGalleryFolderDropTargets() {
+  document.querySelectorAll('.folder-drop-target').forEach((node) => node.classList.remove('folder-drop-target'));
+  gCurrentTargetFolderName = '';
+  gCurrentDropFolderPath = '';
+  gCurrentDropFolderCard = null;
+}
+
+function getEligibleDroppedPaths(paths, targetPath) {
+  if (!Array.isArray(paths) || !paths.length || !targetPath) return [];
+  const targetNorm = targetPath.replace(/\//g, '\\').toLowerCase();
+  return paths.filter((path) => {
+    const srcFolder = (path || '').replace(/\//g, '\\').replace(/\\[^\\]+$/, '').toLowerCase();
+    return srcFolder !== targetNorm;
+  });
+}
+
+function cancelInternalGalleryDrop(e) {
+  if (!isInternalGalleryDragEvent(e)) return false;
+  e.preventDefault();
+  e.stopPropagation();
+  debugGalleryDrag(`cancel hovered=${gCurrentDropFolderPath || ''} dragCount=${gCurrentDragPaths.length}`);
+  if (gBridge && gBridge.hide_drag_tooltip) gBridge.hide_drag_tooltip();
+  clearGalleryFolderDropTargets();
+  return true;
+}
+
+function getFolderCardFromEventTarget(target) {
+  const node = target && target.nodeType === Node.TEXT_NODE ? target.parentElement : target;
+  if (!node || !node.closest) return null;
+  return node.closest('.folder-card');
+}
+
+function getFolderCardFromPoint(clientX, clientY, fallbackTarget = null) {
+  const hit = typeof document.elementFromPoint === 'function'
+    ? document.elementFromPoint(clientX, clientY)
+    : null;
+  const fromPoint = getFolderCardFromEventTarget(hit);
+  if (fromPoint) return fromPoint;
+  return getFolderCardFromEventTarget(fallbackTarget);
+}
+
+function updateGalleryDragHoverFromPoint(clientX, clientY, fallbackTarget = null) {
+  const folderCard = getFolderCardFromPoint(clientX, clientY, fallbackTarget);
+  const targetPath = folderCard ? (folderCard.getAttribute('data-path') || '') : '';
+  const eligiblePaths = getEligibleDroppedPaths(gCurrentDragPaths, targetPath);
+  if (!folderCard || !targetPath || !eligiblePaths.length) {
+    clearGalleryFolderDropTargets();
+    return false;
+  }
+  if (gCurrentDropFolderCard !== folderCard) {
+    clearGalleryFolderDropTargets();
+    folderCard.classList.add('folder-drop-target');
+    gCurrentDropFolderCard = folderCard;
+    gCurrentTargetFolderName = getItemName({ path: targetPath, is_folder: true });
+    gCurrentDropFolderPath = targetPath;
+    debugGalleryDrag(`hover folder=${targetPath} eligible=${eligiblePaths.length}`);
+  }
+  return true;
+}
+
+function executeGalleryDropToCurrentTarget(isCopy) {
+  const targetPath = gCurrentDropFolderPath || '';
+  const eligiblePaths = getEligibleDroppedPaths(gCurrentDragPaths, targetPath);
+  if (!targetPath || !eligiblePaths.length || gGalleryDragHandled) return false;
+  gGalleryDragHandled = true;
+  if (gBridge && gBridge.hide_drag_tooltip) gBridge.hide_drag_tooltip();
+  debugGalleryDrag(`execute target=${targetPath} count=${eligiblePaths.length} op=${isCopy ? 'copy' : 'move'}`);
+  setGlobalLoading(true, isCopy ? 'Copying…' : 'Moving…', 25);
+  if (gBridge && (isCopy ? gBridge.copy_paths_async : gBridge.move_paths_async)) {
+    const op = isCopy ? gBridge.copy_paths_async : gBridge.move_paths_async;
+    op.call(gBridge, eligiblePaths, targetPath);
+    return true;
+  }
+  return false;
+}
+
 function createStructuredCard(item, idx) {
   const mediaIdx = getItemIndex(item, idx);
   const card = document.createElement('div');
@@ -1774,8 +1916,81 @@ function createStructuredCard(item, idx) {
     showCtx(e.clientX, e.clientY, item, mediaIdx, false);
   });
 
-  if (!isFolder) {
+  if (isFolder) {
+    card.addEventListener('dragenter', (e) => {
+      if (!isInternalGalleryDragEvent(e)) return;
+      const paths = getDraggedPathsFromEvent(e);
+      const targetPath = item.path || '';
+      const eligiblePaths = getEligibleDroppedPaths(paths, targetPath);
+      if (!eligiblePaths.length) return;
+      e.preventDefault();
+      e.stopPropagation();
+      clearGalleryFolderDropTargets();
+      card.classList.add('folder-drop-target');
+      gCurrentTargetFolderName = getItemName(item);
+      gCurrentDropFolderPath = targetPath;
+    });
+    card.addEventListener('dragover', (e) => {
+      if (!isInternalGalleryDragEvent(e)) return;
+      const paths = getDraggedPathsFromEvent(e);
+      const targetPath = item.path || '';
+      const eligiblePaths = getEligibleDroppedPaths(paths, targetPath);
+      if (!eligiblePaths.length) {
+        card.classList.remove('folder-drop-target');
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      const isCopy = e.ctrlKey || e.metaKey;
+      if (e.dataTransfer) e.dataTransfer.dropEffect = isCopy ? 'copy' : 'move';
+      if (!card.classList.contains('folder-drop-target')) {
+        clearGalleryFolderDropTargets();
+        card.classList.add('folder-drop-target');
+        gCurrentTargetFolderName = getItemName(item);
+        gCurrentDropFolderPath = targetPath;
+        debugGalleryDrag(`hover folder=${targetPath} eligible=${eligiblePaths.length}`);
+      }
+      if (gBridge && gBridge.update_drag_tooltip) {
+        const count = gCurrentDragCount || eligiblePaths.length || 1;
+        gBridge.update_drag_tooltip(count, isCopy, gCurrentTargetFolderName);
+      }
+    });
+    card.addEventListener('dragleave', (e) => {
+      if (card.contains(e.relatedTarget)) return;
+      clearGalleryFolderDropTargets();
+    });
+    card.addEventListener('drop', (e) => {
+      if (!isInternalGalleryDragEvent(e)) return;
+      const paths = getDraggedPathsFromEvent(e);
+      const targetPath = item.path || gCurrentDropFolderPath || '';
+      const eligiblePaths = getEligibleDroppedPaths(paths, targetPath);
+      e.preventDefault();
+      e.stopPropagation();
+      clearGalleryFolderDropTargets();
+      if (!eligiblePaths.length) {
+        debugGalleryDrag(`folder-card drop ignored target=${targetPath} paths=${paths.length}`);
+        return;
+      }
+      const isCopy = e.ctrlKey || e.metaKey;
+      if (gBridge && gBridge.hide_drag_tooltip) gBridge.hide_drag_tooltip();
+      debugGalleryDrag(`folder-card drop execute target=${targetPath} count=${eligiblePaths.length} op=${isCopy ? 'copy' : 'move'}`);
+      setGlobalLoading(true, isCopy ? 'Copying…' : 'Moving…', 25);
+      if (gBridge && (isCopy ? gBridge.copy_paths_async : gBridge.move_paths_async)) {
+        const op = isCopy ? gBridge.copy_paths_async : gBridge.move_paths_async;
+        op.call(gBridge, eligiblePaths, targetPath);
+      }
+    });
+  } else {
     card.draggable = true;
+    card.addEventListener('dragover', (e) => {
+      if (!isInternalGalleryDragEvent(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
+    });
+    card.addEventListener('drop', (e) => {
+      cancelInternalGalleryDrop(e);
+    });
     card.addEventListener('dragstart', (e) => {
       const path = item.path || '';
       if (!path) return;
@@ -1787,19 +2002,30 @@ function createStructuredCard(item, idx) {
       e.dataTransfer.setData('web/mmx-paths', pathsJson);
       e.dataTransfer.setData('application/x-mmx-type', 'file');
       if (window.qt && gBridge && gBridge.set_drag_paths) gBridge.set_drag_paths(paths);
+      gCurrentDragPaths = paths.slice();
       gCurrentDragCount = paths.length;
+      gGalleryDragHandled = false;
+      clearGalleryFolderDropTargets();
+      debugGalleryDrag(`dragstart count=${paths.length} first=${paths[0] || ''}`);
       e.dataTransfer.effectAllowed = 'copyMove';
     });
     card.addEventListener('drag', (e) => {
       if (gBridge && gBridge.update_drag_tooltip && e.clientX > 0 && e.clientY > 0) {
+        updateGalleryDragHoverFromPoint(e.clientX, e.clientY, e.target);
         const isCopy = e.ctrlKey || e.metaKey;
         const count = gCurrentDragCount || 1;
         gBridge.update_drag_tooltip(count, isCopy, gCurrentTargetFolderName);
       }
     });
-    card.addEventListener('dragend', () => {
+    card.addEventListener('dragend', (e) => {
+      if (e && e.clientX > 0 && e.clientY > 0) {
+        updateGalleryDragHoverFromPoint(e.clientX, e.clientY, e.target);
+      }
+      executeGalleryDropToCurrentTarget(!!(e && (e.ctrlKey || e.metaKey)));
       if (gBridge && gBridge.hide_drag_tooltip) gBridge.hide_drag_tooltip();
       if (window.qt && gBridge && gBridge.set_drag_paths) gBridge.set_drag_paths([]);
+      clearGalleryFolderDropTargets();
+      gCurrentDragPaths = [];
       gCurrentDragCount = 0;
     });
   }
@@ -1871,7 +2097,11 @@ function createMasonryCard(item, idx) {
       if (window.qt && gBridge && gBridge.set_drag_paths) {
         gBridge.set_drag_paths(paths);
       }
+      gGalleryDragHandled = false;
+      clearGalleryFolderDropTargets();
+      gCurrentDragPaths = paths.slice();
       gCurrentDragCount = paths.length;
+      debugGalleryDrag(`dragstart count=${paths.length} first=${paths[0] || ''}`);
 
       e.dataTransfer.effectAllowed = 'copyMove';
 
@@ -1887,18 +2117,24 @@ function createMasonryCard(item, idx) {
     });
     card.addEventListener('drag', (e) => {
       if (gBridge && gBridge.update_drag_tooltip && e.clientX > 0 && e.clientY > 0) {
+        updateGalleryDragHoverFromPoint(e.clientX, e.clientY, e.target);
         const isCopy = e.ctrlKey || e.metaKey;
         const count = gCurrentDragCount || 1;
         gBridge.update_drag_tooltip(count, isCopy, gCurrentTargetFolderName);
       }
     });
     card.addEventListener('dragend', (e) => {
+      if (e && e.clientX > 0 && e.clientY > 0) {
+        updateGalleryDragHoverFromPoint(e.clientX, e.clientY, e.target);
+      }
+      executeGalleryDropToCurrentTarget(!!(e && (e.ctrlKey || e.metaKey)));
       if (gBridge && gBridge.hide_drag_tooltip) {
         gBridge.hide_drag_tooltip();
       }
       if (window.qt && gBridge && gBridge.set_drag_paths) {
         gBridge.set_drag_paths([]);
       }
+      gCurrentDragPaths = [];
       gCurrentDragCount = 0;
       e.preventDefault();
     });
@@ -1974,23 +2210,33 @@ function createMasonryCard(item, idx) {
     if (window.qt && gBridge && gBridge.set_drag_paths) {
       gBridge.set_drag_paths(paths);
     }
+    gGalleryDragHandled = false;
+    clearGalleryFolderDropTargets();
+    gCurrentDragPaths = paths.slice();
     gCurrentDragCount = paths.length;
+    debugGalleryDrag(`dragstart count=${paths.length} first=${paths[0] || ''}`);
     e.dataTransfer.effectAllowed = 'copyMove';
   });
   card.addEventListener('drag', (e) => {
     if (gBridge && gBridge.update_drag_tooltip && e.clientX > 0 && e.clientY > 0) {
+      updateGalleryDragHoverFromPoint(e.clientX, e.clientY, e.target);
       const isCopy = e.ctrlKey || e.metaKey;
       const count = gCurrentDragCount || 1;
       gBridge.update_drag_tooltip(count, isCopy, gCurrentTargetFolderName);
     }
   });
-  card.addEventListener('dragend', () => {
+  card.addEventListener('dragend', (e) => {
+    if (e && e.clientX > 0 && e.clientY > 0) {
+      updateGalleryDragHoverFromPoint(e.clientX, e.clientY, e.target);
+    }
+    executeGalleryDropToCurrentTarget(!!(e && (e.ctrlKey || e.metaKey)));
     if (gBridge && gBridge.hide_drag_tooltip) {
       gBridge.hide_drag_tooltip();
     }
     if (window.qt && gBridge && gBridge.set_drag_paths) {
       gBridge.set_drag_paths([]);
     }
+    gCurrentDragPaths = [];
     gCurrentDragCount = 0;
   });
 
@@ -2425,6 +2671,64 @@ function wireCtxMenu() {
 function renderMediaList(items, scrollToTop = true) {
   const el = document.getElementById('mediaList');
   if (!el) return;
+  if (!el.dataset.internalDropCancelBound) {
+    el.addEventListener('dragover', (e) => {
+      if (!isInternalGalleryDragEvent(e)) return;
+      const folderTarget = getFolderCardFromPoint(e.clientX, e.clientY, e.target);
+      const paths = getDraggedPathsFromEvent(e);
+      if (folderTarget) {
+        const targetPath = folderTarget.getAttribute('data-path') || '';
+        const eligiblePaths = getEligibleDroppedPaths(paths, targetPath);
+        if (eligiblePaths.length) {
+          e.preventDefault();
+          e.stopPropagation();
+          clearGalleryFolderDropTargets();
+          folderTarget.classList.add('folder-drop-target');
+          gCurrentTargetFolderName = getItemName({ path: targetPath, is_folder: true });
+          gCurrentDropFolderPath = targetPath;
+          const isCopy = e.ctrlKey || e.metaKey;
+          if (e.dataTransfer) e.dataTransfer.dropEffect = isCopy ? 'copy' : 'move';
+          if (gBridge && gBridge.update_drag_tooltip) {
+            const count = gCurrentDragCount || eligiblePaths.length || 1;
+            gBridge.update_drag_tooltip(count, isCopy, gCurrentTargetFolderName);
+          }
+          return;
+        }
+      }
+      clearGalleryFolderDropTargets();
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
+    });
+    el.addEventListener('dragleave', (e) => {
+      if (el.contains(e.relatedTarget)) return;
+      clearGalleryFolderDropTargets();
+    });
+    el.addEventListener('drop', (e) => {
+      const folderTarget = getFolderCardFromPoint(e.clientX, e.clientY, e.target);
+      if (folderTarget && isInternalGalleryDragEvent(e)) {
+        const paths = getDraggedPathsFromEvent(e);
+        const targetPath = folderTarget.getAttribute('data-path') || gCurrentDropFolderPath || '';
+        const eligiblePaths = getEligibleDroppedPaths(paths, targetPath);
+        if (eligiblePaths.length) {
+          e.preventDefault();
+          e.stopPropagation();
+          clearGalleryFolderDropTargets();
+          const isCopy = e.ctrlKey || e.metaKey;
+          if (gBridge && gBridge.hide_drag_tooltip) gBridge.hide_drag_tooltip();
+          debugGalleryDrag(`gallery drop execute target=${targetPath} count=${eligiblePaths.length} op=${isCopy ? 'copy' : 'move'}`);
+          setGlobalLoading(true, isCopy ? 'Copying…' : 'Moving…', 25);
+          if (gBridge && (isCopy ? gBridge.copy_paths_async : gBridge.move_paths_async)) {
+            const op = isCopy ? gBridge.copy_paths_async : gBridge.move_paths_async;
+            op.call(gBridge, eligiblePaths, targetPath);
+          }
+          return;
+        }
+      }
+      debugGalleryDrag(`gallery drop cancel hovered=${gCurrentDropFolderPath || ''} dragCount=${gCurrentDragPaths.length}`);
+      cancelInternalGalleryDrop(e);
+    });
+    el.dataset.internalDropCancelBound = 'true';
+  }
   applyGalleryViewMode(gGalleryViewMode);
 
   el.innerHTML = '';

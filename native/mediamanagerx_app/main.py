@@ -996,6 +996,7 @@ class Bridge(QObject):
         self._scan_abort = False
         self._scan_lock = threading.Lock()
         self.drag_paths: list[str] = []
+        self.drag_target_folder: str = ""
         self._last_dlg_res = None
         
         appdata = Path(
@@ -1153,6 +1154,12 @@ class Bridge(QObject):
     def set_drag_paths(self, paths: list[str]) -> None:
         """Called from JS to register the actual files being dragged."""
         self.drag_paths = [str(p) for p in paths]
+        if not self.drag_paths:
+            self.drag_target_folder = ""
+
+    @Slot(str)
+    def set_drag_target_folder(self, folder_path: str) -> None:
+        self.drag_target_folder = str(folder_path or "")
 
     @Slot(int, bool, str)
     def update_drag_tooltip(self, count: int, is_copy: bool, target_folder: str) -> None:
@@ -2788,6 +2795,36 @@ class GalleryView(QWebEngineView):
         super().__init__(parent)
         self.setAcceptDrops(True)
 
+    def _probe_gallery_folder_target(self, x: int, y: int) -> None:
+        main_win = self.window()
+        bridge = getattr(main_win, "bridge", None)
+        if not bridge:
+            return
+
+        script = (
+            "(() => {"
+            f"  const el = document.elementFromPoint({int(x)}, {int(y)});"
+            "  const card = el && el.closest ? el.closest('.folder-card[data-path]') : null;"
+            "  return card ? card.getAttribute('data-path') : '';"
+            "})()"
+        )
+
+        def _apply_target(target_path: str) -> None:
+            try:
+                bridge.drag_target_folder = str(target_path or "")
+                bridge.dragOverFolder.emit(Path(target_path).name if target_path else "")
+            except Exception:
+                pass
+
+        try:
+            self.page().runJavaScript(script, _apply_target)
+        except Exception:
+            try:
+                bridge.drag_target_folder = ""
+                bridge.dragOverFolder.emit("")
+            except Exception:
+                pass
+
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
             is_copy = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
@@ -2808,8 +2845,14 @@ class GalleryView(QWebEngineView):
             is_file_drag = True
             
         if is_file_drag and bridge:
-            selected = bridge.get_selected_folders()
-            target_folder = selected[0] if selected else ""
+            try:
+                pos = event.position()
+                x, y = int(pos.x()), int(pos.y())
+            except Exception:
+                pos = event.pos()
+                x, y = int(pos.x()), int(pos.y())
+            self._probe_gallery_folder_target(x, y)
+            target_folder = bridge.drag_target_folder or ""
             
             # Count items: side-channel first (internal), then MIME (external)
             count = len(bridge.drag_paths) if bridge.drag_paths else len(event.mimeData().urls())
@@ -2830,6 +2873,8 @@ class GalleryView(QWebEngineView):
         main_win = self.window()
         bridge = getattr(main_win, "bridge", None)
         if bridge:
+            bridge.drag_target_folder = ""
+            bridge.dragOverFolder.emit("")
             bridge.hide_drag_tooltip()
         super().dragLeaveEvent(event)
 
@@ -2851,12 +2896,26 @@ class GalleryView(QWebEngineView):
                 src_paths = [url.toLocalFile() for url in mime.urls() if url.toLocalFile()]
             
             if src_paths:
-                selected = bridge.get_selected_folders()
-                target_path = selected[0] if selected else ""
+                if bridge.drag_paths:
+                    target_path = bridge.drag_target_folder
+                else:
+                    target_path = ""
+                if not target_path and not bridge.drag_paths:
+                    selected = bridge.get_selected_folders()
+                    target_path = selected[0] if selected else ""
                 
                 if target_path:
-                    # Filter out if moving to THE SAME folder
                     target_path_norm = target_path.replace("\\", "/").lower()
+
+                    # Internal gallery drags dropped back onto the gallery background
+                    # should be treated as a cancelled drag, not as a move/copy into
+                    # the currently loaded folder.
+                    if bridge.drag_paths:
+                        if not bridge.drag_target_folder:
+                            event.ignore()
+                            return
+
+                    # Filter out if moving to THE SAME folder
                     src_paths = [p for p in src_paths if os.path.dirname(p).replace("\\", "/").lower() != target_path_norm]
                     
                     if src_paths:
@@ -2866,8 +2925,15 @@ class GalleryView(QWebEngineView):
                         
                         paths_obj = [Path(p) for p in src_paths]
                         bridge._process_file_op(op_type, paths_obj, Path(target_path))
+                        bridge.drag_target_folder = ""
+                        bridge.dragOverFolder.emit("")
                         event.acceptProposedAction()
                         return
+                if bridge.drag_paths:
+                    bridge.drag_target_folder = ""
+                    bridge.dragOverFolder.emit("")
+                    event.ignore()
+                    return
         
         super().dropEvent(event)
 
