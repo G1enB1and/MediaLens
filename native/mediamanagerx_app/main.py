@@ -2874,6 +2874,10 @@ class GalleryView(QWebEngineView):
 
 
 class MainWindow(QMainWindow):
+    _DEFAULT_LEFT_PANEL_WIDTH = 200
+    _DEFAULT_CENTER_WIDTH = 700
+    _DEFAULT_RIGHT_PANEL_WIDTH = 300
+
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("MediaManagerX")
@@ -3783,14 +3787,7 @@ class MainWindow(QMainWindow):
         splitter.setMouseTracking(True)
         splitter.setHandleWidth(7)
 
-        # Apply persistent widths
-        state = self.bridge.settings.value("ui/splitter_state")
-        if state:
-            splitter.restoreState(state)
-        else:
-            # Side panels fixed (0 stretch), Gallery expands (1 stretch)
-            # Default to 200px left, 300px right sidebars if no saved state
-            splitter.setSizes([200, 700, 300])
+        self._restore_main_splitter_sizes()
 
         splitter.splitterMoved.connect(lambda *args: self._on_splitter_moved())
 
@@ -3829,6 +3826,51 @@ class MainWindow(QMainWindow):
 
     def _set_selected_folders(self, folder_paths: list[str]) -> None:
         self.bridge.set_selected_folders(folder_paths)
+
+    def _get_saved_panel_width(self, qkey: str, default: int) -> int:
+        try:
+            val = int(self.bridge.settings.value(qkey, default, type=int) or default)
+        except Exception:
+            val = default
+        return max(120, val)
+
+    def _current_splitter_sizes(self) -> list[int]:
+        try:
+            sizes = [int(v) for v in self.splitter.sizes()]
+        except Exception:
+            sizes = []
+        if len(sizes) < 3:
+            return [
+                self._DEFAULT_LEFT_PANEL_WIDTH,
+                self._DEFAULT_CENTER_WIDTH,
+                self._DEFAULT_RIGHT_PANEL_WIDTH,
+            ]
+        return sizes[:3]
+
+    def _save_main_panel_widths(self) -> None:
+        try:
+            sizes = self._current_splitter_sizes()
+            if self.left_panel.isVisible() and sizes[0] > 0:
+                self.bridge.settings.setValue("ui/left_panel_width", int(sizes[0]))
+            if self.right_panel.isVisible() and sizes[2] > 0:
+                self.bridge.settings.setValue("ui/right_panel_width", int(sizes[2]))
+        except Exception:
+            pass
+
+    def _restore_main_splitter_sizes(self) -> None:
+        try:
+            show_left = bool(self.bridge.settings.value("ui/show_left_panel", True, type=bool))
+            show_right = bool(self.bridge.settings.value("ui/show_right_panel", True, type=bool))
+            left_width = self._get_saved_panel_width("ui/left_panel_width", self._DEFAULT_LEFT_PANEL_WIDTH)
+            right_width = self._get_saved_panel_width("ui/right_panel_width", self._DEFAULT_RIGHT_PANEL_WIDTH)
+            sizes = [
+                left_width if show_left else 0,
+                self._DEFAULT_CENTER_WIDTH,
+                right_width if show_right else 0,
+            ]
+            self.splitter.setSizes(sizes)
+        except Exception:
+            pass
 
     def _on_load_folder_requested(self, folder_path: str) -> None:
         if not folder_path:
@@ -4022,9 +4064,15 @@ class MainWindow(QMainWindow):
             if key == "gallery.view_mode":
                 self._sync_gallery_view_actions()
             elif key == "ui.show_left_panel":
+                if not bool(value):
+                    self._save_main_panel_widths()
                 self.left_panel.setVisible(bool(value))
+                QTimer.singleShot(0, self._restore_main_splitter_sizes)
             elif key == "ui.show_right_panel":
+                if not bool(value):
+                    self._save_main_panel_widths()
                 self.right_panel.setVisible(bool(value))
+                QTimer.singleShot(0, self._restore_main_splitter_sizes)
             elif key == "ui.preview_above_details":
                 if hasattr(self, "preview_header_row"):
                     visible = bool(value)
@@ -6695,16 +6743,16 @@ class MainWindow(QMainWindow):
         try:
             cur = bool(self.bridge.settings.value(qkey, True, type=bool))
             new = not cur
+            if not new:
+                self._save_main_panel_widths()
             self.bridge.settings.setValue(qkey, new)
             self.bridge.uiFlagChanged.emit(qkey.replace("/", "."), new)
-            # Save state after toggle to remember relative widths
-            self._save_splitter_state()
         except Exception:
             pass
 
     def _save_splitter_state(self) -> None:
         try:
-            self.bridge.settings.setValue("ui/splitter_state", self.splitter.saveState())
+            self._save_main_panel_widths()
             if hasattr(self, "left_sections_splitter"):
                 self.bridge.settings.setValue("ui/left_sections_splitter_state", self.left_sections_splitter.saveState())
         except Exception:

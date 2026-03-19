@@ -617,9 +617,12 @@ function fitDetailsColumnsToContainer(container) {
 function applyDetailsColumnWidths(container) {
   if (!container) return;
   fitDetailsColumnsToContainer(container);
-  DETAILS_COLUMN_CONFIG.forEach(col => {
-    const width = col.resizable ? (gDetailsColumnWidths[col.key] || col.width) : col.width;
-    container.style.setProperty(`--details-col-${col.key}`, `${Math.round(width)}px`);
+  const targets = [container, ...container.querySelectorAll('.gallery-details')];
+  targets.forEach(target => {
+    DETAILS_COLUMN_CONFIG.forEach(col => {
+      const width = col.resizable ? (gDetailsColumnWidths[col.key] || col.width) : col.width;
+      target.style.setProperty(`--details-col-${col.key}`, `${Math.round(width)}px`);
+    });
   });
 }
 
@@ -2771,6 +2774,10 @@ function wireGalleryBackground() {
   const main = document.querySelector('main');
   if (!main) return;
 
+  const syncScrollTopState = () => {
+    document.body.classList.toggle('gallery-scroll-top', main.scrollTop <= 2);
+  };
+
   main.addEventListener('click', (e) => {
     // If we click the background (anything not a card or inside a card)
     if (!e.target.closest('.card')) {
@@ -2788,6 +2795,7 @@ function wireGalleryBackground() {
   });
 
   main.addEventListener('scroll', () => {
+    syncScrollTopState();
     if (gPlayingInplaceCard && gBridge && gBridge.update_native_video_rect) {
       const target = gPlayingInplaceCard.querySelector('.structured-thumb') || gPlayingInplaceCard;
       const rect = target.getBoundingClientRect();
@@ -2796,6 +2804,8 @@ function wireGalleryBackground() {
       gBridge.update_native_video_rect(rect.x, rect.y, rect.width, rect.height);
     }
   });
+
+  syncScrollTopState();
 }
 
 window.addEventListener('resize', () => {
