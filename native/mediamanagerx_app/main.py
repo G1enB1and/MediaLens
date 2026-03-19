@@ -1341,7 +1341,6 @@ class Bridge(QObject):
                 "ui.show_left_panel": bool(self.settings.value("ui/show_left_panel", True, type=bool)),
                 "ui.show_right_panel": bool(self.settings.value("ui/show_right_panel", True, type=bool)),
                 "ui.preview_above_details": self._preview_above_details_enabled(),
-                "ui.enable_glassmorphism": bool(self.settings.value("ui/enable_glassmorphism", True, type=bool)),
                 "ui.theme_mode": str(self.settings.value("ui/theme_mode", "dark", type=str) or "dark"),
                 "metadata.display.res": bool(self.settings.value("metadata/display/res", True, type=bool)),
                 "metadata.display.size": bool(self.settings.value("metadata/display/size", True, type=bool)),
@@ -1403,7 +1402,6 @@ class Bridge(QObject):
                 "ui.show_left_panel": True,
                 "ui.show_right_panel": True,
                 "ui.preview_above_details": True,
-                "ui.enable_glassmorphism": True,
                 "ui.theme_mode": "dark",
             }
 
@@ -1491,7 +1489,6 @@ class Bridge(QObject):
                 "ui.show_left_panel", 
                 "ui.show_right_panel", 
                 "ui.preview_above_details",
-                "ui.enable_glassmorphism", 
                 "updates.check_on_launch"
             )
             if key not in allowed and not key.startswith("metadata.display."):
@@ -3714,7 +3711,6 @@ class MainWindow(QMainWindow):
         self.btn_clear_bulk_tags.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_clear_bulk_tags.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.btn_clear_bulk_tags.clicked.connect(self._clear_bulk_tags)
-        self.btn_clear_bulk_tags.setStyleSheet("QPushButton { color: #f28b82; }") # Subtle red
         right_layout.addWidget(self.btn_clear_bulk_tags)
         self.btn_clear_bulk_tags.setVisible(False)
 
@@ -4243,6 +4239,12 @@ class MainWindow(QMainWindow):
         self.preview_image_lbl.setVisible(False)
         self.preview_sep.setVisible(False)
         self.details_header_lbl.setVisible(False)
+        self.lbl_group_general.setVisible(False)
+        self.lbl_group_camera.setVisible(False)
+        self.lbl_group_ai.setVisible(False)
+        self.meta_sep1.setVisible(False)
+        self.meta_sep2.setVisible(False)
+        self.meta_sep3.setVisible(False)
         self.lbl_fn_cap.setVisible(False)
         self.meta_filename_edit.setVisible(False)
         self.meta_path_lbl.setVisible(False)
@@ -6023,9 +6025,9 @@ class MainWindow(QMainWindow):
         
         # UI visibility logic
         visible_groups = [group for group in self._metadata_group_order(kind) if self._is_metadata_group_enabled(kind, group, True)]
-        self.lbl_group_general.setVisible("general" in visible_groups)
-        self.lbl_group_camera.setVisible("camera" in visible_groups)
-        self.lbl_group_ai.setVisible("ai" in visible_groups)
+        self.lbl_group_general.setVisible(False)
+        self.lbl_group_camera.setVisible(False)
+        self.lbl_group_ai.setVisible(False)
         active_fields = {
             field
             for group in visible_groups
@@ -6573,12 +6575,13 @@ class MainWindow(QMainWindow):
                 border-color: {accent_str};
             }}
             QPushButton#btnClearBulkTags {{
-                background-color: transparent;
+                background-color: {Theme.get_btn_save_bg(accent)};
                 color: {text};
                 border: 1px solid {Theme.get_border(accent)};
                 border-radius: 4px;
                 padding: 4px 8px;
-                font-size: 12px;
+                font-size: 11px;
+                font-weight: 500;
             }}
             QPushButton#btnClearBulkTags:hover {{
                 background-color: {Theme.get_btn_save_hover(accent)};

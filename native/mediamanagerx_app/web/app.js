@@ -3040,7 +3040,6 @@ function wireSettings() {
   const browse = document.getElementById('browseStartFolder');
   const backdrop = document.getElementById('settingsBackdrop');
   const toggle = document.getElementById('toggleRandomize');
-  const glassToggle = document.getElementById('toggleGlass');
 
   // Pane switching logic
   const navItems = document.querySelectorAll('.settings-nav-item');
@@ -3054,14 +3053,6 @@ function wireSettings() {
       });
     });
   });
-
-  if (glassToggle) {
-    glassToggle.addEventListener('change', () => {
-      if (!gBridge || !gBridge.set_setting_bool) return;
-      document.body.classList.toggle('no-glass', !glassToggle.checked);
-      gBridge.set_setting_bool('ui.enable_glassmorphism', glassToggle.checked, function () { });
-    });
-  }
 
   if (openBtn) openBtn.addEventListener('click', openSettings);
   if (closeBtn) closeBtn.addEventListener('click', closeSettings);
@@ -3757,11 +3748,6 @@ async function main() {
       updateThemeAwareIcons(theme);
       const radio = document.getElementById(theme === 'light' ? 'themeLight' : 'themeDark');
       if (radio) radio.checked = true;
-
-      const glass = (s && s['ui.enable_glassmorphism']) !== false; // Default true
-      document.body.classList.toggle('no-glass', !glass);
-      const gt = document.getElementById('toggleGlass');
-      if (gt) gt.checked = glass;
 
       updateSidebarButtonIcons('left', !!(s && s['ui.show_left_panel']));
       updateSidebarButtonIcons('right', !!(s && s['ui.show_right_panel']));
