@@ -1,6 +1,17 @@
 # Change Log
 
-## v1.0.17 (Current)
+## v1.0.18 (Current)
+
+### Changed
+
+- **Details Header Layout**: Refined regular and grouped Details header spacing, sticky positioning, separator styling, and scroll-state behavior so both modes align cleanly without visible jumps or header gaps.
+- **Grouped Details Columns**: Fixed grouped-by-date Details mode so the shared resizable header stays aligned with filenames, folders, sizes, and other row data below it while resizing.
+- **Sidebar Width Persistence**: Corrected sidebar state persistence so reopening panels restores their previous usable widths instead of saving and restoring zero-width sidebars.
+- **WebEngine Startup Stability**: Deferred the initial WebEngine background-color setup until after the event loop starts, avoiding native startup aborts seen on some installed Windows machines.
+
+---
+
+## v1.0.17
 
 ### Added
 
