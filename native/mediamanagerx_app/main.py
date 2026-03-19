@@ -619,18 +619,20 @@ class CustomSplitterHandle(QSplitterHandle):
     def __init__(self, orientation: Qt.Orientation, parent: QSplitter) -> None:
         super().__init__(orientation, parent)
         self.setMouseTracking(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         accent_str = str(self.parent().window().bridge.settings.value("ui/accent_color", "#8ab4f8"))
         accent = QColor(accent_str)
-        
+        track = QColor(Theme.get_bg(accent))
         idle = QColor(Theme.get_splitter_idle(accent))
         color = accent if self.underMouse() else idle
 
-        painter.fillRect(self.rect(), Qt.GlobalColor.transparent)
+        painter.fillRect(self.rect(), track)
         pen = QPen(color)
-        pen.setWidth(1)
+        pen.setWidth(2 if self.underMouse() else 1)
         painter.setPen(pen)
         mid_x = self.rect().center().x()
         mid_y = self.rect().center().y()
@@ -6380,7 +6382,7 @@ class MainWindow(QMainWindow):
             return
         
         self._current_accent = accent_color
-        self.splitter.setHandleWidth(1)
+        self.splitter.setHandleWidth(7)
         
         # We no longer need stylesheets or manual loops here because 
         # CustomSplitterHandle.paintEvent handles everything natively.
@@ -6528,7 +6530,7 @@ class MainWindow(QMainWindow):
         """)
         
         # Right Panel (Metadata) - Mirroring Left Panel Background precisely
-        self.right_panel.setStyleSheet(f"background-color: {sb_bg_str}; border-left: 1px solid {Theme.get_border(accent)};")
+        self.right_panel.setStyleSheet(f"background-color: {sb_bg_str}; border-left: none;")
         
         self.scroll_area.setStyleSheet(f"""
             QScrollArea {{ background-color: {sb_bg_str}; border: none; }}
