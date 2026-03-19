@@ -1258,6 +1258,18 @@ function syncTimelineFromScroll() {
   if (gTimelineScrubActive || now <= gTimelineNavigationActiveUntil) return;
   const main = document.querySelector('main');
   if (!main) return;
+  const targets = getActiveTimelineScrollTargets();
+  if (!targets.length) return;
+  const maxScrollTop = Math.max(0, main.scrollHeight - main.clientHeight);
+  const atBottom = maxScrollTop <= 0 || main.scrollTop >= (maxScrollTop - 4);
+  if (atBottom) {
+    const last = targets[targets.length - 1];
+    updateTimelineThumb(last.ratio);
+    if (gTimelineHoverActive) showTimelineTooltipForPoint(last);
+    gTimelineLastScrollTop = main.scrollTop;
+    gTimelineLastThumbRatio = last.ratio;
+    return;
+  }
   const state = getTimelineInterpolatedStateFromScroll(main.scrollTop);
   if (!state) return;
   const scrollDelta = main.scrollTop - gTimelineLastScrollTop;
