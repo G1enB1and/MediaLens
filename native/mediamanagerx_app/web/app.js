@@ -36,6 +36,9 @@ let gTimelineLastThumbRatio = 0;
 let gTimelineUserScrollActiveUntil = 0;
 let gTimelineWheelSessionTimer = 0;
 let gTimelineNavigationActiveUntil = 0;
+let gTimelineHeaderObserver = null;
+let gTimelineVisibleGroupKeys = new Set();
+let gTimelineActiveGroupKey = '';
 const TIMELINE_INSET_PX = 20;
 const TIMELINE_THUMB_SIZE_PX = 14;
 const TIMELINE_TOP_YEAR_TOP_PX = 20;
@@ -1170,6 +1173,112 @@ function refreshTimelineScrollTargets() {
     .sort((a, b) => a.ratio - b.ratio);
 }
 
+function applyTimelineMarkerStates() {
+  const rail = document.getElementById('timelineRail');
+  const points = rail && Array.isArray(rail.__timelinePoints) ? rail.__timelinePoints : [];
+  points.forEach((point) => {
+    if (!point.marker) return;
+    const isActive = !!gTimelineActiveGroupKey && point.key === gTimelineActiveGroupKey;
+    const isVisible = gTimelineVisibleGroupKeys.has(point.key);
+    point.marker.classList.toggle('is-active', isActive);
+    point.marker.classList.toggle('is-visible', !isActive && isVisible);
+    point.marker.classList.toggle('is-dim', !isActive && !isVisible);
+  });
+}
+
+function setTimelineActiveGroupKey(groupKey) {
+  gTimelineActiveGroupKey = groupKey || '';
+  applyTimelineMarkerStates();
+}
+
+function refreshVisibleTimelineAnchors() {
+  const main = document.querySelector('main');
+  const sections = document.querySelectorAll('.gallery-group[data-group-key]');
+  if (!main || !sections.length) {
+    gTimelineVisibleGroupKeys = new Set();
+    applyTimelineMarkerStates();
+    return;
+  }
+  const mainRect = main.getBoundingClientRect();
+  const visibleKeys = new Set();
+  sections.forEach((section) => {
+    const header = section.querySelector('.gallery-group-header');
+    if (!header) return;
+    const rect = header.getBoundingClientRect();
+    const visibleHeight = Math.min(rect.bottom, mainRect.bottom) - Math.max(rect.top, mainRect.top);
+    if (visibleHeight >= 12) {
+      const key = section.dataset.groupKey || '';
+      if (key) visibleKeys.add(key);
+    }
+  });
+  gTimelineVisibleGroupKeys = visibleKeys;
+  applyTimelineMarkerStates();
+}
+
+function disconnectTimelineHeaderObserver() {
+  if (gTimelineHeaderObserver) {
+    gTimelineHeaderObserver.disconnect();
+    gTimelineHeaderObserver = null;
+  }
+}
+
+function setupTimelineHeaderObserver() {
+  disconnectTimelineHeaderObserver();
+  gTimelineVisibleGroupKeys = new Set();
+  const main = document.querySelector('main');
+  const sections = document.querySelectorAll('.gallery-group[data-group-key]');
+  if (!main || !sections.length || typeof IntersectionObserver === 'undefined') {
+    refreshVisibleTimelineAnchors();
+    return;
+  }
+  gTimelineHeaderObserver = new IntersectionObserver((entries) => {
+    let changed = false;
+    entries.forEach((entry) => {
+      const section = entry.target.closest('.gallery-group[data-group-key]');
+      const key = section && section.dataset.groupKey;
+      if (!key) return;
+      const isVisible = entry.isIntersecting && entry.intersectionRect.height >= 12;
+      if (isVisible) {
+        if (!gTimelineVisibleGroupKeys.has(key)) {
+          gTimelineVisibleGroupKeys.add(key);
+          changed = true;
+        }
+      } else if (gTimelineVisibleGroupKeys.delete(key)) {
+        changed = true;
+      }
+    });
+    if (changed) applyTimelineMarkerStates();
+  }, {
+    root: main,
+    threshold: [0, 0.25, 0.5, 0.75, 1],
+    rootMargin: '-8px 0px -8px 0px',
+  });
+
+  sections.forEach((section) => {
+    const header = section.querySelector('.gallery-group-header');
+    if (header) gTimelineHeaderObserver.observe(header);
+  });
+  refreshVisibleTimelineAnchors();
+}
+
+function getNearestTimelinePointForRatio(ratio) {
+  const rail = document.getElementById('timelineRail');
+  const points = rail && Array.isArray(rail.__timelinePoints) ? rail.__timelinePoints : [];
+  if (!points.length) return null;
+  const clampedRatio = clampTimelineRatio(ratio);
+  let closest = points[0];
+  let closestDistance = Math.abs(clampedRatio - closest.ratio);
+  for (let i = 1; i < points.length; i += 1) {
+    const point = points[i];
+    const distance = Math.abs(clampedRatio - point.ratio);
+    if (distance < closestDistance) {
+      closest = point;
+      closestDistance = distance;
+    }
+  }
+  return closest;
+}
+
 function getActiveTimelineScrollTargets() {
   if (Array.isArray(gTimelineScrollTargetsFrozen) && gTimelineScrollTargetsFrozen.length) {
     return gTimelineScrollTargetsFrozen;
@@ -1265,6 +1374,7 @@ function syncTimelineFromScroll() {
   if (atBottom) {
     const last = targets[targets.length - 1];
     updateTimelineThumb(last.ratio);
+    setTimelineActiveGroupKey(last.key);
     if (gTimelineHoverActive) showTimelineTooltipForPoint(last);
     gTimelineLastScrollTop = main.scrollTop;
     gTimelineLastThumbRatio = last.ratio;
@@ -1287,6 +1397,7 @@ function syncTimelineFromScroll() {
   }
 
   updateTimelineThumb(nextRatio);
+  setTimelineActiveGroupKey(state.point && state.point.key ? state.point.key : '');
   if (gTimelineHoverActive) refreshTimelineTooltip(nextRatio);
   gTimelineLastScrollTop = main.scrollTop;
   gTimelineLastThumbRatio = nextRatio;
@@ -1353,6 +1464,8 @@ function scrubTimelineAt(clientY, { snap = false } = {}) {
   const ratio = getTimelineRatioFromClientY(clientY);
   gTimelineScrubRatio = ratio;
   updateTimelineThumb(ratio);
+  const point = getNearestTimelinePointForRatio(ratio);
+  if (point) setTimelineActiveGroupKey(point.key);
   refreshTimelineTooltip(ratio);
   if (snap) snapTimelineToNearestPoint(ratio);
   else scrollTimelineToRatio(ratio);
@@ -1379,11 +1492,14 @@ function buildTimelinePoints(groups) {
 function renderTimelineRail(groups) {
   const rail = document.getElementById('timelineRail');
   if (!rail) return;
+  disconnectTimelineHeaderObserver();
   rail.innerHTML = '';
   rail.__timelinePoints = [];
   rail.__snapTargets = [];
   rail.__scrollTargets = [];
   rail.__activeSnapTarget = null;
+  gTimelineVisibleGroupKeys = new Set();
+  gTimelineActiveGroupKey = '';
   rail.classList.remove('timeline-granularity-day', 'timeline-granularity-month', 'timeline-granularity-year');
   rail.classList.add(`timeline-granularity-${gGroupDateGranularity}`);
 
@@ -1426,7 +1542,7 @@ function renderTimelineRail(groups) {
   timeline.points.forEach((point) => {
     const marker = document.createElement('button');
     marker.type = 'button';
-    marker.className = 'timeline-marker timeline-entry';
+    marker.className = 'timeline-marker timeline-entry is-dim';
     marker.textContent = point.label;
     marker.setAttribute('aria-label', point.title);
     marker.dataset.groupKey = point.key;
@@ -1484,6 +1600,8 @@ function renderTimelineRail(groups) {
   rail.appendChild(scale);
   requestAnimationFrame(() => {
     layoutTimelinePoints();
+    setupTimelineHeaderObserver();
+    applyTimelineMarkerStates();
     scheduleTimelineScrollTargetRefresh();
   });
   rail.hidden = !rail.childElementCount;
@@ -3374,6 +3492,7 @@ function wireGalleryBackground() {
     const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
     gTimelineUserScrollActiveUntil = now + 220;
     syncScrollTopState();
+    refreshVisibleTimelineAnchors();
     syncTimelineFromScroll();
     maybeLoadMoreInfiniteResults();
     if (gPlayingInplaceCard && gBridge && gBridge.update_native_video_rect) {
@@ -3394,6 +3513,7 @@ window.addEventListener('resize', () => {
     applyDetailsColumnWidths(mediaList);
   }
   layoutTimelinePoints();
+  refreshVisibleTimelineAnchors();
   scheduleTimelineScrollTargetRefresh();
 });
 

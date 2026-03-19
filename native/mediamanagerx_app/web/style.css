@@ -1304,7 +1304,7 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   transform: translateY(-50%);
   border: none;
   background: transparent;
-  color: color-mix(in srgb, var(--fg), var(--muted) 22%);
+  color: color-mix(in srgb, var(--fg), var(--muted) 60%);
   text-align: right;
   cursor: ns-resize;
   white-space: nowrap;
@@ -1321,6 +1321,7 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 .timeline-entry {
   font-size: 11px;
   font-weight: 600;
+  transition: color 120ms ease, opacity 120ms ease;
 }
 
 .timeline-marker:focus-visible {
@@ -1328,8 +1329,24 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   color: var(--accent);
 }
 
+.timeline-marker.is-dim {
+  color: color-mix(in srgb, var(--fg), var(--muted) 60%);
+  opacity: 0.56;
+}
+
+.timeline-marker.is-visible {
+  color: color-mix(in srgb, var(--fg), white 8%);
+  opacity: 0.9;
+}
+
+.timeline-marker.is-active {
+  color: color-mix(in srgb, var(--fg), white 18%);
+  opacity: 1;
+}
+
 .timeline-entry:hover {
   color: var(--accent);
+  opacity: 1;
 }
 
 .timeline-scrubber {
