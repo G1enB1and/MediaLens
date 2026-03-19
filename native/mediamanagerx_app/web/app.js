@@ -25,11 +25,23 @@ let gGroupDateGranularity = 'day';
 let gCollapsedGroupKeys = new Set();
 let gTimelineScrubActive = false;
 let gTimelineScrubPointerId = null;
+let gTimelineHoverActive = false;
+let gTimelineScrubRatio = 0;
+let gPendingScrollAnchor = null;
+let gInfiniteScrollLoading = false;
+let gTimelineScrollTargetsFrozen = null;
+let gTimelineRefreshTargetsRaf = 0;
+let gTimelineLastScrollTop = 0;
+let gTimelineLastThumbRatio = 0;
+let gTimelineUserScrollActiveUntil = 0;
+let gTimelineWheelSessionTimer = 0;
+let gTimelineNavigationActiveUntil = 0;
 const TIMELINE_INSET_PX = 20;
 const TIMELINE_THUMB_SIZE_PX = 14;
 const TIMELINE_TOP_YEAR_TOP_PX = 20;
 const TIMELINE_TOP_MONTH_TOP_PX = 35;
 const TIMELINE_THUMB_OFFSET_PX = 8;
+const TIMELINE_MIN_POINT_GAP_PX = 26;
 
 const GALLERY_VIEW_MODES = new Set(['masonry', 'grid_small', 'grid_medium', 'grid_large', 'grid_xlarge', 'list', 'content', 'details']);
 const DETAILS_COLUMN_CONFIG = [
@@ -733,7 +745,13 @@ function getDateGroupMeta(item) {
       timelineYear: 'Unknown',
       timelineLabel: 'Unknown',
       timelineTitle: 'Unknown Date',
+      timelineDayLabel: '?',
+      yearNumber: null,
+      monthIndex: null,
+      dayNumber: null,
       sortValue: -1,
+      rangeStart: null,
+      rangeEnd: null,
     };
   }
 
@@ -744,26 +762,44 @@ function getDateGroupMeta(item) {
   const monthLong = date.toLocaleDateString(undefined, { month: 'long' });
 
   if (gGroupDateGranularity === 'year') {
+    const rangeStart = Date.UTC(year, 0, 1);
+    const rangeEnd = Date.UTC(year, 11, 31);
     return {
       key: `${year}`,
       label: `${year}`,
       timelineYear: `${year}`,
       timelineLabel: `${year}`,
       timelineTitle: `${year}`,
-      sortValue: Date.UTC(year, 0, 1),
+      timelineDayLabel: '1',
+      yearNumber: year,
+      monthIndex: 0,
+      dayNumber: 1,
+      sortValue: rangeStart,
+      rangeStart,
+      rangeEnd,
     };
   }
 
   if (gGroupDateGranularity === 'month') {
+    const rangeStart = Date.UTC(year, month, 1);
+    const rangeEnd = Date.UTC(year, month + 1, 0);
     return {
       key: `${year}-${String(month + 1).padStart(2, '0')}`,
       label: `${monthLong} ${year}`,
       timelineYear: `${year}`,
       timelineLabel: monthLabel,
       timelineTitle: `${monthLong} ${year}`,
-      sortValue: Date.UTC(year, month, 1),
+      timelineDayLabel: '1',
+      yearNumber: year,
+      monthIndex: month,
+      dayNumber: 1,
+      sortValue: rangeStart,
+      rangeStart,
+      rangeEnd,
     };
   }
+
+  const rangeStart = Date.UTC(year, month, day);
 
   return {
     key: `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
@@ -771,7 +807,13 @@ function getDateGroupMeta(item) {
     timelineYear: `${year}`,
     timelineLabel: monthLabel,
     timelineTitle: `${monthLong} ${year}`,
-    sortValue: Date.UTC(year, month, day),
+    timelineDayLabel: `${day}`,
+    yearNumber: year,
+    monthIndex: month,
+    dayNumber: day,
+    sortValue: rangeStart,
+    rangeStart,
+    rangeEnd: rangeStart,
   };
 }
 
@@ -810,6 +852,7 @@ function toggleGroupCollapsed(groupKey, forceCollapsed = null) {
     if (body) body.hidden = collapsed;
     if (toggle) toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
   });
+  scheduleTimelineScrollTargetRefresh();
 }
 
 function setAllGroupsCollapsed(collapsed) {
@@ -825,134 +868,561 @@ function scrollToGroup(groupKey) {
   target.scrollIntoView({ block: 'start', behavior: gTimelineScrubActive ? 'auto' : 'smooth' });
 }
 
-function updateTimelineThumb(index, total) {
-  const thumb = document.querySelector('#timelineRail .timeline-scrubber-thumb');
-  if (!thumb || total <= 0) return;
-  const ratio = total <= 1 ? 0 : index / (total - 1);
-  thumb.style.top = `calc(${TIMELINE_TOP_YEAR_TOP_PX + TIMELINE_THUMB_OFFSET_PX}px + ${Math.max(0, Math.min(1, ratio))} * (100% - ${TIMELINE_INSET_PX * 2}px) - ${TIMELINE_THUMB_SIZE_PX / 2}px)`;
+function captureCurrentGroupScrollAnchor() {
+  const main = document.querySelector('main');
+  if (!main) return null;
+  const groups = Array.from(document.querySelectorAll('.gallery-group'));
+  if (!groups.length) {
+    return {
+      scrollTop: main.scrollTop,
+      groupSortValue: null,
+      offsetWithinGroup: 0,
+    };
+  }
+  const mainRect = main.getBoundingClientRect();
+  let best = null;
+  groups.forEach((group) => {
+    const rect = group.getBoundingClientRect();
+    const topWithinMain = rect.top - mainRect.top;
+    if (topWithinMain <= 8) {
+      if (!best || topWithinMain > best.topWithinMain) {
+        best = { group, topWithinMain };
+      }
+    }
+  });
+  if (!best) {
+    best = {
+      group: groups[0],
+      topWithinMain: groups[0].getBoundingClientRect().top - mainRect.top,
+    };
+  }
+  const groupSortValueRaw = Number(best.group.dataset.sortValue);
+  const groupRangeStartRaw = Number(best.group.dataset.rangeStart);
+  const groupRangeEndRaw = Number(best.group.dataset.rangeEnd);
+  const groupTopScroll = main.scrollTop + best.topWithinMain;
+  return {
+    scrollTop: main.scrollTop,
+    groupSortValue: Number.isFinite(groupSortValueRaw) ? groupSortValueRaw : null,
+    rangeStart: Number.isFinite(groupRangeStartRaw) ? groupRangeStartRaw : null,
+    rangeEnd: Number.isFinite(groupRangeEndRaw) ? groupRangeEndRaw : null,
+    offsetWithinGroup: Math.max(0, main.scrollTop - groupTopScroll),
+  };
 }
 
-function scrubTimelineAt(clientY) {
+function restoreGroupScrollAnchor() {
+  const anchor = gPendingScrollAnchor;
+  gPendingScrollAnchor = null;
+  if (!anchor) return;
+  const main = document.querySelector('main');
+  if (!main) return;
+  const groups = Array.from(document.querySelectorAll('.gallery-group'));
+  if (!groups.length) {
+    main.scrollTop = anchor.scrollTop || 0;
+    return;
+  }
+  if (!Number.isFinite(anchor.groupSortValue)) {
+    main.scrollTop = anchor.scrollTop || 0;
+    return;
+  }
+  const groupsWithRanges = groups.map((group) => ({
+    group,
+    sortValue: Number(group.dataset.sortValue),
+    rangeStart: Number(group.dataset.rangeStart),
+    rangeEnd: Number(group.dataset.rangeEnd),
+  })).filter(entry => Number.isFinite(entry.sortValue));
+
+  const containingPreferred = groupsWithRanges.filter(entry => (
+    Number.isFinite(entry.rangeStart) &&
+    Number.isFinite(entry.rangeEnd) &&
+    anchor.groupSortValue >= entry.rangeStart &&
+    anchor.groupSortValue <= entry.rangeEnd
+  ));
+
+  const overlappingRange = containingPreferred.length ? containingPreferred : groupsWithRanges.filter(entry => (
+    Number.isFinite(entry.rangeStart) &&
+    Number.isFinite(entry.rangeEnd) &&
+    Number.isFinite(anchor.rangeStart) &&
+    Number.isFinite(anchor.rangeEnd) &&
+    entry.rangeStart <= anchor.rangeEnd &&
+    entry.rangeEnd >= anchor.rangeStart
+  ));
+
+  const candidatePool = overlappingRange.length ? overlappingRange : groupsWithRanges;
+  let bestGroup = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  candidatePool.forEach((entry) => {
+    const compareValue = Number.isFinite(entry.sortValue) ? entry.sortValue : entry.rangeStart;
+    const distance = Math.abs(compareValue - anchor.groupSortValue);
+    if (distance < bestDistance) {
+      bestGroup = entry.group;
+      bestDistance = distance;
+    }
+  });
+  if (!bestGroup) {
+    main.scrollTop = anchor.scrollTop || 0;
+    return;
+  }
+  const targetScrollTop = (bestGroup.offsetTop || 0) + (anchor.offsetWithinGroup || 0);
+  main.scrollTop = Math.max(0, targetScrollTop);
+}
+
+function rerenderCurrentMediaPreservingScroll() {
+  gPendingScrollAnchor = captureCurrentGroupScrollAnchor();
+  renderMediaList(gMedia, false);
+}
+
+function shouldUseInfiniteDateScroll() {
+  return gGroupBy === 'date' && gGalleryViewMode !== 'masonry';
+}
+
+function shouldUseInfiniteScrollMode() {
+  if (shouldUseInfiniteDateScroll()) return true;
+  return gGalleryViewMode === 'list'
+    || gGalleryViewMode === 'details'
+    || gGalleryViewMode === 'content'
+    || gGalleryViewMode === 'grid_small'
+    || gGalleryViewMode === 'grid_medium';
+}
+
+function hasMoreInfiniteResults() {
+  return shouldUseInfiniteScrollMode() && Array.isArray(gMedia) && gMedia.length < (gTotal || 0);
+}
+
+function maybeLoadMoreInfiniteResults() {
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  if (gTimelineScrubActive || now <= gTimelineNavigationActiveUntil) return;
+  if (!shouldUseInfiniteScrollMode() || gInfiniteScrollLoading || !gBridge || !hasMoreInfiniteResults()) return;
+  const main = document.querySelector('main');
+  if (!main) return;
+  const remaining = main.scrollHeight - (main.scrollTop + main.clientHeight);
+  if (remaining > 600) return;
+  gInfiniteScrollLoading = true;
+  const nextOffset = gMedia.length;
+  gBridge.list_media(gSelectedFolders, PAGE_SIZE, nextOffset, gSort, gFilter, gSearchQuery || '', function (items) {
+    const nextItems = Array.isArray(items) ? items : [];
+    if (nextItems.length > 0) {
+      renderMediaList(gMedia.concat(nextItems), false);
+    }
+    gInfiniteScrollLoading = false;
+    renderPager();
+    requestAnimationFrame(() => maybeLoadMoreInfiniteResults());
+  });
+}
+
+function clampTimelineRatio(ratio) {
+  if (!Number.isFinite(ratio)) return 0;
+  return Math.max(0, Math.min(1, ratio));
+}
+
+function getTimelineTopCss(ratio) {
+  return `calc(${TIMELINE_TOP_YEAR_TOP_PX + TIMELINE_THUMB_OFFSET_PX}px + ${clampTimelineRatio(ratio)} * (100% - ${TIMELINE_INSET_PX * 2}px) - ${TIMELINE_THUMB_SIZE_PX / 2}px)`;
+}
+
+function updateTimelineViewport(ratio) {
+  const rail = document.getElementById('timelineRail');
+  const layer = rail && rail.querySelector('.timeline-anchor-layer');
+  const layout = rail && rail.__timelineLayout;
+  if (!rail || !layer || !layout) return;
+  const clampedRatio = clampTimelineRatio(ratio);
+  rail.__currentTimelineRatio = clampedRatio;
+  const viewportOffset = (layout.overflow || 0) * clampedRatio;
+  layer.style.transform = `translateY(${-viewportOffset}px)`;
+}
+
+function updateTimelineThumb(ratio) {
+  const thumb = document.querySelector('#timelineRail .timeline-scrubber-thumb');
+  if (!thumb) return;
+  const clampedRatio = clampTimelineRatio(ratio);
+  thumb.style.top = getTimelineTopCss(clampedRatio);
+  updateTimelineViewport(clampedRatio);
+}
+
+function layoutTimelinePoints() {
+  const rail = document.getElementById('timelineRail');
+  const layer = rail && rail.querySelector('.timeline-anchor-layer');
+  const points = rail && Array.isArray(rail.__timelinePoints) ? rail.__timelinePoints : [];
+  if (!rail || !layer || !points.length) return;
+  const availableHeight = Math.max(1, rail.clientHeight - (TIMELINE_INSET_PX * 2));
+  const virtualSpan = Math.max(availableHeight, Math.max(0, points.length - 1) * TIMELINE_MIN_POINT_GAP_PX);
+  const overflow = Math.max(0, virtualSpan - availableHeight);
+  rail.__timelineLayout = { availableHeight, virtualSpan, overflow };
+  points.forEach((point, index) => {
+    if (!point.marker) return;
+    const ratio = points.length <= 1 ? 0 : index / (points.length - 1);
+    point.marker.style.top = `${TIMELINE_INSET_PX + (ratio * virtualSpan)}px`;
+  });
+  updateTimelineViewport(rail.__currentTimelineRatio || 0);
+}
+
+function panTimelineByWheel(deltaY) {
+  const rail = document.getElementById('timelineRail');
+  const layout = rail && rail.__timelineLayout;
+  if (!rail || !layout || !(layout.overflow > 0)) return false;
+  beginTimelineWheelSession();
+  const currentRatio = clampTimelineRatio(rail.__currentTimelineRatio || 0);
+  const nextRatio = clampTimelineRatio(currentRatio + (deltaY / Math.max(layout.virtualSpan, 1)));
+  gTimelineHoverActive = true;
+  gTimelineScrubRatio = nextRatio;
+  updateTimelineThumb(nextRatio);
+  refreshTimelineTooltip(nextRatio);
+  scrollTimelineToRatio(nextRatio);
+  return true;
+}
+
+function getTimelineHoverPoint(ratio) {
+  const rail = document.getElementById('timelineRail');
+  const points = rail && Array.isArray(rail.__timelinePoints) ? rail.__timelinePoints : [];
+  if (!points.length) return null;
+  const clampedRatio = clampTimelineRatio(ratio);
+  let closest = points[0];
+  let closestDistance = Math.abs(clampedRatio - closest.ratio);
+  for (let i = 1; i < points.length; i += 1) {
+    const point = points[i];
+    const distance = Math.abs(clampedRatio - point.ratio);
+    if (distance < closestDistance) {
+      closest = point;
+      closestDistance = distance;
+    }
+  }
+  return closest;
+}
+
+function setTimelineTooltip(visible, ratio = 0, text = '') {
+  const rail = document.getElementById('timelineRail');
+  const tooltip = rail && rail.querySelector('.timeline-scrubber-tooltip');
+  if (!rail || !tooltip) return;
+  const shouldShow = !!visible && !!text;
+  tooltip.hidden = !shouldShow;
+  rail.classList.toggle('is-hovering', shouldShow);
+  if (!shouldShow) return;
+  tooltip.textContent = text;
+  tooltip.style.top = `calc(${TIMELINE_INSET_PX}px + ${clampTimelineRatio(ratio)} * (100% - ${TIMELINE_INSET_PX * 2}px))`;
+}
+
+function showTimelineTooltipForPoint(point) {
+  const rail = document.getElementById('timelineRail');
+  if (rail) rail.__activeSnapTarget = point || null;
+  if (!point) {
+    setTimelineTooltip(false);
+    return;
+  }
+  setTimelineTooltip(true, point.ratio, point.title || point.label || '');
+}
+
+function refreshTimelineTooltip(ratio) {
+  const point = getTimelineHoverPoint(ratio);
+  if (!point) {
+    const rail = document.getElementById('timelineRail');
+    if (rail) rail.__activeSnapTarget = null;
+    setTimelineTooltip(false);
+    return null;
+  }
+  const rail = document.getElementById('timelineRail');
+  if (rail) rail.__activeSnapTarget = point;
+  setTimelineTooltip(gTimelineScrubActive || gTimelineHoverActive, ratio, point.title || point.label || '');
+  return point;
+}
+
+function getTimelineRatioFromClientY(clientY) {
   const rail = document.getElementById('timelineRail');
   const track = rail && rail.querySelector('.timeline-scrubber-track');
-  if (!rail || !track) return;
-  const targets = Array.isArray(rail.__scrubGroups) ? rail.__scrubGroups : [];
-  if (!targets.length) return;
+  if (!track) return 0;
   const rect = track.getBoundingClientRect();
   const rawRatio = rect.height <= 0 ? 0 : (clientY - rect.top) / rect.height;
-  const ratio = Math.max(0, Math.min(1, rawRatio));
-  const index = Math.max(0, Math.min(targets.length - 1, Math.round(ratio * (targets.length - 1))));
-  const targetKey = targets[index];
-  if (!targetKey) return;
-  updateTimelineThumb(index, targets.length);
-  scrollToGroup(targetKey);
+  return clampTimelineRatio(rawRatio);
+}
+
+function refreshTimelineScrollTargets() {
+  const rail = document.getElementById('timelineRail');
+  const main = document.querySelector('main');
+  if (!rail || !main) return;
+  const baseTargets = Array.isArray(rail.__snapTargets) ? rail.__snapTargets : [];
+  const mainRect = main.getBoundingClientRect();
+  rail.__scrollTargets = baseTargets
+    .map((target) => {
+      const section = document.querySelector(`.gallery-group[data-group-key="${CSS.escape(target.key)}"]`);
+      if (!section) return null;
+      const sectionRect = section.getBoundingClientRect();
+      return {
+        ...target,
+        scrollTop: main.scrollTop + (sectionRect.top - mainRect.top),
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.ratio - b.ratio);
+}
+
+function getActiveTimelineScrollTargets() {
+  if (Array.isArray(gTimelineScrollTargetsFrozen) && gTimelineScrollTargetsFrozen.length) {
+    return gTimelineScrollTargetsFrozen;
+  }
+  const rail = document.getElementById('timelineRail');
+  return rail && Array.isArray(rail.__scrollTargets) ? rail.__scrollTargets : [];
+}
+
+function freezeTimelineScrollTargets() {
+  refreshTimelineScrollTargets();
+  const rail = document.getElementById('timelineRail');
+  const targets = rail && Array.isArray(rail.__scrollTargets) ? rail.__scrollTargets : [];
+  gTimelineScrollTargetsFrozen = targets.map(target => ({ ...target }));
+}
+
+function unfreezeTimelineScrollTargets() {
+  gTimelineScrollTargetsFrozen = null;
+}
+
+function beginTimelineWheelSession() {
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  gTimelineNavigationActiveUntil = now + 240;
+  freezeTimelineScrollTargets();
+  if (gTimelineWheelSessionTimer) clearTimeout(gTimelineWheelSessionTimer);
+  gTimelineWheelSessionTimer = setTimeout(() => {
+    gTimelineWheelSessionTimer = 0;
+    if (gTimelineScrubActive) return;
+    const settleNow = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    gTimelineNavigationActiveUntil = settleNow + 240;
+    unfreezeTimelineScrollTargets();
+    scheduleTimelineScrollTargetRefresh();
+  }, 180);
+}
+
+function scheduleTimelineScrollTargetRefresh() {
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  if (gTimelineScrubActive || now <= gTimelineNavigationActiveUntil) {
+    if (!gTimelineRefreshTargetsRaf) {
+      gTimelineRefreshTargetsRaf = requestAnimationFrame(() => {
+        gTimelineRefreshTargetsRaf = 0;
+        scheduleTimelineScrollTargetRefresh();
+      });
+    }
+    return;
+  }
+  if (gTimelineRefreshTargetsRaf) return;
+  gTimelineRefreshTargetsRaf = requestAnimationFrame(() => {
+    gTimelineRefreshTargetsRaf = 0;
+    refreshTimelineScrollTargets();
+    syncTimelineFromScroll();
+  });
+}
+
+function getTimelineInterpolatedStateFromScroll(scrollTop) {
+  const targets = getActiveTimelineScrollTargets();
+  if (!targets.length) return null;
+  if (targets.length === 1) return { ratio: targets[0].ratio, point: targets[0] };
+  if (scrollTop <= targets[0].scrollTop) return { ratio: targets[0].ratio, point: targets[0] };
+  const last = targets[targets.length - 1];
+  if (scrollTop >= last.scrollTop) return { ratio: last.ratio, point: last };
+  for (let i = 0; i < targets.length - 1; i += 1) {
+    const current = targets[i];
+    const next = targets[i + 1];
+    if (scrollTop >= current.scrollTop && scrollTop <= next.scrollTop) {
+      const span = next.scrollTop - current.scrollTop;
+      const progress = span <= 0 ? 0 : (scrollTop - current.scrollTop) / span;
+      return {
+        ratio: current.ratio + ((next.ratio - current.ratio) * progress),
+        point: progress < 0.5 ? current : next,
+      };
+    }
+  }
+  return { ratio: last.ratio, point: last };
+}
+
+function syncTimelineFromScroll() {
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  if (gTimelineScrubActive || now <= gTimelineNavigationActiveUntil) return;
+  const main = document.querySelector('main');
+  if (!main) return;
+  const state = getTimelineInterpolatedStateFromScroll(main.scrollTop);
+  if (!state) return;
+  const scrollDelta = main.scrollTop - gTimelineLastScrollTop;
+  let nextRatio = state.ratio;
+
+  // During active user scrolling, ignore small backward corrections caused by
+  // lazy-load/layout shifts so the timeline keeps moving in the intended direction.
+  if (now <= gTimelineUserScrollActiveUntil) {
+    const backwardThreshold = 0.035;
+    if (scrollDelta > 0 && nextRatio < (gTimelineLastThumbRatio - backwardThreshold)) {
+      nextRatio = gTimelineLastThumbRatio;
+    } else if (scrollDelta < 0 && nextRatio > (gTimelineLastThumbRatio + backwardThreshold)) {
+      nextRatio = gTimelineLastThumbRatio;
+    }
+  }
+
+  updateTimelineThumb(nextRatio);
+  if (gTimelineHoverActive) refreshTimelineTooltip(nextRatio);
+  gTimelineLastScrollTop = main.scrollTop;
+  gTimelineLastThumbRatio = nextRatio;
+}
+
+function scrollTimelineToRatio(ratio) {
+  const main = document.querySelector('main');
+  const targets = getActiveTimelineScrollTargets();
+  if (!main || !targets.length) return;
+  const clampedRatio = clampTimelineRatio(ratio);
+  if (targets.length === 1) {
+    main.scrollTop = targets[0].scrollTop;
+    return;
+  }
+  if (clampedRatio <= targets[0].ratio) {
+    main.scrollTop = targets[0].scrollTop;
+    return;
+  }
+  const last = targets[targets.length - 1];
+  if (clampedRatio >= last.ratio) {
+    main.scrollTop = last.scrollTop;
+    return;
+  }
+  for (let i = 0; i < targets.length - 1; i += 1) {
+    const current = targets[i];
+    const next = targets[i + 1];
+    if (clampedRatio >= current.ratio && clampedRatio <= next.ratio) {
+      const span = next.ratio - current.ratio;
+      const progress = span <= 0 ? 0 : (clampedRatio - current.ratio) / span;
+      main.scrollTop = current.scrollTop + ((next.scrollTop - current.scrollTop) * progress);
+      return;
+    }
+  }
+}
+
+function snapTimelineToNearestPoint(ratio) {
+  const rail = document.getElementById('timelineRail');
+  const targets = rail && Array.isArray(rail.__snapTargets) ? rail.__snapTargets : [];
+  if (!targets.length) return;
+  const activeTarget = rail && rail.__activeSnapTarget;
+  if (activeTarget && activeTarget.key) {
+    updateTimelineThumb(activeTarget.ratio);
+    showTimelineTooltipForPoint(activeTarget);
+    scrollToGroup(activeTarget.key);
+    return;
+  }
+  const clampedRatio = clampTimelineRatio(ratio);
+  let closest = targets[0];
+  let closestDistance = Math.abs(clampedRatio - closest.ratio);
+  for (let i = 1; i < targets.length; i += 1) {
+    const target = targets[i];
+    const distance = Math.abs(clampedRatio - target.ratio);
+    if (distance < closestDistance) {
+      closest = target;
+      closestDistance = distance;
+    }
+  }
+  updateTimelineThumb(closest.ratio);
+  refreshTimelineTooltip(closest.ratio);
+  scrollToGroup(closest.key);
+}
+
+function scrubTimelineAt(clientY, { snap = false } = {}) {
+  const ratio = getTimelineRatioFromClientY(clientY);
+  gTimelineScrubRatio = ratio;
+  updateTimelineThumb(ratio);
+  refreshTimelineTooltip(ratio);
+  if (snap) snapTimelineToNearestPoint(ratio);
+  else scrollTimelineToRatio(ratio);
+}
+
+function buildTimelinePoints(groups) {
+  if (!Array.isArray(groups) || !groups.length) {
+    return { points: [], snapTargets: [] };
+  }
+
+  const points = groups.map((group, index) => ({
+    key: group.key,
+    ratio: groups.length <= 1 ? 0 : index / (groups.length - 1),
+    label: group.label,
+    title: group.label,
+  }));
+
+  return {
+    points,
+    snapTargets: points,
+  };
 }
 
 function renderTimelineRail(groups) {
   const rail = document.getElementById('timelineRail');
   if (!rail) return;
   rail.innerHTML = '';
-  rail.__scrubGroups = [];
+  rail.__timelinePoints = [];
+  rail.__snapTargets = [];
+  rail.__scrollTargets = [];
+  rail.__activeSnapTarget = null;
 
   if (gGroupBy !== 'date' || !Array.isArray(groups) || groups.length === 0) {
     rail.hidden = true;
     return;
   }
 
-  rail.__scrubGroups = groups.map(group => group.key);
+  const timeline = buildTimelinePoints(groups);
+  rail.__timelinePoints = timeline.points;
+  rail.__snapTargets = timeline.snapTargets;
   const scale = document.createElement('div');
   scale.className = 'timeline-scale';
-  const entryPositions = [];
-  const entryMarkers = [];
-
-  const years = new Map();
-  let lastMonthTitle = null;
-  const toInsetTop = (ratio) => `calc(${TIMELINE_INSET_PX}px + ${Math.max(0, Math.min(1, ratio))} * (100% - ${TIMELINE_INSET_PX * 2}px))`;
-  groups.forEach((group, groupIndex) => {
-    const ratio = groups.length <= 1 ? 0 : groupIndex / (groups.length - 1);
-    if (!years.has(group.timelineYear)) {
-      years.set(group.timelineYear, { key: group.key, ratio });
-    }
-    const duplicateMonth = gGroupDateGranularity === 'day' && group.timelineTitle === lastMonthTitle;
-    if (!duplicateMonth || gGroupDateGranularity !== 'day') {
-      const marker = document.createElement('button');
-      marker.type = 'button';
-      marker.className = 'timeline-marker timeline-entry';
-      marker.textContent = group.timelineLabel;
-      marker.title = group.timelineTitle;
-      marker.dataset.groupKey = group.key;
-      marker.style.top = toInsetTop(ratio);
-      marker.addEventListener('click', () => scrollToGroup(group.key));
-      scale.appendChild(marker);
-      entryPositions.push(ratio);
-      entryMarkers.push({ key: group.key, ratio, marker });
-      lastMonthTitle = group.timelineTitle;
-    }
-  });
-
-  const firstEntryRatio = entryPositions.length ? Math.min(...entryPositions) : null;
-  const lastEntryRatio = entryPositions.length ? Math.max(...entryPositions) : null;
-
-  const findClearRatio = (ratio) => {
-    const minGap = 0.055;
-    let nextRatio = ratio;
-    const nearby = entryPositions
-      .filter(value => Math.abs(value - ratio) < minGap)
-      .sort((a, b) => Math.abs(a - ratio) - Math.abs(b - ratio));
-    nearby.forEach((value) => {
-      if (Math.abs(nextRatio - value) < minGap) {
-        if (value < 0.12) {
-          nextRatio = Math.max(0.01, value - minGap);
-        } else if (value <= 0.5) {
-          nextRatio = Math.min(0.98, value + minGap);
-        } else {
-          nextRatio = Math.max(0.02, value - minGap);
-        }
-      }
+  const anchorLayer = document.createElement('div');
+  anchorLayer.className = 'timeline-anchor-layer';
+  scale.appendChild(anchorLayer);
+  timeline.points.forEach((point) => {
+    const marker = document.createElement('button');
+    marker.type = 'button';
+    marker.className = 'timeline-marker timeline-entry';
+    marker.textContent = point.label;
+    marker.setAttribute('aria-label', point.title);
+    marker.dataset.groupKey = point.key;
+    point.marker = marker;
+    marker.addEventListener('click', () => scrollToGroup(point.key));
+    marker.addEventListener('pointerenter', () => {
+      gTimelineHoverActive = true;
+      showTimelineTooltipForPoint(point);
     });
-    return Math.max(0.01, Math.min(0.98, nextRatio));
-  };
-
-  const yearMarkers = [];
-  years.forEach(({ key, ratio }, year) => {
-    const yearBtn = document.createElement('button');
-    yearBtn.type = 'button';
-    yearBtn.className = 'timeline-marker timeline-year';
-    yearBtn.textContent = year;
-    yearBtn.dataset.groupKey = key;
-    const resolvedRatio = findClearRatio(ratio);
-    yearBtn.style.top = toInsetTop(resolvedRatio);
-    if (lastEntryRatio !== null && Math.abs(ratio - lastEntryRatio) < 0.001) {
-      yearBtn.classList.add('is-above');
-      yearBtn.style.top = toInsetTop(lastEntryRatio);
-    }
-    yearBtn.addEventListener('click', () => scrollToGroup(key));
-    scale.appendChild(yearBtn);
-    yearMarkers.push({ key, ratio, marker: yearBtn });
+    marker.addEventListener('pointermove', () => {
+      gTimelineHoverActive = true;
+      showTimelineTooltipForPoint(point);
+    });
+    marker.addEventListener('pointerleave', () => {
+      if (gTimelineScrubActive) return;
+      gTimelineHoverActive = false;
+      setTimelineTooltip(false);
+    });
+    anchorLayer.appendChild(marker);
   });
-
-  const firstEntry = entryMarkers[0];
-  const firstYear = yearMarkers[0];
-  if (firstEntry && firstYear) {
-    firstYear.marker.classList.remove('is-above');
-    firstYear.marker.classList.add('is-top-year');
-    firstYear.marker.style.top = `${TIMELINE_TOP_YEAR_TOP_PX}px`;
-    firstEntry.marker.classList.add('is-top-month');
-    firstEntry.marker.style.top = `${TIMELINE_TOP_MONTH_TOP_PX}px`;
-  }
 
   const scrubber = document.createElement('div');
   scrubber.className = 'timeline-scrubber';
-  scrubber.innerHTML = '<div class="timeline-scrubber-track"></div><div class="timeline-scrubber-thumb"></div>';
+  scrubber.innerHTML = '<div class="timeline-scrubber-tooltip" hidden></div><div class="timeline-scrubber-track"></div><div class="timeline-scrubber-thumb"></div>';
   scrubber.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    if (scrubber.setPointerCapture) scrubber.setPointerCapture(e.pointerId);
+    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    gTimelineNavigationActiveUntil = now + 240;
+    freezeTimelineScrollTargets();
     gTimelineScrubActive = true;
+    gTimelineHoverActive = true;
     gTimelineScrubPointerId = e.pointerId;
-    scrubTimelineAt(e.clientY);
+    scrubTimelineAt(e.clientY, { snap: false });
   });
+  scrubber.addEventListener('pointerenter', (e) => {
+    gTimelineHoverActive = true;
+    refreshTimelineTooltip(getTimelineRatioFromClientY(e.clientY));
+  });
+  scrubber.addEventListener('pointermove', (e) => {
+    if (!gTimelineHoverActive && !gTimelineScrubActive) return;
+    refreshTimelineTooltip(getTimelineRatioFromClientY(e.clientY));
+  });
+  scrubber.addEventListener('pointerleave', () => {
+    if (gTimelineScrubActive) return;
+    gTimelineHoverActive = false;
+    setTimelineTooltip(false);
+  });
+  scrubber.addEventListener('wheel', (e) => {
+    if (!panTimelineByWheel(e.deltaY)) return;
+    e.preventDefault();
+  }, { passive: false });
   scale.appendChild(scrubber);
 
   rail.appendChild(scale);
-  updateTimelineThumb(0, rail.__scrubGroups.length);
+  requestAnimationFrame(() => {
+    layoutTimelinePoints();
+    scheduleTimelineScrollTargetRefresh();
+  });
   rail.hidden = !rail.childElementCount;
 }
 
@@ -1387,6 +1857,9 @@ function renderGroupedMediaList(el, items) {
     const section = document.createElement('section');
     section.className = 'gallery-group';
     section.dataset.groupKey = group.key;
+    section.dataset.sortValue = Number.isFinite(group.sortValue) ? `${group.sortValue}` : '';
+    section.dataset.rangeStart = Number.isFinite(group.rangeStart) ? `${group.rangeStart}` : '';
+    section.dataset.rangeEnd = Number.isFinite(group.rangeEnd) ? `${group.rangeEnd}` : '';
 
     const header = document.createElement('div');
     header.className = 'gallery-group-header';
@@ -1420,6 +1893,8 @@ function renderGroupedMediaList(el, items) {
 
   renderTimelineRail(groups);
   requestAnimationFrame(() => {
+    restoreGroupScrollAnchor();
+    scheduleTimelineScrollTargetRefresh();
     const unobserved = el.querySelectorAll('img[data-src]:not([src]), img[data-video-path]:not([src])');
     unobserved.forEach(img => {
       if (gPosterRequested.has(img)) return;
@@ -1759,7 +2234,7 @@ function renderMediaList(items, scrollToTop = true) {
 
   el.innerHTML = '';
   const main = document.querySelector('main');
-  if (scrollToTop && main) {
+  if (scrollToTop && main && !gPendingScrollAnchor) {
     main.scrollTop = 0;
   }
   gMedia = Array.isArray(items) ? items : [];
@@ -1900,14 +2375,31 @@ document.addEventListener('DOMContentLoaded', () => {
       deselectAll();
     }
   });
-  window.addEventListener('pointerup', () => {
+  window.addEventListener('pointerup', (e) => {
+    if (gTimelineScrubActive) {
+      if (gTimelineScrubPointerId === null || e.pointerId === gTimelineScrubPointerId) {
+        scrubTimelineAt(e.clientY, { snap: false });
+      }
+      snapTimelineToNearestPoint(gTimelineScrubRatio);
+    }
+    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    gTimelineNavigationActiveUntil = now + 260;
     gTimelineScrubActive = false;
     gTimelineScrubPointerId = null;
+    if (gTimelineWheelSessionTimer) {
+      clearTimeout(gTimelineWheelSessionTimer);
+      gTimelineWheelSessionTimer = 0;
+    }
+    unfreezeTimelineScrollTargets();
+    scheduleTimelineScrollTargetRefresh();
+    if (!gTimelineHoverActive) setTimelineTooltip(false);
   });
   window.addEventListener('pointermove', (e) => {
     if (!gTimelineScrubActive) return;
     if (gTimelineScrubPointerId !== null && e.pointerId !== gTimelineScrubPointerId) return;
-    scrubTimelineAt(e.clientY);
+    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    gTimelineNavigationActiveUntil = now + 240;
+    scrubTimelineAt(e.clientY, { snap: false });
   });
 
   setupCustomSelect('sortSelect', (val) => {
@@ -1935,12 +2427,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   setupCustomSelect('dateGranularitySelect', (val) => {
     gGroupDateGranularity = ['day', 'month', 'year'].includes(val) ? val : 'day';
+    rerenderCurrentMediaPreservingScroll();
     if (gBridge && gBridge.set_setting_str) {
-      gBridge.set_setting_str('gallery.group_date_granularity', gGroupDateGranularity, function () {
-        refreshFromBridge(gBridge, true);
-      });
-    } else if (gBridge) {
-      refreshFromBridge(gBridge, true);
+      gBridge.set_setting_str('gallery.group_date_granularity', gGroupDateGranularity, function () { });
     }
   });
 });
@@ -2175,15 +2664,32 @@ function pagerPagesToShow() {
 }
 
 function renderPager() {
+  const infiniteMode = shouldUseInfiniteScrollMode();
   const tp = totalPages();
   const cur = gPage + 1;
 
   const pages = pagerPagesToShow();
 
   document.querySelectorAll('[data-pager]').forEach((root) => {
+    root.hidden = false;
     const prev = root.querySelector('[data-prev]');
     const next = root.querySelector('[data-next]');
     const links = root.querySelector('[data-links]');
+    if (prev) {
+      prev.hidden = infiniteMode;
+      prev.style.display = infiniteMode ? 'none' : '';
+    }
+    if (next) {
+      next.hidden = infiniteMode;
+      next.style.display = infiniteMode ? 'none' : '';
+    }
+    if (links) {
+      links.hidden = infiniteMode;
+      links.style.display = infiniteMode ? 'none' : '';
+      if (infiniteMode) links.innerHTML = '';
+    }
+
+    if (infiniteMode) return;
 
     if (prev) prev.disabled = gPage === 0;
     if (next) next.disabled = cur >= tp;
@@ -2234,14 +2740,21 @@ function refreshFromBridge(bridge, resetPage = false) {
       if (resetPage) {
         gPage = 0;
       }
+      if (resetPage || !shouldUseInfiniteScrollMode()) {
+        gInfiniteScrollLoading = false;
+      }
 
     // ── 1. Fast Path Reconcile (Hybrid Load) ─────────────────────────────
     // This loads the synthesized candidates from disk + DB without waiting for scan.
       bridge.count_media(gSelectedFolders, gFilter, gSearchQuery || '', function (count) {
         gTotal = count || 0;
-        bridge.list_media(gSelectedFolders, PAGE_SIZE, gPage * PAGE_SIZE, gSort, gFilter, gSearchQuery || '', function (items) {
-          renderMediaList(items, true);
+        const useInfinite = shouldUseInfiniteScrollMode();
+        const limit = useInfinite ? Math.max(PAGE_SIZE, gMedia.length || PAGE_SIZE) : PAGE_SIZE;
+        const offset = useInfinite ? 0 : gPage * PAGE_SIZE;
+        bridge.list_media(gSelectedFolders, limit, offset, gSort, gFilter, gSearchQuery || '', function (items) {
+          renderMediaList(items, !gPendingScrollAnchor);
           renderPager();
+          if (useInfinite) requestAnimationFrame(() => maybeLoadMoreInfiniteResults());
           // Hide the "Starting..." or "Loading..." overlay once we have the first batch of results.
           setGlobalLoading(false);
           if (bridge.start_scan_paths) {
@@ -2795,7 +3308,11 @@ function wireGalleryBackground() {
   });
 
   main.addEventListener('scroll', () => {
+    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    gTimelineUserScrollActiveUntil = now + 220;
     syncScrollTopState();
+    syncTimelineFromScroll();
+    maybeLoadMoreInfiniteResults();
     if (gPlayingInplaceCard && gBridge && gBridge.update_native_video_rect) {
       const target = gPlayingInplaceCard.querySelector('.structured-thumb') || gPlayingInplaceCard;
       const rect = target.getBoundingClientRect();
@@ -2813,6 +3330,8 @@ window.addEventListener('resize', () => {
   if (mediaList && mediaList.classList.contains('gallery-details')) {
     applyDetailsColumnWidths(mediaList);
   }
+  layoutTimelinePoints();
+  scheduleTimelineScrollTargetRefresh();
 });
 
 async function main() {
@@ -2990,12 +3509,7 @@ async function main() {
         gTotal = count || 0;
         const tp = totalPages();
         if (gPage >= tp) gPage = Math.max(0, tp - 1);
-
-        // Silent background refresh to pick up new metadata without blocking
-        bridge.list_media(gSelectedFolders, PAGE_SIZE, gPage * PAGE_SIZE, gSort, gFilter, gSearchQuery || '', function (items) {
-          renderMediaList(items, false);
-          renderPager();
-        });
+        refreshFromBridge(bridge, false);
       });
     }
 
@@ -3130,18 +3644,22 @@ async function main() {
               setCustomSelectValue('dateGranularitySelect', gGroupDateGranularity);
               syncGroupByUi();
               updateCtxViewState();
-              refreshFromBridge(bridge, true);
+              refreshFromBridge(bridge, false);
             });
             return;
           }
           if ((key === 'gallery.group_by' || key === 'gallery.group_date_granularity') && bridge.get_settings) {
             bridge.get_settings(function (s) {
+              const prevGroupBy = gGroupBy;
+              const prevGranularity = gGroupDateGranularity;
               gGroupBy = ((s && s['gallery.group_by']) || 'none') === 'date' ? 'date' : 'none';
               gGroupDateGranularity = (s && s['gallery.group_date_granularity']) || 'day';
               setCustomSelectValue('groupBySelect', gGroupBy);
               setCustomSelectValue('dateGranularitySelect', gGroupDateGranularity);
               syncGroupByUi();
-              refreshFromBridge(bridge, true);
+              if (key === 'gallery.group_date_granularity' || prevGroupBy !== gGroupBy || prevGranularity !== gGroupDateGranularity) {
+                rerenderCurrentMediaPreservingScroll();
+              }
             });
             return;
           }
