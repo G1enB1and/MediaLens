@@ -46,6 +46,9 @@ const TIMELINE_TOP_MONTH_TOP_PX = 35;
 const TIMELINE_THUMB_OFFSET_PX = 8;
 const TIMELINE_MIN_POINT_GAP_PX = 26;
 const TIMELINE_NAV_LANE_PX = 28;
+const TIMELINE_VIEWPORT_TOP_MARGIN_PX = -6;
+const TIMELINE_VIEWPORT_BOTTOM_MARGIN_PX = 32;
+const TIMELINE_MIN_HEIGHT_PX = 140;
 
 const GALLERY_VIEW_MODES = new Set(['masonry', 'grid_small', 'grid_medium', 'grid_large', 'grid_xlarge', 'list', 'content', 'details']);
 const DETAILS_COLUMN_CONFIG = [
@@ -1059,6 +1062,16 @@ function layoutTimelinePoints() {
   updateTimelineViewport(rail.__currentTimelineRatio || 0);
 }
 
+function syncTimelineViewportBox() {
+  const rail = document.getElementById('timelineRail');
+  const main = document.querySelector('main');
+  if (!rail || !main) return;
+  const mainRect = main.getBoundingClientRect();
+  const availableHeight = Math.max(0, Math.floor(mainRect.height - TIMELINE_VIEWPORT_TOP_MARGIN_PX - TIMELINE_VIEWPORT_BOTTOM_MARGIN_PX));
+  rail.style.top = `${TIMELINE_VIEWPORT_TOP_MARGIN_PX}px`;
+  rail.style.height = `${Math.max(TIMELINE_MIN_HEIGHT_PX, availableHeight)}px`;
+}
+
 function panTimelineByWheel(deltaY) {
   const rail = document.getElementById('timelineRail');
   const layout = rail && rail.__timelineLayout;
@@ -1599,6 +1612,7 @@ function renderTimelineRail(groups) {
 
   rail.appendChild(scale);
   requestAnimationFrame(() => {
+    syncTimelineViewportBox();
     layoutTimelinePoints();
     setupTimelineHeaderObserver();
     applyTimelineMarkerStates();
@@ -3512,6 +3526,7 @@ window.addEventListener('resize', () => {
   if (mediaList && mediaList.classList.contains('gallery-details')) {
     applyDetailsColumnWidths(mediaList);
   }
+  syncTimelineViewportBox();
   layoutTimelinePoints();
   refreshVisibleTimelineAnchors();
   scheduleTimelineScrollTargetRefresh();
