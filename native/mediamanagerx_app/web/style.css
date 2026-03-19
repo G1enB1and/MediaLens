@@ -1093,7 +1093,7 @@ p {
 }
 
 .gallery-grouped.gallery-details .gallery-group-header {
-  top: 27px;
+  top: 11px;
   z-index: 18;
   padding-top: 0;
   background: var(--bg);
@@ -1188,20 +1188,16 @@ p {
 }
 
 .gallery-grouped > .details-header {
-  top: -16px;
+  top: -18px;
   z-index: 20;
   position: sticky;
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 1px 0 var(--border);
 }
 
-.gallery-grouped.gallery-details > .details-header::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -10px;
-  height: 10px;
-  background: var(--bg);
-  pointer-events: none;
+body.gallery-scroll-top #mediaList.gallery-details > .details-header {
+  transform: translateY(-25px);
+  padding-top: 16px;
 }
 
 .timeline-rail {
@@ -1321,13 +1317,13 @@ p {
     minmax(25px, var(--details-col-size));
   gap: 14px;
   margin: 0;
-  padding: 16px 12px 8px;
+  padding: 9px 12px 8px;
   color: var(--muted);
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   position: sticky;
-  top: -16px;
+  top: -18px;
   z-index: 20;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
