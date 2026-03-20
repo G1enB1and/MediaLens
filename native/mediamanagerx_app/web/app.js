@@ -161,6 +161,7 @@ const METADATA_SETTINGS_CONFIG = {
 let gTotalOnPage = 0;
 let gLoadedOnPage = 0;
 let gLoadingDismissed = false;
+let gNavState = { canBack: false, canForward: false, canUp: false, currentPath: '' };
 
 function setStatus(text) {
   const el = document.getElementById('status');
@@ -183,6 +184,25 @@ function setSelectedFolder(paths, activeCollection = null) {
   } else {
     el.textContent = `${paths.length} folders selected`;
   }
+}
+
+function applyNavigationState(state = {}) {
+  gNavState = {
+    canBack: !!state.canBack,
+    canForward: !!state.canForward,
+    canUp: !!state.canUp,
+    currentPath: state.currentPath || '',
+  };
+
+  const backBtn = document.getElementById('navBack');
+  const forwardBtn = document.getElementById('navForward');
+  const upBtn = document.getElementById('navUp');
+  const refreshBtn = document.getElementById('navRefresh');
+
+  if (backBtn) backBtn.disabled = !gNavState.canBack;
+  if (forwardBtn) forwardBtn.disabled = !gNavState.canForward;
+  if (upBtn) upBtn.disabled = !gNavState.canUp;
+  if (refreshBtn) refreshBtn.disabled = !gNavState.currentPath;
 }
 
 // Background queue for items not yet in the viewport
@@ -1650,9 +1670,9 @@ function syncGroupByUi() {
 }
 
 function openFolderItem(path) {
-  if (gBridge && gBridge.set_selected_folders && path) {
+  if (gBridge && gBridge.navigate_to_folder && path) {
     deselectAll();
-    gBridge.set_selected_folders([path]);
+    gBridge.navigate_to_folder(path);
   }
 }
 
@@ -3313,6 +3333,34 @@ function wirePager() {
     });
   }
 
+  const backBtn = document.getElementById('navBack');
+  if (backBtn) {
+    backBtn.addEventListener('click', () => {
+      if (gBridge && gBridge.navigate_back) gBridge.navigate_back();
+    });
+  }
+
+  const forwardBtn = document.getElementById('navForward');
+  if (forwardBtn) {
+    forwardBtn.addEventListener('click', () => {
+      if (gBridge && gBridge.navigate_forward) gBridge.navigate_forward();
+    });
+  }
+
+  const upBtn = document.getElementById('navUp');
+  if (upBtn) {
+    upBtn.addEventListener('click', () => {
+      if (gBridge && gBridge.navigate_up) gBridge.navigate_up();
+    });
+  }
+
+  const refreshBtn = document.getElementById('navRefresh');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', () => {
+      if (gBridge && gBridge.refresh_current_folder) gBridge.refresh_current_folder();
+    });
+  }
+
   renderPager();
 }
 
@@ -4083,6 +4131,12 @@ async function main() {
         });
     }
 
+    if (bridge.get_navigation_state) {
+      bridge.get_navigation_state(function (state) {
+        applyNavigationState(state || {});
+      });
+    }
+
     // Initial sync
     refreshFromBridge(bridge);
 
@@ -4092,6 +4146,17 @@ async function main() {
         gSelectedFolders = folders || [];
         gPage = 0;
         refreshFromBridge(bridge);
+      });
+    }
+
+    if (bridge.navigationStateChanged) {
+      bridge.navigationStateChanged.connect(function (canBack, canForward, canUp, currentPath) {
+        applyNavigationState({
+          canBack,
+          canForward,
+          canUp,
+          currentPath,
+        });
       });
     }
 

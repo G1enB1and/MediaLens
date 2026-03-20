@@ -36,7 +36,7 @@ MediaManagerX is designed for people who manage **large, complex, or AI-generate
 
 ### 🕰️ Timeline-Based Browsing (NEW)
 
-Explore your media by **when it was created, modified, aqcuired, taken, or auto**.
+Explore your media by **when it was created, modified, acquired, taken, or automatically determined**.
 
 - Group by **day, month, or year**
 - Smooth timeline scrubbing with live feedback
@@ -72,7 +72,7 @@ Go beyond filenames.
   - Grid (various sizes)
   - List / Details / Content views
 - Infinite scroll where it matters
-- Lightbox for large focused viewing
+- Lightbox for focused, full-size viewing
 
 ---
 
@@ -98,7 +98,7 @@ Go beyond filenames.
 
 - Dark and light themes with accent color of your choice
 - Responsive layout that adapts to screen size
-- Optimized rendering for multiple animated gifs and videos in a collage style masonry view with no stutter, lag, or flickering.
+- Optimized rendering for multiple animated GIFs and videos in a collage-style masonry view with no stutter, lag, or flicker
 - Carefully tuned interactions for smooth, predictable behavior
 
 ---

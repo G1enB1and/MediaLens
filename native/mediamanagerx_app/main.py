@@ -964,6 +964,11 @@ class Bridge(QObject):
     uiFlagChanged = Signal(str, bool)  # key, value
     metadataRequested = Signal(list)
     loadFolderRequested = Signal(str)
+    navigateToFolderRequested = Signal(str)
+    navigateBackRequested = Signal()
+    navigateForwardRequested = Signal()
+    navigateUpRequested = Signal()
+    refreshFolderRequested = Signal()
 
     accentColorChanged = Signal(str)
     # Async file ops (so WebEngine UI doesn't freeze during rename)
@@ -974,6 +979,7 @@ class Bridge(QObject):
     scanFinished = Signal(str, int)  # folder, count
     selectionChanged = Signal(list)  # list of folder paths
     scanProgress = Signal(str, int)  # file_path, percentage
+    navigationStateChanged = Signal(bool, bool, bool, str)  # can_back, can_forward, can_up, current_path
     
     # Update Signals
     updateAvailable = Signal(str, bool)  # version, manual
@@ -998,6 +1004,8 @@ class Bridge(QObject):
         self.drag_paths: list[str] = []
         self.drag_target_folder: str = ""
         self._last_dlg_res = None
+        self._can_nav_back = False
+        self._can_nav_forward = False
         
         appdata = Path(
             QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
@@ -1172,6 +1180,32 @@ class Bridge(QObject):
     @Slot(result=list)
     def get_selected_folders(self) -> list:
         return self._selected_folders
+
+    @Slot(result="QVariantMap")
+    def get_navigation_state(self) -> dict:
+        current_path = self._selected_folders[0] if self._selected_folders else ""
+        can_up = False
+        if current_path:
+            try:
+                parent = Path(current_path).parent
+                can_up = str(parent) != str(Path(current_path))
+            except Exception:
+                can_up = False
+        return {
+            "canBack": self._can_nav_back,
+            "canForward": self._can_nav_forward,
+            "canUp": can_up,
+            "currentPath": current_path,
+        }
+
+    def emit_navigation_state(self) -> None:
+        state = self.get_navigation_state()
+        self.navigationStateChanged.emit(
+            bool(state.get("canBack")),
+            bool(state.get("canForward")),
+            bool(state.get("canUp")),
+            str(state.get("currentPath", "")),
+        )
 
     @Slot(int, result=bool)
     def set_active_collection(self, collection_id: int) -> bool:
@@ -1546,6 +1580,26 @@ class Bridge(QObject):
     @Slot(str)
     def load_folder_now(self, path: str) -> None:
         self.loadFolderRequested.emit(str(path))
+
+    @Slot(str)
+    def navigate_to_folder(self, path: str) -> None:
+        self.navigateToFolderRequested.emit(str(path))
+
+    @Slot()
+    def navigate_back(self) -> None:
+        self.navigateBackRequested.emit()
+
+    @Slot()
+    def navigate_forward(self) -> None:
+        self.navigateForwardRequested.emit()
+
+    @Slot()
+    def navigate_up(self) -> None:
+        self.navigateUpRequested.emit()
+
+    @Slot()
+    def refresh_current_folder(self) -> None:
+        self.refreshFolderRequested.emit()
 
     @Slot(result=str)
     def pick_folder(self) -> str:
@@ -2964,8 +3018,17 @@ class MainWindow(QMainWindow):
         self.bridge.uiFlagChanged.connect(self._apply_ui_flag)
         self.bridge.metadataRequested.connect(self._show_metadata_for_path)
         self.bridge.loadFolderRequested.connect(self._on_load_folder_requested)
+        self.bridge.navigateToFolderRequested.connect(self._on_navigate_to_folder_requested)
+        self.bridge.navigateBackRequested.connect(self._navigate_back)
+        self.bridge.navigateForwardRequested.connect(self._navigate_forward)
+        self.bridge.navigateUpRequested.connect(self._navigate_up)
+        self.bridge.refreshFolderRequested.connect(self._refresh_current_folder)
         self.bridge.accentColorChanged.connect(self._on_accent_changed)
         self._current_accent = Theme.ACCENT_DEFAULT
+        self._folder_history: list[str] = []
+        self._folder_history_index: int = -1
+        self._suppress_tree_selection_history = False
+        self._tree_root_path: str = ""
 
         # Native Tooltip
         self.native_tooltip = NativeDragTooltip()
@@ -3363,7 +3426,7 @@ class MainWindow(QMainWindow):
         self.bridge.collectionsChanged.connect(self._reload_collections)
         self._reload_collections()
 
-        self._set_selected_folders([str(default_root)])
+        self._navigate_to_folder(str(default_root), record_history=True, re_root_tree=True)
 
         # Apply UI flags from settings
         try:
@@ -3960,31 +4023,108 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-    def _on_load_folder_requested(self, folder_path: str) -> None:
+    def _update_navigation_state(self) -> None:
+        self.bridge._can_nav_back = self._folder_history_index > 0
+        self.bridge._can_nav_forward = 0 <= self._folder_history_index < (len(self._folder_history) - 1)
+        self.bridge.emit_navigation_state()
+
+    def _sync_tree_to_folder(self, path_str: str) -> None:
+        if not path_str:
+            return
+        root_idx = self.proxy_model.mapFromSource(self.fs_model.index(path_str))
+        self._suppress_tree_selection_history = True
+        try:
+            if root_idx.isValid():
+                self.tree.setCurrentIndex(root_idx)
+                self.tree.scrollTo(root_idx)
+                self.tree.expand(root_idx)
+        finally:
+            self._suppress_tree_selection_history = False
+
+    def _set_tree_root(self, folder_path: str) -> None:
+        if not folder_path:
+            return
+        p = Path(folder_path)
+        path_str = str(p.absolute())
+        self._tree_root_path = path_str
+        self.proxy_model.setRootPath(path_str)
+
+        root_parent = p.parent
+        parent_idx = self.fs_model.setRootPath(str(root_parent))
+        self.tree.setRootIndex(self.proxy_model.mapFromSource(parent_idx))
+
+        root_idx = self.proxy_model.mapFromSource(self.fs_model.index(path_str))
+        if root_idx.isValid():
+            self.tree.expand(root_idx)
+
+    def _navigate_to_folder(self, folder_path: str, *, record_history: bool = True, refresh: bool = False, re_root_tree: bool = False) -> None:
         if not folder_path:
             return
         p = Path(folder_path)
         if not p.exists() or not p.is_dir():
             QMessageBox.warning(self, "Invalid Folder", f"The folder does not exist:\n{folder_path}")
             return
-            
-        # Use apparent path (Path(p).absolute()) NOT resolved path.
+
         path_str = str(p.absolute())
-        # Update the proxy model's local filtering root
-        self.proxy_model.setRootPath(path_str)
-        
-        # The tree needs to show the root folder, so we set the tree-root to the parent
-        root_parent = p.parent
-        parent_idx = self.fs_model.setRootPath(str(root_parent))
-        
-        self.tree.setRootIndex(self.proxy_model.mapFromSource(parent_idx))
-        
-        root_idx = self.proxy_model.mapFromSource(self.fs_model.index(path_str))
-        self.tree.setCurrentIndex(root_idx)
-        if root_idx.isValid():
-            self.tree.expand(root_idx)
-            
-        self._set_selected_folders([path_str])
+        current_path = self.bridge._selected_folders[0] if self.bridge._selected_folders else ""
+        is_new_target = path_str != current_path
+
+        if re_root_tree or not self._tree_root_path:
+            self._set_tree_root(path_str)
+        self._sync_tree_to_folder(path_str)
+        if is_new_target or refresh:
+            self._set_selected_folders([path_str])
+            if refresh and not is_new_target:
+                self.bridge.selectionChanged.emit([path_str])
+
+        if record_history:
+            if self._folder_history_index >= 0 and self._folder_history[self._folder_history_index] == path_str:
+                pass
+            else:
+                if self._folder_history_index < len(self._folder_history) - 1:
+                    self._folder_history = self._folder_history[: self._folder_history_index + 1]
+                self._folder_history.append(path_str)
+                self._folder_history_index = len(self._folder_history) - 1
+        self._update_navigation_state()
+
+    def _on_load_folder_requested(self, folder_path: str) -> None:
+        self._navigate_to_folder(folder_path, record_history=True, re_root_tree=True)
+
+    def _on_navigate_to_folder_requested(self, folder_path: str) -> None:
+        self._navigate_to_folder(folder_path, record_history=True, re_root_tree=False)
+
+    def _navigate_back(self) -> None:
+        if self._folder_history_index <= 0:
+            self._update_navigation_state()
+            return
+        self._folder_history_index -= 1
+        self._navigate_to_folder(self._folder_history[self._folder_history_index], record_history=False)
+
+    def _navigate_forward(self) -> None:
+        if self._folder_history_index >= len(self._folder_history) - 1:
+            self._update_navigation_state()
+            return
+        self._folder_history_index += 1
+        self._navigate_to_folder(self._folder_history[self._folder_history_index], record_history=False)
+
+    def _navigate_up(self) -> None:
+        current_path = self.bridge._selected_folders[0] if self.bridge._selected_folders else ""
+        if not current_path:
+            self._update_navigation_state()
+            return
+        current = Path(current_path)
+        parent = current.parent
+        if str(parent) == str(current):
+            self._update_navigation_state()
+            return
+        self._navigate_to_folder(str(parent), record_history=True)
+
+    def _refresh_current_folder(self) -> None:
+        current_path = self.bridge._selected_folders[0] if self.bridge._selected_folders else ""
+        if not current_path:
+            self._update_navigation_state()
+            return
+        self._navigate_to_folder(current_path, record_history=False, refresh=True)
 
     def _on_directory_loaded(self, path: str) -> None:
         """Triggered when QFileSystemModel finishes loading a directory's contents."""
@@ -4023,6 +4163,8 @@ class MainWindow(QMainWindow):
                 self.tree.expand(root_idx)
 
     def _on_tree_selection(self, *_args) -> None:
+        if self._suppress_tree_selection_history:
+            return
         selection_model = self.tree.selectionModel()
         selected_indices = selection_model.selectedRows()
         
@@ -4039,7 +4181,11 @@ class MainWindow(QMainWindow):
                 self.collections_list.blockSignals(True)
                 self.collections_list.clearSelection()
                 self.collections_list.blockSignals(False)
-            self._set_selected_folders(paths)
+            if len(paths) == 1:
+                self._navigate_to_folder(paths[0], record_history=True)
+            else:
+                self._set_selected_folders(paths)
+                self._update_navigation_state()
 
     def _reload_collections(self) -> None:
         if not hasattr(self, "collections_list"):

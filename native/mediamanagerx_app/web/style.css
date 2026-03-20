@@ -805,6 +805,12 @@ body.lightbox-open .toolbar {
   margin-left: auto;
 }
 
+.folder-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 
 .tb-btn {
   display: flex;
@@ -849,6 +855,13 @@ body.lightbox-open .toolbar {
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+.tb-icon-btn {
+  width: 32px;
+  padding: 0;
+  justify-content: center;
+  font-size: 15px;
 }
 
 .tb-page {
