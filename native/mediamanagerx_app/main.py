@@ -4119,42 +4119,86 @@ class MainWindow(QMainWindow):
     def _on_load_folder_requested(self, folder_path: str) -> None:
         self._navigate_to_folder(folder_path, record_history=True, re_root_tree=True)
 
-    def _build_drag_preview_pixmap(self, preview_path: str, preview_width: int, preview_height: int) -> QPixmap:
-        max_preview = 100
-
+    def _load_drag_source_pixmap(self, path_str: str) -> QPixmap:
         source_pixmap = QPixmap()
-        if preview_path:
+        if path_str:
             try:
-                p = Path(preview_path)
-                preview_source = p
+                p = Path(path_str)
                 if p.exists():
-                    if p.suffix.lower() in {".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}:
-                        poster = self.bridge._ensure_video_poster(p)
-                        if poster and poster.exists():
-                            preview_source = poster
-                    reader = QImageReader(str(preview_source))
-                    img = reader.read()
-                    if not img.isNull():
-                        source_pixmap = QPixmap.fromImage(img)
+                    candidates: list[Path] = [p]
+                    poster = self.bridge._ensure_video_poster(p)
+                    if poster and poster.exists() and poster not in candidates:
+                        candidates.append(poster)
+
+                    for candidate in candidates:
+                        source_pixmap = QPixmap(str(candidate))
+                        if not source_pixmap.isNull():
+                            break
+                        reader = QImageReader(str(candidate))
+                        img = reader.read()
+                        if not img.isNull():
+                            source_pixmap = QPixmap.fromImage(img)
+                            break
             except Exception:
                 source_pixmap = QPixmap()
 
         if source_pixmap.isNull():
             provider = QFileIconProvider()
             source_pixmap = provider.icon(QFileIconProvider.IconType.File).pixmap(QSize(64, 64))
+        return source_pixmap
 
-        src_w = int(preview_width or source_pixmap.width() or max_preview)
-        src_h = int(preview_height or source_pixmap.height() or max_preview)
+    def _scaled_drag_preview_pixmap(self, path_str: str, preferred_width: int = 0, preferred_height: int = 0) -> QPixmap:
+        max_preview = 100
+        source_pixmap = self._load_drag_source_pixmap(path_str)
+        src_w = int(preferred_width or source_pixmap.width() or max_preview)
+        src_h = int(preferred_height or source_pixmap.height() or max_preview)
         if src_w <= 0:
             src_w = max_preview
         if src_h <= 0:
             src_h = max_preview
-
         scale = min(max_preview / src_w, max_preview / src_h, 1.0)
         draw_w = max(1, int(round(src_w * scale)))
         draw_h = max(1, int(round(src_h * scale)))
-
         return source_pixmap.scaled(draw_w, draw_h, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+
+    def _build_drag_preview_pixmap(self, paths: list[str], preview_path: str, preview_width: int, preview_height: int) -> QPixmap:
+        clean_paths = [str(Path(p).absolute()) for p in (paths or []) if p]
+        if not clean_paths and preview_path:
+            clean_paths = [str(Path(preview_path).absolute())]
+        if not clean_paths:
+            return QPixmap()
+
+        stack_paths: list[str] = []
+        for candidate in [preview_path, *clean_paths]:
+            if candidate and candidate not in stack_paths:
+                stack_paths.append(candidate)
+            if len(stack_paths) >= 3:
+                break
+
+        layered: list[tuple[QPixmap, int, int]] = []
+        spread = 14
+        max_w = 0
+        max_h = 0
+        back_to_front = list(reversed(stack_paths))
+        layer_count = len(back_to_front)
+        for idx, candidate in enumerate(back_to_front):
+            preferred_w = preview_width if candidate == preview_path else 0
+            preferred_h = preview_height if candidate == preview_path else 0
+            pixmap = self._scaled_drag_preview_pixmap(candidate, preferred_w, preferred_h)
+            x = (layer_count - 1 - idx) * spread
+            y = idx * spread
+            layered.append((pixmap, x, y))
+            max_w = max(max_w, x + pixmap.width())
+            max_h = max(max_h, y + pixmap.height())
+
+        canvas = QPixmap(max_w, max_h)
+        canvas.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(canvas)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        for pixmap, x, y in layered:
+            painter.drawPixmap(x, y, pixmap)
+        painter.end()
+        return canvas
 
     def _start_native_gallery_drag(self, paths: list[str], preview_path: str, preview_width: int, preview_height: int) -> None:
         clean_paths = [str(Path(p).absolute()) for p in (paths or []) if p]
@@ -4167,7 +4211,7 @@ class MainWindow(QMainWindow):
 
         drag = QDrag(self.web)
         drag.setMimeData(mime)
-        preview_pixmap = self._build_drag_preview_pixmap(preview_path, preview_width, preview_height)
+        preview_pixmap = self._build_drag_preview_pixmap(clean_paths, preview_path, preview_width, preview_height)
         if hasattr(self, "native_tooltip"):
             self.native_tooltip.set_preview_pixmap(preview_pixmap)
         empty_drag = QPixmap(1, 1)
