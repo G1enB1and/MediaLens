@@ -105,6 +105,7 @@ from PySide6.QtGui import (
     QAction,
     QActionGroup,
     QColor,
+    QDrag,
     QFontMetrics,
     QImageReader,
     QIcon,
@@ -964,6 +965,7 @@ class Bridge(QObject):
     uiFlagChanged = Signal(str, bool)  # key, value
     metadataRequested = Signal(list)
     loadFolderRequested = Signal(str)
+    startNativeDragRequested = Signal(list, str, int, int)
     navigateToFolderRequested = Signal(str)
     navigateBackRequested = Signal()
     navigateForwardRequested = Signal()
@@ -992,6 +994,7 @@ class Bridge(QObject):
     updateTooltipRequested = Signal(int, bool, str) # count, isCopy, targetFolder
     hideTooltipRequested = Signal()
     conflictDialogRequested = Signal(str, str)
+    nativeDragFinished = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -1580,6 +1583,14 @@ class Bridge(QObject):
     @Slot(str)
     def load_folder_now(self, path: str) -> None:
         self.loadFolderRequested.emit(str(path))
+
+    @Slot(list, str, int, int)
+    def start_native_drag(self, paths: list[str], preview_path: str, preview_width: int, preview_height: int) -> None:
+        clean_paths = [str(p) for p in (paths or []) if p]
+        if not clean_paths:
+            return
+        self.set_drag_paths(clean_paths)
+        self.startNativeDragRequested.emit(clean_paths, str(preview_path or ""), int(preview_width or 0), int(preview_height or 0))
 
     @Slot(str)
     def navigate_to_folder(self, path: str) -> None:
@@ -2781,22 +2792,31 @@ class Bridge(QObject):
         return {"ffmpeg": bool(self._ffmpeg_bin()), "ffmpeg_path": self._ffmpeg_bin() or "", "ffprobe": bool(self._ffprobe_bin()), "ffprobe_path": self._ffprobe_bin() or "", "thumb_dir": str(self._thumb_dir)}
 
 
-class NativeDragTooltip(QLabel):
-    """A floating, frameless tooltip that follows the cursor during drag operations."""
+class NativeDragTooltip(QWidget):
+    """A floating stack with preview image above tooltip text during drag operations."""
     def __init__(self, parent=None):
         super().__init__(parent, Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowTransparentForInput | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setObjectName("nativeDragTooltip")
-        # Standard styling: small padding, less rounding
-        self.setStyleSheet("""
-            #nativeDragTooltip {
-                background: palette(window);
-                border: 1px solid palette(highlight);
-                border-radius: 6px;
-                padding: 4px 10px;
-                font-size: 10pt;
-            }
-        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        self.preview_label = QLabel(self)
+        self.preview_label.setObjectName("nativeDragTooltipPreview")
+        self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_label.hide()
+        layout.addWidget(self.preview_label, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        self.text_label = QLabel(self)
+        self.text_label.setObjectName("nativeDragTooltipText")
+        self.text_label.setTextFormat(Qt.TextFormat.RichText)
+        self.text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.text_label.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        layout.addWidget(self.text_label, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.update_style(QColor(Theme.ACCENT_DEFAULT), Theme.get_is_light())
 
     def update_style(self, accent_color: QColor, is_light: bool):
         bg = Theme.get_control_bg(accent_color)
@@ -2804,9 +2824,9 @@ class NativeDragTooltip(QLabel):
         border = Theme.get_border(accent_color)
         
         self.setStyleSheet(f"""
-            #nativeDragTooltip {{
-                background-color: {bg} !important;
-                color: {fg} !important;
+            #nativeDragTooltipText {{
+                background-color: {bg};
+                color: {fg};
                 border: 1px solid {border};
                 border-radius: 6px;
                 padding: 6px 12px;
@@ -2815,13 +2835,21 @@ class NativeDragTooltip(QLabel):
         """)
 
     def update_text(self, text: str):
-        self.setText(text)
+        self.text_label.setText(text)
+        self.adjustSize()
+
+    def set_preview_pixmap(self, pixmap: QPixmap | None) -> None:
+        if pixmap is None or pixmap.isNull():
+            self.preview_label.clear()
+            self.preview_label.hide()
+        else:
+            self.preview_label.setPixmap(pixmap)
+            self.preview_label.show()
         self.adjustSize()
 
     def follow_cursor(self):
         pos = QCursor.pos()
-        # Offset slightly from the cursor - closer (10,10) helps cover native tooltips
-        self.move(pos.x() + 10, pos.y() + 10)
+        self.move(pos.x() + 10, pos.y() - (self.height() // 2))
         if not self.isVisible():
             self.show()
 
@@ -3018,6 +3046,7 @@ class MainWindow(QMainWindow):
         self.bridge.uiFlagChanged.connect(self._apply_ui_flag)
         self.bridge.metadataRequested.connect(self._show_metadata_for_path)
         self.bridge.loadFolderRequested.connect(self._on_load_folder_requested)
+        self.bridge.startNativeDragRequested.connect(self._start_native_gallery_drag)
         self.bridge.navigateToFolderRequested.connect(self._on_navigate_to_folder_requested)
         self.bridge.navigateBackRequested.connect(self._navigate_back)
         self.bridge.navigateForwardRequested.connect(self._navigate_forward)
@@ -4089,6 +4118,73 @@ class MainWindow(QMainWindow):
 
     def _on_load_folder_requested(self, folder_path: str) -> None:
         self._navigate_to_folder(folder_path, record_history=True, re_root_tree=True)
+
+    def _build_drag_preview_pixmap(self, preview_path: str, preview_width: int, preview_height: int) -> QPixmap:
+        max_preview = 100
+
+        source_pixmap = QPixmap()
+        if preview_path:
+            try:
+                p = Path(preview_path)
+                preview_source = p
+                if p.exists():
+                    if p.suffix.lower() in {".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}:
+                        poster = self.bridge._ensure_video_poster(p)
+                        if poster and poster.exists():
+                            preview_source = poster
+                    reader = QImageReader(str(preview_source))
+                    img = reader.read()
+                    if not img.isNull():
+                        source_pixmap = QPixmap.fromImage(img)
+            except Exception:
+                source_pixmap = QPixmap()
+
+        if source_pixmap.isNull():
+            provider = QFileIconProvider()
+            source_pixmap = provider.icon(QFileIconProvider.IconType.File).pixmap(QSize(64, 64))
+
+        src_w = int(preview_width or source_pixmap.width() or max_preview)
+        src_h = int(preview_height or source_pixmap.height() or max_preview)
+        if src_w <= 0:
+            src_w = max_preview
+        if src_h <= 0:
+            src_h = max_preview
+
+        scale = min(max_preview / src_w, max_preview / src_h, 1.0)
+        draw_w = max(1, int(round(src_w * scale)))
+        draw_h = max(1, int(round(src_h * scale)))
+
+        return source_pixmap.scaled(draw_w, draw_h, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+
+    def _start_native_gallery_drag(self, paths: list[str], preview_path: str, preview_width: int, preview_height: int) -> None:
+        clean_paths = [str(Path(p).absolute()) for p in (paths or []) if p]
+        if not clean_paths:
+            return
+
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile(path) for path in clean_paths])
+        mime.setText("\n".join(clean_paths))
+
+        drag = QDrag(self.web)
+        drag.setMimeData(mime)
+        preview_pixmap = self._build_drag_preview_pixmap(preview_path, preview_width, preview_height)
+        if hasattr(self, "native_tooltip"):
+            self.native_tooltip.set_preview_pixmap(preview_pixmap)
+        empty_drag = QPixmap(1, 1)
+        empty_drag.fill(Qt.GlobalColor.transparent)
+        drag.setPixmap(empty_drag)
+        drag.setHotSpot(QPoint(0, 0))
+
+        try:
+            self.bridge.drag_target_folder = ""
+            drag.exec(Qt.DropAction.CopyAction | Qt.DropAction.MoveAction, Qt.DropAction.MoveAction)
+        finally:
+            self.bridge.drag_target_folder = ""
+            if hasattr(self, "native_tooltip"):
+                self.native_tooltip.set_preview_pixmap(None)
+            self.bridge.hide_drag_tooltip()
+            self.bridge.set_drag_paths([])
+            self.bridge.nativeDragFinished.emit()
 
     def _on_navigate_to_folder_requested(self, folder_path: str) -> None:
         self._navigate_to_folder(folder_path, record_history=True, re_root_tree=False)

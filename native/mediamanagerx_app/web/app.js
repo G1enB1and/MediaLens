@@ -163,6 +163,74 @@ let gLoadedOnPage = 0;
 let gLoadingDismissed = false;
 let gNavState = { canBack: false, canForward: false, canUp: false, currentPath: '' };
 
+function buildDragPreviewCanvas(img, item = null) {
+  if (!img) return null;
+  const sourceWidth = (item && item.width) || img.naturalWidth || img.width || 0;
+  const sourceHeight = (item && item.height) || img.naturalHeight || img.height || 0;
+  if (!sourceWidth || !sourceHeight) return null;
+
+  const previewMaxWidth = 75;
+  const previewMaxHeight = 75;
+  const cursorOffsetX = 20;
+  const cursorOffsetY = 20;
+  const scale = Math.min(previewMaxWidth / sourceWidth, previewMaxHeight / sourceHeight, 1);
+  const drawWidth = Math.max(1, Math.round(sourceWidth * scale));
+  const drawHeight = Math.max(1, Math.round(sourceHeight * scale));
+  const cssWidth = drawWidth + cursorOffsetX;
+  const cssHeight = drawHeight + cursorOffsetY;
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(cssWidth * dpr);
+  canvas.height = Math.round(cssHeight * dpr);
+  canvas.style.width = `${cssWidth}px`;
+  canvas.style.height = `${cssHeight}px`;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  ctx.scale(dpr, dpr);
+
+  const offsetX = cursorOffsetX;
+  const offsetY = cursorOffsetY;
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+  ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
+  return canvas;
+}
+
+function primeGalleryDragState(paths) {
+  if (window.qt && gBridge && gBridge.set_drag_paths) {
+    gBridge.set_drag_paths(paths);
+  }
+  gGalleryDragHandled = false;
+  clearGalleryFolderDropTargets();
+  gCurrentDragPaths = paths.slice();
+  gCurrentDragCount = paths.length;
+  debugGalleryDrag(`dragstart count=${paths.length} first=${paths[0] || ''}`);
+}
+
+function clearGalleryDragState() {
+  if (gBridge && gBridge.hide_drag_tooltip) {
+    gBridge.hide_drag_tooltip();
+  }
+  if (window.qt && gBridge && gBridge.set_drag_paths) {
+    gBridge.set_drag_paths([]);
+  }
+  clearGalleryFolderDropTargets();
+  gCurrentDragPaths = [];
+  gCurrentDragCount = 0;
+  gCurrentTargetFolderName = '';
+  gCurrentDropFolderPath = '';
+  gGalleryDragHandled = false;
+}
+
+function startNativeGalleryDrag(e, item, paths) {
+  if (!(window.qt && gBridge && gBridge.start_native_drag)) return false;
+  e.preventDefault();
+  e.stopPropagation();
+  primeGalleryDragState(paths);
+  gBridge.start_native_drag(paths, item.path || '', item.width || 0, item.height || 0);
+  return true;
+}
+
 function setStatus(text) {
   const el = document.getElementById('status');
   if (el) el.textContent = text;
@@ -2015,18 +2083,14 @@ function createStructuredCard(item, idx) {
       const path = item.path || '';
       if (!path) return;
       const paths = gSelectedPaths.has(path) ? Array.from(gSelectedPaths) : [path];
+      if (startNativeGalleryDrag(e, item, paths)) return;
       const urls = paths.map(p => 'file:///' + p.replace(/\\/g, '/'));
       const pathsJson = JSON.stringify(paths);
       e.dataTransfer.setData('text/uri-list', urls.join('\r\n'));
       e.dataTransfer.setData('text/plain', pathsJson);
       e.dataTransfer.setData('web/mmx-paths', pathsJson);
       e.dataTransfer.setData('application/x-mmx-type', 'file');
-      if (window.qt && gBridge && gBridge.set_drag_paths) gBridge.set_drag_paths(paths);
-      gCurrentDragPaths = paths.slice();
-      gCurrentDragCount = paths.length;
-      gGalleryDragHandled = false;
-      clearGalleryFolderDropTargets();
-      debugGalleryDrag(`dragstart count=${paths.length} first=${paths[0] || ''}`);
+      primeGalleryDragState(paths);
       e.dataTransfer.effectAllowed = 'copyMove';
     });
     card.addEventListener('drag', (e) => {
@@ -2042,11 +2106,7 @@ function createStructuredCard(item, idx) {
         updateGalleryDragHoverFromPoint(e.clientX, e.clientY, e.target);
       }
       executeGalleryDropToCurrentTarget(!!(e && (e.ctrlKey || e.metaKey)));
-      if (gBridge && gBridge.hide_drag_tooltip) gBridge.hide_drag_tooltip();
-      if (window.qt && gBridge && gBridge.set_drag_paths) gBridge.set_drag_paths([]);
-      clearGalleryFolderDropTargets();
-      gCurrentDragPaths = [];
-      gCurrentDragCount = 0;
+      clearGalleryDragState();
     });
   }
 
@@ -2106,6 +2166,8 @@ function createMasonryCard(item, idx) {
       }
       console.log("JS DragStart Image:", paths);
 
+      if (startNativeGalleryDrag(e, item, paths)) return;
+
       const urls = paths.map(p => 'file:///' + p.replace(/\\/g, '/'));
       const pathsJson = JSON.stringify(paths);
 
@@ -2114,25 +2176,15 @@ function createMasonryCard(item, idx) {
       e.dataTransfer.setData('web/mmx-paths', pathsJson);
       e.dataTransfer.setData('application/x-mmx-type', 'file');
 
-      if (window.qt && gBridge && gBridge.set_drag_paths) {
-        gBridge.set_drag_paths(paths);
-      }
-      gGalleryDragHandled = false;
-      clearGalleryFolderDropTargets();
-      gCurrentDragPaths = paths.slice();
-      gCurrentDragCount = paths.length;
-      debugGalleryDrag(`dragstart count=${paths.length} first=${paths[0] || ''}`);
-
+      primeGalleryDragState(paths);
       e.dataTransfer.effectAllowed = 'copyMove';
 
       const previewImg = card.querySelector('img');
       if (previewImg) {
-        const canvas = document.createElement('canvas');
-        canvas.width = 64;
-        canvas.height = 64;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(previewImg, 0, 0, 64, 64);
-        e.dataTransfer.setDragImage(canvas, -10, -10);
+        const canvas = buildDragPreviewCanvas(previewImg, item);
+        if (canvas) {
+          e.dataTransfer.setDragImage(canvas, 0, 0);
+        }
       }
     });
     card.addEventListener('drag', (e) => {
@@ -2148,14 +2200,7 @@ function createMasonryCard(item, idx) {
         updateGalleryDragHoverFromPoint(e.clientX, e.clientY, e.target);
       }
       executeGalleryDropToCurrentTarget(!!(e && (e.ctrlKey || e.metaKey)));
-      if (gBridge && gBridge.hide_drag_tooltip) {
-        gBridge.hide_drag_tooltip();
-      }
-      if (window.qt && gBridge && gBridge.set_drag_paths) {
-        gBridge.set_drag_paths([]);
-      }
-      gCurrentDragPaths = [];
-      gCurrentDragCount = 0;
+      clearGalleryDragState();
       e.preventDefault();
     });
     return card;
@@ -2219,6 +2264,7 @@ function createMasonryCard(item, idx) {
     if (!path) return;
 
     const paths = gSelectedPaths.has(path) ? Array.from(gSelectedPaths) : [path];
+    if (startNativeGalleryDrag(e, item, paths)) return;
     const urls = paths.map(p => 'file:///' + p.replace(/\\/g, '/'));
     const pathsJson = JSON.stringify(paths);
 
@@ -2227,14 +2273,7 @@ function createMasonryCard(item, idx) {
     e.dataTransfer.setData('web/mmx-paths', pathsJson);
     e.dataTransfer.setData('application/x-mmx-type', 'file');
 
-    if (window.qt && gBridge && gBridge.set_drag_paths) {
-      gBridge.set_drag_paths(paths);
-    }
-    gGalleryDragHandled = false;
-    clearGalleryFolderDropTargets();
-    gCurrentDragPaths = paths.slice();
-    gCurrentDragCount = paths.length;
-    debugGalleryDrag(`dragstart count=${paths.length} first=${paths[0] || ''}`);
+    primeGalleryDragState(paths);
     e.dataTransfer.effectAllowed = 'copyMove';
   });
   card.addEventListener('drag', (e) => {
@@ -2250,14 +2289,7 @@ function createMasonryCard(item, idx) {
       updateGalleryDragHoverFromPoint(e.clientX, e.clientY, e.target);
     }
     executeGalleryDropToCurrentTarget(!!(e && (e.ctrlKey || e.metaKey)));
-    if (gBridge && gBridge.hide_drag_tooltip) {
-      gBridge.hide_drag_tooltip();
-    }
-    if (window.qt && gBridge && gBridge.set_drag_paths) {
-      gBridge.set_drag_paths([]);
-    }
-    gCurrentDragPaths = [];
-    gCurrentDragCount = 0;
+    clearGalleryDragState();
   });
 
   return card;
@@ -4178,6 +4210,12 @@ async function main() {
           canUp,
           currentPath,
         });
+      });
+    }
+
+    if (bridge.nativeDragFinished) {
+      bridge.nativeDragFinished.connect(function () {
+        clearGalleryDragState();
       });
     }
 
