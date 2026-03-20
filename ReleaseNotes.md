@@ -1,16 +1,17 @@
-## MediaManagerX v1.0.20
+## MediaManagerX v1.0.21
 
 ### Summary
-This release focuses on polish and stability. Gallery drag-and-drop now works inside the gallery itself, the date timeline feels more refined and better aligned to the visible viewport, and several UI flicker/cleanup issues were removed from the metadata panel and sidebars.
+This release makes browsing and drag-and-drop feel much more polished. Folder navigation is faster, right-click menus stay on screen, and drag previews now look intentional instead of falling back to the default Windows behavior.
 
 ### Highlights
-- Dragging files from the gallery into folder cards shown in the gallery now works, while dropping back on the same item or empty gallery space cleanly cancels
-- The timeline now has stronger active/visible context styling, better bottom-of-gallery behavior, responsive viewport sizing, and cleaner corner rendering
-- Metadata details gained clearer `General`, `Camera`, and `AI` group headings, while the bulk editor and empty state stay free of those extra headings
-- Glassmorphism has been fully removed so the app renders as solid opaque panels without the flicker seen around animated media
+- Added back, up, forward, and refresh controls for folder navigation directly in the main toolbar.
+- Rebuilt drag previews so they keep the correct aspect ratio, sit cleanly beside the cursor, and can show stacked previews for multi-file drags.
+- Fixed context menus so they reposition to stay fully visible instead of getting cut off near the screen edge.
 
 ### Notes
-- Sidebar divider rendering and resize hover states were also cleaned up so the side panels feel more stable and crisp during resize
+- The new drag preview stack preserves existing gallery, file tree, collection, and Windows Explorer drag-and-drop workflows while replacing the old shell-style preview.
+
+---
 
 Full Changelog:
 https://github.com/G1enB1and/MediaManagerX/blob/dev/native/mediamanagerx_app/CHANGELOG.md
