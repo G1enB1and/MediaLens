@@ -1,6 +1,21 @@
 # Change Log
 
-## v1.0.20 (Current)
+## v1.0.21 (Current)
+
+### Added
+
+- **Explorer-Style Folder Navigation**: Added `Back`, `Up`, `Forward`, and `Refresh` controls beside the selected-folder readout for faster folder browsing.
+
+### Changed
+
+- **Context Menu Placement**: Refined right-click menu positioning so menus stay fully visible on screen instead of getting clipped near the bottom or edges.
+- **Native Drag Preview Overhaul**: Replaced the Windows shell drag preview with a native in-app drag stack that keeps original aspect ratios, supports larger previews, and positions the preview/tooltip stack cleanly beside the cursor.
+- **Multi-Item Drag Stacks**: Multi-select drags now show overlapping preview thumbnails so stacked drags communicate that multiple files are moving or copying.
+- **Left Tree Navigation Behavior**: Restored the file tree so normal folder navigation highlights subfolders without re-rooting the tree unexpectedly.
+
+---
+
+## v1.0.20
 
 ### Added
 
