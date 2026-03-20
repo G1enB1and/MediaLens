@@ -2385,19 +2385,6 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
   const renameBtn = document.getElementById('ctxRename');
   const addToCollectionBtn = document.getElementById('ctxAddToCollection');
 
-  // Position clamped to viewport
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-  const rect = ctx.getBoundingClientRect();
-  const w = rect.width || 200;
-  const h = rect.height || 180;
-
-  const left = Math.max(8, Math.min(vw - w - 8, x));
-  const top = Math.max(8, Math.min(vh - h - 8, y));
-  ctx.style.left = `${left}px`;
-  ctx.style.top = `${top}px`;
-  ctx.hidden = false;
-
   if (gBridge && gBridge.debug_log) {
     gBridge.debug_log(`showCtx: item=${item ? item.path : 'null'} idx=${idx}`);
   }
@@ -2473,6 +2460,40 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
     if (hideBtn) hideBtn.style.display = isHidden ? 'none' : 'block';
     if (unhideBtn) unhideBtn.style.display = isHidden ? 'block' : 'none';
   }
+
+  const viewportPadding = 8;
+  ctx.hidden = false;
+  ctx.style.visibility = 'hidden';
+  ctx.style.left = '0px';
+  ctx.style.top = '0px';
+
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const rect = ctx.getBoundingClientRect();
+  const w = rect.width || 200;
+  const h = rect.height || 180;
+
+  const maxLeft = Math.max(viewportPadding, vw - w - viewportPadding);
+  const maxTop = Math.max(viewportPadding, vh - h - viewportPadding);
+  const rightAlignedLeft = x - w;
+  const bottomAlignedTop = y - h;
+
+  let left = x;
+  let top = y;
+
+  if (left > maxLeft) {
+    left = rightAlignedLeft >= viewportPadding ? rightAlignedLeft : maxLeft;
+  }
+  if (top > maxTop) {
+    top = bottomAlignedTop >= viewportPadding ? bottomAlignedTop : maxTop;
+  }
+
+  left = Math.max(viewportPadding, Math.min(maxLeft, left));
+  top = Math.max(viewportPadding, Math.min(maxTop, top));
+
+  ctx.style.left = `${left}px`;
+  ctx.style.top = `${top}px`;
+  ctx.style.visibility = '';
 }
 
 function wireCtxMenu() {
