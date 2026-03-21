@@ -982,6 +982,9 @@ class Bridge(QObject):
     selectionChanged = Signal(list)  # list of folder paths
     scanProgress = Signal(str, int)  # file_path, percentage
     navigationStateChanged = Signal(bool, bool, bool, str)  # can_back, can_forward, can_up, current_path
+    childFoldersListed = Signal(str, list)  # request_id, folders
+    mediaCounted = Signal(str, int)  # request_id, count
+    mediaListed = Signal(str, list)  # request_id, items
     
     # Update Signals
     updateAvailable = Signal(str, bool)  # version, manual
@@ -1210,8 +1213,7 @@ class Bridge(QObject):
             str(state.get("currentPath", "")),
         )
 
-    @Slot(str, result=list)
-    def list_child_folders(self, folder_path: str) -> list:
+    def _list_child_folders_impl(self, folder_path: str) -> list:
         try:
             root = Path(str(folder_path or ""))
             if not root.exists() or not root.is_dir():
@@ -1231,6 +1233,21 @@ class Bridge(QObject):
             return children
         except Exception:
             return []
+
+    @Slot(str, result=list)
+    def list_child_folders(self, folder_path: str) -> list:
+        return self._list_child_folders_impl(folder_path)
+
+    @Slot(str, str)
+    def list_child_folders_async(self, request_id: str, folder_path: str) -> None:
+        req = str(request_id or "")
+        path = str(folder_path or "")
+
+        def work() -> None:
+            items = self._list_child_folders_impl(path)
+            self.childFoldersListed.emit(req, items)
+
+        threading.Thread(target=work, daemon=True).start()
 
     @Slot(int, result=bool)
     def set_active_collection(self, collection_id: int) -> bool:
@@ -2468,11 +2485,40 @@ class Bridge(QObject):
             return out
         except Exception: return []
 
+    @Slot(str, list, int, int, str, str, str)
+    def list_media_async(self, request_id: str, folders, limit=100, offset=0, sort_by="name_asc", filter_type="all", search_query="") -> None:
+        req = str(request_id or "")
+        folder_list = list(folders or [])
+        lim = int(limit or 0)
+        off = int(offset or 0)
+        sort = str(sort_by or "name_asc")
+        ftype = str(filter_type or "all")
+        query = str(search_query or "")
+
+        def work() -> None:
+            items = self.list_media(folder_list, lim, off, sort, ftype, query)
+            self.mediaListed.emit(req, items or [])
+
+        threading.Thread(target=work, daemon=True).start()
+
     @Slot(list, str, str, result=int)
     def count_media(self, folders: list, filter_type: str = "all", search_query: str = "") -> int:
         try:
             return len(self._get_gallery_entries(folders, "name_asc", filter_type, search_query))
         except Exception: return 0
+
+    @Slot(str, list, str, str)
+    def count_media_async(self, request_id: str, folders: list, filter_type: str = "all", search_query: str = "") -> None:
+        req = str(request_id or "")
+        folder_list = list(folders or [])
+        ftype = str(filter_type or "all")
+        query = str(search_query or "")
+
+        def work() -> None:
+            count = self.count_media(folder_list, ftype, query)
+            self.mediaCounted.emit(req, int(count or 0))
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _get_reconciled_candidates(self, folders: list, filter_type: str = "all", search_query: str = "") -> list[dict]:
         from app.mediamanager.db.media_repo import list_media_in_scope
