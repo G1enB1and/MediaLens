@@ -1386,6 +1386,7 @@ class Bridge(QObject):
                 "ui.accent_color": str(self.settings.value("ui/accent_color", "#8ab4f8", type=str) or "#8ab4f8"),
                 "ui.show_left_panel": bool(self.settings.value("ui/show_left_panel", True, type=bool)),
                 "ui.show_right_panel": bool(self.settings.value("ui/show_right_panel", True, type=bool)),
+                "ui.show_bottom_panel": bool(self.settings.value("ui/show_bottom_panel", True, type=bool)),
                 "ui.preview_above_details": self._preview_above_details_enabled(),
                 "ui.theme_mode": str(self.settings.value("ui/theme_mode", "dark", type=str) or "dark"),
                 "metadata.display.res": bool(self.settings.value("metadata/display/res", True, type=bool)),
@@ -1447,6 +1448,7 @@ class Bridge(QObject):
                 "ui.accent_color": "#8ab4f8",
                 "ui.show_left_panel": True,
                 "ui.show_right_panel": True,
+                "ui.show_bottom_panel": True,
                 "ui.preview_above_details": True,
                 "ui.theme_mode": "dark",
             }
@@ -1534,6 +1536,7 @@ class Bridge(QObject):
                 "gallery.show_hidden",
                 "ui.show_left_panel", 
                 "ui.show_right_panel", 
+                "ui.show_bottom_panel",
                 "ui.preview_above_details",
                 "updates.check_on_launch"
             )
@@ -3024,6 +3027,7 @@ class MainWindow(QMainWindow):
     _DEFAULT_LEFT_PANEL_WIDTH = 200
     _DEFAULT_CENTER_WIDTH = 700
     _DEFAULT_RIGHT_PANEL_WIDTH = 300
+    _DEFAULT_BOTTOM_PANEL_HEIGHT = 220
 
     def __init__(self) -> None:
         super().__init__()
@@ -3162,13 +3166,23 @@ class MainWindow(QMainWindow):
 
         view_menu.addSeparator()
 
-        toggle_left = QAction("Toggle Left Panel", self)
-        toggle_left.triggered.connect(lambda: self._toggle_panel_setting("ui/show_left_panel"))
-        view_menu.addAction(toggle_left)
+        self.act_toggle_left_panel = QAction("Show Left Panel", self)
+        self.act_toggle_left_panel.setCheckable(True)
+        self.act_toggle_left_panel.setChecked(bool(self.bridge.settings.value("ui/show_left_panel", True, type=bool)))
+        self.act_toggle_left_panel.triggered.connect(lambda checked=False: self._toggle_panel_setting("ui/show_left_panel"))
+        view_menu.addAction(self.act_toggle_left_panel)
 
-        toggle_right = QAction("Toggle Right Panel", self)
-        toggle_right.triggered.connect(lambda: self._toggle_panel_setting("ui/show_right_panel"))
-        view_menu.addAction(toggle_right)
+        self.act_toggle_bottom_panel = QAction("Show Bottom Panel", self)
+        self.act_toggle_bottom_panel.setCheckable(True)
+        self.act_toggle_bottom_panel.setChecked(bool(self.bridge.settings.value("ui/show_bottom_panel", True, type=bool)))
+        self.act_toggle_bottom_panel.triggered.connect(lambda checked=False: self._toggle_panel_setting("ui/show_bottom_panel"))
+        view_menu.addAction(self.act_toggle_bottom_panel)
+
+        self.act_toggle_right_panel = QAction("Show Right Panel", self)
+        self.act_toggle_right_panel.setCheckable(True)
+        self.act_toggle_right_panel.setChecked(bool(self.bridge.settings.value("ui/show_right_panel", True, type=bool)))
+        self.act_toggle_right_panel.triggered.connect(lambda checked=False: self._toggle_panel_setting("ui/show_right_panel"))
+        view_menu.addAction(self.act_toggle_right_panel)
 
         self.act_preview_above_details = QAction("Preview Image Above Details", self)
         self.act_preview_above_details.setCheckable(True)
@@ -3464,7 +3478,18 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-        # Center: embedded WebEngine UI scaffold
+        # Center: embedded WebEngine UI scaffold + future bottom chat panel
+        center_container = QWidget()
+        center_container_layout = QVBoxLayout(center_container)
+        center_container_layout.setContentsMargins(0, 0, 0, 0)
+
+        center_splitter = CustomSplitter(Qt.Orientation.Vertical)
+        center_splitter.setObjectName("centerSplitter")
+        center_splitter.setMouseTracking(True)
+        center_splitter.setHandleWidth(7)
+        center_splitter.setChildrenCollapsible(False)
+        self.center_splitter = center_splitter
+
         center = QWidget()
         center_layout = QVBoxLayout(center)
         center_layout.setContentsMargins(0, 0, 0, 0)
@@ -3958,8 +3983,29 @@ class MainWindow(QMainWindow):
 
         self.web.setUrl(QUrl.fromLocalFile(str(index_path.resolve())))
 
+        self.bottom_panel = QWidget()
+        self.bottom_panel.setObjectName("bottomPanel")
+        bottom_layout = QVBoxLayout(self.bottom_panel)
+        bottom_layout.setContentsMargins(14, 10, 14, 14)
+        bottom_layout.setSpacing(6)
+
+        self.bottom_panel_header = QLabel("AI Chat")
+        self.bottom_panel_header.setObjectName("bottomPanelHeader")
+        bottom_layout.addWidget(self.bottom_panel_header)
+
+        self.bottom_panel_placeholder = QLabel("Chat panel layout placeholder")
+        self.bottom_panel_placeholder.setObjectName("bottomPanelPlaceholder")
+        self.bottom_panel_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        bottom_layout.addWidget(self.bottom_panel_placeholder, 1)
+
+        center_splitter.addWidget(center)
+        center_splitter.addWidget(self.bottom_panel)
+        center_splitter.setStretchFactor(0, 1)
+        center_splitter.setStretchFactor(1, 0)
+        center_container_layout.addWidget(center_splitter)
+
         splitter.addWidget(self.left_panel)
-        splitter.addWidget(center)
+        splitter.addWidget(center_container)
 
         splitter.addWidget(self.right_panel)
         splitter.setStretchFactor(1, 1)
@@ -3968,8 +4014,10 @@ class MainWindow(QMainWindow):
         splitter.setHandleWidth(7)
 
         self._restore_main_splitter_sizes()
+        self._restore_center_splitter_sizes()
 
         splitter.splitterMoved.connect(lambda *args: self._on_splitter_moved())
+        center_splitter.splitterMoved.connect(lambda *args: self._on_splitter_moved())
 
         self.setCentralWidget(splitter)
 
@@ -3980,6 +4028,11 @@ class MainWindow(QMainWindow):
         try:
             show_right = bool(self.bridge.settings.value("ui/show_right_panel", True, type=bool))
             self._apply_ui_flag("ui.show_right_panel", show_right)
+        except Exception:
+            pass
+        try:
+            show_bottom = bool(self.bridge.settings.value("ui/show_bottom_panel", True, type=bool))
+            self._apply_ui_flag("ui.show_bottom_panel", show_bottom)
         except Exception:
             pass
 
@@ -4014,6 +4067,13 @@ class MainWindow(QMainWindow):
             val = default
         return max(120, val)
 
+    def _get_saved_panel_height(self, qkey: str, default: int) -> int:
+        try:
+            val = int(self.bridge.settings.value(qkey, default, type=int) or default)
+        except Exception:
+            val = default
+        return max(140, val)
+
     def _current_splitter_sizes(self) -> list[int]:
         try:
             sizes = [int(v) for v in self.splitter.sizes()]
@@ -4037,6 +4097,16 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    def _save_bottom_panel_height(self) -> None:
+        try:
+            if not hasattr(self, "center_splitter") or not hasattr(self, "bottom_panel"):
+                return
+            sizes = [int(v) for v in self.center_splitter.sizes()]
+            if len(sizes) >= 2 and self.bottom_panel.isVisible() and sizes[1] > 0:
+                self.bridge.settings.setValue("ui/bottom_panel_height", int(sizes[1]))
+        except Exception:
+            pass
+
     def _restore_main_splitter_sizes(self) -> None:
         try:
             show_left = bool(self.bridge.settings.value("ui/show_left_panel", True, type=bool))
@@ -4049,6 +4119,18 @@ class MainWindow(QMainWindow):
                 right_width if show_right else 0,
             ]
             self.splitter.setSizes(sizes)
+        except Exception:
+            pass
+
+    def _restore_center_splitter_sizes(self) -> None:
+        try:
+            show_bottom = bool(self.bridge.settings.value("ui/show_bottom_panel", True, type=bool))
+            bottom_height = self._get_saved_panel_height("ui/bottom_panel_height", self._DEFAULT_BOTTOM_PANEL_HEIGHT)
+            sizes = [
+                self._DEFAULT_CENTER_WIDTH,
+                bottom_height if show_bottom else 0,
+            ]
+            self.center_splitter.setSizes(sizes)
         except Exception:
             pass
 
@@ -4447,6 +4529,15 @@ class MainWindow(QMainWindow):
                     self._save_main_panel_widths()
                 self.right_panel.setVisible(bool(value))
                 QTimer.singleShot(0, self._restore_main_splitter_sizes)
+                if hasattr(self, "act_toggle_right_panel"):
+                    self.act_toggle_right_panel.setChecked(bool(value))
+            elif key == "ui.show_bottom_panel":
+                if not bool(value):
+                    self._save_bottom_panel_height()
+                self.bottom_panel.setVisible(bool(value))
+                QTimer.singleShot(0, self._restore_center_splitter_sizes)
+                if hasattr(self, "act_toggle_bottom_panel"):
+                    self.act_toggle_bottom_panel.setChecked(bool(value))
             elif key == "ui.preview_above_details":
                 if hasattr(self, "preview_header_row"):
                     visible = bool(value)
@@ -4473,6 +4564,8 @@ class MainWindow(QMainWindow):
             elif key == "gallery.show_hidden":
                 if hasattr(self, "proxy_model"):
                     self.proxy_model.invalidateFilter()
+            if key == "ui.show_left_panel" and hasattr(self, "act_toggle_left_panel"):
+                self.act_toggle_left_panel.setChecked(bool(value))
         except Exception:
             pass
 
@@ -6735,6 +6828,8 @@ class MainWindow(QMainWindow):
         
         self._current_accent = accent_color
         self.splitter.setHandleWidth(7)
+        if hasattr(self, "center_splitter"):
+            self.center_splitter.setHandleWidth(7)
         
         # We no longer need stylesheets or manual loops here because 
         # CustomSplitterHandle.paintEvent handles everything natively.
@@ -6742,6 +6837,11 @@ class MainWindow(QMainWindow):
             h = self.splitter.handle(i)
             if h:
                 h.update()
+        if hasattr(self, "center_splitter"):
+            for i in range(self.center_splitter.count()):
+                h = self.center_splitter.handle(i)
+                if h:
+                    h.update()
 
     def _on_accent_changed(self, accent_color: str) -> None:
         """Called when the bridge emits accentColorChanged."""
@@ -6883,6 +6983,26 @@ class MainWindow(QMainWindow):
         
         # Right Panel (Metadata) - Mirroring Left Panel Background precisely
         self.right_panel.setStyleSheet(f"background-color: {sb_bg_str}; border-left: none;")
+        if hasattr(self, "bottom_panel"):
+            self.bottom_panel.setStyleSheet(f"""
+                QWidget#bottomPanel {{
+                    background-color: {sb_bg_str};
+                    border-top: 1px solid {Theme.get_border(accent)};
+                }}
+                QLabel#bottomPanelHeader {{
+                    color: {text};
+                    font-weight: bold;
+                    background: transparent;
+                }}
+                QLabel#bottomPanelPlaceholder {{
+                    color: {text_muted};
+                    background-color: {Theme.get_control_bg(accent)};
+                    border: 1px solid {Theme.get_border(accent)};
+                    border-radius: 10px;
+                    padding: 18px;
+                }}
+                {scrollbar_style}
+            """)
         
         self.scroll_area.setStyleSheet(f"""
             QScrollArea {{ background-color: {sb_bg_str}; border: none; }}
@@ -7147,7 +7267,10 @@ class MainWindow(QMainWindow):
             cur = bool(self.bridge.settings.value(qkey, True, type=bool))
             new = not cur
             if not new:
-                self._save_main_panel_widths()
+                if qkey == "ui/show_bottom_panel":
+                    self._save_bottom_panel_height()
+                else:
+                    self._save_main_panel_widths()
             self.bridge.settings.setValue(qkey, new)
             self.bridge.uiFlagChanged.emit(qkey.replace("/", "."), new)
         except Exception:
@@ -7156,6 +7279,7 @@ class MainWindow(QMainWindow):
     def _save_splitter_state(self) -> None:
         try:
             self._save_main_panel_widths()
+            self._save_bottom_panel_height()
             if hasattr(self, "left_sections_splitter"):
                 self.bridge.settings.setValue("ui/left_sections_splitter_state", self.left_sections_splitter.saveState())
         except Exception:
@@ -7203,8 +7327,13 @@ class MainWindow(QMainWindow):
                 if self.right_panel.isVisible():
                     rp_pos = self.right_panel.mapFromGlobal(QCursor.pos())
                     is_right_panel = self.right_panel.rect().contains(rp_pos)
-                    
-                if not is_right_panel:
+
+                is_bottom_panel = False
+                if hasattr(self, "bottom_panel") and self.bottom_panel.isVisible():
+                    bp_pos = self.bottom_panel.mapFromGlobal(QCursor.pos())
+                    is_bottom_panel = self.bottom_panel.rect().contains(bp_pos)
+
+                if not is_right_panel and not is_bottom_panel:
                     # Double check: is a popup active? (Already checked above, but keep for safety)
                     if QApplication.activePopupWidget() is None:
                         self._deselect_web_items()

@@ -3818,28 +3818,36 @@ function updateThemeAwareIcons(theme) {
   }
 
   // Update Sidebar Icons
-  ['Left', 'Right'].forEach(side => {
+  ['Left', 'Bottom', 'Right'].forEach(side => {
     const icon = document.getElementById('icon' + side + 'Panel');
     if (icon) {
       const isOpened = icon.src.includes('opened');
       const sideKey = side.toLowerCase();
       const state = isOpened ? 'opened' : 'closed';
-      icon.src = `${sideKey}-sidebar-${state}${suffix}.png`;
+      const prefix = sideKey === 'bottom' ? 'bottom' : `${sideKey}-sidebar`;
+      icon.src = `${prefix}-${state}${suffix}.png`;
     }
   });
 }
 
 function updateSidebarButtonIcons(side, visible) {
-  const icon = document.getElementById('icon' + (side === 'left' ? 'Left' : 'Right') + 'Panel');
+  const iconIdMap = {
+    left: 'iconLeftPanel',
+    bottom: 'iconBottomPanel',
+    right: 'iconRightPanel',
+  };
+  const icon = document.getElementById(iconIdMap[side]);
   if (!icon) return;
   const isLight = document.documentElement.classList.contains('light-mode');
   const suffix = isLight ? '-black' : '';
   const state = visible ? 'opened' : 'closed';
-  icon.src = `${side}-sidebar-${state}${suffix}.png`;
+  const prefix = side === 'bottom' ? 'bottom' : `${side}-sidebar`;
+  icon.src = `${prefix}-${state}${suffix}.png`;
 }
 
 function wireSidebarToggles() {
   const btnLeft = document.getElementById('toggleLeftPanel');
+  const btnBottom = document.getElementById('toggleBottomPanel');
   const btnRight = document.getElementById('toggleRightPanel');
 
   if (btnLeft) {
@@ -3848,6 +3856,16 @@ function wireSidebarToggles() {
       gBridge.get_settings(function (s) {
         const cur = !!(s && s['ui.show_left_panel']);
         gBridge.set_setting_bool('ui.show_left_panel', !cur);
+      });
+    });
+  }
+
+  if (btnBottom) {
+    btnBottom.addEventListener('click', () => {
+      if (!gBridge || !gBridge.get_settings) return;
+      gBridge.get_settings(function (s) {
+        const cur = !!(s && s['ui.show_bottom_panel']);
+        gBridge.set_setting_bool('ui.show_bottom_panel', !cur);
       });
     });
   }
@@ -4155,6 +4173,7 @@ async function main() {
       if (radio) radio.checked = true;
 
       updateSidebarButtonIcons('left', !!(s && s['ui.show_left_panel']));
+      updateSidebarButtonIcons('bottom', !!(s && s['ui.show_bottom_panel']));
       updateSidebarButtonIcons('right', !!(s && s['ui.show_right_panel']));
 
       const savedMode = (s && s['metadata.layout.active_mode']) || 'image';
@@ -4246,6 +4265,24 @@ async function main() {
 
     if (bridge.uiFlagChanged) {
       bridge.uiFlagChanged.connect(function (key, value) {
+        if (key === 'ui.show_left_panel') {
+          updateSidebarButtonIcons('left', !!value);
+          return;
+        }
+        if (key === 'ui.show_bottom_panel') {
+          updateSidebarButtonIcons('bottom', !!value);
+          return;
+        }
+        if (key === 'ui.show_right_panel') {
+          updateSidebarButtonIcons('right', !!value);
+          return;
+        }
+        if (key === 'ui.theme_mode') {
+          const theme = value ? 'light' : 'dark';
+          document.documentElement.classList.toggle('light-mode', theme === 'light');
+          updateThemeAwareIcons(theme);
+          return;
+        }
         if (key === 'gallery.show_hidden' || key === 'gallery.view_mode' || key === 'gallery.group_by' || key === 'gallery.group_date_granularity') {
           if (key === 'gallery.view_mode' && bridge.get_settings) {
             bridge.get_settings(function (s) {
