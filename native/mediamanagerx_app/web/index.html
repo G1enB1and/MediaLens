@@ -80,7 +80,7 @@
             <button class="tb-btn tb-icon-btn" id="navRefresh" title="Refresh" aria-label="Refresh">&#8635;</button>
           </div>
           <div class="k">Selected folder</div>
-          <div class="v" id="selectedFolder">(none)</div>
+          <div class="v folder-address" id="selectedFolder" title="Current folder" tabindex="0">(none)</div>
         </div>
         <div class="pager">
           <button class="tb-btn" data-prev>Prev</button>
@@ -127,6 +127,8 @@
       <div class="ctx-sep"></div>
       <button class="ctx-item" id="ctxCancel">Cancel</button>
     </div>
+
+    <div class="folder-crumb-menu" id="folderCrumbMenu" hidden></div>
 
     <div class="app-body">
       <main>

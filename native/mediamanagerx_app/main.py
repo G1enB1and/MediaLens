@@ -1210,6 +1210,28 @@ class Bridge(QObject):
             str(state.get("currentPath", "")),
         )
 
+    @Slot(str, result=list)
+    def list_child_folders(self, folder_path: str) -> list:
+        try:
+            root = Path(str(folder_path or ""))
+            if not root.exists() or not root.is_dir():
+                return []
+            children: list[dict] = []
+            for child in root.iterdir():
+                try:
+                    if not child.is_dir():
+                        continue
+                    children.append({
+                        "name": child.name or str(child),
+                        "path": str(child),
+                    })
+                except Exception:
+                    continue
+            children.sort(key=lambda item: str(item.get("name", "")).lower())
+            return children
+        except Exception:
+            return []
+
     @Slot(int, result=bool)
     def set_active_collection(self, collection_id: int) -> bool:
         from app.mediamanager.db.collections_repo import get_collection
