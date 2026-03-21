@@ -1,15 +1,15 @@
-## MediaManagerX v1.0.21
+## MediaManagerX v1.0.22
 
 ### Summary
-This release makes browsing and drag-and-drop feel much more polished. Folder navigation is faster, right-click menus stay on screen, and drag previews now look intentional instead of falling back to the default Windows behavior.
+This release makes folder navigation feel much more capable and much less fragile. The header now behaves more like Windows Explorer, and several navigation paths were moved off the main UI thread to reduce freezing during browsing.
 
 ### Highlights
-- Added back, up, forward, and refresh controls for folder navigation directly in the main toolbar.
-- Rebuilt drag previews so they keep the correct aspect ratio, sit cleanly beside the cursor, and can show stacked previews for multi-file drags.
-- Fixed context menus so they reposition to stay fully visible instead of getting cut off near the screen edge.
+- Added a full Explorer-style address bar with clickable breadcrumbs, dropdown chevrons, editable path entry, and keyboard-friendly folder menus.
+- Added a new hideable, resizable bottom panel with persisted size and visibility to reserve space for the upcoming AI chat experience.
+- Moved several navigation-time folder and gallery lookups off the UI thread to improve responsiveness during folder changes.
 
 ### Notes
-- The new drag preview stack preserves existing gallery, file tree, collection, and Windows Explorer drag-and-drop workflows while replacing the old shell-style preview.
+- The installer/build flow was also tightened up so stale packaged files are less likely to slip into a release.
 
 ---
 

@@ -1,6 +1,24 @@
 # Change Log
 
-## v1.0.21 (Current)
+## v1.0.22 (Current)
+
+### Added
+
+- **Bottom AI Panel Shell**: Added a new hideable and resizable bottom panel with persisted visibility and size so the upcoming AI chat area has a dedicated place in the layout.
+- **Explorer-Style Address Bar**: Replaced the simple selected-folder label with a full Windows Explorer-style address bar that shows the full path as clickable breadcrumbs.
+- **Breadcrumb Folder Menus**: Added dropdown chevrons between breadcrumb segments and at the end of the current path so nearby folders can be opened directly from the address bar.
+
+### Changed
+
+- **Navigation Responsiveness**: Moved breadcrumb folder enumeration, gallery counts, and gallery listing requests off the UI thread so folder navigation is less likely to freeze the app.
+- **Tree Sync Scheduling**: Changed native tree synchronization so folder navigation updates the selected folder first and coalesces heavier tree sync work behind a deferred timer instead of doing it immediately on every navigation.
+- **Address Bar Interaction**: Added editable-path mode plus keyboard navigation and lazy-expanding flyout menus so the address bar behaves much closer to Windows Explorer.
+- **Header Wrapping**: Updated the header layout so pagination drops below the address bar on narrower widths instead of overlapping it.
+- **Release Build Safety**: Hardened the release build flow to catch stale packaged artifacts before producing an installer and kept `setup.cfg` versioning in sync during version bumps.
+
+---
+
+## v1.0.21
 
 ### Added
 
