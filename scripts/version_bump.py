@@ -59,5 +59,9 @@ def main():
     toml = root / "pyproject.toml"
     update_file(toml, r'version = "[\d.]+"', f'version = "{new_version}"')
 
+    # 5. setup.cfg
+    setup_cfg = root / "setup.cfg"
+    update_file(setup_cfg, r"version = [\d.]+", f"version = {new_version}")
+
 if __name__ == "__main__":
     main()
