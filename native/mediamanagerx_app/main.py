@@ -3130,6 +3130,11 @@ class MainWindow(QMainWindow):
         self._folder_history_index: int = -1
         self._suppress_tree_selection_history = False
         self._tree_root_path: str = ""
+        self._pending_tree_sync_path: str = ""
+        self._pending_tree_reroot: bool = False
+        self._tree_sync_timer = QTimer(self)
+        self._tree_sync_timer.setSingleShot(True)
+        self._tree_sync_timer.timeout.connect(self._apply_pending_tree_sync)
 
         # Native Tooltip
         self.native_tooltip = NativeDragTooltip()
@@ -4220,6 +4225,29 @@ class MainWindow(QMainWindow):
         finally:
             self._suppress_tree_selection_history = False
 
+    def _queue_tree_sync(self, path_str: str, *, re_root_tree: bool = False) -> None:
+        if not path_str:
+            return
+        self._pending_tree_sync_path = str(path_str)
+        self._pending_tree_reroot = self._pending_tree_reroot or bool(re_root_tree)
+        if not self.left_panel.isVisible():
+            return
+        self._tree_sync_timer.start(0)
+
+    def _apply_pending_tree_sync(self) -> None:
+        path_str = str(self._pending_tree_sync_path or "")
+        re_root_tree = bool(self._pending_tree_reroot)
+        self._pending_tree_sync_path = ""
+        self._pending_tree_reroot = False
+        if not path_str or not self.left_panel.isVisible():
+            return
+        try:
+            if re_root_tree or not self._tree_root_path:
+                self._set_tree_root(path_str)
+            self._sync_tree_to_folder(path_str)
+        except Exception as exc:
+            self.bridge._log(f"Tree sync failed for {path_str}: {exc}")
+
     def _set_tree_root(self, folder_path: str) -> None:
         if not folder_path:
             return
@@ -4248,13 +4276,11 @@ class MainWindow(QMainWindow):
         current_path = self.bridge._selected_folders[0] if self.bridge._selected_folders else ""
         is_new_target = path_str != current_path
 
-        if re_root_tree or not self._tree_root_path:
-            self._set_tree_root(path_str)
-        self._sync_tree_to_folder(path_str)
         if is_new_target or refresh:
             self._set_selected_folders([path_str])
             if refresh and not is_new_target:
                 self.bridge.selectionChanged.emit([path_str])
+        self._queue_tree_sync(path_str, re_root_tree=re_root_tree)
 
         if record_history:
             if self._folder_history_index >= 0 and self._folder_history[self._folder_history_index] == path_str:
@@ -4592,6 +4618,10 @@ class MainWindow(QMainWindow):
                     self._save_main_panel_widths()
                 self.left_panel.setVisible(bool(value))
                 QTimer.singleShot(0, self._restore_main_splitter_sizes)
+                if bool(value):
+                    current_path = self.bridge._selected_folders[0] if self.bridge._selected_folders else ""
+                    if current_path:
+                        self._queue_tree_sync(current_path)
             elif key == "ui.show_right_panel":
                 if not bool(value):
                     self._save_main_panel_widths()
