@@ -169,6 +169,12 @@ let gCurrentFolderChildren = [];
 let gFolderChildCache = new Map();
 let gCrumbMenuLevels = [];
 let gFolderChildrenToken = 0;
+let gChildFolderRequestSeq = 0;
+let gPendingChildFolderRequests = new Map();
+let gGalleryRequestSeq = 0;
+let gPendingMediaCountRequests = new Map();
+let gPendingMediaListRequests = new Map();
+let gRefreshGeneration = 0;
 
 function buildDragPreviewCanvas(img, item = null) {
   if (!img) return null;
@@ -289,11 +295,21 @@ function getFolderBreadcrumbs(path) {
 
 function fetchFolderChildren(path) {
   const normalized = normalizeFolderPath(path);
-  if (!normalized || !gBridge || !gBridge.list_child_folders) {
+  if (!normalized || !gBridge) {
     return Promise.resolve([]);
   }
   if (gFolderChildCache.has(normalized)) {
     return Promise.resolve(gFolderChildCache.get(normalized) || []);
+  }
+  if (gBridge.list_child_folders_async) {
+    return new Promise((resolve) => {
+      const requestId = `child-${Date.now()}-${++gChildFolderRequestSeq}`;
+      gPendingChildFolderRequests.set(requestId, { path: normalized, resolve });
+      gBridge.list_child_folders_async(requestId, normalized);
+    });
+  }
+  if (!gBridge.list_child_folders) {
+    return Promise.resolve([]);
   }
   return new Promise((resolve) => {
     gBridge.list_child_folders(normalized, function (items) {
@@ -301,6 +317,60 @@ function fetchFolderChildren(path) {
       gFolderChildCache.set(normalized, nextItems);
       resolve(nextItems);
     });
+  });
+}
+
+function fetchMediaCount(folders, filterType, searchQuery) {
+  if (!gBridge) return Promise.resolve(0);
+  if (gBridge.count_media_async) {
+    return new Promise((resolve) => {
+      const requestId = `count-${Date.now()}-${++gGalleryRequestSeq}`;
+      gPendingMediaCountRequests.set(requestId, resolve);
+      gBridge.count_media_async(requestId, folders || [], filterType || 'all', searchQuery || '');
+    });
+  }
+  if (!gBridge.count_media) {
+    return Promise.resolve(0);
+  }
+  return new Promise((resolve) => {
+    gBridge.count_media(folders || [], filterType || 'all', searchQuery || '', function (count) {
+      resolve(Number(count || 0));
+    });
+  });
+}
+
+function fetchMediaList(folders, limit, offset, sortBy, filterType, searchQuery) {
+  if (!gBridge) return Promise.resolve([]);
+  if (gBridge.list_media_async) {
+    return new Promise((resolve) => {
+      const requestId = `list-${Date.now()}-${++gGalleryRequestSeq}`;
+      gPendingMediaListRequests.set(requestId, resolve);
+      gBridge.list_media_async(
+        requestId,
+        folders || [],
+        Number(limit || 0),
+        Number(offset || 0),
+        sortBy || 'name_asc',
+        filterType || 'all',
+        searchQuery || ''
+      );
+    });
+  }
+  if (!gBridge.list_media) {
+    return Promise.resolve([]);
+  }
+  return new Promise((resolve) => {
+    gBridge.list_media(
+      folders || [],
+      Number(limit || 0),
+      Number(offset || 0),
+      sortBy || 'name_asc',
+      filterType || 'all',
+      searchQuery || '',
+      function (items) {
+        resolve(Array.isArray(items) ? items : []);
+      }
+    );
   });
 }
 
@@ -1508,7 +1578,7 @@ function maybeLoadMoreInfiniteResults() {
   if (remaining > 600) return;
   gInfiniteScrollLoading = true;
   const nextOffset = gMedia.length;
-  gBridge.list_media(gSelectedFolders, PAGE_SIZE, nextOffset, gSort, gFilter, gSearchQuery || '', function (items) {
+  fetchMediaList(gSelectedFolders, PAGE_SIZE, nextOffset, gSort, gFilter, gSearchQuery || '').then(function (items) {
     const nextItems = Array.isArray(items) ? items : [];
     if (nextItems.length > 0) {
       renderMediaList(gMedia.concat(nextItems), false);
@@ -3706,9 +3776,12 @@ function renderPager() {
 
 function refreshFromBridge(bridge, resetPage = false) {
   if (!bridge) return;
+  const refreshToken = ++gRefreshGeneration;
   bridge.get_selected_folders(function (folders) {
+    if (refreshToken !== gRefreshGeneration) return;
     gSelectedFolders = folders || [];
     bridge.get_active_collection(function (activeCollection) {
+      if (refreshToken !== gRefreshGeneration) return;
       gActiveCollection = activeCollection && activeCollection.id ? activeCollection : null;
       setSelectedFolder(gSelectedFolders, gActiveCollection);
 
@@ -3729,12 +3802,14 @@ function refreshFromBridge(bridge, resetPage = false) {
 
     // ── 1. Fast Path Reconcile (Hybrid Load) ─────────────────────────────
     // This loads the synthesized candidates from disk + DB without waiting for scan.
-      bridge.count_media(gSelectedFolders, gFilter, gSearchQuery || '', function (count) {
+      fetchMediaCount(gSelectedFolders, gFilter, gSearchQuery || '').then(function (count) {
+        if (refreshToken !== gRefreshGeneration) return;
         gTotal = count || 0;
         const useInfinite = shouldUseInfiniteScrollMode();
         const limit = useInfinite ? Math.max(PAGE_SIZE, gMedia.length || PAGE_SIZE) : PAGE_SIZE;
         const offset = useInfinite ? 0 : gPage * PAGE_SIZE;
-        bridge.list_media(gSelectedFolders, limit, offset, gSort, gFilter, gSearchQuery || '', function (items) {
+        fetchMediaList(gSelectedFolders, limit, offset, gSort, gFilter, gSearchQuery || '').then(function (items) {
+          if (refreshToken !== gRefreshGeneration) return;
           renderMediaList(items, !gPendingScrollAnchor);
           renderPager();
           if (useInfinite) requestAnimationFrame(() => maybeLoadMoreInfiniteResults());
@@ -4670,6 +4745,37 @@ async function main() {
           canUp,
           currentPath,
         });
+      });
+    }
+
+    if (bridge.childFoldersListed) {
+      bridge.childFoldersListed.connect(function (requestId, items) {
+        const pending = gPendingChildFolderRequests.get(requestId);
+        if (!pending) return;
+        gPendingChildFolderRequests.delete(requestId);
+        const nextItems = Array.isArray(items) ? items : [];
+        if (pending.path) {
+          gFolderChildCache.set(pending.path, nextItems);
+        }
+        pending.resolve(nextItems);
+      });
+    }
+
+    if (bridge.mediaCounted) {
+      bridge.mediaCounted.connect(function (requestId, count) {
+        const pending = gPendingMediaCountRequests.get(requestId);
+        if (!pending) return;
+        gPendingMediaCountRequests.delete(requestId);
+        pending(Number(count || 0));
+      });
+    }
+
+    if (bridge.mediaListed) {
+      bridge.mediaListed.connect(function (requestId, items) {
+        const pending = gPendingMediaListRequests.get(requestId);
+        if (!pending) return;
+        gPendingMediaListRequests.delete(requestId);
+        pending(Array.isArray(items) ? items : []);
       });
     }
 
