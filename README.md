@@ -134,7 +134,7 @@ This transforms browsing from “where is it?” → **“when did I make it?”
 
 Download the latest installer:
 
-👉 <https://github.com/G1enB1and/MediaManagerX/releases>
+👉 <https://github.com/G1enB1and/MediaLens/releases>
 
 - One-click setup
 - All dependencies included
@@ -145,7 +145,7 @@ Download the latest installer:
 ## Power Users (Run from Source)
 
 ```
-git clone https://github.com/G1enB1and/MediaManagerX.git
+git clone https://github.com/G1enB1and/MediaLens.git
 cd MediaManagerX
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
