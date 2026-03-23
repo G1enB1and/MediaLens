@@ -53,14 +53,18 @@ MediaManagerX is designed for people who manage **large, complex, or AI-generate
 
 Go beyond filenames, and even beyond traditional metadata.
 
-- Extract:
-  - AI prompts & generation parameters
-  - EXIF & camera data
-  - Embedded comments and tags
+#### Extract
+
+- AI prompts & generation parameters
+- EXIF & camera data
+- Embedded comments and tags
+
+#### Choose your workflow
+
+- ⚡ Fast local database
+- 📦 Embedded metadata in files
+
 - Edit metadata in bulk across files or folders
-- Choose your workflow:
-  - ⚡ Fast local database
-  - 📦 Embedded metadata in files
 - Persistent tagging via file hashing (even after moving/renaming files)
 
 ![Gallery](docs/Screenshots/Screenshot-Metadata-AI-01.png)
@@ -86,12 +90,14 @@ This transforms browsing from “where is it?” → **“when did I make it?”
 ### 🖼️ High-Performance Gallery
 
 - Smooth browsing for images, GIFs, and videos
-- Multiple view modes:
-  - Masonry
-  - Grid (various sizes)
-  - List / Details / Content views
 - Infinite scroll where it matters
 - Lightbox for focused, full-size viewing
+
+#### Multiple view modes
+
+- Masonry
+- Grid (various sizes)
+- List / Details / Content views
 
 ---
 
