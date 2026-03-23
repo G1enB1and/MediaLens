@@ -1525,7 +1525,7 @@ class Bridge(QObject):
     @Slot()
     def download_and_install_update(self):
         """Download latest installer and launch it."""
-        url = "https://github.com/G1enB1and/MediaManagerX/releases/latest/download/MediaManagerX_Setup.exe"
+        url = "https://github.com/G1enB1and/MediaManagerX/releases/latest/download/MediaLens_Setup.exe"
         request = QNetworkRequest(QUrl(url))
         self._download_reply = self.nam.get(request)
         
@@ -1538,7 +1538,7 @@ class Bridge(QObject):
             if self._download_reply.error() == QNetworkReply.NetworkError.NoError:
                 data = self._download_reply.readAll()
                 temp_dir = QStandardPaths.writableLocation(QStandardPaths.TempLocation)
-                setup_path = os.path.join(temp_dir, "MediaManagerX_Setup_New.exe")
+                setup_path = os.path.join(temp_dir, "MediaLens_Setup_New.exe")
                 try:
                     with open(setup_path, "wb") as f:
                         f.write(data)
@@ -3099,11 +3099,11 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("MediaManagerX")
+        self.setWindowTitle("MediaLens")
         self.resize(1200, 800)
 
         # Set window icon
-        icon_path = Path(__file__).with_name("web") / "favicon.png"
+        icon_path = Path(__file__).with_name("web") / "MediaLens-Logo.ico"
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
 
@@ -7036,8 +7036,7 @@ class MainWindow(QMainWindow):
             self.native_tooltip.update_style(accent, is_light)
         
         # Theme-aware Window Icon
-        icon_name = "favicon-black.png" if is_light else "favicon.png"
-        icon_path = Path(__file__).with_name("web") / icon_name
+        icon_path = Path(__file__).with_name("web") / "MediaLens-Logo.ico"
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
         
@@ -7455,7 +7454,7 @@ class MainWindow(QMainWindow):
     def toggle_devtools(self) -> None:
         if self._devtools is None:
             self._devtools = QWebEngineView()
-            self._devtools.setWindowTitle("MediaManagerX DevTools")
+            self._devtools.setWindowTitle("MediaLens DevTools")
             self._devtools.resize(1100, 700)
             self.web.page().setDevToolsPage(self._devtools.page())
             self._devtools.show()
@@ -7494,7 +7493,7 @@ class MainWindow(QMainWindow):
             backend = "Unknown"
 
         info = (
-            "# MediaManagerX\n\n"
+            "# MediaLens\n\n"
             f"**Version**: {__version__}\n\n"
             "**Author**: Glen Bland\n\n"
             "A premium Windows native media manager built with PySide6.\n\n"
@@ -7506,7 +7505,7 @@ class MainWindow(QMainWindow):
             f"- **Thumbnails**: {st.get('thumb_dir')}"
         )
 
-        self._show_themed_dialog("About MediaManagerX", info, is_markdown=True)
+        self._show_themed_dialog("About MediaLens", info, is_markdown=True)
 
     def _show_markdown_dialog(self, title: str, file_name: str) -> None:
         """Helper to show a markdown file in a scrollable dialog."""
@@ -7693,7 +7692,7 @@ def main() -> None:
 
     # Ensure QStandardPaths.AppDataLocation resolves to a stable, app-specific dir.
     app.setOrganizationName("G1enB1and")
-    app.setApplicationName("MediaManagerX")
+    app.setApplicationName("MediaLens")
 
     win = MainWindow()
     win.show()

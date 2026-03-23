@@ -342,7 +342,7 @@
 
 ### Added in v1.0.1-alpha
 
-- Initial MediaManagerX project scaffold and Python package layout.
+- Initial MediaLens project scaffold and Python package layout.
 - SQLite schema bootstrap and initialization scripts.
 - Windows path normalization utilities and scope validation.
 - Folder scope query builder and selection state helpers.

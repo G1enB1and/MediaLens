@@ -1,7 +1,7 @@
-#define MyAppName "MediaManagerX"
+#define MyAppName "MediaLens"
 #define MyAppVersion "v1.0.22" ; Source of Truth: \VERSION
 #define MyAppPublisher "G1enB1and"
-#define MyAppExeName "MediaManagerX.exe"
+#define MyAppExeName "MediaLens.exe"
 
 [Setup]
 ; AppId uniquely identifies this application
@@ -13,8 +13,8 @@ DefaultDirName={autopf}\{#MyAppName}
 ; Allow user to choose "Current User" vs "All Users" (requires admin)
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir=.\
-OutputBaseFilename=MediaManagerX_Setup
-SetupIconFile=app.ico
+OutputBaseFilename=MediaLens_Setup
+SetupIconFile=native\mediamanagerx_app\web\MediaLens-Logo.ico
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
@@ -37,4 +37,4 @@ Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Open MediaManagerX After Installing Setup"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "Open MediaLens After Installing Setup"; Flags: nowait postinstall skipifsilent
