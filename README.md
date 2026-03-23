@@ -1,22 +1,24 @@
 # MediaManagerX
 
-**A powerful, modern media manager built for large libraries, AI workflows, and deep metadata.**
+**MediaManagerX is a local-first media intelligence platform for creators, AI workflows, and large libraries.**
 
-MediaManagerX helps you explore, organize, and understand your media — not just store it.  
-Browse thousands of files smoothly, navigate by time, and surface hidden metadata like AI prompts, EXIF data, and embedded comments.
+It doesn’t just organize files — it understands them, so you can stop digging through folders… and start finding meaning instantly.
+
+Extract prompts, analyze metadata, and navigate your entire library by time, context, and meaning.
+Browse thousands of files smoothly, and surface hidden metadata like AI prompts, EXIF data, and embedded comments.
 
 ---
 
 ## 🔥 Why MediaManagerX?
 
 Most media managers treat files like static objects.
-
 MediaManagerX treats them like **living data**.
 
 - Navigate your library by **collections, time, or folders**
 - Extract and edit **deep embedded metadata** (AI prompts, EXIF, workflows)
-- Handle **massive collections** without losing performance
+- Stay fast even with tens of thousands of files
 - Stay flexible with **database + embedded metadata dual storage**
+- Designed to scale from personal libraries to **dataset-scale collections**
 
 ---
 
@@ -32,9 +34,35 @@ MediaManagerX is designed for people who manage **large, complex, or AI-generate
 
 ---
 
+## ⚡ What Makes MediaManagerX Different?  
+  
+- Not cloud-locked — fully local and private  
+- Not just tagging — understands embedded AI workflows and prompts  
+- Not folder-bound — collections and metadata-first organization  
+- Not static — built for evolving datasets and creative pipelines
+
+
+---
+
 ## ✨ Key Features
 
-### 🕰️ Timeline-Based Browsing (NEW)
+### 🧠 Advanced Metadata System
+
+Go beyond filenames.
+
+- Extract:
+  - AI prompts & generation parameters
+  - EXIF & camera data
+  - Embedded comments and tags
+- Edit metadata in bulk across files or folders
+- Choose your workflow:
+  - ⚡ Fast local database
+  - 📦 Embedded metadata in files
+- Persistent tagging via file hashing (even after moving/renaming files)
+
+---
+
+### 🕰️ Timeline-Based Browsing
 
 Explore your media by **when it was created, modified, acquired, taken, or automatically determined**.
 
@@ -48,29 +76,13 @@ This transforms browsing from “where is it?” → **“when did I make it?”
 
 ---
 
-### 🧠 Advanced Metadata System
-
-Go beyond filenames.
-
-- Extract:
-  - AI prompts & generation parameters
-  - EXIF & camera data
-  - Embedded comments and tags
-- Edit metadata in bulk across files or folders
-- Choose your workflow:
-  - ⚡ Fast local database
-  - 📦 Embedded metadata in files
-- Persistent tagging via file hashing (even after moving/renaming files)
-
----
-
 ### 🖼️ High-Performance Gallery
 
 - Smooth browsing for images, GIFs, and videos
 - Multiple view modes:
-  - Masonry
-  - Grid (various sizes)
-  - List / Details / Content views
+  - Masonry
+  - Grid (various sizes)
+  - List / Details / Content views
 - Infinite scroll where it matters
 - Lightbox for focused, full-size viewing
 
@@ -129,6 +141,8 @@ python -m pip install -e .
 python scripts\setup.py
 python -m native.mediamanagerx_app.main
 ```
+
+  
 
 ---
 
@@ -197,3 +211,4 @@ MIT License
 ---
 
 Created by Glen Bland
+
