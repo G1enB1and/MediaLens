@@ -1,8 +1,8 @@
-# MediaManagerX
+﻿# MediaLens
 
-**MediaManagerX is a local-first media intelligence platform for creators, AI workflows, and large libraries.**
+**MediaLens is a local-first media intelligence platform for creators, AI workflows, and large libraries.**
 
-It doesn’t just organize files — it understands them, so you can stop digging through folders… and start finding meaning instantly.
+It doesn't just organize files - it understands them, so you can stop digging through folders and start finding meaning instantly.
 
 Extract prompts, analyze metadata, and navigate your entire library by time, context, and meaning.
 Browse thousands of files smoothly, and surface hidden metadata like AI prompts, EXIF data, and embedded comments.
@@ -13,10 +13,10 @@ Browse thousands of files smoothly, and surface hidden metadata like AI prompts,
 
 ---
 
-## 🔥 Why MediaManagerX?
+## Why MediaLens?
 
 Most media managers treat files like static objects.
-MediaManagerX treats them like **living data**.
+MediaLens treats them like **living data**.
 
 - Navigate your library by **collections, time, or folders**
 - Extract and edit **deep embedded metadata** (AI prompts, EXIF, workflows)
@@ -26,30 +26,30 @@ MediaManagerX treats them like **living data**.
 
 ---
 
-## 🧭 Built For
+## Built For
 
-MediaManagerX is designed for people who manage **large, complex, or AI-generated media libraries**:
+MediaLens is designed for people who manage **large, complex, or AI-generated media libraries**:
 
-- 🎨 AI artists (Stable Diffusion, ComfyUI, Midjourney workflows)
-- 📸 Photographers with large photo archives
-- 🎬 Video editors and content creators
-- 🧠 Researchers building datasets or tagging systems
-- 🗂️ Power users who want control over their files
-
----
-
-## ⚡ What Makes MediaManagerX Different?  
-  
-- Not cloud-locked — fully local and private  
-- Not just tagging — understands embedded AI workflows and prompts  
-- Not folder-bound — collections and metadata-first organization  
-- Not static — built for evolving datasets and creative pipelines
+- AI artists (Stable Diffusion, ComfyUI, Midjourney workflows)
+- Photographers with large photo archives
+- Video editors and content creators
+- Researchers building datasets or tagging systems
+- Power users who want control over their files
 
 ---
 
-## ✨ Key Features
+## What Makes MediaLens Different?
 
-### 🧠 Advanced Metadata System
+- Not cloud-locked - fully local and private
+- Not just tagging - understands embedded AI workflows and prompts
+- Not folder-bound - collections and metadata-first organization
+- Not static - built for evolving datasets and creative pipelines
+
+---
+
+## Key Features
+
+### Advanced Metadata System
 
 Go beyond filenames, and even beyond traditional metadata.
 
@@ -61,9 +61,8 @@ Go beyond filenames, and even beyond traditional metadata.
 
 #### Choose your workflow
 
-- ⚡ Fast local database
-- 📦 Embedded metadata in files
-
+- Fast local database
+- Embedded metadata in files
 - Edit metadata in bulk across files or folders
 - Persistent tagging via file hashing (even after moving/renaming files)
 
@@ -71,7 +70,7 @@ Go beyond filenames, and even beyond traditional metadata.
 
 ---
 
-### 🕰️ Timeline-Based Browsing
+### Timeline-Based Browsing
 
 Explore your media by **when it was created, modified, acquired, taken, or automatically determined**.
 
@@ -81,13 +80,13 @@ Explore your media by **when it was created, modified, acquired, taken, or autom
 - Infinite scrolling for continuous browsing
 - Jump through large libraries instantly
 
-This transforms browsing from “where is it?” → **“when did I make it?”**
+This transforms browsing from "where is it?" to **"when did I make it?"**
 
 ![Gallery](docs/Screenshots/Screenshot-Timeline-01.png)
 
 ---
 
-### 🖼️ High-Performance Gallery
+### High-Performance Gallery
 
 - Smooth browsing for images, GIFs, and videos
 - Infinite scroll where it matters
@@ -101,7 +100,7 @@ This transforms browsing from “where is it?” → **“when did I make it?”
 
 ---
 
-### 🧩 Smart Organization
+### Smart Organization
 
 - Search, filter, and sort your entire library
 - Collections for flexible grouping (independent of folders)
@@ -110,7 +109,7 @@ This transforms browsing from “where is it?” → **“when did I make it?”
 
 ---
 
-### 🧰 Built for Large Libraries
+### Built for Large Libraries
 
 - Lazy loading and optimized scanning
 - Hybrid pagination + infinite scroll strategy
@@ -119,7 +118,7 @@ This transforms browsing from “where is it?” → **“when did I make it?”
 
 ---
 
-### 🎨 Clean, Stable UI
+### Clean, Stable UI
 
 - Dark and light themes with accent color of your choice
 - Responsive layout that adapts to screen size
@@ -128,13 +127,13 @@ This transforms browsing from “where is it?” → **“when did I make it?”
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Recommended (Windows)
 
 Download the latest installer:
 
-👉 <https://github.com/G1enB1and/MediaLens/releases>
+<https://github.com/G1enB1and/MediaLens/releases>
 
 - One-click setup
 - All dependencies included
@@ -144,24 +143,24 @@ Download the latest installer:
 
 ## Power Users (Run from Source)
 
-```
+```powershell
 git clone https://github.com/G1enB1and/MediaLens.git
-cd MediaManagerX
+cd MediaLens
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -U pip
 python -m pip install -e .
 python scripts\setup.py
-python -m native.mediamanagerx_app.main
+python run.py
 ```
 
 ---
 
-## 🗺️ Roadmap
+## Roadmap
 
-MediaManagerX is evolving into a full intelligent media platform.
+MediaLens is evolving into a full intelligent media platform.
 
-### 🔜 Near-Term
+### Near-Term
 
 - Duplicate finder with smart merge logic
 - Compare mode (side-by-side / overlay)
@@ -171,17 +170,17 @@ MediaManagerX is evolving into a full intelligent media platform.
 
 ---
 
-### 🤖 AI-Powered Features
+### AI-Powered Features
 
 - Auto-tagging and image descriptions
 - Prompt extraction and management
 - Prompt library and workflow tools
-- “Chat with your images” (vision + LLM integration)
+- "Chat with your images" (vision + LLM integration)
 - Segment Anything (SAM) integration
 
 ---
 
-### ☁️ Ecosystem & Sync
+### Ecosystem & Sync
 
 - Google Photos / Drive import
 - OneDrive / Dropbox / cloud integrations
@@ -190,7 +189,7 @@ MediaManagerX is evolving into a full intelligent media platform.
 
 ---
 
-### 🧪 Advanced Tools
+### Advanced Tools
 
 - Facial recognition and grouping
 - Dataset creation tools (AI training workflows)
@@ -199,23 +198,23 @@ MediaManagerX is evolving into a full intelligent media platform.
 
 ---
 
-## 🧪 Tests / Validation
+## Tests / Validation
 
 `python tests/dev_check.py`
 
 ---
 
-## 💬 Philosophy
+## Philosophy
 
-MediaManagerX is built around a simple idea:
+MediaLens is built around a simple idea:
 
-> Your media is more than files — it’s context, memory, and meaning.
+> Your media is more than files - it's context, memory, and meaning.
 
 This app is designed to help you navigate that meaning, not just store data.
 
 ---
 
-## 📄 License
+## License
 
 MIT License
 

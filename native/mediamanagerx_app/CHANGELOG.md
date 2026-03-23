@@ -1,6 +1,21 @@
-# Change Log
+﻿# Change Log
 
-## v1.0.22 (Current)
+## v1.0.23 (Current)
+
+### Added
+
+- **MediaLens Brand Assets**: Added the new MediaLens logo set and multi-resolution ICO packaging assets for the app, installer, taskbar, and Start menu.
+
+### Changed
+
+- **MediaLens Rebrand**: Updated the app name across the header, window title, About dialog, DevTools window, installer, and packaged release outputs so shipped builds consistently present MediaLens.
+- **Theme-Aware Header Branding**: Swapped the header logo to the new MediaLens light and dark variants while preserving theme-aware sidebar toggle behavior.
+- **Release Packaging Names**: Renamed the build spec, packaged executable, installer output, and related workflow/docs references to the MediaLens naming scheme.
+- **Update and Repo Links**: Pointed in-app update checks, installer downloads, Help menu links, and release documentation to the renamed G1enB1and/MediaLens GitHub repository.
+
+---
+
+## v1.0.22
 
 ### Added
 
@@ -277,7 +292,7 @@
 
 - **Cursor Feedback**: Cursor now changes to a hand pointer when hovering over clickable folders and files.
 - **Conflict Dialog Improvements**:
-  - Fixed SVG rendering for the **“Apply to all”** checkbox so the checkmark displays correctly in all themes.
+  - Fixed SVG rendering for the **â€œApply to allâ€** checkbox so the checkmark displays correctly in all themes.
   - Improved button hover effects for clearer interaction feedback.
   - Fixed vertical clipping of long filenames.
 - **Drag & Drop Refinements**:
@@ -292,10 +307,10 @@
 ### Added in v1.0.3
 
 - **Keyboard Shortcuts**:
-  - **Ctrl+C / Ctrl+X / Ctrl+V** — Copy, Cut, Paste files and folders
-  - **Delete** — Delete selected items with confirmation
-  - **F2** — Rename selected items (inline for folders, dialog for gallery)
-  - **Ctrl+A** — Select all gallery items
+  - **Ctrl+C / Ctrl+X / Ctrl+V** â€” Copy, Cut, Paste files and folders
+  - **Delete** â€” Delete selected items with confirmation
+  - **F2** â€” Rename selected items (inline for folders, dialog for gallery)
+  - **Ctrl+A** â€” Select all gallery items
 
 ### Changed in v1.0.3
 
@@ -322,7 +337,7 @@
 ### Added in v1.0.2
 
 - **Auto-Update System**: App now checks GitHub for updates on launch (manual check available).
-- **Help Dialogs**: Added **Terms of Service** and **What’s New** windows in the Help menu.
+- **Help Dialogs**: Added **Terms of Service** and **Whatâ€™s New** windows in the Help menu.
 
 ### Changed in v1.0.2
 
@@ -358,3 +373,4 @@
 - Initial container-first masonry layout helper and design documentation.
 
 ---
+
