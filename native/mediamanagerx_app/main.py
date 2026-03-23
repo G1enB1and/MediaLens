@@ -1499,7 +1499,7 @@ class Bridge(QObject):
     @Slot(bool)
     def check_for_updates(self, manual: bool = False):
         """Check GitHub for a newer version in the VERSION file."""
-        url = "https://raw.githubusercontent.com/G1enB1and/MediaManagerX/main/VERSION"
+        url = "https://raw.githubusercontent.com/G1enB1and/MediaLens/main/VERSION"
         request = QNetworkRequest(QUrl(url))
         self._update_reply = self.nam.get(request)
         
@@ -1525,7 +1525,7 @@ class Bridge(QObject):
     @Slot()
     def download_and_install_update(self):
         """Download latest installer and launch it."""
-        url = "https://github.com/G1enB1and/MediaManagerX/releases/latest/download/MediaLens_Setup.exe"
+        url = "https://github.com/G1enB1and/MediaLens/releases/latest/download/MediaLens_Setup.exe"
         request = QNetworkRequest(QUrl(url))
         self._download_reply = self.nam.get(request)
         
@@ -3292,11 +3292,11 @@ class MainWindow(QMainWindow):
         help_menu.addSeparator()
         
         bug_action = QAction("&Report a Bug", self)
-        bug_action.triggered.connect(lambda: __import__("webbrowser").open("https://github.com/G1enB1and/MediaManagerX/issues"))
+        bug_action.triggered.connect(lambda: __import__("webbrowser").open("https://github.com/G1enB1and/MediaLens/issues"))
         help_menu.addAction(bug_action)
         
         website_action = QAction("&Project Website", self)
-        website_action.triggered.connect(lambda: __import__("webbrowser").open("https://github.com/G1enB1and/MediaManagerX"))
+        website_action.triggered.connect(lambda: __import__("webbrowser").open("https://github.com/G1enB1and/MediaLens"))
         help_menu.addAction(website_action)
 
         help_menu.addSeparator()

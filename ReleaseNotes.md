@@ -14,4 +14,4 @@ This release makes folder navigation feel much more capable and much less fragil
 ---
 
 Full Changelog:
-https://github.com/G1enB1and/MediaManagerX/blob/dev/native/mediamanagerx_app/CHANGELOG.md
+https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md
