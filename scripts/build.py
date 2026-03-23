@@ -5,34 +5,22 @@ import subprocess
 import sys
 from pathlib import Path
 
-from PIL import Image
-
-
 ROOT = Path(__file__).resolve().parent.parent
-SPEC_PATH = ROOT / "MediaManagerX.spec"
+SPEC_PATH = ROOT / "MediaLens.spec"
 DIST_DIR = ROOT / "dist"
 BUILD_DIR = ROOT / "build"
-APP_DIR = DIST_DIR / "MediaManagerX"
+APP_DIR = DIST_DIR / "MediaLens"
 INTERNAL_DIR = APP_DIR / "_internal"
 VERSION_FILE = ROOT / "VERSION"
 RELEASE_NOTES_FILE = ROOT / "ReleaseNotes.md"
 
 
 def create_icon() -> None:
-    print("Generating app.ico from web logo...")
-    img_path = ROOT / "native" / "mediamanagerx_app" / "web" / "media-manager-logo-256.png"
-    if not img_path.exists():
-        raise FileNotFoundError(f"Icon source not found: {img_path}")
-
-    img = Image.open(img_path)
-    try:
-        img.save(
-            ROOT / "app.ico",
-            format="ICO",
-            sizes=[(256, 256), (128, 128), (64, 64), (32, 32), (16, 16)],
-        )
-    finally:
-        img.close()
+    print("Syncing MediaLens ICO asset for packaging...")
+    icon_path = ROOT / "native" / "mediamanagerx_app" / "web" / "MediaLens-Logo.ico"
+    if not icon_path.exists():
+        raise FileNotFoundError(f"Icon source not found: {icon_path}")
+    shutil.copyfile(icon_path, ROOT / "app.ico")
 
 
 def clean_build_dirs() -> None:
@@ -81,7 +69,7 @@ def verify_bundle() -> str:
     if bundled_notes != expected_notes:
         raise RuntimeError("Bundled ReleaseNotes.md does not match the repo root copy.")
 
-    exe_path = APP_DIR / "MediaManagerX.exe"
+    exe_path = APP_DIR / "MediaLens.exe"
     if not exe_path.exists():
         raise FileNotFoundError(f"Built executable missing: {exe_path}")
 
@@ -115,12 +103,12 @@ def build_installer() -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build MediaManagerX release artifacts from the canonical spec."
+        description="Build MediaLens release artifacts from the canonical spec."
     )
     parser.add_argument(
         "--installer",
         action="store_true",
-        help="Compile MediaManagerX_Setup.exe after rebuilding and validating the app bundle.",
+        help="Compile MediaLens_Setup.exe after rebuilding and validating the app bundle.",
     )
     parser.add_argument(
         "--no-clean",

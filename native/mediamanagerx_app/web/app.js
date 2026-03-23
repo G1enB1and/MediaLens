@@ -4330,7 +4330,7 @@ function updateThemeAwareIcons(theme) {
   // Update Logo
   const logo = document.getElementById('mainLogo');
   if (logo) {
-    logo.src = `media-manager-logo-64${suffix}.png`;
+    logo.src = isLight ? 'MediaLens-Logo-64.png' : 'MediaLens-Logo-Dark-64.png';
   }
 
   // Update Sidebar Icons
