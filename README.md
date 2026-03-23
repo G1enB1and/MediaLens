@@ -9,6 +9,10 @@ Browse thousands of files smoothly, and surface hidden metadata like AI prompts,
 
 ---
 
+![Gallery](docs/Screenshots/Screenshot-Masonry-01.png)
+
+---
+
 ## 🔥 Why MediaManagerX?
 
 Most media managers treat files like static objects.
@@ -41,14 +45,13 @@ MediaManagerX is designed for people who manage **large, complex, or AI-generate
 - Not folder-bound — collections and metadata-first organization  
 - Not static — built for evolving datasets and creative pipelines
 
-
 ---
 
 ## ✨ Key Features
 
 ### 🧠 Advanced Metadata System
 
-Go beyond filenames.
+Go beyond filenames, and even beyond traditional metadata.
 
 - Extract:
   - AI prompts & generation parameters
@@ -59,6 +62,8 @@ Go beyond filenames.
   - ⚡ Fast local database
   - 📦 Embedded metadata in files
 - Persistent tagging via file hashing (even after moving/renaming files)
+
+![Gallery](docs/Screenshots/Screenshot-Metadata-AI-01.png)
 
 ---
 
@@ -73,6 +78,8 @@ Explore your media by **when it was created, modified, acquired, taken, or autom
 - Jump through large libraries instantly
 
 This transforms browsing from “where is it?” → **“when did I make it?”**
+
+![Gallery](docs/Screenshots/Screenshot-Timeline-01.png)
 
 ---
 
@@ -142,8 +149,6 @@ python scripts\setup.py
 python -m native.mediamanagerx_app.main
 ```
 
-  
-
 ---
 
 ## 🗺️ Roadmap
@@ -211,4 +216,3 @@ MIT License
 ---
 
 Created by Glen Bland
-
