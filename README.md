@@ -9,7 +9,7 @@ Browse thousands of files smoothly, and surface hidden metadata like AI prompts,
 
 ---
 
-![Gallery](docs/Screenshots/Screenshot-Masonry-01.png)
+![Gallery](docs/Screenshots/Screenshot-Masonry-02.png)
 
 ---
 
@@ -66,7 +66,7 @@ Go beyond filenames, and even beyond traditional metadata.
 - Edit metadata in bulk across files or folders
 - Persistent tagging via file hashing (even after moving/renaming files)
 
-![Gallery](docs/Screenshots/Screenshot-Metadata-AI-01.png)
+![Gallery](docs/Screenshots/Screenshot-Metadata-AI-02.png)
 
 ---
 
@@ -82,7 +82,7 @@ Explore your media by **when it was created, modified, acquired, taken, or autom
 
 This transforms browsing from "where is it?" to **"when did I make it?"**
 
-![Gallery](docs/Screenshots/Screenshot-Timeline-01.png)
+![Gallery](docs/Screenshots/Screenshot-Timeline-02.png)
 
 ---
 
