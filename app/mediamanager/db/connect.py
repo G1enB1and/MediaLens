@@ -3,7 +3,12 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from app.mediamanager.db.migrations import init_db
+from app.mediamanager.db.migrations import (
+    _ensure_is_hidden_columns,
+    _ensure_media_item_date_columns,
+    _ensure_media_metadata_columns,
+    init_db,
+)
 
 
 def connect_db(db_path: str) -> sqlite3.Connection:
@@ -24,4 +29,8 @@ def connect_db(db_path: str) -> sqlite3.Connection:
     # can report success before later writes fail with disk I/O errors. Keep the
     # app on MEMORY journaling so scan/import writes remain functional.
     conn.execute("PRAGMA journal_mode=MEMORY;")
+    _ensure_media_metadata_columns(conn)
+    _ensure_is_hidden_columns(conn)
+    _ensure_media_item_date_columns(conn)
+    conn.commit()
     return conn

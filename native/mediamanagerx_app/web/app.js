@@ -45,6 +45,8 @@ let gTimelineHeaderObserver = null;
 let gTimelineVisibleGroupKeys = new Set();
 let gTimelineActiveGroupKey = '';
 let gDuplicateKeepOverrides = new Map();
+let gScanActive = false;
+let gSimilarityThreshold = 'low';
 const TIMELINE_INSET_PX = 20;
 const TIMELINE_THUMB_SIZE_PX = 14;
 const TIMELINE_TOP_YEAR_TOP_PX = 20;
@@ -56,7 +58,8 @@ const TIMELINE_VIEWPORT_TOP_MARGIN_PX = -6;
 const TIMELINE_VIEWPORT_BOTTOM_MARGIN_PX = 32;
 const TIMELINE_MIN_HEIGHT_PX = 140;
 
-const GALLERY_VIEW_MODES = new Set(['masonry', 'grid_small', 'grid_medium', 'grid_large', 'grid_xlarge', 'list', 'content', 'details', 'duplicates']);
+const GALLERY_VIEW_MODES = new Set(['masonry', 'grid_small', 'grid_medium', 'grid_large', 'grid_xlarge', 'list', 'content', 'details', 'duplicates', 'similar', 'similar_only']);
+const REVIEW_VIEW_MODES = new Set(['duplicates', 'similar', 'similar_only']);
 const DETAILS_COLUMN_CONFIG = [
   { key: 'thumb', label: '', min: 72, width: 72, resizable: false },
   { key: 'name', label: 'File Name', min: 25, width: 260, resizable: true },
@@ -67,8 +70,15 @@ const DETAILS_COLUMN_CONFIG = [
 ];
 let gDetailsColumnWidths = Object.fromEntries(DETAILS_COLUMN_CONFIG.map(col => [col.key, col.width]));
 
+function getReviewMode() {
+  if (gGalleryViewMode === 'similar_only' || gGroupBy === 'similar_only') return 'similar_only';
+  if (gGalleryViewMode === 'similar' || gGroupBy === 'similar') return 'similar';
+  if (gGalleryViewMode === 'duplicates' || gGroupBy === 'duplicates') return 'duplicates';
+  return '';
+}
+
 function isDuplicateModeActive() {
-  return gGalleryViewMode === 'duplicates' || gGroupBy === 'duplicates';
+  return !!getReviewMode();
 }
 
 const METADATA_SETTINGS_CONFIG = {
@@ -1239,7 +1249,7 @@ function getGalleryContainerClasses(mode) {
   if (nextMode === 'masonry') {
     return ['masonry'];
   }
-  if (nextMode === 'duplicates') {
+  if (nextMode === 'duplicates' || nextMode === 'similar' || nextMode === 'similar_only') {
     return ['gallery-duplicates'];
   }
   if (nextMode.startsWith('grid_')) {
@@ -1262,7 +1272,7 @@ function applyGalleryClasses(el, mode) {
 
 function applyGalleryViewMode(mode) {
   const nextMode = GALLERY_VIEW_MODES.has(mode) ? mode : 'masonry';
-  if (nextMode !== 'duplicates') {
+  if (!REVIEW_VIEW_MODES.has(nextMode)) {
     gLastStandardViewMode = nextMode;
   }
   gGalleryViewMode = nextMode;
@@ -1568,9 +1578,13 @@ function compareDuplicateCandidates(a, b) {
 }
 
 function buildDuplicateGroups(items) {
+  const reviewMode = getReviewMode();
+  const baseLabel = reviewMode === 'duplicates' ? 'Duplicate Group' : 'Similar Group';
   const seen = new Map();
   items.filter(item => !item.is_folder).forEach((item) => {
-    const key = String(item.content_hash || item.duplicate_group_key || '').trim();
+    const key = String((reviewMode && reviewMode !== 'duplicates')
+      ? (item.duplicate_group_key || item.content_hash || '')
+      : (item.content_hash || item.duplicate_group_key || '')).trim();
     if (!key) return;
     let group = seen.get(key);
     if (!group) {
@@ -1588,7 +1602,7 @@ function buildDuplicateGroups(items) {
       const keepSize = Number(keepItem && keepItem.file_size) || 0;
       const totalSize = sortedItems.reduce((sum, item) => sum + (Number(item.file_size) || 0), 0);
       const savings = Math.max(0, totalSize - keepSize);
-      const label = `Duplicate Group ${index + 1}`;
+      const label = `${baseLabel} ${index + 1}`;
       return {
         key: group.key,
         label,
@@ -1608,7 +1622,7 @@ function buildDuplicateGroups(items) {
   });
 
   groups.forEach((group, index) => {
-    group.label = `Duplicate Group ${index + 1}`;
+    group.label = `${baseLabel} ${index + 1}`;
   });
 
   return groups;
@@ -2411,6 +2425,10 @@ function syncGroupByUi() {
   if (granularitySelect) {
     granularitySelect.hidden = gGroupBy !== 'date';
   }
+  const similaritySelect = document.getElementById('similarityThresholdSelect');
+  if (similaritySelect) {
+    similaritySelect.hidden = !['similar', 'similar_only'].includes(gGroupBy);
+  }
 }
 
 function escapeHtml(value) {
@@ -2422,16 +2440,33 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+function setReviewMode(mode) {
+  const nextMode = mode === 'similar_only' ? 'similar_only' : (mode === 'similar' ? 'similar' : 'duplicates');
+  if (!REVIEW_VIEW_MODES.has(gGalleryViewMode)) {
+    gLastStandardViewMode = gGalleryViewMode;
+  }
+  applyGalleryViewMode(nextMode);
+  updateCtxViewState();
+  return nextMode;
+}
+
+function clearReviewMode() {
+  const restoreMode = gLastStandardViewMode && !REVIEW_VIEW_MODES.has(gLastStandardViewMode) ? gLastStandardViewMode : 'masonry';
+  applyGalleryViewMode(restoreMode);
+  updateCtxViewState();
+  return restoreMode;
+}
+
 function setDuplicateMode(active) {
   if (active) {
-    if (gGalleryViewMode !== 'duplicates') {
+    if (!REVIEW_VIEW_MODES.has(gGalleryViewMode)) {
       gLastStandardViewMode = gGalleryViewMode;
     }
     applyGalleryViewMode('duplicates');
     updateCtxViewState();
     return 'duplicates';
   }
-  const restoreMode = gLastStandardViewMode && gLastStandardViewMode !== 'duplicates' ? gLastStandardViewMode : 'masonry';
+  const restoreMode = gLastStandardViewMode && !REVIEW_VIEW_MODES.has(gLastStandardViewMode) ? gLastStandardViewMode : 'masonry';
   applyGalleryViewMode(restoreMode);
   updateCtxViewState();
   return restoreMode;
@@ -3178,10 +3213,17 @@ function renderGroupedMediaList(el, items) {
 
 function renderDuplicateMediaList(el, items) {
   const groups = buildDuplicateGroups(items);
+  const reviewMode = getReviewMode();
+  const isSimilarReview = reviewMode === 'similar' || reviewMode === 'similar_only';
+  const groupLabel = isSimilarReview ? 'Similar Group' : 'Duplicate Group';
+  const summaryLabel = isSimilarReview ? 'Similar Groups' : 'Duplicate Groups';
+  const emptyLabel = isSimilarReview
+    ? (gScanActive ? 'No similar images found in the current scope yet. Still scanning...' : 'No similar images found in the current scope.')
+    : 'No duplicates found in the current scope.';
   if (!groups.length) {
     const div = document.createElement('div');
     div.className = 'empty';
-    div.textContent = 'No duplicates found in the current scope.';
+    div.textContent = emptyLabel;
     el.appendChild(div);
     renderTimelineRail([]);
     return;
@@ -3194,7 +3236,7 @@ function renderDuplicateMediaList(el, items) {
   const totalSavings = groups.reduce((sum, group) => sum + (group.sortValue || 0), 0);
   summary.innerHTML = `
     <div class="duplicate-summary-card">
-      <div class="duplicate-summary-label">Duplicate Groups</div>
+      <div class="duplicate-summary-label">${summaryLabel}</div>
       <div class="duplicate-summary-value">${groups.length}</div>
     </div>
     <div class="duplicate-summary-card">
@@ -3219,8 +3261,9 @@ function renderDuplicateMediaList(el, items) {
 
   groups.forEach((group) => {
     const existingKeep = getDuplicateKeepPath(group.key);
-    if (!existingKeep && group.keepItem && group.keepItem.path) {
-      gDuplicateKeepOverrides.set(group.key, group.keepItem.path);
+    const groupPaths = new Set(group.items.map(item => item.path).filter(Boolean));
+    if (!existingKeep || !groupPaths.has(existingKeep)) {
+      gDuplicateKeepOverrides.set(group.key, (group.keepItem && group.keepItem.path) ? group.keepItem.path : (group.items[0] && group.items[0].path) || '');
     }
     const section = document.createElement('section');
     section.className = 'gallery-group duplicate-group';
@@ -3232,7 +3275,8 @@ function renderDuplicateMediaList(el, items) {
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.className = 'gallery-group-toggle';
-    toggle.innerHTML = `<span class="gallery-group-chevron" aria-hidden="true"></span><span class="gallery-group-title">${group.label}</span><span class="gallery-group-count">${group.items.length}</span>`;
+    const title = group.label || `${groupLabel} ${groups.indexOf(group) + 1}`;
+    toggle.innerHTML = `<span class="gallery-group-chevron" aria-hidden="true"></span><span class="gallery-group-title">${title}</span><span class="gallery-group-count">${group.items.length}</span>`;
     toggle.addEventListener('click', () => toggleGroupCollapsed(group.key));
     header.appendChild(toggle);
 
@@ -3473,9 +3517,11 @@ function wireCtxMenu() {
 
     if (btn.dataset.viewMode && gBridge && gBridge.set_setting_str) {
       const nextViewMode = btn.dataset.viewMode;
-      gGroupBy = nextViewMode === 'duplicates' ? 'duplicates' : (gGroupBy === 'duplicates' ? 'none' : gGroupBy);
-      if (nextViewMode === 'duplicates') {
-        setDuplicateMode(true);
+      gGroupBy = (nextViewMode === 'duplicates' || nextViewMode === 'similar' || nextViewMode === 'similar_only')
+        ? nextViewMode
+        : (REVIEW_VIEW_MODES.has(gGroupBy) ? 'none' : gGroupBy);
+      if (REVIEW_VIEW_MODES.has(nextViewMode)) {
+        setReviewMode(nextViewMode);
       } else {
         applyGalleryViewMode(nextViewMode);
         updateCtxViewState();
@@ -3729,7 +3775,9 @@ function renderMediaList(items, scrollToTop = true) {
   if (!items || items.length === 0) {
     const div = document.createElement('div');
     div.className = 'empty';
-    div.textContent = isDuplicateModeActive() ? 'No duplicates found in the current scope.' : 'No media discovered yet.';
+    div.textContent = isDuplicateModeActive()
+      ? ((getReviewMode() === 'similar' || getReviewMode() === 'similar_only') ? 'No similar images found in the current scope.' : 'No duplicates found in the current scope.')
+      : 'No media discovered yet.';
     el.appendChild(div);
     renderTimelineRail([]);
     return;
@@ -3891,11 +3939,11 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   setupCustomSelect('groupBySelect', (val) => {
-    gGroupBy = val === 'date' ? 'date' : (val === 'duplicates' ? 'duplicates' : 'none');
-    if (gGroupBy === 'duplicates') {
-      setDuplicateMode(true);
-    } else if (gGalleryViewMode === 'duplicates') {
-      setDuplicateMode(false);
+    gGroupBy = val === 'date' ? 'date' : (val === 'duplicates' ? 'duplicates' : (val === 'similar' ? 'similar' : (val === 'similar_only' ? 'similar_only' : 'none')));
+    if (['duplicates', 'similar', 'similar_only'].includes(gGroupBy)) {
+      setReviewMode(gGroupBy);
+    } else if (REVIEW_VIEW_MODES.has(gGalleryViewMode)) {
+      clearReviewMode();
     }
     syncGroupByUi();
     if (gBridge && gBridge.set_setting_str) {
@@ -3914,6 +3962,17 @@ document.addEventListener('DOMContentLoaded', () => {
     rerenderCurrentMediaPreservingScroll();
     if (gBridge && gBridge.set_setting_str) {
       gBridge.set_setting_str('gallery.group_date_granularity', gGroupDateGranularity, function () { });
+    }
+  });
+
+  setupCustomSelect('similarityThresholdSelect', (val) => {
+    gSimilarityThreshold = ['very_low', 'low', 'medium', 'high', 'very_high'].includes(val) ? val : 'low';
+    if (gBridge && gBridge.set_setting_str) {
+      gBridge.set_setting_str('gallery.similarity_threshold', gSimilarityThreshold, function () {
+        refreshFromBridge(gBridge, true);
+      });
+    } else if (gBridge) {
+      refreshFromBridge(gBridge, true);
     }
   });
 });
@@ -5062,12 +5121,14 @@ async function main() {
 
     if (bridge.scanStarted) {
       bridge.scanStarted.connect(function (folder) {
+        gScanActive = true;
         // Silent background scan now, non-blocking
       });
     }
 
     if (bridge.scanFinished) {
       bridge.scanFinished.connect(function (folder, count) {
+        gScanActive = false;
         gTotal = count || 0;
         const tp = totalPages();
         if (gPage >= tp) gPage = Math.max(0, tp - 1);
@@ -5103,13 +5164,15 @@ async function main() {
       applyGalleryViewMode(nextViewMode);
       updateCtxViewState();
       const nextGroupBy = (s && s['gallery.group_by']) || 'none';
-      gGroupBy = ['date', 'duplicates'].includes(nextGroupBy) ? nextGroupBy : 'none';
-      if (gGalleryViewMode !== 'duplicates') {
+      gGroupBy = ['date', 'duplicates', 'similar', 'similar_only'].includes(nextGroupBy) ? nextGroupBy : 'none';
+      if (!REVIEW_VIEW_MODES.has(gGalleryViewMode)) {
         gLastStandardViewMode = gGalleryViewMode;
       }
       gGroupDateGranularity = (s && s['gallery.group_date_granularity']) || 'day';
+      gSimilarityThreshold = (s && s['gallery.similarity_threshold']) || 'low';
       setCustomSelectValue('groupBySelect', gGroupBy);
       setCustomSelectValue('dateGranularitySelect', gGroupDateGranularity);
+      setCustomSelectValue('similarityThresholdSelect', gSimilarityThreshold);
       syncGroupByUi();
       if (viewModeChanged && gBridge) {
         refreshFromBridge(gBridge, false);
@@ -5268,35 +5331,40 @@ async function main() {
           updateThemeAwareIcons(theme);
           return;
         }
-        if (key === 'gallery.show_hidden' || key === 'gallery.view_mode' || key === 'gallery.group_by' || key === 'gallery.group_date_granularity') {
+        if (key === 'gallery.show_hidden' || key === 'gallery.view_mode' || key === 'gallery.group_by' || key === 'gallery.group_date_granularity' || key === 'gallery.similarity_threshold') {
           if (key === 'gallery.view_mode' && bridge.get_settings) {
             bridge.get_settings(function (s) {
               applyGalleryViewMode((s && s['gallery.view_mode']) || 'masonry');
               const nextGroupBy = (s && s['gallery.group_by']) || 'none';
-              gGroupBy = ['date', 'duplicates'].includes(nextGroupBy) ? nextGroupBy : 'none';
+              gGroupBy = ['date', 'duplicates', 'similar', 'similar_only'].includes(nextGroupBy) ? nextGroupBy : 'none';
               gGroupDateGranularity = (s && s['gallery.group_date_granularity']) || 'day';
-              if (gGalleryViewMode !== 'duplicates') {
+              gSimilarityThreshold = (s && s['gallery.similarity_threshold']) || 'low';
+              if (!REVIEW_VIEW_MODES.has(gGalleryViewMode)) {
                 gLastStandardViewMode = gGalleryViewMode;
               }
               setCustomSelectValue('groupBySelect', gGroupBy);
               setCustomSelectValue('dateGranularitySelect', gGroupDateGranularity);
+              setCustomSelectValue('similarityThresholdSelect', gSimilarityThreshold);
               syncGroupByUi();
               updateCtxViewState();
               refreshFromBridge(bridge, false);
             });
             return;
           }
-          if ((key === 'gallery.group_by' || key === 'gallery.group_date_granularity') && bridge.get_settings) {
+          if ((key === 'gallery.group_by' || key === 'gallery.group_date_granularity' || key === 'gallery.similarity_threshold') && bridge.get_settings) {
             bridge.get_settings(function (s) {
               const prevGroupBy = gGroupBy;
               const prevGranularity = gGroupDateGranularity;
+              const prevSimilarity = gSimilarityThreshold;
               const nextGroupBy = (s && s['gallery.group_by']) || 'none';
-              gGroupBy = ['date', 'duplicates'].includes(nextGroupBy) ? nextGroupBy : 'none';
+              gGroupBy = ['date', 'duplicates', 'similar', 'similar_only'].includes(nextGroupBy) ? nextGroupBy : 'none';
               gGroupDateGranularity = (s && s['gallery.group_date_granularity']) || 'day';
+              gSimilarityThreshold = (s && s['gallery.similarity_threshold']) || 'low';
               setCustomSelectValue('groupBySelect', gGroupBy);
               setCustomSelectValue('dateGranularitySelect', gGroupDateGranularity);
+              setCustomSelectValue('similarityThresholdSelect', gSimilarityThreshold);
               syncGroupByUi();
-              if (key === 'gallery.group_date_granularity' || prevGroupBy !== gGroupBy || prevGranularity !== gGroupDateGranularity) {
+              if (key === 'gallery.group_date_granularity' || key === 'gallery.similarity_threshold' || prevGroupBy !== gGroupBy || prevGranularity !== gGroupDateGranularity || prevSimilarity !== gSimilarityThreshold) {
                 rerenderCurrentMediaPreservingScroll();
               }
             });
