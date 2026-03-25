@@ -23,6 +23,7 @@ import shlex
 import traceback
 from collections import Counter
 from datetime import datetime, timezone
+from math import gcd
 from packaging.version import Version
 from pathlib import Path
 
@@ -1556,6 +1557,16 @@ class Bridge(QObject):
         ranked = [dict(entry) for entry in entries]
         self._annotate_group_color_variants(ranked)
 
+        def _normalized_aspect_ratio(entry: dict) -> tuple[int, int] | None:
+            width = int(entry.get("width") or 0)
+            height = int(entry.get("height") or 0)
+            if width <= 0 or height <= 0 or entry.get("media_type") != "image":
+                return None
+            divisor = gcd(width, height)
+            if divisor <= 0:
+                return None
+            return (width // divisor, height // divisor)
+
         for entry in ranked:
             entry["duplicate_folder_depth"] = self._folder_depth_for_duplicate(entry)
 
@@ -1600,6 +1611,33 @@ class Bridge(QObject):
             color_candidates = [idx for idx, entry in enumerate(ranked) if str(entry.get("color_variant") or "") == "color"]
             if color_candidates:
                 candidate_indices = color_candidates
+
+        aspect_ratios = [_normalized_aspect_ratio(entry) for entry in ranked]
+        image_areas = [int(entry.get("width") or 0) * int(entry.get("height") or 0) for entry in ranked]
+        valid_ratio_indices = [idx for idx, ratio in enumerate(aspect_ratios) if ratio is not None and image_areas[idx] > 0]
+        distinct_ratios = {aspect_ratios[idx] for idx in valid_ratio_indices}
+        if len(distinct_ratios) > 1:
+            full_frame_idx = max(valid_ratio_indices, key=lambda idx: image_areas[idx], default=-1)
+            full_frame_area = image_areas[full_frame_idx] if full_frame_idx >= 0 else 0
+            full_frame_ratio = aspect_ratios[full_frame_idx] if full_frame_idx >= 0 else None
+            unique_full_frame = full_frame_idx >= 0 and image_areas.count(full_frame_area) == 1
+            cropped_candidates = [
+                idx for idx in valid_ratio_indices
+                if idx != full_frame_idx
+                and aspect_ratios[idx] != full_frame_ratio
+                and image_areas[idx] < full_frame_area
+            ]
+            if unique_full_frame:
+                informative_reasons[full_frame_idx].append("Full frame")
+            for idx in cropped_candidates:
+                informative_reasons[idx].append("Cropped version")
+            if len(cropped_candidates) == 1:
+                cropped_path = str(ranked[cropped_candidates[0]].get("path") or "")
+                positive_categories[0:0] = [{
+                    "label": "Cropped version",
+                    "value": lambda entry, winner_path=cropped_path: 1 if str(entry.get("path") or "") == winner_path else 0,
+                    "enabled": lambda values: max(values, default=0) > 0,
+                }]
 
         while len(candidate_indices) > 1:
             round_winners: set[int] = set()
