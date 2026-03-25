@@ -1,7 +1,7 @@
 ## MediaLens v1.1.1
 
 ### Summary
-This release marks a major MediaLens milestone: duplicate review and similar-image grouping are now built directly into the gallery workflow. Exact duplicate sets, visually similar image groups, keep-best suggestions, metadata merging, and review controls are now live!
+This release brings intelligent duplicate and similar-image cleanup directly into the MediaLens gallery workflow. MediaLens can detect exact duplicates and visually similar images—including resized, compressed, and edited variants—then help you compare, choose the best version, and clean up with confidence. Smart recommendations, metadata merging, and flexible review controls ensure nothing valuable is lost while simplifying even large libraries.
 
 ### Highlights
 - Added Group By `Duplicates`, `Duplicates and Similar`, and `Similar` gallery review modes in both the header and native `View` menu.

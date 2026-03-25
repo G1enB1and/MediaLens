@@ -1492,11 +1492,13 @@ class Bridge(QObject):
 
     @staticmethod
     def _duplicate_score(entry: dict) -> tuple:
+        color_rank = 1 if str(entry.get("color_variant") or "") == "color" else 0
         folder_depth = Bridge._folder_depth_for_duplicate(entry)
         tag_count, filled_fields = Bridge._duplicate_metadata_score(entry)
         file_size = int(entry.get("file_size") or 0)
         modified_time = int(entry.get("preferred_date") or 0)
         return (
+            color_rank,
             folder_depth,
             tag_count,
             filled_fields,
@@ -1507,16 +1509,19 @@ class Bridge(QObject):
 
     def _sort_duplicate_group(self, entries: list[dict]) -> list[dict]:
         ranked = [dict(entry) for entry in entries]
+        self._annotate_group_color_variants(ranked)
         ranked.sort(key=self._duplicate_score, reverse=True)
         metadata_scores = [self._duplicate_metadata_score(entry) for entry in ranked]
         folder_depths = [self._folder_depth_for_duplicate(entry) for entry in ranked]
         file_sizes = [int(entry.get("file_size") or 0) for entry in ranked]
         modified_times = [int(entry.get("preferred_date") or 0) for entry in ranked]
+        color_modes = [str(entry.get("color_variant") or "") for entry in ranked]
         best_metadata = max(metadata_scores, default=(0, 0))
         best_folder_depth = max(folder_depths, default=0)
         largest_file_size = max(file_sizes, default=0)
         smallest_file_size = min(file_sizes, default=0)
         best_modified = max(modified_times, default=0)
+        has_color_variants = "color" in color_modes and "grayscale" in color_modes
         unique_best_metadata = metadata_scores.count(best_metadata) == 1 and best_metadata > (0, 0)
         unique_best_folder = folder_depths.count(best_folder_depth) == 1 and best_folder_depth > 1
         unique_largest_file = file_sizes.count(largest_file_size) == 1 and largest_file_size > smallest_file_size
@@ -1527,6 +1532,11 @@ class Bridge(QObject):
             entry["duplicate_group_position"] = index
             entry["duplicate_folder_depth"] = self._folder_depth_for_duplicate(entry)
             reasons: list[str] = []
+            if has_color_variants:
+                if str(entry.get("color_variant") or "") == "color":
+                    reasons.append("Color version")
+                elif str(entry.get("color_variant") or "") == "grayscale":
+                    reasons.append("Grayscale version")
             if unique_best_metadata and self._duplicate_metadata_score(entry) == best_metadata:
                 reasons.append("Most metadata")
             if unique_best_folder and self._folder_depth_for_duplicate(entry) == best_folder_depth:
@@ -1541,6 +1551,120 @@ class Bridge(QObject):
             entry["duplicate_best_reason"] = " • ".join(reasons)
             entry["duplicate_is_overall_best"] = index == 0
         return ranked
+
+    def _rank_duplicate_group(self, entries: list[dict], extra_positive_categories: list[dict] | None = None) -> list[dict]:
+        ranked = [dict(entry) for entry in entries]
+        self._annotate_group_color_variants(ranked)
+
+        for entry in ranked:
+            entry["duplicate_folder_depth"] = self._folder_depth_for_duplicate(entry)
+
+        positive_categories = [
+            {
+                "label": "Largest file size",
+                "value": lambda entry: int(entry.get("file_size") or 0),
+                "enabled": lambda values: max(values, default=0) > min(values, default=0),
+            },
+            {
+                "label": "Most metadata",
+                "value": lambda entry: self._duplicate_metadata_score(entry),
+                "enabled": lambda values: max(values, default=(0, 0)) > (0, 0),
+            },
+            {
+                "label": "Best folder organization",
+                "value": lambda entry: int(entry.get("duplicate_folder_depth") or 0),
+                "enabled": lambda values: max(values, default=0) > 1,
+            },
+            {
+                "label": "Newest edit",
+                "value": lambda entry: int(entry.get("preferred_date") or 0),
+                "enabled": lambda values: max(values, default=0) > 0,
+            },
+        ]
+        if extra_positive_categories:
+            positive_categories[1:1] = list(extra_positive_categories)
+
+        positive_reasons: list[list[str]] = [[] for _ in ranked]
+        informative_reasons: list[list[str]] = [[] for _ in ranked]
+
+        color_modes = [str(entry.get("color_variant") or "") for entry in ranked]
+        has_color_variants = "color" in color_modes and "grayscale" in color_modes
+        candidate_indices = list(range(len(ranked)))
+        if has_color_variants:
+            for idx, entry in enumerate(ranked):
+                mode = str(entry.get("color_variant") or "")
+                if mode == "color":
+                    informative_reasons[idx].append("Color version")
+                elif mode == "grayscale":
+                    informative_reasons[idx].append("Grayscale version")
+            color_candidates = [idx for idx, entry in enumerate(ranked) if str(entry.get("color_variant") or "") == "color"]
+            if color_candidates:
+                candidate_indices = color_candidates
+
+        while len(candidate_indices) > 1:
+            round_winners: set[int] = set()
+            for category in positive_categories:
+                values = [category["value"](ranked[idx]) for idx in candidate_indices]
+                if not values or not category["enabled"](values):
+                    continue
+                best_value = max(values)
+                winners = [idx for idx in candidate_indices if category["value"](ranked[idx]) == best_value]
+                if len(winners) != 1:
+                    continue
+                winner = winners[0]
+                if category["label"] not in positive_reasons[winner]:
+                    positive_reasons[winner].append(category["label"])
+                round_winners.add(winner)
+            if not round_winners:
+                break
+            survivors = [idx for idx in candidate_indices if idx in round_winners]
+            if len(survivors) == len(candidate_indices):
+                break
+            candidate_indices = survivors
+
+        file_sizes = [int(entry.get("file_size") or 0) for entry in ranked]
+        largest_file_size = max(file_sizes, default=0)
+        smallest_file_size = min(file_sizes, default=0)
+        if largest_file_size > smallest_file_size and file_sizes.count(smallest_file_size) == 1:
+            informative_reasons[file_sizes.index(smallest_file_size)].append("Smallest file size")
+
+        def final_score(idx: int) -> tuple:
+            entry = ranked[idx]
+            color_rank = 1 if str(entry.get("color_variant") or "") == "color" else 0
+            file_size = int(entry.get("file_size") or 0)
+            area = int(entry.get("width") or 0) * int(entry.get("height") or 0)
+            folder_depth = int(entry.get("duplicate_folder_depth") or 0)
+            tag_count, filled_fields = self._duplicate_metadata_score(entry)
+            modified_time = int(entry.get("preferred_date") or 0)
+            return (
+                len(positive_reasons[idx]),
+                color_rank,
+                file_size,
+                area,
+                folder_depth,
+                tag_count,
+                filled_fields,
+                modified_time,
+                str(entry.get("path", "")).lower(),
+            )
+
+        contenders = candidate_indices or list(range(len(ranked)))
+        best_idx = max(contenders, key=final_score, default=0)
+        order = sorted(range(len(ranked)), key=final_score, reverse=True)
+        sorted_ranked = [ranked[idx] for idx in order]
+
+        for position, original_idx in enumerate(order):
+            entry = sorted_ranked[position]
+            reasons = positive_reasons[original_idx] + [
+                reason for reason in informative_reasons[original_idx]
+                if reason not in positive_reasons[original_idx]
+            ]
+            entry["duplicate_keep_suggestion"] = original_idx == best_idx
+            entry["duplicate_group_position"] = position
+            entry["duplicate_category_reasons"] = reasons
+            entry["duplicate_best_reason"] = " • ".join(reasons)
+            entry["duplicate_is_overall_best"] = original_idx == best_idx
+        return sorted_ranked
 
     def _build_duplicate_entries(self, entries: list[dict], sort_by: str) -> list[dict]:
         media_entries = [dict(entry) for entry in entries if not entry.get("is_folder")]
@@ -1561,7 +1685,7 @@ class Bridge(QObject):
 
         group_rows: list[tuple[tuple, list[dict]]] = []
         for group_key, group_entries in duplicate_groups.items():
-            sorted_group = self._sort_duplicate_group(group_entries)
+            sorted_group = self._rank_duplicate_group(group_entries)
             kept_size = int(sorted_group[0].get("file_size") or 0) if sorted_group else 0
             total_size = sum(int(entry.get("file_size") or 0) for entry in sorted_group)
             savings = max(0, total_size - kept_size)
@@ -1612,7 +1736,7 @@ class Bridge(QObject):
                 if len(grouped_entries) == 1:
                     unique_candidates.append(grouped_entries[0])
                 else:
-                    unique_candidates.append(self._sort_duplicate_group(grouped_entries)[0])
+                    unique_candidates.append(self._rank_duplicate_group(grouped_entries)[0])
             candidates = unique_candidates
         if len(candidates) < 2:
             return []
@@ -1675,7 +1799,16 @@ class Bridge(QObject):
 
         group_rows: list[tuple[tuple, list[dict]]] = []
         for group_index, group_entries in enumerate(similar_groups, start=1):
-            sorted_group = self._sort_duplicate_group(group_entries)
+            sorted_group = self._rank_duplicate_group(
+                group_entries,
+                extra_positive_categories=[
+                    {
+                        "label": "Highest resolution",
+                        "value": lambda entry: int(entry.get("width") or 0) * int(entry.get("height") or 0),
+                        "enabled": lambda values: max(values, default=0) > min(values, default=0),
+                    },
+                ],
+            )
             areas = [int(entry.get("width") or 0) * int(entry.get("height") or 0) for entry in sorted_group]
             max_area = max(areas)
             min_area = min(areas)
@@ -1684,9 +1817,7 @@ class Bridge(QObject):
             for entry in sorted_group:
                 area = int(entry.get("width") or 0) * int(entry.get("height") or 0)
                 reasons = list(entry.get("duplicate_category_reasons") or [])
-                if unique_highest_area and area == max_area:
-                    reasons.append("Highest resolution")
-                elif unique_lowest_area and area == min_area:
+                if unique_lowest_area and area == min_area:
                     reasons.append("Downscaled copy")
                 entry["duplicate_category_reasons"] = list(dict.fromkeys(reasons))
                 entry["duplicate_best_reason"] = " • ".join(entry["duplicate_category_reasons"])
@@ -1708,6 +1839,31 @@ class Bridge(QObject):
         for _, group in group_rows:
             flattened.extend(group)
         return flattened
+
+    def _annotate_group_color_variants(self, entries: list[dict]) -> None:
+        from app.mediamanager.utils.hashing import classify_image_color_mode
+
+        cache = getattr(self, "_color_variant_cache", None)
+        if cache is None:
+            cache = {}
+            self._color_variant_cache = cache
+
+        for entry in entries:
+            if entry.get("is_folder") or entry.get("media_type") != "image" or str(entry.get("color_variant") or "").strip():
+                continue
+            path = str(entry.get("path") or "").strip()
+            if not path:
+                continue
+            cached = cache.get(path)
+            if cached is None:
+                try:
+                    p = Path(path)
+                    cached = classify_image_color_mode(p) if p.exists() and p.is_file() else ""
+                except Exception:
+                    cached = ""
+                cache[path] = cached
+            if cached:
+                entry["color_variant"] = cached
 
     def _backfill_scope_phashes(self, entries: list[dict]) -> None:
         from app.mediamanager.utils.hashing import calculate_image_phash

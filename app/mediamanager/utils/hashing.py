@@ -52,6 +52,22 @@ def calculate_image_phash(path: str | Path) -> str:
         return ""
 
 
+def classify_image_color_mode(path: str | Path) -> str:
+    """Classify an image as color or grayscale for duplicate-review hints."""
+    try:
+        with Image.open(path) as img:
+            mode = str(img.mode or "").upper()
+            if mode in {"1", "L", "LA"}:
+                return "grayscale"
+            sample = img.convert("RGB").resize((32, 32), _RESAMPLE)
+            for red, green, blue in sample.getdata():
+                if abs(int(red) - int(green)) > 6 or abs(int(red) - int(blue)) > 6 or abs(int(green) - int(blue)) > 6:
+                    return "color"
+            return "grayscale"
+    except Exception:
+        return ""
+
+
 def phash_distance(left: str, right: str) -> int:
     """Return the Hamming distance between two hexadecimal perceptual hashes."""
     left_value = str(left or "").strip()

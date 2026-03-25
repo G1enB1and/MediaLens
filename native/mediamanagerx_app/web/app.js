@@ -45,6 +45,7 @@ let gTimelineHeaderObserver = null;
 let gTimelineVisibleGroupKeys = new Set();
 let gTimelineActiveGroupKey = '';
 let gDuplicateKeepOverrides = new Map();
+let gDuplicateGroupOrder = new Map();
 let gScanActive = false;
 let gSimilarityThreshold = 'low';
 const TIMELINE_INSET_PX = 20;
@@ -1197,6 +1198,7 @@ function keepBestInDuplicateGroup(groupKey) {
     .filter(item => String(item.duplicate_group_key || '') === String(groupKey || '') && item.path && item.path !== keepPath)
     .map(item => item.path);
   if (!deletePaths.length) return;
+  gPendingScrollAnchor = captureCurrentGroupScrollAnchor();
   setGlobalLoading(true, 'Deleting duplicate files...', 25);
   deletePathsSequential(deletePaths, () => {
     setGlobalLoading(false);
@@ -1210,6 +1212,7 @@ function mergeDuplicateGroupMetadata(groupKey) {
     .map(item => item.path)
     .filter(Boolean);
   if (paths.length < 2 || !gBridge || !gBridge.merge_duplicate_group_metadata) return;
+  gPendingScrollAnchor = captureCurrentGroupScrollAnchor();
   setGlobalLoading(true, 'Merging duplicate metadata...', 25);
   const ok = gBridge.merge_duplicate_group_metadata(paths);
   setGlobalLoading(false);
@@ -1225,6 +1228,7 @@ function autoResolveAllDuplicateGroups() {
       .filter(Boolean)
   ));
   if (!groupKeys.length) return;
+  gPendingScrollAnchor = captureCurrentGroupScrollAnchor();
   setGlobalLoading(true, 'Resolving duplicate metadata...', 20);
   groupKeys.forEach((groupKey) => {
     const paths = gMedia
@@ -1241,6 +1245,7 @@ function autoResolveAllDuplicateGroups() {
 
 function deleteDuplicateCard(path) {
   if (!path || !gBridge || !gBridge.delete_path) return;
+  gPendingScrollAnchor = captureCurrentGroupScrollAnchor();
   setGlobalLoading(true, 'Deleting file...', 25);
   gBridge.delete_path(path, function () {
     setGlobalLoading(false);
@@ -1657,6 +1662,13 @@ function buildDuplicateGroups(items) {
       const keepSize = Number(keepItem && keepItem.file_size) || 0;
       const totalSize = sortedItems.reduce((sum, item) => sum + (Number(item.file_size) || 0), 0);
       const savings = Math.max(0, totalSize - keepSize);
+      const stablePath = String(
+        getDuplicateKeepPath(group.key)
+        || (keepItem && keepItem.path)
+        || (sortedItems.find(item => item && item.path) || {}).path
+        || group.key
+        || ''
+      ).toLowerCase();
       const label = `${baseLabel} ${index + 1}`;
       return {
         key: group.key,
@@ -1664,6 +1676,8 @@ function buildDuplicateGroups(items) {
         items: sortedItems,
         keepItem,
         sortValue: savings,
+        stableOrderKey: stablePath,
+        previousOrder: gDuplicateGroupOrder.has(stablePath) ? Number(gDuplicateGroupOrder.get(stablePath)) : null,
         rangeStart: null,
         rangeEnd: null,
         subtitle: `${sortedItems.length} items${savings > 0 ? ` • Save ${formatFileSize(savings)}` : ''}`,
@@ -1671,13 +1685,22 @@ function buildDuplicateGroups(items) {
     });
 
   groups.sort((a, b) => {
+    const aPrev = Number(a.previousOrder);
+    const bPrev = Number(b.previousOrder);
+    const aHasPrev = Number.isFinite(aPrev);
+    const bHasPrev = Number.isFinite(bPrev);
+    if (aHasPrev && bHasPrev && aPrev !== bPrev) return aPrev - bPrev;
+    if (aHasPrev !== bHasPrev) return aHasPrev ? -1 : 1;
     if (b.sortValue !== a.sortValue) return b.sortValue - a.sortValue;
     if (b.items.length !== a.items.length) return b.items.length - a.items.length;
-    return a.label.localeCompare(b.label);
+    return String(a.stableOrderKey || a.label).localeCompare(String(b.stableOrderKey || b.label));
   });
 
   groups.forEach((group, index) => {
     group.label = `${baseLabel} ${index + 1}`;
+    if (group.stableOrderKey) {
+      gDuplicateGroupOrder.set(group.stableOrderKey, index);
+    }
   });
 
   return groups;
@@ -3371,6 +3394,7 @@ function renderDuplicateMediaList(el, items) {
 
   renderTimelineRail([]);
   requestAnimationFrame(() => {
+    restoreGroupScrollAnchor();
     groups.forEach((group) => {
       const keepPath = getDuplicateKeepPath(group.key);
       if (keepPath) {
