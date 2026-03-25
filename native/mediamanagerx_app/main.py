@@ -1412,25 +1412,101 @@ class Bridge(QObject):
         return self._gallery_view_mode() == "duplicates" or self._gallery_group_by() == "duplicates"
 
     @staticmethod
+    def _folder_depth_for_duplicate(entry: dict) -> int:
+        try:
+            parent = Path(str(entry.get("path", ""))).parent
+            parts = [part for part in parent.parts if part not in ("\\", "/")]
+            return len(parts)
+        except Exception:
+            return 0
+
+    @staticmethod
+    def _duplicate_metadata_score(entry: dict) -> tuple[int, int]:
+        tags = [tag.strip() for tag in str(entry.get("tags") or "").split(",") if tag.strip()]
+        filled_fields = sum(
+            1
+            for key in ("title", "description", "notes", "collection_names", "ai_prompt", "ai_loras", "model_name")
+            if str(entry.get(key) or "").strip()
+        )
+        return (len(set(tags)), filled_fields)
+
+    @staticmethod
+    def _split_distinct_text_blocks(values: list[str]) -> list[str]:
+        seen: set[str] = set()
+        merged: list[str] = []
+        for raw in values:
+            text = str(raw or "").replace("\r\n", "\n").strip()
+            if not text:
+                continue
+            blocks = re.split(r"\n\s*\n+", text)
+            for block in blocks:
+                normalized = block.strip()
+                if not normalized:
+                    continue
+                key = normalized.casefold()
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(normalized)
+        return merged
+
+    @classmethod
+    def _merge_duplicate_text_field(cls, values: list[str]) -> str:
+        return "\n\n".join(cls._split_distinct_text_blocks(values))
+
+    @staticmethod
+    def _merge_duplicate_scalar_field(values: list[str]) -> str:
+        seen: set[str] = set()
+        for raw in values:
+            value = str(raw or "").strip()
+            if not value:
+                continue
+            key = value.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            return value
+        return ""
+
+    @staticmethod
     def _duplicate_score(entry: dict) -> tuple:
-        width = int(entry.get("width") or 0)
-        height = int(entry.get("height") or 0)
-        resolution = width * height
-        size = int(entry.get("file_size") or 0)
-        date_value = int(entry.get("preferred_date") or 0)
+        folder_depth = Bridge._folder_depth_for_duplicate(entry)
+        tag_count, filled_fields = Bridge._duplicate_metadata_score(entry)
+        modified_time = int(entry.get("preferred_date") or 0)
         return (
-            resolution,
-            size,
-            -date_value if date_value > 0 else 0,
+            folder_depth,
+            tag_count,
+            filled_fields,
+            modified_time,
             str(entry.get("path", "")).lower(),
         )
 
     def _sort_duplicate_group(self, entries: list[dict]) -> list[dict]:
         ranked = [dict(entry) for entry in entries]
         ranked.sort(key=self._duplicate_score, reverse=True)
+        metadata_scores = [self._duplicate_metadata_score(entry) for entry in ranked]
+        folder_depths = [self._folder_depth_for_duplicate(entry) for entry in ranked]
+        modified_times = [int(entry.get("preferred_date") or 0) for entry in ranked]
+        best_metadata = max(metadata_scores, default=(0, 0))
+        best_folder_depth = max(folder_depths, default=0)
+        best_modified = max(modified_times, default=0)
+        unique_best_metadata = metadata_scores.count(best_metadata) == 1 and best_metadata > (0, 0)
+        unique_best_folder = folder_depths.count(best_folder_depth) == 1 and best_folder_depth > 1
+        unique_best_modified = modified_times.count(best_modified) == 1 and best_modified > 0
         for index, entry in enumerate(ranked):
             entry["duplicate_keep_suggestion"] = index == 0
             entry["duplicate_group_position"] = index
+            entry["duplicate_folder_depth"] = self._folder_depth_for_duplicate(entry)
+            reasons: list[str] = []
+            if unique_best_metadata and self._duplicate_metadata_score(entry) == best_metadata:
+                reasons.append("Most metadata")
+            if unique_best_folder and self._folder_depth_for_duplicate(entry) == best_folder_depth:
+                reasons.append("Best folder organization")
+            if unique_best_modified and int(entry.get("preferred_date") or 0) == best_modified:
+                reasons.append("Newest edit")
+            entry["duplicate_category_reasons"] = reasons
+            entry["duplicate_best_reason"] = " • ".join(reasons)
+            entry["duplicate_is_overall_best"] = index == 0
         return ranked
 
     def _build_duplicate_entries(self, entries: list[dict], sort_by: str) -> list[dict]:
@@ -2499,6 +2575,71 @@ class Bridge(QObject):
             if m: clear_all_media_tags(self.conn, m["id"])
         except Exception: pass
 
+    @Slot(list, result=bool)
+    def merge_duplicate_group_metadata(self, paths: list[str]) -> bool:
+        from app.mediamanager.db.ai_metadata_repo import get_media_ai_metadata
+        from app.mediamanager.db.media_repo import get_media_by_path, update_media_dates
+        from app.mediamanager.db.metadata_repo import get_media_metadata, upsert_media_metadata
+        from app.mediamanager.db.tags_repo import attach_tags, list_media_tags
+
+        clean_paths = [str(path or "").strip() for path in (paths or []) if str(path or "").strip()]
+        if len(clean_paths) < 2:
+            return False
+
+        try:
+            rows: list[tuple[dict, dict, dict, list[str]]] = []
+            for path in clean_paths:
+                media = get_media_by_path(self.conn, path)
+                if not media:
+                    continue
+                meta = get_media_metadata(self.conn, media["id"]) or {}
+                ai_meta = get_media_ai_metadata(self.conn, media["id"]) or {}
+                tags = list_media_tags(self.conn, media["id"])
+                rows.append((media, meta, ai_meta, tags))
+
+            if len(rows) < 2:
+                return False
+
+            merged_tags = sorted({tag.strip() for _, _, _, tags in rows for tag in tags if str(tag).strip()}, key=str.casefold)
+            merged_title = self._merge_duplicate_scalar_field([meta.get("title") for _, meta, _, _ in rows])
+            merged_desc = self._merge_duplicate_text_field([meta.get("description") or ai_meta.get("description") for _, meta, ai_meta, _ in rows])
+            merged_notes = self._merge_duplicate_text_field([meta.get("notes") for _, meta, _, _ in rows])
+            merged_embedded_tags = self._merge_duplicate_text_field([meta.get("embedded_tags") for _, meta, _, _ in rows])
+            merged_embedded_comments = self._merge_duplicate_text_field([meta.get("embedded_comments") for _, meta, _, _ in rows])
+            merged_ai_prompt = self._merge_duplicate_text_field([meta.get("ai_prompt") or ai_meta.get("ai_prompt") for _, meta, ai_meta, _ in rows])
+            merged_ai_negative = self._merge_duplicate_text_field([meta.get("ai_negative_prompt") or ai_meta.get("ai_negative_prompt") for _, meta, ai_meta, _ in rows])
+            merged_ai_params = self._merge_duplicate_text_field([meta.get("ai_params") for _, meta, _, _ in rows])
+            merged_exif_date = self._merge_duplicate_scalar_field([media.get("exif_date_taken") for media, _, _, _ in rows])
+            merged_metadata_date = self._merge_duplicate_scalar_field([media.get("metadata_date") for media, _, _, _ in rows])
+
+            for media, _, _, _ in rows:
+                upsert_media_metadata(
+                    self.conn,
+                    media["id"],
+                    merged_title,
+                    merged_desc,
+                    merged_notes,
+                    merged_embedded_tags,
+                    merged_embedded_comments,
+                    merged_ai_prompt,
+                    merged_ai_negative,
+                    merged_ai_params,
+                )
+                attach_tags(self.conn, media["id"], merged_tags)
+                update_media_dates(
+                    self.conn,
+                    media["id"],
+                    exif_date_taken=merged_exif_date or None,
+                    metadata_date=merged_metadata_date or None,
+                )
+            return True
+        except Exception as exc:
+            try:
+                self._log(f"Merge duplicate metadata failed: {exc}")
+            except Exception:
+                pass
+            return False
+
     @Slot(list, int, int, str, str, str, result=list)
     def list_media(self, folders, limit=100, offset=0, sort_by="name_asc", filter_type="all", search_query="") -> list:
         try:
@@ -2533,6 +2674,8 @@ class Bridge(QObject):
                             "duplicate_group_position": -1,
                             "duplicate_keep_suggestion": False,
                             "duplicate_space_savings": 0,
+                            "duplicate_category_reasons": [],
+                            "duplicate_is_overall_best": False,
                         }
                     )
                     continue
@@ -2569,6 +2712,9 @@ class Bridge(QObject):
                     "duplicate_group_position": int(r.get("duplicate_group_position") or 0),
                     "duplicate_keep_suggestion": bool(r.get("duplicate_keep_suggestion")),
                     "duplicate_space_savings": int(r.get("duplicate_space_savings") or 0),
+                    "duplicate_category_reasons": list(r.get("duplicate_category_reasons") or []),
+                    "duplicate_best_reason": r.get("duplicate_best_reason") or "",
+                    "duplicate_is_overall_best": bool(r.get("duplicate_is_overall_best")),
                 })
             return out
         except Exception: return []
