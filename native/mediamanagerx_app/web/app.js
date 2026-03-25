@@ -24,6 +24,7 @@ let gActiveMetadataMode = 'image';
 let gUpdateToastTimer = null;
 let gScanManuallyHidden = false;
 let gGalleryViewMode = 'masonry';
+let gLastStandardViewMode = 'masonry';
 let gGroupBy = 'none';
 let gGroupDateGranularity = 'day';
 let gCollapsedGroupKeys = new Set();
@@ -54,7 +55,7 @@ const TIMELINE_VIEWPORT_TOP_MARGIN_PX = -6;
 const TIMELINE_VIEWPORT_BOTTOM_MARGIN_PX = 32;
 const TIMELINE_MIN_HEIGHT_PX = 140;
 
-const GALLERY_VIEW_MODES = new Set(['masonry', 'grid_small', 'grid_medium', 'grid_large', 'grid_xlarge', 'list', 'content', 'details']);
+const GALLERY_VIEW_MODES = new Set(['masonry', 'grid_small', 'grid_medium', 'grid_large', 'grid_xlarge', 'list', 'content', 'details', 'duplicates']);
 const DETAILS_COLUMN_CONFIG = [
   { key: 'thumb', label: '', min: 72, width: 72, resizable: false },
   { key: 'name', label: 'File Name', min: 25, width: 260, resizable: true },
@@ -64,6 +65,10 @@ const DETAILS_COLUMN_CONFIG = [
   { key: 'size', label: 'Size', min: 25, width: 110, resizable: true },
 ];
 let gDetailsColumnWidths = Object.fromEntries(DETAILS_COLUMN_CONFIG.map(col => [col.key, col.width]));
+
+function isDuplicateModeActive() {
+  return gGalleryViewMode === 'duplicates' || gGroupBy === 'duplicates';
+}
 
 const METADATA_SETTINGS_CONFIG = {
   image: {
@@ -1121,6 +1126,9 @@ function getGalleryContainerClasses(mode) {
   if (nextMode === 'masonry') {
     return ['masonry'];
   }
+  if (nextMode === 'duplicates') {
+    return ['gallery-duplicates'];
+  }
   if (nextMode.startsWith('grid_')) {
     return ['gallery-grid', `view-${nextMode.replace('_', '-')}`];
   }
@@ -1141,6 +1149,9 @@ function applyGalleryClasses(el, mode) {
 
 function applyGalleryViewMode(mode) {
   const nextMode = GALLERY_VIEW_MODES.has(mode) ? mode : 'masonry';
+  if (nextMode !== 'duplicates') {
+    gLastStandardViewMode = nextMode;
+  }
   gGalleryViewMode = nextMode;
   const el = document.getElementById('mediaList');
   if (!el) return;
@@ -1420,6 +1431,76 @@ function buildGroupedItems(items) {
   return groups;
 }
 
+function getDuplicateCandidateScore(item) {
+  const width = Number(item && item.width) || 0;
+  const height = Number(item && item.height) || 0;
+  const resolution = width * height;
+  const size = Number(item && item.file_size) || 0;
+  const dateValue = Number(item && (item.auto_date || item.file_created_time || item.modified_time)) || 0;
+  const path = String(item && item.path || '').toLowerCase();
+  return [resolution, size, dateValue > 0 ? -dateValue : 0, path];
+}
+
+function compareDuplicateCandidates(a, b) {
+  const scoreA = getDuplicateCandidateScore(a);
+  const scoreB = getDuplicateCandidateScore(b);
+  for (let i = 0; i < scoreA.length; i += 1) {
+    if (scoreA[i] === scoreB[i]) continue;
+    if (typeof scoreA[i] === 'string' || typeof scoreB[i] === 'string') {
+      return String(scoreA[i]).localeCompare(String(scoreB[i]));
+    }
+    return scoreB[i] - scoreA[i];
+  }
+  return 0;
+}
+
+function buildDuplicateGroups(items) {
+  const seen = new Map();
+  items.filter(item => !item.is_folder).forEach((item) => {
+    const key = String(item.content_hash || item.duplicate_group_key || '').trim();
+    if (!key) return;
+    let group = seen.get(key);
+    if (!group) {
+      group = { key, items: [] };
+      seen.set(key, group);
+    }
+    group.items.push(item);
+  });
+
+  const groups = Array.from(seen.values())
+    .filter(group => group.items.length > 1)
+    .map((group, index) => {
+      const sortedItems = group.items.slice().sort(compareDuplicateCandidates);
+      const keepItem = sortedItems[0] || null;
+      const keepSize = Number(keepItem && keepItem.file_size) || 0;
+      const totalSize = sortedItems.reduce((sum, item) => sum + (Number(item.file_size) || 0), 0);
+      const savings = Math.max(0, totalSize - keepSize);
+      const label = `Duplicate Group ${index + 1}`;
+      return {
+        key: group.key,
+        label,
+        items: sortedItems,
+        keepItem,
+        sortValue: savings,
+        rangeStart: null,
+        rangeEnd: null,
+        subtitle: `${sortedItems.length} items${savings > 0 ? ` • Save ${formatFileSize(savings)}` : ''}`,
+      };
+    });
+
+  groups.sort((a, b) => {
+    if (b.sortValue !== a.sortValue) return b.sortValue - a.sortValue;
+    if (b.items.length !== a.items.length) return b.items.length - a.items.length;
+    return a.label.localeCompare(b.label);
+  });
+
+  groups.forEach((group, index) => {
+    group.label = `Duplicate Group ${index + 1}`;
+  });
+
+  return groups;
+}
+
 function toggleGroupCollapsed(groupKey, forceCollapsed = null) {
   const shouldCollapse = forceCollapsed === null ? !gCollapsedGroupKeys.has(groupKey) : !!forceCollapsed;
   if (shouldCollapse) gCollapsedGroupKeys.add(groupKey);
@@ -1556,6 +1637,7 @@ function shouldUseInfiniteDateScroll() {
 }
 
 function shouldUseInfiniteScrollMode() {
+  if (isDuplicateModeActive()) return false;
   if (shouldUseInfiniteDateScroll()) return true;
   return gGalleryViewMode === 'list'
     || gGalleryViewMode === 'details'
@@ -2218,6 +2300,21 @@ function syncGroupByUi() {
   }
 }
 
+function setDuplicateMode(active) {
+  if (active) {
+    if (gGalleryViewMode !== 'duplicates') {
+      gLastStandardViewMode = gGalleryViewMode;
+    }
+    applyGalleryViewMode('duplicates');
+    updateCtxViewState();
+    return 'duplicates';
+  }
+  const restoreMode = gLastStandardViewMode && gLastStandardViewMode !== 'duplicates' ? gLastStandardViewMode : 'masonry';
+  applyGalleryViewMode(restoreMode);
+  updateCtxViewState();
+  return restoreMode;
+}
+
 function openFolderItem(path) {
   if (gBridge && gBridge.navigate_to_folder && path) {
     deselectAll();
@@ -2363,7 +2460,9 @@ function createStructuredCard(item, idx) {
   const isFolder = !!item.is_folder;
   const usesThumbnails = viewUsesThumbnails();
   const supportsInlinePlayback = !isFolder && item.media_type === 'video' && viewSupportsInlineVideoPlayback();
+  const duplicateMode = isDuplicateModeActive();
   card.className = `card structured-card${isFolder ? ' folder-card ready' : ' loading'}`;
+  if (duplicateMode && !isFolder) card.classList.add('duplicate-card');
   card.tabIndex = 0;
   card.setAttribute('data-path', item.path || '');
   card.setAttribute('data-is-folder', isFolder ? 'true' : 'false');
@@ -2436,6 +2535,13 @@ function createStructuredCard(item, idx) {
   title.title = getItemName(item);
   content.appendChild(title);
 
+  if (duplicateMode && !isFolder) {
+    const badge = document.createElement('div');
+    badge.className = `duplicate-badge${item.duplicate_keep_suggestion ? ' is-keep' : ''}`;
+    badge.textContent = item.duplicate_keep_suggestion ? 'Keep Best' : 'Duplicate';
+    content.appendChild(badge);
+  }
+
   const folder = document.createElement('div');
   folder.className = 'entry-folder';
   folder.textContent = getItemFolderDisplay(item);
@@ -2464,6 +2570,15 @@ function createStructuredCard(item, idx) {
     content.appendChild(meta);
   } else if (gGalleryViewMode === 'list') {
     folder.remove();
+  }
+
+  if (duplicateMode && !isFolder) {
+    const duplicateMeta = document.createElement('div');
+    duplicateMeta.className = 'entry-detail duplicate-reason';
+    duplicateMeta.textContent = item.duplicate_keep_suggestion
+      ? 'Best candidate based on resolution, size, and date'
+      : 'Matched by identical content hash';
+    content.appendChild(duplicateMeta);
   }
 
   card.appendChild(content);
@@ -2885,6 +3000,67 @@ function renderGroupedMediaList(el, items) {
   });
 }
 
+function renderDuplicateMediaList(el, items) {
+  const groups = buildDuplicateGroups(items);
+  if (!groups.length) {
+    const div = document.createElement('div');
+    div.className = 'empty';
+    div.textContent = 'No duplicates found in the current scope.';
+    el.appendChild(div);
+    renderTimelineRail([]);
+    return;
+  }
+  el.classList.add('gallery-grouped', 'gallery-duplicates-root');
+
+  groups.forEach((group) => {
+    const section = document.createElement('section');
+    section.className = 'gallery-group duplicate-group';
+    section.dataset.groupKey = group.key;
+
+    const header = document.createElement('div');
+    header.className = 'gallery-group-header duplicate-group-header';
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'gallery-group-toggle';
+    toggle.innerHTML = `<span class="gallery-group-chevron" aria-hidden="true"></span><span class="gallery-group-title">${group.label}</span><span class="gallery-group-count">${group.items.length}</span>`;
+    toggle.addEventListener('click', () => toggleGroupCollapsed(group.key));
+    header.appendChild(toggle);
+
+    const meta = document.createElement('div');
+    meta.className = 'duplicate-group-meta';
+    meta.textContent = group.subtitle;
+    header.appendChild(meta);
+
+    const body = document.createElement('div');
+    applyGalleryClasses(body, 'duplicates');
+    body.classList.add('gallery-group-body');
+    renderStructuredMediaList(body, group.items, { renderHeader: false });
+
+    section.appendChild(header);
+    section.appendChild(body);
+    el.appendChild(section);
+    toggleGroupCollapsed(group.key, gCollapsedGroupKeys.has(group.key));
+  });
+
+  renderTimelineRail([]);
+  requestAnimationFrame(() => {
+    const unobserved = el.querySelectorAll('img[data-src]:not([src]), img[data-video-path]:not([src])');
+    unobserved.forEach(img => {
+      if (gPosterRequested.has(img)) return;
+      const imgSrc = img.getAttribute('data-src');
+      const path = img.getAttribute('data-video-path');
+      const item = gMedia.find(m => m.path === path || m.url === imgSrc);
+      if (imgSrc) {
+        gBackgroundQueue.push({ type: 'image', el: img, imgSrc });
+      } else if (path && item) {
+        gBackgroundQueue.push({ type: 'video', el: img, path, width: item.width, height: item.height });
+      }
+    });
+    scheduleBackgroundDrain();
+  });
+}
+
 function showCtx(x, y, item, idx, fromLightbox = false) {
   const ctx = document.getElementById('ctx');
   if (!ctx) return;
@@ -2953,7 +3129,7 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
   if (clearSelectionBtn) clearSelectionBtn.style.display = (gSelectedPaths.size > 0) ? 'block' : 'none';
   const collapseAllBtn = document.getElementById('ctxCollapseAll');
   const expandAllBtn = document.getElementById('ctxExpandAll');
-  const showGroupActions = gGroupBy === 'date';
+  const showGroupActions = gGroupBy === 'date' || isDuplicateModeActive();
   if (collapseAllBtn) collapseAllBtn.style.display = showGroupActions ? 'block' : 'none';
   if (expandAllBtn) expandAllBtn.style.display = showGroupActions ? 'block' : 'none';
 
@@ -3063,10 +3239,20 @@ function wireCtxMenu() {
     }
 
     if (btn.dataset.viewMode && gBridge && gBridge.set_setting_str) {
-      applyGalleryViewMode(btn.dataset.viewMode);
-      updateCtxViewState();
-      gBridge.set_setting_str('gallery.view_mode', btn.dataset.viewMode, function () {
-        refreshFromBridge(gBridge, true);
+      const nextViewMode = btn.dataset.viewMode;
+      gGroupBy = nextViewMode === 'duplicates' ? 'duplicates' : (gGroupBy === 'duplicates' ? 'none' : gGroupBy);
+      if (nextViewMode === 'duplicates') {
+        setDuplicateMode(true);
+      } else {
+        applyGalleryViewMode(nextViewMode);
+        updateCtxViewState();
+      }
+      syncGroupByUi();
+      setCustomSelectValue('groupBySelect', gGroupBy);
+      gBridge.set_setting_str('gallery.view_mode', gGalleryViewMode, function () {
+        gBridge.set_setting_str('gallery.group_by', gGroupBy, function () {
+          refreshFromBridge(gBridge, true);
+        });
       });
       hideCtx();
       return;
@@ -3310,7 +3496,7 @@ function renderMediaList(items, scrollToTop = true) {
   if (!items || items.length === 0) {
     const div = document.createElement('div');
     div.className = 'empty';
-    div.textContent = 'No media discovered yet.';
+    div.textContent = isDuplicateModeActive() ? 'No duplicates found in the current scope.' : 'No media discovered yet.';
     el.appendChild(div);
     renderTimelineRail([]);
     return;
@@ -3322,6 +3508,11 @@ function renderMediaList(items, scrollToTop = true) {
     div.textContent = 'No results.';
     el.appendChild(div);
     renderTimelineRail([]);
+    return;
+  }
+
+  if (isDuplicateModeActive()) {
+    renderDuplicateMediaList(el, viewItems);
     return;
   }
 
@@ -3467,11 +3658,18 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   setupCustomSelect('groupBySelect', (val) => {
-    gGroupBy = val === 'date' ? 'date' : 'none';
+    gGroupBy = val === 'date' ? 'date' : (val === 'duplicates' ? 'duplicates' : 'none');
+    if (gGroupBy === 'duplicates') {
+      setDuplicateMode(true);
+    } else if (gGalleryViewMode === 'duplicates') {
+      setDuplicateMode(false);
+    }
     syncGroupByUi();
     if (gBridge && gBridge.set_setting_str) {
       gBridge.set_setting_str('gallery.group_by', gGroupBy, function () {
-        refreshFromBridge(gBridge, true);
+        gBridge.set_setting_str('gallery.view_mode', gGalleryViewMode, function () {
+          refreshFromBridge(gBridge, true);
+        });
       });
     } else if (gBridge) {
       refreshFromBridge(gBridge, true);
@@ -3717,7 +3915,7 @@ function pagerPagesToShow() {
 }
 
 function renderPager() {
-  const infiniteMode = shouldUseInfiniteScrollMode();
+  const infiniteMode = shouldUseInfiniteScrollMode() || isDuplicateModeActive();
   const tp = totalPages();
   const cur = gPage + 1;
 
@@ -3806,8 +4004,11 @@ function refreshFromBridge(bridge, resetPage = false) {
         if (refreshToken !== gRefreshGeneration) return;
         gTotal = count || 0;
         const useInfinite = shouldUseInfiniteScrollMode();
-        const limit = useInfinite ? Math.max(PAGE_SIZE, gMedia.length || PAGE_SIZE) : PAGE_SIZE;
-        const offset = useInfinite ? 0 : gPage * PAGE_SIZE;
+        const duplicateMode = isDuplicateModeActive();
+        const limit = duplicateMode
+          ? Math.max(PAGE_SIZE, gTotal || PAGE_SIZE)
+          : (useInfinite ? Math.max(PAGE_SIZE, gMedia.length || PAGE_SIZE) : PAGE_SIZE);
+        const offset = (useInfinite || duplicateMode) ? 0 : gPage * PAGE_SIZE;
         fetchMediaList(gSelectedFolders, limit, offset, gSort, gFilter, gSearchQuery || '').then(function (items) {
           if (refreshToken !== gRefreshGeneration) return;
           renderMediaList(items, !gPendingScrollAnchor);
@@ -4668,7 +4869,11 @@ async function main() {
       const viewModeChanged = nextViewMode !== gGalleryViewMode;
       applyGalleryViewMode(nextViewMode);
       updateCtxViewState();
-      gGroupBy = ((s && s['gallery.group_by']) || 'none') === 'date' ? 'date' : 'none';
+      const nextGroupBy = (s && s['gallery.group_by']) || 'none';
+      gGroupBy = ['date', 'duplicates'].includes(nextGroupBy) ? nextGroupBy : 'none';
+      if (gGalleryViewMode !== 'duplicates') {
+        gLastStandardViewMode = gGalleryViewMode;
+      }
       gGroupDateGranularity = (s && s['gallery.group_date_granularity']) || 'day';
       setCustomSelectValue('groupBySelect', gGroupBy);
       setCustomSelectValue('dateGranularitySelect', gGroupDateGranularity);
@@ -4834,8 +5039,12 @@ async function main() {
           if (key === 'gallery.view_mode' && bridge.get_settings) {
             bridge.get_settings(function (s) {
               applyGalleryViewMode((s && s['gallery.view_mode']) || 'masonry');
-              gGroupBy = ((s && s['gallery.group_by']) || 'none') === 'date' ? 'date' : 'none';
+              const nextGroupBy = (s && s['gallery.group_by']) || 'none';
+              gGroupBy = ['date', 'duplicates'].includes(nextGroupBy) ? nextGroupBy : 'none';
               gGroupDateGranularity = (s && s['gallery.group_date_granularity']) || 'day';
+              if (gGalleryViewMode !== 'duplicates') {
+                gLastStandardViewMode = gGalleryViewMode;
+              }
               setCustomSelectValue('groupBySelect', gGroupBy);
               setCustomSelectValue('dateGranularitySelect', gGroupDateGranularity);
               syncGroupByUi();
@@ -4848,7 +5057,8 @@ async function main() {
             bridge.get_settings(function (s) {
               const prevGroupBy = gGroupBy;
               const prevGranularity = gGroupDateGranularity;
-              gGroupBy = ((s && s['gallery.group_by']) || 'none') === 'date' ? 'date' : 'none';
+              const nextGroupBy = (s && s['gallery.group_by']) || 'none';
+              gGroupBy = ['date', 'duplicates'].includes(nextGroupBy) ? nextGroupBy : 'none';
               gGroupDateGranularity = (s && s['gallery.group_date_granularity']) || 'day';
               setCustomSelectValue('groupBySelect', gGroupBy);
               setCustomSelectValue('dateGranularitySelect', gGroupDateGranularity);
