@@ -1090,6 +1090,48 @@ p {
   gap: 22px;
 }
 
+.duplicate-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.duplicate-summary-actions {
+  display: flex;
+  align-items: end;
+  justify-content: flex-start;
+}
+
+.duplicate-summary-actions .tb-btn.highlight {
+  background: color-mix(in srgb, var(--card-bg), var(--fg) 10%);
+  color: var(--fg);
+  border-color: var(--border);
+}
+
+.duplicate-summary-actions .tb-btn.highlight:hover {
+  background: var(--accent);
+  color: white;
+  border-color: color-mix(in srgb, var(--accent), white 14%);
+}
+
+.duplicate-summary-card {
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--border), var(--accent) 16%);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--card-bg), var(--accent) 4%);
+}
+
+.duplicate-summary-label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.duplicate-summary-value {
+  font-size: 22px;
+  font-weight: 700;
+}
+
 .gallery-grouped.gallery-details {
   gap: 0;
 }
@@ -1210,6 +1252,12 @@ p {
   font-size: 12px;
   color: var(--muted);
   white-space: nowrap;
+}
+
+.duplicate-group-actions {
+  display: flex;
+  gap: 10px;
+  padding-top: 10px;
 }
 
 .gallery-group-body[hidden] {
@@ -1683,6 +1731,63 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 .gallery-duplicates .structured-content {
   display: grid;
   gap: 6px;
+  align-content: start;
+  min-height: 0;
+}
+
+.duplicate-card-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.duplicate-keep-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.duplicate-keep-toggle {
+  accent-color: var(--accent);
+}
+
+.duplicate-trash-btn {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 6px;
+}
+
+.duplicate-trash-btn:hover {
+  color: #d45a5a;
+  background: color-mix(in srgb, #d45a5a, transparent 86%);
+}
+
+.gallery-duplicates .entry-name,
+.gallery-duplicates .entry-folder,
+.gallery-duplicates .entry-detail {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: initial;
+  word-break: break-word;
+}
+
+.gallery-duplicates .entry-name {
+  line-height: 1.35;
+}
+
+.gallery-duplicates .entry-folder {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 11px;
 }
 
 .duplicate-badge {
@@ -1705,9 +1810,29 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   border-color: color-mix(in srgb, var(--accent), var(--border) 42%);
 }
 
+.duplicate-reason-list {
+  display: grid;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 4px;
+}
+
 .duplicate-reason {
   white-space: normal;
   line-height: 1.35;
+  color: color-mix(in srgb, var(--accent), var(--fg) 24%);
+  font-weight: 600;
+}
+
+.duplicate-overall-best {
+  padding-top: 2px;
+  color: color-mix(in srgb, var(--accent), white 18%);
+  font-weight: 700;
+}
+
+.duplicate-stats {
+  font-weight: 600;
+  color: color-mix(in srgb, var(--fg), var(--muted) 28%);
 }
 
 .structured-thumb .thumb {
