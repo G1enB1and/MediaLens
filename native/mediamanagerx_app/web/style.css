@@ -197,12 +197,12 @@ header {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-width: 260px;
+  min-width: 0;
 }
 
 .search-input {
   flex: 1;
-  min-width: 0;
+  min-width: 120px;
   max-width: none;
   height: 34px;
   border-radius: 12px;
@@ -2236,6 +2236,10 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   cursor: text;
 }
 
+.kv.hide-selected-folder-label #selectedFolderLabel {
+  display: none;
+}
+
 .folder-address:focus-visible {
   outline: none;
   border-color: color-mix(in srgb, var(--accent), transparent 35%);
@@ -2370,16 +2374,16 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   display: flex;
   gap: 8px;
   align-items: center;
-  margin-left: auto;
+  margin-left: 0;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  justify-content: flex-start;
   flex: 1 1 100%;
 }
 
 /* Custom Select Replacement */
 .custom-select {
   position: relative;
-  width: 160px;
+  width: 145px;
   max-width: 100%;
   height: 34px;
   background: var(--input-bg);
@@ -2392,6 +2396,18 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   outline: none;
 }
 
+#groupBySelect {
+  width: 232px;
+  min-width: 232px;
+  max-width: min(100%, 320px);
+}
+
+#similarityThresholdSelect {
+  width: 217px;
+  min-width: 217px;
+  max-width: min(100%, 320px);
+}
+
 @media (max-width: 1100px) {
   .header-top {
     gap: 12px;
@@ -2401,13 +2417,7 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
     flex: 0 0 auto;
   }
 
-  .search {
-    flex: 1 1 100%;
-    order: 2;
-  }
-
   .controls {
-    order: 3;
     justify-content: flex-start;
     margin-left: 0;
   }
@@ -2427,7 +2437,19 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   }
 
   .custom-select {
-    width: 148px;
+    width: 133px;
+  }
+
+  #groupBySelect {
+    width: min(232px, 100%);
+    min-width: 148px;
+    max-width: min(100%, 320px);
+  }
+
+  #similarityThresholdSelect {
+    width: min(217px, 100%);
+    min-width: 148px;
+    max-width: min(100%, 320px);
   }
 }
 

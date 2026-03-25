@@ -191,6 +191,8 @@ let gGalleryRequestSeq = 0;
 let gPendingMediaCountRequests = new Map();
 let gPendingMediaListRequests = new Map();
 let gRefreshGeneration = 0;
+let gSelectedFolderLabelHidden = false;
+let gSelectedFolderLabelWidth = 0;
 
 function buildDragPreviewCanvas(img, item = null) {
   if (!img) return null;
@@ -355,6 +357,54 @@ function fetchMediaCount(folders, filterType, searchQuery) {
   });
 }
 
+function getSelectedFolderLabelWidth() {
+  const label = document.getElementById('selectedFolderLabel');
+  if (!label) return gSelectedFolderLabelWidth || 0;
+  if (!gSelectedFolderLabelWidth) {
+    gSelectedFolderLabelWidth = Math.ceil(label.getBoundingClientRect().width || label.scrollWidth || 0);
+  }
+  return gSelectedFolderLabelWidth;
+}
+
+function getFolderAddressContentWidth(address) {
+  if (!address) return 0;
+  const children = Array.from(address.children || []);
+  if (!children.length) {
+    return Math.ceil(address.scrollWidth || 0);
+  }
+  let width = 0;
+  children.forEach((child) => {
+    width += Math.ceil(child.getBoundingClientRect().width || 0);
+  });
+  const styles = window.getComputedStyle(address);
+  const gap = parseFloat(styles.columnGap || styles.gap || '0') || 0;
+  const paddingLeft = parseFloat(styles.paddingLeft || '0') || 0;
+  const paddingRight = parseFloat(styles.paddingRight || '0') || 0;
+  if (children.length > 1) {
+    width += Math.ceil(gap * (children.length - 1));
+  }
+  width += Math.ceil(paddingLeft + paddingRight);
+  return width;
+}
+
+function updateSelectedFolderLabelVisibility() {
+  const address = document.getElementById('selectedFolder');
+  const row = address ? address.closest('.kv') : null;
+  if (!address || !row) return;
+  const contentWidth = getFolderAddressContentWidth(address);
+  const overflowPx = Math.ceil(contentWidth - address.clientWidth);
+  const labelWidth = getSelectedFolderLabelWidth();
+  const spareRoomPx = Math.floor(address.clientWidth - contentWidth);
+  const hideThreshold = 1;
+  const showThreshold = 100;
+  if (!gSelectedFolderLabelHidden && overflowPx > hideThreshold) {
+    gSelectedFolderLabelHidden = true;
+  } else if (gSelectedFolderLabelHidden && spareRoomPx >= labelWidth + showThreshold) {
+    gSelectedFolderLabelHidden = false;
+  }
+  row.classList.toggle('hide-selected-folder-label', gSelectedFolderLabelHidden);
+}
+
 function fetchMediaList(folders, limit, offset, sortBy, filterType, searchQuery) {
   if (!gBridge) return Promise.resolve([]);
   if (gBridge.list_media_async) {
@@ -396,6 +446,7 @@ function refreshCurrentFolderChildren() {
   if (!currentPath) {
     gCurrentFolderChildren = [];
     renderFolderAddress();
+    updateSelectedFolderLabelVisibility();
     return;
   }
   fetchFolderChildren(currentPath).then((items) => {
@@ -403,6 +454,7 @@ function refreshCurrentFolderChildren() {
     if (normalizeFolderPath(gNavState.currentPath) !== currentPath) return;
     gCurrentFolderChildren = Array.isArray(items) ? items : [];
     renderFolderAddress();
+    updateSelectedFolderLabelVisibility();
   });
 }
 
@@ -424,6 +476,7 @@ function renderFolderAddress() {
     input.value = textValue;
     input.focus();
     input.select();
+    requestAnimationFrame(updateSelectedFolderLabelVisibility);
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -448,6 +501,7 @@ function renderFolderAddress() {
 
   if (!currentPath) {
     el.textContent = textValue;
+    requestAnimationFrame(updateSelectedFolderLabelVisibility);
     return;
   }
 
@@ -497,6 +551,7 @@ function renderFolderAddress() {
     el.appendChild(chevron);
   }
   el.scrollLeft = el.scrollWidth;
+  requestAnimationFrame(updateSelectedFolderLabelVisibility);
 }
 
 function getFolderCrumbMenu(level) {
@@ -4421,6 +4476,7 @@ function wirePager() {
 
   window.addEventListener('resize', () => {
     closeFolderCrumbMenu();
+    updateSelectedFolderLabelVisibility();
   });
 
   renderPager();
