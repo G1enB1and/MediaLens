@@ -59,6 +59,18 @@
               <div data-value="none" class="selected">Group By: None</div>
               <div data-value="date">Group By: Date</div>
               <div data-value="duplicates">Group By: Duplicates</div>
+              <div data-value="similar">Group By: Duplicates and Similar</div>
+              <div data-value="similar_only">Group By: Similar</div>
+            </div>
+          </div>
+          <div class="custom-select" id="similarityThresholdSelect" tabindex="0" hidden>
+            <div class="select-trigger">Similarity Threshold: Low</div>
+            <div class="select-options">
+              <div data-value="very_low">Similarity Threshold: Very Low</div>
+              <div data-value="low" class="selected">Similarity Threshold: Low</div>
+              <div data-value="medium">Similarity Threshold: Medium</div>
+              <div data-value="high">Similarity Threshold: High</div>
+              <div data-value="very_high">Similarity Threshold: Very High</div>
             </div>
           </div>
           <div class="custom-select" id="dateGranularitySelect" tabindex="0" hidden>
@@ -125,6 +137,8 @@
       <button class="ctx-item ctx-view-item" data-view-mode="details">Details</button>
       <button class="ctx-item ctx-view-item" data-view-mode="content">Content</button>
       <button class="ctx-item ctx-view-item" data-view-mode="duplicates">Duplicates</button>
+      <button class="ctx-item ctx-view-item" data-view-mode="similar">Duplicates and Similar</button>
+      <button class="ctx-item ctx-view-item" data-view-mode="similar_only">Similar</button>
       <button class="ctx-item ctx-view-item" data-view-mode="masonry">Masonry</button>
       <div class="ctx-sep"></div>
       <button class="ctx-item" id="ctxCancel">Cancel</button>

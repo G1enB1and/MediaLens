@@ -1400,16 +1400,38 @@ class Bridge(QObject):
             "content",
             "details",
             "duplicates",
+            "similar",
+            "similar_only",
         }
         return mode if mode in allowed else "masonry"
 
     def _gallery_group_by(self) -> str:
         value = str(self.settings.value("gallery/group_by", "none", type=str) or "none")
-        allowed = {"none", "date", "duplicates"}
+        allowed = {"none", "date", "duplicates", "similar", "similar_only"}
         return value if value in allowed else "none"
+
+    def _gallery_similarity_threshold(self) -> str:
+        value = str(self.settings.value("gallery/similarity_threshold", "low", type=str) or "low")
+        allowed = {"very_low", "low", "medium", "high", "very_high"}
+        return value if value in allowed else "low"
 
     def _duplicates_mode_active(self) -> bool:
         return self._gallery_view_mode() == "duplicates" or self._gallery_group_by() == "duplicates"
+
+    def _similar_mode_active(self) -> bool:
+        return self._gallery_view_mode() == "similar" or self._gallery_group_by() == "similar"
+
+    def _similar_only_mode_active(self) -> bool:
+        return self._gallery_view_mode() == "similar_only" or self._gallery_group_by() == "similar_only"
+
+    def _review_group_mode(self) -> str | None:
+        if self._similar_only_mode_active():
+            return "similar_only"
+        if self._similar_mode_active():
+            return "similar"
+        if self._duplicates_mode_active():
+            return "duplicates"
+        return None
 
     @staticmethod
     def _folder_depth_for_duplicate(entry: dict) -> int:
@@ -1472,11 +1494,13 @@ class Bridge(QObject):
     def _duplicate_score(entry: dict) -> tuple:
         folder_depth = Bridge._folder_depth_for_duplicate(entry)
         tag_count, filled_fields = Bridge._duplicate_metadata_score(entry)
+        file_size = int(entry.get("file_size") or 0)
         modified_time = int(entry.get("preferred_date") or 0)
         return (
             folder_depth,
             tag_count,
             filled_fields,
+            file_size,
             modified_time,
             str(entry.get("path", "")).lower(),
         )
@@ -1486,12 +1510,17 @@ class Bridge(QObject):
         ranked.sort(key=self._duplicate_score, reverse=True)
         metadata_scores = [self._duplicate_metadata_score(entry) for entry in ranked]
         folder_depths = [self._folder_depth_for_duplicate(entry) for entry in ranked]
+        file_sizes = [int(entry.get("file_size") or 0) for entry in ranked]
         modified_times = [int(entry.get("preferred_date") or 0) for entry in ranked]
         best_metadata = max(metadata_scores, default=(0, 0))
         best_folder_depth = max(folder_depths, default=0)
+        largest_file_size = max(file_sizes, default=0)
+        smallest_file_size = min(file_sizes, default=0)
         best_modified = max(modified_times, default=0)
         unique_best_metadata = metadata_scores.count(best_metadata) == 1 and best_metadata > (0, 0)
         unique_best_folder = folder_depths.count(best_folder_depth) == 1 and best_folder_depth > 1
+        unique_largest_file = file_sizes.count(largest_file_size) == 1 and largest_file_size > smallest_file_size
+        unique_smallest_file = file_sizes.count(smallest_file_size) == 1 and largest_file_size > smallest_file_size
         unique_best_modified = modified_times.count(best_modified) == 1 and best_modified > 0
         for index, entry in enumerate(ranked):
             entry["duplicate_keep_suggestion"] = index == 0
@@ -1502,6 +1531,10 @@ class Bridge(QObject):
                 reasons.append("Most metadata")
             if unique_best_folder and self._folder_depth_for_duplicate(entry) == best_folder_depth:
                 reasons.append("Best folder organization")
+            if unique_largest_file and int(entry.get("file_size") or 0) == largest_file_size:
+                reasons.append("Largest file size")
+            if unique_smallest_file and int(entry.get("file_size") or 0) == smallest_file_size:
+                reasons.append("Smallest file size")
             if unique_best_modified and int(entry.get("preferred_date") or 0) == best_modified:
                 reasons.append("Newest edit")
             entry["duplicate_category_reasons"] = reasons
@@ -1558,6 +1591,167 @@ class Bridge(QObject):
             flattened.extend(group)
         return flattened
 
+    def _build_similar_entries(self, entries: list[dict], sort_by: str, *, include_exact: bool, threshold: int, bucket_prefix: int) -> list[dict]:
+        from app.mediamanager.utils.hashing import phash_distance
+
+        candidates = [
+            dict(entry)
+            for entry in entries
+            if not entry.get("is_folder") and (str(entry.get("content_hash") or "").strip() or str(entry.get("phash") or "").strip())
+        ]
+        if not include_exact:
+            unique_candidates: list[dict] = []
+            exact_groups: dict[str, list[dict]] = {}
+            for entry in candidates:
+                content_hash = str(entry.get("content_hash") or "").strip()
+                if content_hash:
+                    exact_groups.setdefault(content_hash, []).append(entry)
+                else:
+                    unique_candidates.append(entry)
+            for grouped_entries in exact_groups.values():
+                if len(grouped_entries) == 1:
+                    unique_candidates.append(grouped_entries[0])
+                else:
+                    unique_candidates.append(self._sort_duplicate_group(grouped_entries)[0])
+            candidates = unique_candidates
+        if len(candidates) < 2:
+            return []
+
+        parents = list(range(len(candidates)))
+
+        def find(idx: int) -> int:
+            while parents[idx] != idx:
+                parents[idx] = parents[parents[idx]]
+                idx = parents[idx]
+            return idx
+
+        def union(left: int, right: int) -> None:
+            left_root = find(left)
+            right_root = find(right)
+            if left_root != right_root:
+                parents[right_root] = left_root
+
+        buckets: dict[str, list[int]] = {}
+        hash_groups: dict[str, list[int]] = {}
+        for index, entry in enumerate(candidates):
+            phash = str(entry.get("phash") or "")
+            bucket = phash[:bucket_prefix] if bucket_prefix > 0 else "*"
+            buckets.setdefault(bucket, []).append(index)
+            content_hash = str(entry.get("content_hash") or "").strip()
+            if include_exact and content_hash:
+                hash_groups.setdefault(content_hash, []).append(index)
+
+        for group_items in hash_groups.values():
+            if len(group_items) < 2:
+                continue
+            anchor = group_items[0]
+            for other in group_items[1:]:
+                union(anchor, other)
+
+        for bucket_items in buckets.values():
+            for pos, left_idx in enumerate(bucket_items):
+                if candidates[left_idx].get("media_type") != "image":
+                    continue
+                left_hash = candidates[left_idx].get("phash") or ""
+                if not left_hash:
+                    continue
+                for right_idx in bucket_items[pos + 1:]:
+                    if candidates[right_idx].get("media_type") != "image":
+                        continue
+                    right_hash = candidates[right_idx].get("phash") or ""
+                    if not right_hash:
+                        continue
+                    distance = phash_distance(left_hash, right_hash)
+                    if distance <= threshold and (include_exact or distance > 0):
+                        union(left_idx, right_idx)
+
+        groups: dict[int, list[dict]] = {}
+        for index, entry in enumerate(candidates):
+            groups.setdefault(find(index), []).append(entry)
+
+        similar_groups = [group for group in groups.values() if len(group) > 1]
+        if not similar_groups:
+            return []
+
+        group_rows: list[tuple[tuple, list[dict]]] = []
+        for group_index, group_entries in enumerate(similar_groups, start=1):
+            sorted_group = self._sort_duplicate_group(group_entries)
+            areas = [int(entry.get("width") or 0) * int(entry.get("height") or 0) for entry in sorted_group]
+            max_area = max(areas)
+            min_area = min(areas)
+            unique_highest_area = areas.count(max_area) == 1 and max_area > min_area
+            unique_lowest_area = areas.count(min_area) == 1 and max_area > min_area
+            for entry in sorted_group:
+                area = int(entry.get("width") or 0) * int(entry.get("height") or 0)
+                reasons = list(entry.get("duplicate_category_reasons") or [])
+                if unique_highest_area and area == max_area:
+                    reasons.append("Highest resolution")
+                elif unique_lowest_area and area == min_area:
+                    reasons.append("Downscaled copy")
+                entry["duplicate_category_reasons"] = list(dict.fromkeys(reasons))
+                entry["duplicate_best_reason"] = " • ".join(entry["duplicate_category_reasons"])
+                entry["review_group_mode"] = "similar" if include_exact else "similar_only"
+                entry["similar_group_distance_threshold"] = threshold
+                entry["similar_group_key"] = f"similar-{group_index}"
+                entry["duplicate_group_key"] = entry["similar_group_key"]
+                entry["duplicate_group_size"] = len(sorted_group)
+            best = sorted_group[0]
+            name = Path(str(best.get("path", ""))).name.lower()
+            area_score = int(best.get("width") or 0) * int(best.get("height") or 0)
+            order_key = (-area_score, -len(sorted_group), name)
+            if sort_by == "name_desc":
+                order_key = (name, -area_score, -len(sorted_group))
+            group_rows.append((order_key, sorted_group))
+
+        group_rows.sort(key=lambda row: row[0], reverse=(sort_by == "name_desc"))
+        flattened: list[dict] = []
+        for _, group in group_rows:
+            flattened.extend(group)
+        return flattened
+
+    def _backfill_scope_phashes(self, entries: list[dict]) -> None:
+        from app.mediamanager.utils.hashing import calculate_image_phash
+
+        updates: list[tuple[str, str]] = []
+        for entry in entries:
+            if entry.get("is_folder") or entry.get("media_type") != "image" or str(entry.get("phash") or "").strip():
+                continue
+            path = str(entry.get("path") or "").strip()
+            if not path:
+                continue
+            try:
+                p = Path(path)
+                if not p.exists() or not p.is_file():
+                    continue
+                phash = calculate_image_phash(p)
+            except Exception:
+                phash = ""
+            if not phash:
+                continue
+            entry["phash"] = phash
+            updates.append((phash, path))
+        if not updates:
+            return
+        try:
+            self.conn.executemany("UPDATE media_items SET phash = ? WHERE path = ?", updates)
+            self.conn.commit()
+        except Exception as exc:
+            try:
+                self._log(f"pHash backfill failed: {exc}")
+            except Exception:
+                pass
+
+    def _similarity_config(self) -> tuple[int, int]:
+        level = self._gallery_similarity_threshold()
+        mapping = {
+            "very_low": (5, 2),
+            "low": (9, 2),
+            "medium": (12, 2),
+            "high": (15, 1),
+            "very_high": (18, 1),
+        }
+        return mapping.get(level, (12, 2))
+
     def _gallery_group_date_granularity(self) -> str:
         value = str(self.settings.value("gallery/group_date_granularity", "day", type=str) or "day")
         allowed = {"day", "month", "year"}
@@ -1574,6 +1768,7 @@ class Bridge(QObject):
                 "gallery.view_mode": self._gallery_view_mode(),
                 "gallery.group_by": self._gallery_group_by(),
                 "gallery.group_date_granularity": self._gallery_group_date_granularity(),
+                "gallery.similarity_threshold": self._gallery_similarity_threshold(),
                 "ui.accent_color": str(self.settings.value("ui/accent_color", "#8ab4f8", type=str) or "#8ab4f8"),
                 "ui.show_left_panel": bool(self.settings.value("ui/show_left_panel", True, type=bool)),
                 "ui.show_right_panel": bool(self.settings.value("ui/show_right_panel", True, type=bool)),
@@ -1636,6 +1831,7 @@ class Bridge(QObject):
                 "gallery.view_mode": "masonry",
                 "gallery.group_by": "none",
                 "gallery.group_date_granularity": "day",
+                "gallery.similarity_threshold": "low",
                 "ui.accent_color": "#8ab4f8",
                 "ui.show_left_panel": True,
                 "ui.show_right_panel": True,
@@ -1745,17 +1941,20 @@ class Bridge(QObject):
     @Slot(str, str, result=bool)
     def set_setting_str(self, key: str, value: str) -> bool:
         try:
-            if key not in ("gallery.start_folder", "gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "ui.accent_color", "ui.theme_mode", "metadata.display.order") and not key.startswith("metadata.layout."):
+            if key not in ("gallery.start_folder", "gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "gallery.similarity_threshold", "ui.accent_color", "ui.theme_mode", "metadata.display.order") and not key.startswith("metadata.layout."):
                 return False
             if key == "gallery.view_mode":
-                allowed = {"masonry", "grid_small", "grid_medium", "grid_large", "grid_xlarge", "list", "content", "details", "duplicates"}
+                allowed = {"masonry", "grid_small", "grid_medium", "grid_large", "grid_xlarge", "list", "content", "details", "duplicates", "similar", "similar_only"}
                 if value not in allowed:
                     return False
             elif key == "gallery.group_by":
-                if value not in {"none", "date", "duplicates"}:
+                if value not in {"none", "date", "duplicates", "similar", "similar_only"}:
                     return False
             elif key == "gallery.group_date_granularity":
                 if value not in {"day", "month", "year"}:
+                    return False
+            elif key == "gallery.similarity_threshold":
+                if value not in {"very_low", "low", "medium", "high", "very_high"}:
                     return False
             qkey = key.replace(".", "/")
             self.settings.setValue(qkey, str(value or ""))
@@ -1764,7 +1963,7 @@ class Bridge(QObject):
             elif key == "ui.theme_mode":
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, value == "light")
-            elif key in ("gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity"):
+            elif key in ("gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "gallery.similarity_threshold"):
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, True)
             elif key == "metadata.display.order" or key.startswith("metadata.layout."):
@@ -2669,6 +2868,7 @@ class Bridge(QObject):
                             "auto_date": auto_date,
                             "file_size": None,
                             "content_hash": "",
+                            "phash": "",
                             "duplicate_group_key": "",
                             "duplicate_group_size": 0,
                             "duplicate_group_position": -1,
@@ -2676,6 +2876,7 @@ class Bridge(QObject):
                             "duplicate_space_savings": 0,
                             "duplicate_category_reasons": [],
                             "duplicate_is_overall_best": False,
+                            "review_group_mode": "",
                         }
                     )
                     continue
@@ -2707,6 +2908,7 @@ class Bridge(QObject):
                     "auto_date": auto_date,
                     "file_size": r.get("file_size"),
                     "content_hash": r.get("content_hash") or "",
+                    "phash": r.get("phash") or "",
                     "duplicate_group_key": r.get("duplicate_group_key") or "",
                     "duplicate_group_size": int(r.get("duplicate_group_size") or 0),
                     "duplicate_group_position": int(r.get("duplicate_group_position") or 0),
@@ -2715,6 +2917,7 @@ class Bridge(QObject):
                     "duplicate_category_reasons": list(r.get("duplicate_category_reasons") or []),
                     "duplicate_best_reason": r.get("duplicate_best_reason") or "",
                     "duplicate_is_overall_best": bool(r.get("duplicate_is_overall_best")),
+                    "review_group_mode": r.get("review_group_mode") or "",
                 })
             return out
         except Exception: return []
@@ -2957,13 +3160,24 @@ class Bridge(QObject):
     def _get_gallery_entries(self, folders: list[str], sort_by: str = "name_asc", filter_type: str = "all", search_query: str = "") -> list[dict]:
         if folders:
             entries = self._get_reconciled_candidates(folders, filter_type, search_query)
-            if self._gallery_view_mode() not in {"masonry", "duplicates"} and not self._duplicates_mode_active():
+            if self._gallery_view_mode() not in {"masonry", "duplicates", "similar", "similar_only"} and self._review_group_mode() is None:
                 entries = self._list_folder_entries(folders, search_query) + entries
         elif self._active_collection_id is not None:
             entries = self._get_collection_candidates(self._active_collection_id, filter_type, search_query)
         else:
             entries = []
-        if self._duplicates_mode_active():
+        review_mode = self._review_group_mode()
+        if review_mode in {"similar", "similar_only"}:
+            self._backfill_scope_phashes(entries)
+            threshold, bucket_prefix = self._similarity_config()
+            return self._build_similar_entries(
+                entries,
+                sort_by,
+                include_exact=(review_mode == "similar"),
+                threshold=threshold,
+                bucket_prefix=bucket_prefix,
+            )
+        if review_mode == "duplicates":
             return self._build_duplicate_entries(entries, sort_by)
         return self._sort_gallery_entries(entries, sort_by)
 
@@ -3023,7 +3237,7 @@ class Bridge(QObject):
     def _do_full_scan(self, paths: list[Path], conn, emit_progress: bool = True) -> int:
         from app.mediamanager.db.media_repo import get_media_by_path, upsert_media_item
         from app.mediamanager.metadata.persistence import inspect_and_persist_if_supported
-        from app.mediamanager.utils.hashing import calculate_file_hash
+        from app.mediamanager.utils.hashing import calculate_file_hash, calculate_image_phash
         from datetime import datetime, timezone
         image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"}
         total, count = len(paths), 0
@@ -3038,13 +3252,17 @@ class Bridge(QObject):
                 if existing:
                     curr_mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat()
                     if existing["file_size"] == stat.st_size and existing.get("modified_time") == curr_mtime:
-                        if existing.get("width") and existing.get("height"):
+                        has_required_visual_data = bool(existing.get("width") and existing.get("height"))
+                        if p.suffix.lower() in image_exts:
+                            has_required_visual_data = has_required_visual_data and bool(str(existing.get("phash") or "").strip())
+                        if has_required_visual_data:
                             skip = True
                 
                 if not skip:
                     width, height, d_ms = None, None, None
                     mtype = "image" if p.suffix.lower() in image_exts else "video"
                     
+                    phash = None
                     if mtype == "image":
                         reader = QImageReader(str(p))
                         if reader.canRead():
@@ -3057,6 +3275,7 @@ class Bridge(QObject):
                             w, h, _ = self._probe_video_size(str(p))
                             if w > 0 and h > 0:
                                 width, height = w, h
+                        phash = calculate_image_phash(p)
                     else:
                         w, h, _ = self._probe_video_size(str(p))
                         if w > 0 and h > 0:
@@ -3066,7 +3285,7 @@ class Bridge(QObject):
                         if d_s > 0:
                             d_ms = int(d_s * 1000)
                             
-                    media_id = upsert_media_item(conn, str(p), mtype, calculate_file_hash(p), width=width, height=height, duration_ms=d_ms)
+                    media_id = upsert_media_item(conn, str(p), mtype, calculate_file_hash(p), phash=phash, width=width, height=height, duration_ms=d_ms)
                 if media_id is not None:
                     inspect_and_persist_if_supported(conn, media_id, str(p), "image" if p.suffix.lower() in image_exts else "video")
                 count += 1
@@ -3464,6 +3683,8 @@ class MainWindow(QMainWindow):
             ("details", "Details"),
             ("content", "Content"),
             ("duplicates", "Duplicates"),
+            ("similar", "Duplicates and Similar"),
+            ("similar_only", "Similar"),
             ("masonry", "Masonry"),
         ):
             action = QAction(label, self)
@@ -3559,7 +3780,13 @@ class MainWindow(QMainWindow):
         self.bridge.set_setting_str("gallery.view_mode", mode)
         if mode == "duplicates":
             self.bridge.set_setting_str("gallery.group_by", "duplicates")
+        elif mode == "similar":
+            self.bridge.set_setting_str("gallery.group_by", "similar")
+        elif mode == "similar_only":
+            self.bridge.set_setting_str("gallery.group_by", "similar_only")
         elif self.bridge._gallery_group_by() == "duplicates":
+            self.bridge.set_setting_str("gallery.group_by", "none")
+        elif self.bridge._gallery_group_by() in {"similar", "similar_only"}:
             self.bridge.set_setting_str("gallery.group_by", "none")
         self._sync_gallery_view_actions()
 

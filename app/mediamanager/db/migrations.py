@@ -78,11 +78,20 @@ def _ensure_media_item_date_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE media_items ADD COLUMN exif_date_taken TEXT")
     if "metadata_date" not in cols:
         conn.execute("ALTER TABLE media_items ADD COLUMN metadata_date TEXT")
+    if "phash" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN phash TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_items_phash ON media_items(phash)")
 
 
 def init_db(db_path: str) -> None:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     sql = _load_schema_sql()
+    # Old databases may not have newly added columns yet. Avoid creating indexes
+    # against columns that will be added by the migration helpers below.
+    sql = sql.replace(
+        "CREATE INDEX IF NOT EXISTS idx_media_items_phash ON media_items(phash);\n",
+        "",
+    )
     with sqlite3.connect(db_path) as conn:
         conn.execute("PRAGMA foreign_keys=ON;")
         # The sandboxed Windows environment used in tests can fail when SQLite

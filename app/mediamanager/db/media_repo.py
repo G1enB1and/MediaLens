@@ -31,16 +31,26 @@ def _collect_file_stats(path: str) -> tuple[int, str, str]:
     return size, created, modified
 
 
+def _ensure_phash_column(conn: sqlite3.Connection) -> None:
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(media_items)").fetchall()}
+    if "phash" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN phash TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_items_phash ON media_items(phash)")
+    conn.commit()
+
+
 def add_media_item(
     conn: sqlite3.Connection,
     path: str,
     media_type: str,
     content_hash: Optional[str] = None,
+    phash: Optional[str] = None,
     width: Optional[int] = None,
     height: Optional[int] = None,
     duration_ms: Optional[int] = None,
     is_hidden: int = 0,
 ) -> int:
+    _ensure_phash_column(conn)
     now = _utc_now_iso()
     normalized = normalize_windows_path(path)
     
@@ -49,10 +59,11 @@ def add_media_item(
 
     conn.execute(
         """
-        INSERT INTO media_items(path, content_hash, media_type, file_size_bytes, file_created_time_utc, modified_time_utc, width, height, duration_ms, is_hidden, created_at_utc, updated_at_utc)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO media_items(path, content_hash, phash, media_type, file_size_bytes, file_created_time_utc, modified_time_utc, width, height, duration_ms, is_hidden, created_at_utc, updated_at_utc)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(path) DO UPDATE SET
           content_hash=COALESCE(excluded.content_hash, content_hash),
+          phash=COALESCE(excluded.phash, phash),
           media_type=excluded.media_type,
           file_size_bytes=excluded.file_size_bytes,
           file_created_time_utc=COALESCE(excluded.file_created_time_utc, file_created_time_utc),
@@ -63,7 +74,7 @@ def add_media_item(
           is_hidden=COALESCE(excluded.is_hidden, is_hidden),
           updated_at_utc=excluded.updated_at_utc
         """,
-        (normalized, content_hash, media_type, size, created_time, mtime, width, height, duration_ms, is_hidden, now, now),
+        (normalized, content_hash, phash, media_type, size, created_time, mtime, width, height, duration_ms, is_hidden, now, now),
     )
     row = conn.execute("SELECT id FROM media_items WHERE path = ?", (normalized,)).fetchone()
     if not row:
@@ -73,9 +84,10 @@ def add_media_item(
 
 
 def get_media_by_path(conn: sqlite3.Connection, path: str) -> Optional[dict]:
+    _ensure_phash_column(conn)
     normalized = normalize_windows_path(path)
     row = conn.execute(
-        "SELECT id, path, media_type, file_size_bytes, file_created_time_utc, modified_time_utc, exif_date_taken, metadata_date, width, height, duration_ms, is_hidden FROM media_items WHERE path = ?",
+        "SELECT id, path, media_type, file_size_bytes, file_created_time_utc, modified_time_utc, exif_date_taken, metadata_date, width, height, duration_ms, is_hidden, phash FROM media_items WHERE path = ?",
         (normalized,),
     ).fetchone()
     if not row:
@@ -93,6 +105,7 @@ def get_media_by_path(conn: sqlite3.Connection, path: str) -> Optional[dict]:
         "height": row[9],
         "duration_ms": row[10],
         "is_hidden": bool(row[11]),
+        "phash": row[12],
     }
 
 
@@ -128,11 +141,13 @@ def upsert_media_item(
     path: str,
     media_type: str,
     content_hash: str,
+    phash: str | None = None,
     width: Optional[int] = None,
     height: Optional[int] = None,
     duration_ms: Optional[int] = None,
 ) -> int:
     """Upsert media item, handling renames/moves via content hash."""
+    _ensure_phash_column(conn)
     now = _utc_now_iso()
     normalized = normalize_windows_path(path)
 
@@ -149,10 +164,10 @@ def upsert_media_item(
         conn.execute(
             """
                 UPDATE media_items 
-            SET content_hash = ?, file_size_bytes = ?, file_created_time_utc = ?, modified_time_utc = ?, width = ?, height = ?, duration_ms = ?, updated_at_utc = ? 
+            SET content_hash = ?, phash = COALESCE(?, phash), file_size_bytes = ?, file_created_time_utc = ?, modified_time_utc = ?, width = ?, height = ?, duration_ms = ?, updated_at_utc = ? 
             WHERE id = ?
             """,
-            (content_hash, size, created_time, mtime, width, height, duration_ms, now, existing_by_path[0]),
+            (content_hash, phash, size, created_time, mtime, width, height, duration_ms, now, existing_by_path[0]),
         )
         conn.commit()
         return int(existing_by_path[0])
@@ -178,10 +193,10 @@ def upsert_media_item(
             conn.execute(
                 """
                 UPDATE media_items 
-                SET path = ?, file_size_bytes = ?, file_created_time_utc = ?, modified_time_utc = ?, width = ?, height = ?, duration_ms = ?, updated_at_utc = ? 
+                SET path = ?, phash = COALESCE(?, phash), file_size_bytes = ?, file_created_time_utc = ?, modified_time_utc = ?, width = ?, height = ?, duration_ms = ?, updated_at_utc = ? 
                 WHERE id = ?
                 """,
-                (normalized, size, created_time, mtime, width, height, duration_ms, now, media_id),
+                (normalized, phash, size, created_time, mtime, width, height, duration_ms, now, media_id),
             )
             conn.commit()
             return int(media_id)
@@ -191,7 +206,7 @@ def upsert_media_item(
             pass
 
     # 3. Brand new item (or duplicate content at new path)
-    return add_media_item(conn, normalized, media_type, content_hash, width=width, height=height, duration_ms=duration_ms)
+    return add_media_item(conn, normalized, media_type, content_hash, phash=phash, width=width, height=height, duration_ms=duration_ms)
 
 
 def list_media_in_scope(
@@ -228,6 +243,7 @@ def _list_media_with_where(
     limit: Optional[int] = None,
     offset: Optional[int] = None,
 ) -> list[dict]:
+    _ensure_phash_column(conn)
     if limit is not None:
         limit_sql = f" LIMIT {limit} OFFSET {offset or 0}"
     else:
@@ -238,6 +254,7 @@ def _list_media_with_where(
             m.id, 
             m.path, 
             m.content_hash,
+            m.phash,
             m.media_type, 
             m.file_size_bytes, 
             m.file_created_time_utc,
@@ -298,35 +315,36 @@ def _media_row_to_dict(row) -> dict:
         "id": row[0],
         "path": row[1],
         "content_hash": row[2],
-        "media_type": row[3],
-        "file_size": row[4],
-        "file_created_time": row[5],
-        "modified_time": row[6],
-        "exif_date_taken": row[7],
-        "metadata_date": row[8],
-        "width": row[9],
-        "height": row[10],
-        "duration": (row[11] / 1000.0) if row[11] else None,
-        "is_hidden": bool(row[12]),
-        "title": row[13],
-        "description": row[14],
-        "notes": row[15],
-        "ai_prompt": row[16],
-        "ai_negative_prompt": row[17],
-        "tool_name_found": row[18],
-        "tool_name_inferred": row[19],
-        "model_name": row[20],
-        "checkpoint_name": row[21],
-        "sampler": row[22],
-        "scheduler": row[23],
-        "cfg_scale": row[24],
-        "steps": row[25],
-        "seed": row[26],
-        "source_formats": row[27],
-        "metadata_families": row[28],
-        "ai_loras": row[29],
-        "tags": row[30],
-        "collection_names": row[31],
+        "phash": row[3],
+        "media_type": row[4],
+        "file_size": row[5],
+        "file_created_time": row[6],
+        "modified_time": row[7],
+        "exif_date_taken": row[8],
+        "metadata_date": row[9],
+        "width": row[10],
+        "height": row[11],
+        "duration": (row[12] / 1000.0) if row[12] else None,
+        "is_hidden": bool(row[13]),
+        "title": row[14],
+        "description": row[15],
+        "notes": row[16],
+        "ai_prompt": row[17],
+        "ai_negative_prompt": row[18],
+        "tool_name_found": row[19],
+        "tool_name_inferred": row[20],
+        "model_name": row[21],
+        "checkpoint_name": row[22],
+        "sampler": row[23],
+        "scheduler": row[24],
+        "cfg_scale": row[25],
+        "steps": row[26],
+        "seed": row[27],
+        "source_formats": row[28],
+        "metadata_families": row[29],
+        "ai_loras": row[30],
+        "tags": row[31],
+        "collection_names": row[32],
     }
 
 
