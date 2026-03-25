@@ -1,6 +1,22 @@
 ﻿# Change Log
 
-## v1.0.23 (Current)
+## v1.1.1 (Current)
+
+### Added
+
+- **Duplicate Review Modes**: Added `Duplicates`, `Duplicates and Similar`, and `Similar` gallery review modes in both the header controls and native `View` menu.
+- **Perceptual Similarity Grouping**: Added perceptual-hash based grouping for visually similar images, alongside the existing exact duplicate grouping by content hash.
+- **Duplicate Workflow Actions**: Added duplicate/similar group summary cards, keep-target selection, auto resolve, per-file delete, and group-level metadata merge actions.
+
+### Changed
+
+- **Keep Candidate Scoring**: Added richer keep-best reasoning based on metadata richness, folder organization, file size, resolution, and newest edit to make duplicate cleanup more trustworthy.
+- **Similarity Threshold Controls**: Added user-selectable similarity threshold levels and split exact duplicate review from near-duplicate review for easier tuning.
+- **Header Layout Polish**: Refined header wrapping, select sizing, breadcrumb behavior, and selected-folder responsiveness so the new review controls fit cleanly in the main UI.
+
+---
+
+## v1.0.23
 
 ### Added
 
