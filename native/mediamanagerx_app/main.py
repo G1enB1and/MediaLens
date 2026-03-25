@@ -21,6 +21,7 @@ import json
 import html
 import shlex
 import traceback
+from collections import Counter
 from datetime import datetime, timezone
 from packaging.version import Version
 from pathlib import Path
@@ -1398,13 +1399,88 @@ class Bridge(QObject):
             "list",
             "content",
             "details",
+            "duplicates",
         }
         return mode if mode in allowed else "masonry"
 
     def _gallery_group_by(self) -> str:
         value = str(self.settings.value("gallery/group_by", "none", type=str) or "none")
-        allowed = {"none", "date"}
+        allowed = {"none", "date", "duplicates"}
         return value if value in allowed else "none"
+
+    def _duplicates_mode_active(self) -> bool:
+        return self._gallery_view_mode() == "duplicates" or self._gallery_group_by() == "duplicates"
+
+    @staticmethod
+    def _duplicate_score(entry: dict) -> tuple:
+        width = int(entry.get("width") or 0)
+        height = int(entry.get("height") or 0)
+        resolution = width * height
+        size = int(entry.get("file_size") or 0)
+        date_value = int(entry.get("preferred_date") or 0)
+        return (
+            resolution,
+            size,
+            -date_value if date_value > 0 else 0,
+            str(entry.get("path", "")).lower(),
+        )
+
+    def _sort_duplicate_group(self, entries: list[dict]) -> list[dict]:
+        ranked = [dict(entry) for entry in entries]
+        ranked.sort(key=self._duplicate_score, reverse=True)
+        for index, entry in enumerate(ranked):
+            entry["duplicate_keep_suggestion"] = index == 0
+            entry["duplicate_group_position"] = index
+        return ranked
+
+    def _build_duplicate_entries(self, entries: list[dict], sort_by: str) -> list[dict]:
+        media_entries = [dict(entry) for entry in entries if not entry.get("is_folder")]
+        counts = Counter(
+            str(entry.get("content_hash") or "").strip()
+            for entry in media_entries
+            if str(entry.get("content_hash") or "").strip()
+        )
+        duplicate_groups: dict[str, list[dict]] = {}
+        for entry in media_entries:
+            group_key = str(entry.get("content_hash") or "").strip()
+            if counts.get(group_key, 0) < 2:
+                continue
+            duplicate_groups.setdefault(group_key, []).append(entry)
+
+        if not duplicate_groups:
+            return []
+
+        group_rows: list[tuple[tuple, list[dict]]] = []
+        for group_key, group_entries in duplicate_groups.items():
+            sorted_group = self._sort_duplicate_group(group_entries)
+            kept_size = int(sorted_group[0].get("file_size") or 0) if sorted_group else 0
+            total_size = sum(int(entry.get("file_size") or 0) for entry in sorted_group)
+            savings = max(0, total_size - kept_size)
+            for entry in sorted_group:
+                entry["duplicate_group_key"] = group_key
+                entry["duplicate_group_size"] = len(sorted_group)
+                entry["duplicate_space_savings"] = savings
+            best = sorted_group[0]
+            name = Path(str(best.get("path", ""))).name.lower()
+            if sort_by == "name_desc":
+                order_key = (name, len(sorted_group), savings)
+            elif sort_by == "date_asc":
+                order_key = (best.get("preferred_date") or self._preferred_date_ns(best) or 0, -len(sorted_group), -savings, name)
+            elif sort_by == "date_desc":
+                order_key = (-(best.get("preferred_date") or self._preferred_date_ns(best) or 0), -len(sorted_group), -savings, name)
+            elif sort_by == "size_asc":
+                order_key = (savings, -len(sorted_group), name)
+            else:
+                order_key = (-savings, -len(sorted_group), name)
+            group_rows.append((order_key, sorted_group))
+
+        reverse = sort_by == "name_desc"
+        group_rows.sort(key=lambda row: row[0], reverse=reverse)
+
+        flattened: list[dict] = []
+        for _, group in group_rows:
+            flattened.extend(group)
+        return flattened
 
     def _gallery_group_date_granularity(self) -> str:
         value = str(self.settings.value("gallery/group_date_granularity", "day", type=str) or "day")
@@ -1596,11 +1672,11 @@ class Bridge(QObject):
             if key not in ("gallery.start_folder", "gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "ui.accent_color", "ui.theme_mode", "metadata.display.order") and not key.startswith("metadata.layout."):
                 return False
             if key == "gallery.view_mode":
-                allowed = {"masonry", "grid_small", "grid_medium", "grid_large", "grid_xlarge", "list", "content", "details"}
+                allowed = {"masonry", "grid_small", "grid_medium", "grid_large", "grid_xlarge", "list", "content", "details", "duplicates"}
                 if value not in allowed:
                     return False
             elif key == "gallery.group_by":
-                if value not in {"none", "date"}:
+                if value not in {"none", "date", "duplicates"}:
                     return False
             elif key == "gallery.group_date_granularity":
                 if value not in {"day", "month", "year"}:
@@ -2451,6 +2527,12 @@ class Bridge(QObject):
                             "metadata_date": None,
                             "auto_date": auto_date,
                             "file_size": None,
+                            "content_hash": "",
+                            "duplicate_group_key": "",
+                            "duplicate_group_size": 0,
+                            "duplicate_group_position": -1,
+                            "duplicate_keep_suggestion": False,
+                            "duplicate_space_savings": 0,
                         }
                     )
                     continue
@@ -2481,6 +2563,12 @@ class Bridge(QObject):
                     "metadata_date": r.get("metadata_date"),
                     "auto_date": auto_date,
                     "file_size": r.get("file_size"),
+                    "content_hash": r.get("content_hash") or "",
+                    "duplicate_group_key": r.get("duplicate_group_key") or "",
+                    "duplicate_group_size": int(r.get("duplicate_group_size") or 0),
+                    "duplicate_group_position": int(r.get("duplicate_group_position") or 0),
+                    "duplicate_keep_suggestion": bool(r.get("duplicate_keep_suggestion")),
+                    "duplicate_space_savings": int(r.get("duplicate_space_savings") or 0),
                 })
             return out
         except Exception: return []
@@ -2723,12 +2811,14 @@ class Bridge(QObject):
     def _get_gallery_entries(self, folders: list[str], sort_by: str = "name_asc", filter_type: str = "all", search_query: str = "") -> list[dict]:
         if folders:
             entries = self._get_reconciled_candidates(folders, filter_type, search_query)
-            if self._gallery_view_mode() != "masonry":
+            if self._gallery_view_mode() not in {"masonry", "duplicates"} and not self._duplicates_mode_active():
                 entries = self._list_folder_entries(folders, search_query) + entries
         elif self._active_collection_id is not None:
             entries = self._get_collection_candidates(self._active_collection_id, filter_type, search_query)
         else:
             entries = []
+        if self._duplicates_mode_active():
+            return self._build_duplicate_entries(entries, sort_by)
         return self._sort_gallery_entries(entries, sort_by)
 
     @Slot(list, str)
@@ -3227,6 +3317,7 @@ class MainWindow(QMainWindow):
             ("list", "List"),
             ("details", "Details"),
             ("content", "Content"),
+            ("duplicates", "Duplicates"),
             ("masonry", "Masonry"),
         ):
             action = QAction(label, self)
@@ -3320,6 +3411,10 @@ class MainWindow(QMainWindow):
 
     def _set_gallery_view_mode(self, mode: str) -> None:
         self.bridge.set_setting_str("gallery.view_mode", mode)
+        if mode == "duplicates":
+            self.bridge.set_setting_str("gallery.group_by", "duplicates")
+        elif self.bridge._gallery_group_by() == "duplicates":
+            self.bridge.set_setting_str("gallery.group_by", "none")
         self._sync_gallery_view_actions()
 
     def _sync_gallery_view_actions(self) -> None:
