@@ -1,6 +1,21 @@
 ﻿# Change Log
 
-## v1.1.1 (Current)
+## v1.1.2 (Current)
+
+### Added
+
+- **Auto Resolve Settings Panel**: Added a dedicated Duplicate and Similarity Auto Resolve Rules settings section with Rules and Priorities tabs for review behavior.
+- **Variant Detection Labels**: Added color/grayscale, cropped/full-frame, file-size, and preferred-format labels to duplicate and similar review cards.
+
+### Changed
+
+- **Duplicate and Similar Ranking**: Refined keep-best scoring so visible category winners align better with the overall recommendation and user-configurable priority order.
+- **Similarity Detection Stability**: Fixed pHash backfill, review grouping, and duplicate/similar counting regressions that were causing empty results in real folders.
+- **Review Workflow Reliability**: Restored scan-driven duplicate and similar results, preserved review positioning more reliably after delete actions, and kept the duplicate/similar experience responsive.
+
+---
+
+## v1.1.1
 
 ### Added
 
