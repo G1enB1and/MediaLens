@@ -1,6 +1,6 @@
 [project]
 name = "mediamanagerx"
-version = "1.1.1"
+version = "1.1.2"
 description = "Local-first media asset manager"
 readme = "README.md"
 requires-python = ">=3.10"

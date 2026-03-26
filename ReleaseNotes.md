@@ -1,20 +1,16 @@
-## MediaLens v1.1.1
+## MediaLens v1.1.2
 
 ### Summary
-This release brings intelligent duplicate and similar-image cleanup directly into the MediaLens gallery workflow. MediaLens can detect exact duplicates and visually similar images—including resized, compressed, and edited variants—then help you compare, choose the best version, and clean up with confidence. Smart recommendations, metadata merging, and flexible review controls ensure nothing valuable is lost while simplifying even large libraries.
+This release makes duplicate and similar-image cleanup more reliable and transparent. MediaLens now explains why files are recommended, gives you control over how decisions are made, and ensures real-world libraries produce consistent, trustworthy results.
 
 ### Highlights
-- Added Group By `Duplicates`, `Duplicates and Similar`, and `Similar` gallery review modes in both the header and native `View` menu.
-- Added perceptual-hash based similar image grouping for images, alongside exact duplicate grouping by content hash.
-- Added duplicate and similar group review UI with keep-target selection, auto resolve actions, per-file delete, metadata merge, and group summary controls.
-- Added non-destructive metadata merge across duplicate groups so tags, descriptions, notes, and related fields can be preserved before cleanup.
-- Added keep-candidate reasoning such as metadata richness, folder organization, resolution, file size, and newest edit.
+- Added Duplicate and Similarity Auto Resolve Rules settings with configurable rules and ranking priorities.
+- Added clearer variant labels such as color vs grayscale, cropped vs full frame, largest vs smallest file, and preferred format.
+- Fixed duplicate and similar review so large real-world folders populate results again after scan and pHash backfill.
 
 ### Notes
-- `Duplicates` finds exact file matches.
-- `Duplicates and Similar` combines exact duplicates with perceptual similar-image grouping.
-- `Similar` excludes exact duplicate-only matches so finding edits, burst shots, and prompt reruns are easier.
-- Similar-image detection currently targets images and uses perceptual hashing; exact duplicate detection still covers videos through the existing content hash.
+- Similar-image detection still depends on perceptual hashes for images, while exact duplicate detection continues to use content hashes.
+- This release focused on making duplicate/similar review trustworthy and stable before expanding deeper auto-resolve policies.
 
 ---
 
