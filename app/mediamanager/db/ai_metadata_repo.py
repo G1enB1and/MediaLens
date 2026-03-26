@@ -366,6 +366,88 @@ def get_media_ai_metadata(conn: sqlite3.Connection, media_id: int) -> dict[str, 
     }
 
 
+def upsert_media_ai_selected_fields(
+    conn: sqlite3.Connection,
+    media_id: int,
+    *,
+    ai_prompt: str | None = None,
+    ai_negative_prompt: str | None = None,
+    description: str | None = None,
+) -> None:
+    now = _utc_now_iso()
+    existing = get_media_ai_metadata(conn, media_id) or {}
+    conn.execute(
+        """
+        INSERT INTO media_ai_metadata (
+          media_id, parser_version, normalized_schema_version, is_ai_detected, is_ai_confidence,
+          tool_name_found, tool_name_inferred, tool_name_confidence, ai_prompt, ai_negative_prompt,
+          description, model_name, model_hash, checkpoint_name, sampler, scheduler, cfg_scale,
+          steps, seed, width, height, denoise_strength, upscaler, source_formats_json,
+          metadata_families_json, ai_detection_reasons_json, raw_paths_json, unknown_fields_json,
+          updated_at_utc
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(media_id) DO UPDATE SET
+          ai_prompt=excluded.ai_prompt,
+          ai_negative_prompt=excluded.ai_negative_prompt,
+          description=excluded.description,
+          updated_at_utc=excluded.updated_at_utc
+        """,
+        (
+            media_id,
+            existing.get("parser_version") or PARSER_VERSION,
+            existing.get("normalized_schema_version") or NORMALIZED_SCHEMA_VERSION,
+            1 if existing.get("is_ai_detected") else 0,
+            float(existing.get("is_ai_confidence") or 0.0),
+            existing.get("tool_name_found") or None,
+            existing.get("tool_name_inferred") or None,
+            float(existing.get("tool_name_confidence") or 0.0),
+            ai_prompt if ai_prompt is not None else existing.get("ai_prompt"),
+            ai_negative_prompt if ai_negative_prompt is not None else existing.get("ai_negative_prompt"),
+            description if description is not None else existing.get("description"),
+            existing.get("model_name") or None,
+            existing.get("model_hash") or None,
+            existing.get("checkpoint_name") or None,
+            existing.get("sampler") or None,
+            existing.get("scheduler") or None,
+            _as_float(existing.get("cfg_scale")),
+            _as_int(existing.get("steps")),
+            None if existing.get("seed") in (None, "") else str(existing.get("seed")),
+            _as_int(existing.get("width")),
+            _as_int(existing.get("height")),
+            _as_float(existing.get("denoise_strength")),
+            existing.get("upscaler") or None,
+            _json_dumps(existing.get("source_formats") or []),
+            _json_dumps(existing.get("metadata_families_detected") or []),
+            _json_dumps(existing.get("ai_detection_reasons") or []),
+            _json_dumps(existing.get("raw_paths") or []),
+            _json_dumps(existing.get("unknown_fields") or {}),
+            now,
+        ),
+    )
+    conn.commit()
+
+
+def replace_media_ai_workflows(conn: sqlite3.Connection, media_id: int, workflows: list[dict[str, Any]]) -> None:
+    now = _utc_now_iso()
+    upsert_media_ai_selected_fields(conn, media_id)
+    conn.execute("DELETE FROM media_ai_workflows WHERE media_id = ?", (media_id,))
+    for workflow in workflows or []:
+        conn.execute(
+            """
+            INSERT INTO media_ai_workflows (media_id, kind, data_json, created_at_utc)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                media_id,
+                str(workflow.get("kind") or "workflow"),
+                workflow.get("data_json") if isinstance(workflow.get("data_json"), str) else _json_dumps(workflow.get("data")),
+                now,
+            ),
+        )
+    conn.commit()
+
+
 def summarize_media_ai_metadata(ai_meta: dict[str, Any] | None) -> str:
     if not ai_meta:
         return ""

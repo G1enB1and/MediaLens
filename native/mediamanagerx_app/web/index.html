@@ -202,6 +202,7 @@
             <button class="settings-nav-item active" data-pane="general">General</button>
             <button class="settings-nav-item" data-pane="appearance">Appearance</button>
             <button class="settings-nav-item" data-pane="metadata">Metadata</button>
+            <button class="settings-nav-item" data-pane="duplicates">Duplicate and Similarity Auto Resolve Rules</button>
             <button class="settings-nav-item" data-pane="ai">AI</button>
           </div>
           <div class="modal-actions-sidebar">
@@ -284,6 +285,18 @@
               <label for="metadataModeGif">GIF</label>
             </div>
             <div class="metadata-settings-mount" id="metadataSettingsMount"></div>
+          </div>
+
+          <div class="settings-pane" id="pane-duplicates" hidden>
+            <div class="pane-title">Duplicate and Similarity Auto Resolve Rules</div>
+            <div class="pane-subtitle">Configure how MediaLens keeps, merges, and ranks duplicate and similar files.</div>
+            <div class="segmented-control duplicate-settings-tabs" id="duplicateSettingsTabs">
+              <input type="radio" name="duplicate_settings_mode" value="rules" id="duplicateSettingsRules" checked />
+              <label for="duplicateSettingsRules">Rules</label>
+              <input type="radio" name="duplicate_settings_mode" value="priorities" id="duplicateSettingsPriorities" />
+              <label for="duplicateSettingsPriorities">Priorities</label>
+            </div>
+            <div class="duplicate-settings-mount" id="duplicateSettingsMount"></div>
           </div>
 
           <!-- AI Pane -->
