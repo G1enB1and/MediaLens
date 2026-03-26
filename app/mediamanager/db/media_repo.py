@@ -87,7 +87,7 @@ def get_media_by_path(conn: sqlite3.Connection, path: str) -> Optional[dict]:
     _ensure_phash_column(conn)
     normalized = normalize_windows_path(path)
     row = conn.execute(
-        "SELECT id, path, media_type, file_size_bytes, file_created_time_utc, modified_time_utc, exif_date_taken, metadata_date, width, height, duration_ms, is_hidden, phash FROM media_items WHERE path = ?",
+        "SELECT id, path, content_hash, media_type, file_size_bytes, file_created_time_utc, modified_time_utc, exif_date_taken, metadata_date, width, height, duration_ms, is_hidden, phash FROM media_items WHERE path = ?",
         (normalized,),
     ).fetchone()
     if not row:
@@ -95,17 +95,18 @@ def get_media_by_path(conn: sqlite3.Connection, path: str) -> Optional[dict]:
     return {
         "id": row[0],
         "path": row[1],
-        "media_type": row[2],
-        "file_size": row[3],
-        "file_created_time": row[4],
-        "modified_time": row[5],
-        "exif_date_taken": row[6],
-        "metadata_date": row[7],
-        "width": row[8],
-        "height": row[9],
-        "duration_ms": row[10],
-        "is_hidden": bool(row[11]),
-        "phash": row[12],
+        "content_hash": row[2],
+        "media_type": row[3],
+        "file_size": row[4],
+        "file_created_time": row[5],
+        "modified_time": row[6],
+        "exif_date_taken": row[7],
+        "metadata_date": row[8],
+        "width": row[9],
+        "height": row[10],
+        "duration_ms": row[11],
+        "is_hidden": bool(row[12]),
+        "phash": row[13],
     }
 
 

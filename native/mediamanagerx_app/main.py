@@ -1557,6 +1557,32 @@ class Bridge(QObject):
         ranked = [dict(entry) for entry in entries]
         self._annotate_group_color_variants(ranked)
 
+        crop_policy = str(self.settings.value("duplicate/rules/crop_policy", "prefer_full", type=str) or "prefer_full")
+        color_policy = str(self.settings.value("duplicate/rules/color_policy", "prefer_color", type=str) or "prefer_color")
+        file_size_policy = str(self.settings.value("duplicate/rules/file_size_policy", "prefer_largest", type=str) or "prefer_largest")
+        format_order_raw = str(self.settings.value("duplicate/rules/format_order", "[]", type=str) or "[]")
+        priorities_raw = str(self.settings.value("duplicate/priorities/order", "[]", type=str) or "[]")
+        try:
+            format_order = [str(item).strip().upper() for item in json.loads(format_order_raw or "[]") if str(item).strip()]
+        except Exception:
+            format_order = []
+        if not format_order:
+            format_order = ["PNG", "WEBP", "JPEG", "RAW", "TIFF", "BMP", "GIF", "HEIC", "AVIF"]
+        try:
+            configured_priorities = [str(item).strip() for item in json.loads(priorities_raw or "[]") if str(item).strip()]
+        except Exception:
+            configured_priorities = []
+        if not configured_priorities:
+            configured_priorities = [
+                "File Size",
+                "Resolution",
+                "File Format",
+                "Compression",
+                "Color / Grey Preference",
+                "Text / No Text Preference",
+                "Cropped / Full Preference",
+            ]
+
         def _normalized_aspect_ratio(entry: dict) -> tuple[int, int] | None:
             width = int(entry.get("width") or 0)
             height = int(entry.get("height") or 0)
@@ -1567,40 +1593,69 @@ class Bridge(QObject):
                 return None
             return (width // divisor, height // divisor)
 
+        def _display_file_format(entry: dict) -> str:
+            suffix = Path(str(entry.get("path") or "")).suffix.lower()
+            if suffix in {".jpg", ".jpeg", ".jpe", ".jfif"}:
+                return "JPEG"
+            if suffix in {".png"}:
+                return "PNG"
+            if suffix in {".webp"}:
+                return "WEBP"
+            if suffix in {".tif", ".tiff"}:
+                return "TIFF"
+            if suffix in {".bmp"}:
+                return "BMP"
+            if suffix in {".gif"}:
+                return "GIF"
+            if suffix in {".heic", ".heif"}:
+                return "HEIC"
+            if suffix in {".avif"}:
+                return "AVIF"
+            if suffix in {".raw", ".dng", ".cr2", ".cr3", ".nef", ".arw", ".orf", ".rw2", ".raf", ".srw"}:
+                return "RAW"
+            return suffix.lstrip(".").upper() or "UNKNOWN"
+
+        def _format_score(entry: dict) -> int:
+            fmt = str(entry.get("duplicate_file_format") or "")
+            try:
+                idx = format_order.index(fmt)
+            except ValueError:
+                idx = len(format_order)
+            return len(format_order) - idx
+
+        def _original_timestamp(entry: dict) -> int:
+            for key in ("exif_date_taken", "metadata_date", "file_created_time"):
+                raw_value = entry.get(key)
+                value = raw_value if isinstance(raw_value, int) else self._iso_to_ns(raw_value)
+                if value > 0:
+                    return value
+            return 0
+
+        def _modified_timestamp(entry: dict) -> int:
+            raw_value = entry.get("modified_time")
+            return raw_value if isinstance(raw_value, int) else self._iso_to_ns(raw_value)
+
         for entry in ranked:
             entry["duplicate_folder_depth"] = self._folder_depth_for_duplicate(entry)
-
-        positive_categories = [
-            {
-                "label": "Largest file size",
-                "value": lambda entry: int(entry.get("file_size") or 0),
-                "enabled": lambda values: max(values, default=0) > min(values, default=0),
-            },
-            {
-                "label": "Most metadata",
-                "value": lambda entry: self._duplicate_metadata_score(entry),
-                "enabled": lambda values: max(values, default=(0, 0)) > (0, 0),
-            },
-            {
-                "label": "Best folder organization",
-                "value": lambda entry: int(entry.get("duplicate_folder_depth") or 0),
-                "enabled": lambda values: max(values, default=0) > 1,
-            },
-            {
-                "label": "Newest edit",
-                "value": lambda entry: int(entry.get("preferred_date") or 0),
-                "enabled": lambda values: max(values, default=0) > 0,
-            },
-        ]
-        if extra_positive_categories:
-            positive_categories[1:1] = list(extra_positive_categories)
-
-        positive_reasons: list[list[str]] = [[] for _ in ranked]
-        informative_reasons: list[list[str]] = [[] for _ in ranked]
+            entry["duplicate_file_format"] = _display_file_format(entry)
+            original_time = _original_timestamp(entry)
+            modified_time = _modified_timestamp(entry)
+            entry["duplicate_original_timestamp"] = original_time
+            entry["duplicate_modified_timestamp"] = modified_time
+            entry["duplicate_is_edit_variant"] = (
+                original_time > 0
+                and modified_time > 0
+                and modified_time > original_time + (5 * 60 * 1_000_000_000)
+            )
+            entry["duplicate_crop_variant"] = ""
+            entry["duplicate_size_variant"] = ""
 
         color_modes = [str(entry.get("color_variant") or "") for entry in ranked]
         has_color_variants = "color" in color_modes and "grayscale" in color_modes
+        positive_reasons: list[list[str]] = [[] for _ in ranked]
+        informative_reasons: list[list[str]] = [[] for _ in ranked]
         candidate_indices = list(range(len(ranked)))
+
         if has_color_variants:
             for idx, entry in enumerate(ranked):
                 mode = str(entry.get("color_variant") or "")
@@ -1608,9 +1663,14 @@ class Bridge(QObject):
                     informative_reasons[idx].append("Color version")
                 elif mode == "grayscale":
                     informative_reasons[idx].append("Grayscale version")
-            color_candidates = [idx for idx, entry in enumerate(ranked) if str(entry.get("color_variant") or "") == "color"]
-            if color_candidates:
-                candidate_indices = color_candidates
+            if color_policy == "prefer_color":
+                preferred = [idx for idx, entry in enumerate(ranked) if str(entry.get("color_variant") or "") == "color"]
+                if preferred:
+                    candidate_indices = preferred
+            elif color_policy == "prefer_bw":
+                preferred = [idx for idx, entry in enumerate(ranked) if str(entry.get("color_variant") or "") == "grayscale"]
+                if preferred:
+                    candidate_indices = preferred
 
         aspect_ratios = [_normalized_aspect_ratio(entry) for entry in ranked]
         image_areas = [int(entry.get("width") or 0) * int(entry.get("height") or 0) for entry in ranked]
@@ -1628,16 +1688,117 @@ class Bridge(QObject):
                 and image_areas[idx] < full_frame_area
             ]
             if unique_full_frame:
+                ranked[full_frame_idx]["duplicate_crop_variant"] = "full"
                 informative_reasons[full_frame_idx].append("Full frame")
             for idx in cropped_candidates:
+                ranked[idx]["duplicate_crop_variant"] = "cropped"
                 informative_reasons[idx].append("Cropped version")
-            if len(cropped_candidates) == 1:
-                cropped_path = str(ranked[cropped_candidates[0]].get("path") or "")
-                positive_categories[0:0] = [{
-                    "label": "Cropped version",
-                    "value": lambda entry, winner_path=cropped_path: 1 if str(entry.get("path") or "") == winner_path else 0,
-                    "enabled": lambda values: max(values, default=0) > 0,
-                }]
+            if crop_policy == "prefer_full" and unique_full_frame:
+                candidate_indices = [idx for idx in candidate_indices if idx == full_frame_idx] or candidate_indices
+            elif crop_policy == "prefer_cropped" and cropped_candidates:
+                preferred_cropped = [idx for idx in candidate_indices if idx in cropped_candidates]
+                if preferred_cropped:
+                    candidate_indices = preferred_cropped
+
+        edited_indices = [idx for idx, entry in enumerate(ranked) if entry.get("duplicate_is_edit_variant")]
+        if edited_indices:
+            edited_modified_times = [int(ranked[idx].get("duplicate_modified_timestamp") or 0) for idx in edited_indices]
+            newest_edit_time = max(edited_modified_times, default=0)
+            if newest_edit_time > 0 and edited_modified_times.count(newest_edit_time) == 1:
+                informative_reasons[edited_indices[edited_modified_times.index(newest_edit_time)]].append("Newer edit")
+            original_indices = [
+                idx for idx, entry in enumerate(ranked)
+                if int(entry.get("duplicate_original_timestamp") or 0) > 0 and not entry.get("duplicate_is_edit_variant")
+            ]
+            if len(original_indices) == 1:
+                informative_reasons[original_indices[0]].append("Original")
+
+        file_sizes = [int(entry.get("file_size") or 0) for entry in ranked]
+        largest_file_size = max(file_sizes, default=0)
+        smallest_file_size = min(file_sizes, default=0)
+        if largest_file_size > smallest_file_size and file_sizes.count(largest_file_size) == 1:
+            ranked[file_sizes.index(largest_file_size)]["duplicate_size_variant"] = "largest"
+            informative_reasons[file_sizes.index(largest_file_size)].append("Largest file size")
+        if largest_file_size > smallest_file_size and file_sizes.count(smallest_file_size) == 1:
+            ranked[file_sizes.index(smallest_file_size)]["duplicate_size_variant"] = "smallest"
+            informative_reasons[file_sizes.index(smallest_file_size)].append("Smallest file size")
+        if file_size_policy == "prefer_smallest":
+            preferred_small = [idx for idx in candidate_indices if int(ranked[idx].get("file_size") or 0) == smallest_file_size]
+            if preferred_small and largest_file_size > smallest_file_size:
+                candidate_indices = preferred_small
+
+        format_scores = [_format_score(entry) for entry in ranked]
+        best_format_score = max(format_scores, default=0)
+        if best_format_score > 0 and format_scores.count(best_format_score) == 1:
+            fmt_idx = format_scores.index(best_format_score)
+            informative_reasons[fmt_idx].append(f"Preferred format ({ranked[fmt_idx].get('duplicate_file_format')})")
+
+        priority_category_defs: dict[str, dict] = {
+            "File Size": {
+                "label": "Smallest file size" if file_size_policy == "prefer_smallest" else "Largest file size",
+                "value": (lambda entry: -int(entry.get("file_size") or 0)) if file_size_policy == "prefer_smallest" else (lambda entry: int(entry.get("file_size") or 0)),
+                "enabled": lambda values: max(values, default=0) > min(values, default=0),
+            },
+            "Resolution": {
+                "label": "Highest resolution",
+                "value": lambda entry: int(entry.get("width") or 0) * int(entry.get("height") or 0),
+                "enabled": lambda values: max(values, default=0) > min(values, default=0),
+            },
+            "File Format": {
+                "label": "Preferred format",
+                "value": lambda entry: _format_score(entry),
+                "enabled": lambda values: max(values, default=0) > min(values, default=0) and max(values, default=0) > 0,
+            },
+            "Compression": {
+                "label": "Compression",
+                "value": lambda entry: 0,
+                "enabled": lambda values: False,
+            },
+            "Color / Grey Preference": {
+                "label": "Black & White version" if color_policy == "prefer_bw" else "Color version",
+                "value": (
+                    (lambda entry: 1 if str(entry.get("color_variant") or "") == "grayscale" else 0)
+                    if color_policy == "prefer_bw"
+                    else (lambda entry: 1 if str(entry.get("color_variant") or "") == "color" else 0)
+                ),
+                "enabled": lambda values: max(values, default=0) > min(values, default=0),
+            },
+            "Text / No Text Preference": {
+                "label": "Text preference",
+                "value": lambda entry: 0,
+                "enabled": lambda values: False,
+            },
+            "Cropped / Full Preference": {
+                "label": "Cropped version" if crop_policy == "prefer_cropped" else "Full frame",
+                "value": (
+                    (lambda entry: 1 if str(entry.get("duplicate_crop_variant") or "") == "cropped" else 0)
+                    if crop_policy == "prefer_cropped"
+                    else (lambda entry: 1 if str(entry.get("duplicate_crop_variant") or "") == "full" else 0)
+                ),
+                "enabled": lambda values: max(values, default=0) > min(values, default=0),
+            },
+        }
+        positive_categories = [priority_category_defs[name] for name in configured_priorities if name in priority_category_defs]
+        if extra_positive_categories:
+            resolution_idx = next((i for i, cat in enumerate(positive_categories) if cat["label"] == "Highest resolution"), len(positive_categories))
+            positive_categories[resolution_idx:resolution_idx] = list(extra_positive_categories)
+        positive_categories.extend([
+            {
+                "label": "Most metadata",
+                "value": lambda entry: self._duplicate_metadata_score(entry),
+                "enabled": lambda values: max(values, default=(0, 0)) > (0, 0),
+            },
+            {
+                "label": "Best folder organization",
+                "value": lambda entry: int(entry.get("duplicate_folder_depth") or 0),
+                "enabled": lambda values: max(values, default=0) > 1,
+            },
+            {
+                "label": "Newer edit",
+                "value": lambda entry: (entry.get("duplicate_modified_timestamp") or 0) if entry.get("duplicate_is_edit_variant") else 0,
+                "enabled": lambda values: max(values, default=0) > min(values, default=0) and max(values, default=0) > 0,
+            },
+        ])
 
         while len(candidate_indices) > 1:
             round_winners: set[int] = set()
@@ -1660,25 +1821,47 @@ class Bridge(QObject):
                 break
             candidate_indices = survivors
 
-        file_sizes = [int(entry.get("file_size") or 0) for entry in ranked]
-        largest_file_size = max(file_sizes, default=0)
-        smallest_file_size = min(file_sizes, default=0)
-        if largest_file_size > smallest_file_size and file_sizes.count(smallest_file_size) == 1:
-            informative_reasons[file_sizes.index(smallest_file_size)].append("Smallest file size")
-
         def final_score(idx: int) -> tuple:
             entry = ranked[idx]
-            color_rank = 1 if str(entry.get("color_variant") or "") == "color" else 0
+            priority_scores: list[int] = []
+            for name in configured_priorities:
+                if name == "File Size":
+                    priority_scores.append(-int(entry.get("file_size") or 0) if file_size_policy == "prefer_smallest" else int(entry.get("file_size") or 0))
+                elif name == "Resolution":
+                    priority_scores.append(int(entry.get("width") or 0) * int(entry.get("height") or 0))
+                elif name == "File Format":
+                    priority_scores.append(_format_score(entry))
+                elif name == "Compression":
+                    priority_scores.append(0)
+                elif name == "Color / Grey Preference":
+                    if color_policy == "prefer_bw":
+                        priority_scores.append(1 if str(entry.get("color_variant") or "") == "grayscale" else 0)
+                    elif color_policy == "prefer_color":
+                        priority_scores.append(1 if str(entry.get("color_variant") or "") == "color" else 0)
+                    else:
+                        priority_scores.append(0)
+                elif name == "Text / No Text Preference":
+                    priority_scores.append(0)
+                elif name == "Cropped / Full Preference":
+                    if crop_policy == "prefer_cropped":
+                        priority_scores.append(1 if str(entry.get("duplicate_crop_variant") or "") == "cropped" else 0)
+                    elif crop_policy == "prefer_full":
+                        priority_scores.append(1 if str(entry.get("duplicate_crop_variant") or "") == "full" else 0)
+                    else:
+                        priority_scores.append(0)
             file_size = int(entry.get("file_size") or 0)
+            file_size_fallback = -file_size if file_size_policy == "prefer_smallest" else file_size
             area = int(entry.get("width") or 0) * int(entry.get("height") or 0)
             folder_depth = int(entry.get("duplicate_folder_depth") or 0)
             tag_count, filled_fields = self._duplicate_metadata_score(entry)
-            modified_time = int(entry.get("preferred_date") or 0)
+            preferred_raw = entry.get("preferred_date")
+            modified_time = preferred_raw if isinstance(preferred_raw, int) else self._preferred_date_ns(entry)
             return (
                 len(positive_reasons[idx]),
-                color_rank,
-                file_size,
+                *priority_scores,
+                file_size_fallback,
                 area,
+                _format_score(entry),
                 folder_depth,
                 tag_count,
                 filled_fields,
@@ -1935,6 +2118,38 @@ class Bridge(QObject):
             except Exception:
                 pass
 
+    def _backfill_scope_content_hashes(self, entries: list[dict]) -> None:
+        from app.mediamanager.utils.hashing import calculate_file_hash
+
+        updates: list[tuple[str, str]] = []
+        for entry in entries:
+            if entry.get("is_folder") or str(entry.get("content_hash") or "").strip():
+                continue
+            path = str(entry.get("path") or "").strip()
+            if not path:
+                continue
+            try:
+                p = Path(path)
+                if not p.exists() or not p.is_file():
+                    continue
+                content_hash = calculate_file_hash(p)
+            except Exception:
+                content_hash = ""
+            if not content_hash:
+                continue
+            entry["content_hash"] = content_hash
+            updates.append((content_hash, path))
+        if not updates:
+            return
+        try:
+            self.conn.executemany("UPDATE media_items SET content_hash = ? WHERE path = ?", updates)
+            self.conn.commit()
+        except Exception as exc:
+            try:
+                self._log(f"content hash backfill failed: {exc}")
+            except Exception:
+                pass
+
     def _similarity_config(self) -> tuple[int, int]:
         level = self._gallery_similarity_threshold()
         mapping = {
@@ -1963,6 +2178,7 @@ class Bridge(QObject):
                 "gallery.group_by": self._gallery_group_by(),
                 "gallery.group_date_granularity": self._gallery_group_date_granularity(),
                 "gallery.similarity_threshold": self._gallery_similarity_threshold(),
+                "duplicate.settings.active_tab": str(self.settings.value("duplicate/settings/active_tab", "rules", type=str) or "rules"),
                 "ui.accent_color": str(self.settings.value("ui/accent_color", "#8ab4f8", type=str) or "#8ab4f8"),
                 "ui.show_left_panel": bool(self.settings.value("ui/show_left_panel", True, type=bool)),
                 "ui.show_right_panel": bool(self.settings.value("ui/show_right_panel", True, type=bool)),
@@ -2013,7 +2229,7 @@ class Bridge(QObject):
                 "updates.check_on_launch": bool(self.settings.value("updates/check_on_launch", True, type=bool)),
             }
             for qkey in self.settings.allKeys():
-                if qkey.startswith("metadata/display/") or qkey.startswith("metadata/layout/"):
+                if qkey.startswith("metadata/display/") or qkey.startswith("metadata/layout/") or qkey.startswith("duplicate/"):
                     data[qkey.replace("/", ".")] = self._coerce_setting_value(self.settings.value(qkey))
             return data
         except Exception:
@@ -2026,6 +2242,7 @@ class Bridge(QObject):
                 "gallery.group_by": "none",
                 "gallery.group_date_granularity": "day",
                 "gallery.similarity_threshold": "low",
+                "duplicate.settings.active_tab": "rules",
                 "ui.accent_color": "#8ab4f8",
                 "ui.show_left_panel": True,
                 "ui.show_right_panel": True,
@@ -2121,7 +2338,7 @@ class Bridge(QObject):
                 "ui.preview_above_details",
                 "updates.check_on_launch"
             )
-            if key not in allowed and not key.startswith("metadata.display."):
+            if key not in allowed and not key.startswith("metadata.display.") and not key.startswith("duplicate.rules.merge"):
                 return False
             qkey = key.replace(".", "/")
             self.settings.setValue(qkey, bool(value))
@@ -2135,7 +2352,7 @@ class Bridge(QObject):
     @Slot(str, str, result=bool)
     def set_setting_str(self, key: str, value: str) -> bool:
         try:
-            if key not in ("gallery.start_folder", "gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "gallery.similarity_threshold", "ui.accent_color", "ui.theme_mode", "metadata.display.order") and not key.startswith("metadata.layout."):
+            if key not in ("gallery.start_folder", "gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "gallery.similarity_threshold", "ui.accent_color", "ui.theme_mode", "metadata.display.order", "duplicate.settings.active_tab") and not key.startswith("metadata.layout.") and not key.startswith("duplicate.rules.") and key != "duplicate.priorities.order":
                 return False
             if key == "gallery.view_mode":
                 allowed = {"masonry", "grid_small", "grid_medium", "grid_large", "grid_xlarge", "list", "content", "details", "duplicates", "similar", "similar_only"}
@@ -2149,6 +2366,9 @@ class Bridge(QObject):
                     return False
             elif key == "gallery.similarity_threshold":
                 if value not in {"very_low", "low", "medium", "high", "very_high"}:
+                    return False
+            elif key == "duplicate.settings.active_tab":
+                if value not in {"rules", "priorities"}:
                     return False
             qkey = key.replace(".", "/")
             self.settings.setValue(qkey, str(value or ""))
@@ -2970,7 +3190,12 @@ class Bridge(QObject):
 
     @Slot(list, result=bool)
     def merge_duplicate_group_metadata(self, paths: list[str]) -> bool:
-        from app.mediamanager.db.ai_metadata_repo import get_media_ai_metadata
+        from app.mediamanager.db.ai_metadata_repo import (
+            build_media_ai_sidebar_fields,
+            get_media_ai_metadata,
+            replace_media_ai_workflows,
+            upsert_media_ai_selected_fields,
+        )
         from app.mediamanager.db.media_repo import get_media_by_path, update_media_dates
         from app.mediamanager.db.metadata_repo import get_media_metadata, upsert_media_metadata
         from app.mediamanager.db.tags_repo import attach_tags, list_media_tags
@@ -2993,6 +3218,29 @@ class Bridge(QObject):
             if len(rows) < 2:
                 return False
 
+            all_enabled = bool(self.settings.value("duplicate/rules/merge/all", False, type=bool))
+
+            def merge_enabled(name: str, default: bool = False) -> bool:
+                return all_enabled or bool(self.settings.value(f"duplicate/rules/merge/{name}", default, type=bool))
+
+            ranked_media = self._rank_duplicate_group([dict(media) for media, _, _, _ in rows])
+            path_rank = {str(entry.get("path") or ""): idx for idx, entry in enumerate(ranked_media)}
+            sorted_rows = sorted(rows, key=lambda row: path_rank.get(str(row[0].get("path") or ""), 10**9))
+
+            def pick_best_text(values: list[str]) -> str:
+                for value in values:
+                    text = str(value or "").strip()
+                    if text:
+                        return text
+                return ""
+
+            def pick_best_workflows() -> list[dict]:
+                for _, _, ai_meta, _ in sorted_rows:
+                    workflows = list(ai_meta.get("workflows") or [])
+                    if workflows:
+                        return workflows
+                return []
+
             merged_tags = sorted({tag.strip() for _, _, _, tags in rows for tag in tags if str(tag).strip()}, key=str.casefold)
             merged_title = self._merge_duplicate_scalar_field([meta.get("title") for _, meta, _, _ in rows])
             merged_desc = self._merge_duplicate_text_field([meta.get("description") or ai_meta.get("description") for _, meta, ai_meta, _ in rows])
@@ -3001,30 +3249,86 @@ class Bridge(QObject):
             merged_embedded_comments = self._merge_duplicate_text_field([meta.get("embedded_comments") for _, meta, _, _ in rows])
             merged_ai_prompt = self._merge_duplicate_text_field([meta.get("ai_prompt") or ai_meta.get("ai_prompt") for _, meta, ai_meta, _ in rows])
             merged_ai_negative = self._merge_duplicate_text_field([meta.get("ai_negative_prompt") or ai_meta.get("ai_negative_prompt") for _, meta, ai_meta, _ in rows])
-            merged_ai_params = self._merge_duplicate_text_field([meta.get("ai_params") for _, meta, _, _ in rows])
+            merged_ai_params = pick_best_text([meta.get("ai_params") for _, meta, _, _ in sorted_rows])
+            merged_workflows = pick_best_workflows()
+            merged_workflow_summary = build_media_ai_sidebar_fields({"workflows": merged_workflows}).get("ai_workflows_summary", "")
             merged_exif_date = self._merge_duplicate_scalar_field([media.get("exif_date_taken") for media, _, _, _ in rows])
             merged_metadata_date = self._merge_duplicate_scalar_field([media.get("metadata_date") for media, _, _, _ in rows])
 
+            write_title = merged_title if all_enabled else None
+            write_desc = merged_desc if merge_enabled("description", True) else None
+            write_notes = merged_notes if merge_enabled("notes", True) else None
+            write_embedded_tags = merged_embedded_tags if merge_enabled("tags", True) else None
+            write_embedded_comments = merged_embedded_comments if merge_enabled("comments", True) else None
+            write_ai_prompt = merged_ai_prompt if merge_enabled("ai_prompts", True) else None
+            write_ai_negative = merged_ai_negative if merge_enabled("ai_prompts", True) else None
+            write_ai_params = merged_ai_params if merge_enabled("ai_parameters", True) else None
+            should_write_db_meta = any(
+                value is not None
+                for value in (
+                    write_title,
+                    write_desc,
+                    write_notes,
+                    write_embedded_tags,
+                    write_embedded_comments,
+                    write_ai_prompt,
+                    write_ai_negative,
+                    write_ai_params,
+                )
+            )
+
             for media, _, _, _ in rows:
-                upsert_media_metadata(
-                    self.conn,
-                    media["id"],
-                    merged_title,
-                    merged_desc,
-                    merged_notes,
-                    merged_embedded_tags,
-                    merged_embedded_comments,
-                    merged_ai_prompt,
-                    merged_ai_negative,
-                    merged_ai_params,
-                )
-                attach_tags(self.conn, media["id"], merged_tags)
-                update_media_dates(
-                    self.conn,
-                    media["id"],
-                    exif_date_taken=merged_exif_date or None,
-                    metadata_date=merged_metadata_date or None,
-                )
+                if should_write_db_meta:
+                    upsert_media_metadata(
+                        self.conn,
+                        media["id"],
+                        write_title,
+                        write_desc,
+                        write_notes,
+                        write_embedded_tags,
+                        write_embedded_comments,
+                        write_ai_prompt,
+                        write_ai_negative,
+                        write_ai_params,
+                    )
+                if merge_enabled("tags", True):
+                    attach_tags(self.conn, media["id"], merged_tags)
+                if all_enabled:
+                    update_media_dates(
+                        self.conn,
+                        media["id"],
+                        exif_date_taken=merged_exif_date or None,
+                        metadata_date=merged_metadata_date or None,
+                    )
+                if merge_enabled("description", True) or merge_enabled("ai_prompts", True):
+                    upsert_media_ai_selected_fields(
+                        self.conn,
+                        media["id"],
+                        ai_prompt=write_ai_prompt,
+                        ai_negative_prompt=write_ai_negative,
+                        description=write_desc,
+                    )
+                if merge_enabled("workflows", True):
+                    replace_media_ai_workflows(self.conn, media["id"], merged_workflows)
+                parent_win = self.parent() if isinstance(self.parent(), QWidget) else None
+                if parent_win and hasattr(parent_win, "_embed_metadata_payload_to_file"):
+                    try:
+                        parent_win._embed_metadata_payload_to_file(
+                            str(media.get("path") or ""),
+                            tags=merged_tags if merge_enabled("tags", True) else [],
+                            embedded_tags_text=write_embedded_tags or "",
+                            description=write_desc or "",
+                            comments=write_embedded_comments or "",
+                            ai_prompt=write_ai_prompt or "",
+                            ai_negative_prompt=write_ai_negative or "",
+                            ai_params=write_ai_params or "",
+                            ai_workflows=merged_workflow_summary if merge_enabled("workflows", True) else "",
+                            notes=write_notes or "",
+                            exif_date_taken_raw=(merged_exif_date or "") if all_enabled else "",
+                            metadata_date_raw=(merged_metadata_date or "") if all_enabled else "",
+                        )
+                    except Exception:
+                        pass
             return True
         except Exception as exc:
             try:
@@ -3036,6 +3340,10 @@ class Bridge(QObject):
     @Slot(list, int, int, str, str, str, result=list)
     def list_media(self, folders, limit=100, offset=0, sort_by="name_asc", filter_type="all", search_query="") -> list:
         try:
+            try:
+                self.conn.commit()
+            except Exception:
+                pass
             candidates = self._get_gallery_entries(folders, sort_by, filter_type, search_query)
             start, end = max(0, int(offset)), max(0, int(offset)) + max(0, int(limit))
             out = []
@@ -3070,6 +3378,10 @@ class Bridge(QObject):
                             "duplicate_space_savings": 0,
                             "duplicate_category_reasons": [],
                             "duplicate_is_overall_best": False,
+                            "color_variant": "",
+                            "duplicate_crop_variant": "",
+                            "duplicate_size_variant": "",
+                            "duplicate_file_format": "",
                             "review_group_mode": "",
                         }
                     )
@@ -3111,6 +3423,10 @@ class Bridge(QObject):
                     "duplicate_category_reasons": list(r.get("duplicate_category_reasons") or []),
                     "duplicate_best_reason": r.get("duplicate_best_reason") or "",
                     "duplicate_is_overall_best": bool(r.get("duplicate_is_overall_best")),
+                    "color_variant": r.get("color_variant") or "",
+                    "duplicate_crop_variant": r.get("duplicate_crop_variant") or "",
+                    "duplicate_size_variant": r.get("duplicate_size_variant") or "",
+                    "duplicate_file_format": r.get("duplicate_file_format") or "",
                     "review_group_mode": r.get("review_group_mode") or "",
                 })
             return out
@@ -3135,6 +3451,10 @@ class Bridge(QObject):
     @Slot(list, str, str, result=int)
     def count_media(self, folders: list, filter_type: str = "all", search_query: str = "") -> int:
         try:
+            try:
+                self.conn.commit()
+            except Exception:
+                pass
             return len(self._get_gallery_entries(folders, "name_asc", filter_type, search_query))
         except Exception: return 0
 
@@ -3362,6 +3682,7 @@ class Bridge(QObject):
             entries = []
         review_mode = self._review_group_mode()
         if review_mode in {"similar", "similar_only"}:
+            self._backfill_scope_content_hashes(entries)
             self._backfill_scope_phashes(entries)
             threshold, bucket_prefix = self._similarity_config()
             return self._build_similar_entries(
@@ -3372,6 +3693,7 @@ class Bridge(QObject):
                 bucket_prefix=bucket_prefix,
             )
         if review_mode == "duplicates":
+            self._backfill_scope_content_hashes(entries)
             return self._build_duplicate_entries(entries, sort_by)
         return self._sort_gallery_entries(entries, sort_by)
 
@@ -3389,18 +3711,14 @@ class Bridge(QObject):
                 self._scan_abort = False
                 primary = folders[0] if folders else ""
                 self.scanStarted.emit(primary)
-                from app.mediamanager.db.connect import connect_db
-                scan_conn = connect_db(str(self.db_path))
-                try:
+                with self._scan_lock:
+                    # Always refresh the reconciled scope first so a newly selected root
+                    # cannot accidentally inherit stale paths from a previous disk cache.
+                    self._get_reconciled_candidates(folders, "all", search_query)
                     paths = list(self._disk_cache.values())
-                    if not paths and folders:
-                        self._get_reconciled_candidates(folders, "all", search_query)
-                        paths = list(self._disk_cache.values())
-                    self._do_full_scan(paths, scan_conn, emit_progress=True)
+                    self._do_full_scan(paths, self.conn, emit_progress=True)
                     self._last_full_scan_key = scan_key
                     self.scanFinished.emit(primary, len(self._get_reconciled_candidates(folders, "all", search_query)))
-                finally:
-                    scan_conn.close()
             except Exception as exc:
                 try:
                     self._log(f"Background scan failed: {exc}")
@@ -3415,12 +3733,8 @@ class Bridge(QObject):
             return
         def work():
             try:
-                from app.mediamanager.db.connect import connect_db
-                scan_conn = connect_db(str(self.db_path))
-                try:
-                    self._do_full_scan(clean_paths, scan_conn, emit_progress=False)
-                finally:
-                    scan_conn.close()
+                with self._scan_lock:
+                    self._do_full_scan(clean_paths, self.conn, emit_progress=False)
             except Exception as exc:
                 try:
                     self._log(f"Page scan failed: {exc}")
@@ -3446,10 +3760,11 @@ class Bridge(QObject):
                 if existing:
                     curr_mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat()
                     if existing["file_size"] == stat.st_size and existing.get("modified_time") == curr_mtime:
+                        has_required_content_hash = bool(str(existing.get("content_hash") or "").strip())
                         has_required_visual_data = bool(existing.get("width") and existing.get("height"))
                         if p.suffix.lower() in image_exts:
                             has_required_visual_data = has_required_visual_data and bool(str(existing.get("phash") or "").strip())
-                        if has_required_visual_data:
+                        if has_required_content_hash and has_required_visual_data:
                             skip = True
                 
                 if not skip:
@@ -6108,6 +6423,218 @@ class MainWindow(QMainWindow):
         if notes:
             sections.append(f"[Notes]\n{notes}")
         return "\n\n".join(sections)
+
+    @staticmethod
+    def _build_embed_comment_from_values(
+        *,
+        description: str = "",
+        comments: str = "",
+        ai_prompt: str = "",
+        ai_negative_prompt: str = "",
+        ai_params: str = "",
+        ai_workflows: str = "",
+        notes: str = "",
+    ) -> str:
+        sections: list[str] = []
+
+        def add_section(title: str, value: str) -> None:
+            text = str(value or "").strip()
+            if text:
+                sections.append(f"[{title}]\n{text}")
+
+        add_section("Description", description)
+        add_section("Comments", comments)
+        add_section("AI Prompt", ai_prompt)
+        add_section("AI Negative Prompt", ai_negative_prompt)
+        add_section("AI Parameters", ai_params)
+        add_section("AI Workflows", ai_workflows)
+        add_section("Notes", notes)
+        return "\n\n".join(sections)
+
+    def _embed_metadata_payload_to_file(
+        self,
+        path: str,
+        *,
+        tags: list[str] | None = None,
+        embedded_tags_text: str = "",
+        description: str = "",
+        comments: str = "",
+        ai_prompt: str = "",
+        ai_negative_prompt: str = "",
+        ai_params: str = "",
+        ai_workflows: str = "",
+        notes: str = "",
+        exif_date_taken_raw: str = "",
+        metadata_date_raw: str = "",
+    ) -> bool:
+        p = Path(str(path or ""))
+        if not p.exists():
+            return False
+
+        ext = p.suffix.lower()
+        if ext not in {".jpg", ".jpeg", ".png", ".webp", ".avif"}:
+            return False
+
+        merged_tags = self._merge_tag_lists(
+            self._normalize_tag_list(embedded_tags_text),
+            list(tags or []),
+        )
+        tags_raw = "; ".join(merged_tags)
+        comm_raw = self._build_embed_comment_from_values(
+            description=description,
+            comments=comments,
+            ai_prompt=ai_prompt,
+            ai_negative_prompt=ai_negative_prompt,
+            ai_params=ai_params,
+            ai_workflows=ai_workflows,
+            notes=notes,
+        ).strip()
+
+        try:
+            from PIL import Image, PngImagePlugin
+            import tempfile, os
+
+            exif_date_taken_exif = self._format_exif_datetime(exif_date_taken_raw)
+            metadata_date_exif = self._format_exif_datetime(metadata_date_raw)
+            exif_date_taken_xmp = self._format_xmp_datetime(exif_date_taken_raw)
+            metadata_date_xmp = self._format_xmp_datetime(metadata_date_raw)
+
+            with Image.open(str(p)) as img:
+                if ext == ".png":
+                    pnginfo = PngImagePlugin.PngInfo()
+                    skip_keys = {
+                        "parameters", "comment", "comments", "keywords", "subject", "description",
+                        "title", "author", "copyright", "software", "creation time", "source",
+                        "xmp", "xml:com.adobe.xmp", "exif", "itxt", "ztxt", "text", "tags", "xpcomment", "xpkeywords", "xpsubject"
+                    }
+                    for k, v in img.info.items():
+                        if isinstance(k, str) and k.strip().lower() not in skip_keys:
+                            try:
+                                pnginfo.add_text(k, str(v))
+                            except Exception:
+                                pass
+
+                    win_tags = tags_raw.replace(",", ";")
+                    if comm_raw:
+                        pnginfo.add_text("Description", comm_raw)
+                        pnginfo.add_text("Comment", comm_raw)
+                        pnginfo.add_text("Comments", comm_raw)
+                        pnginfo.add_text("Subject", comm_raw)
+                        pnginfo.add_text("Title", comm_raw)
+                    if tags_raw:
+                        pnginfo.add_text("Keywords", win_tags)
+                        pnginfo.add_text("Tags", win_tags)
+                        if not comm_raw:
+                            pnginfo.add_text("Subject", win_tags)
+                    png_date_taken_text = exif_date_taken_xmp or metadata_date_xmp
+                    if png_date_taken_text:
+                        pnginfo.add_text("Creation Time", png_date_taken_text)
+
+                    parsed_tags = [t.strip() for t in win_tags.split(";") if t.strip()]
+                    xmp_packet = self._build_png_xmp_packet(
+                        comm_raw,
+                        parsed_tags,
+                        exif_date_taken=exif_date_taken_xmp,
+                        metadata_date=metadata_date_xmp,
+                    )
+                    if xmp_packet:
+                        try:
+                            pnginfo.add_itxt("XML:com.adobe.xmp", xmp_packet)
+                        except Exception:
+                            try:
+                                pnginfo.add_text("XML:com.adobe.xmp", xmp_packet)
+                            except Exception:
+                                pass
+
+                    exif = img.getexif()
+                    for tag_id in (0x9C9C, 270, 306, 36867, 36868, 37510, 0x9C9E, 0x9C9F):
+                        try:
+                            del exif[tag_id]
+                        except Exception:
+                            pass
+                    if comm_raw:
+                        exif[0x9C9C] = (comm_raw + "\x00").encode("utf-16le")
+                        exif[270] = comm_raw
+                        exif[37510] = b"UNICODE\x00" + comm_raw.encode("utf-16le") + b"\x00\x00"
+                    if tags_raw:
+                        exif[0x9C9E] = (win_tags + "\x00").encode("utf-16le")
+                        exif[0x9C9F] = (win_tags + "\x00").encode("utf-16le")
+                    if metadata_date_exif:
+                        exif[306] = metadata_date_exif
+                        exif[36868] = metadata_date_exif
+                    if exif_date_taken_exif:
+                        exif[36867] = exif_date_taken_exif
+
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".png", dir=p.parent) as tmp:
+                        tmp_path = Path(tmp.name)
+                    try:
+                        img.load()
+                        img.save(tmp_path, "PNG", pnginfo=pnginfo, exif=exif.tobytes())
+                        os.replace(tmp_path, str(p))
+                    except Exception:
+                        if tmp_path.exists():
+                            tmp_path.unlink()
+                        raise
+
+                elif ext in (".jpg", ".jpeg"):
+                    exif = img.getexif()
+                    if comm_raw:
+                        exif[270] = comm_raw
+                        exif[37510] = comm_raw
+                        exif[0x9C9C] = (comm_raw + "\x00").encode("utf-16le")
+                    if tags_raw:
+                        win_tags = tags_raw.replace(",", ";")
+                        exif[0x9C9E] = (win_tags + "\x00").encode("utf-16le")
+                        exif[0x9C9F] = (win_tags + "\x00").encode("utf-16le")
+                    if metadata_date_exif:
+                        exif[306] = metadata_date_exif
+                        exif[36868] = metadata_date_exif
+                    if exif_date_taken_exif:
+                        exif[36867] = exif_date_taken_exif
+
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg", dir=p.parent) as tmp:
+                        tmp_path = Path(tmp.name)
+                    try:
+                        img.save(tmp_path, "JPEG", exif=exif, quality="keep" if hasattr(img, "quality") else 95)
+                        os.replace(tmp_path, str(p))
+                    except Exception:
+                        if tmp_path.exists():
+                            tmp_path.unlink()
+                        raise
+
+                elif ext == ".webp":
+                    exif = img.getexif()
+                    if comm_raw:
+                        exif[0x9C9C] = (comm_raw + "\x00").encode("utf-16le")
+                    if tags_raw:
+                        exif[0x9C9E] = (tags_raw.replace(",", ";") + "\x00").encode("utf-16le")
+                    if metadata_date_exif:
+                        exif[306] = metadata_date_exif
+                        exif[36868] = metadata_date_exif
+                    if exif_date_taken_exif:
+                        exif[36867] = exif_date_taken_exif
+
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".webp", dir=p.parent) as tmp:
+                        tmp_path = Path(tmp.name)
+                    try:
+                        img.save(tmp_path, "WEBP", exif=exif, lossless=True)
+                        os.replace(tmp_path, str(p))
+                    except Exception:
+                        if tmp_path.exists():
+                            tmp_path.unlink()
+                        raise
+
+            try:
+                from app.mediamanager.db.media_repo import get_media_by_path
+                from app.mediamanager.metadata.persistence import inspect_and_persist_if_supported
+                media = get_media_by_path(self.bridge.conn, str(p))
+                if media:
+                    inspect_and_persist_if_supported(self.bridge.conn, media["id"], str(p), media.get("media_type"))
+            except Exception:
+                pass
+            return True
+        except Exception:
+            return False
 
     def _build_hidden_metadata_merge_comment(self) -> str:
         sections = []

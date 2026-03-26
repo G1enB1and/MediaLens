@@ -21,6 +21,7 @@ let gExternalEditors = {};
 let gCurrentDragCount = 0;
 let gPlayingInplaceCard = null;
 let gActiveMetadataMode = 'image';
+let gDuplicateSettingsMode = 'rules';
 let gUpdateToastTimer = null;
 let gScanManuallyHidden = false;
 let gGalleryViewMode = 'masonry';
@@ -173,6 +174,70 @@ const METADATA_SETTINGS_CONFIG = {
     groupOrder: ['general', 'ai'],
   },
 };
+
+const DUPLICATE_RULE_POLICIES = [
+  {
+    key: 'duplicate.rules.crop_policy',
+    label: 'Crop / Full Composition',
+    options: [
+      ['prefer_full', 'Prefer Full Composition'],
+      ['prefer_cropped', 'Prefer Cropped'],
+      ['keep_each', 'Keep Best from Each'],
+    ],
+    defaultValue: 'prefer_full',
+  },
+  {
+    key: 'duplicate.rules.color_policy',
+    label: 'Color / Black & White',
+    options: [
+      ['prefer_color', 'Prefer Color'],
+      ['prefer_bw', 'Prefer Black & White'],
+      ['keep_each', 'Keep Best from Each'],
+    ],
+    defaultValue: 'prefer_color',
+  },
+  {
+    key: 'duplicate.rules.text_policy',
+    label: 'Text / No Text',
+    options: [
+      ['prefer_text', 'Prefer Text'],
+      ['prefer_no_text', 'Prefer No Text'],
+      ['keep_each', 'Keep Best from Each'],
+    ],
+    defaultValue: 'keep_each',
+  },
+  {
+    key: 'duplicate.rules.file_size_policy',
+    label: 'File Size Variants',
+    options: [
+      ['prefer_largest', 'Prefer Largest File Size'],
+      ['prefer_smallest', 'Prefer Smallest File Size'],
+      ['keep_each', 'Keep Best from Each'],
+    ],
+    defaultValue: 'prefer_largest',
+  },
+];
+
+const DUPLICATE_FORMAT_ORDER_DEFAULT = ['PNG', 'WebP', 'JPEG', 'RAW', 'TIFF', 'BMP', 'GIF', 'HEIC', 'AVIF'];
+const DUPLICATE_MERGE_FIELDS = [
+  ['duplicate.rules.merge.tags', 'Tags', true],
+  ['duplicate.rules.merge.description', 'Description', true],
+  ['duplicate.rules.merge.comments', 'Comments', true],
+  ['duplicate.rules.merge.notes', 'Notes', true],
+  ['duplicate.rules.merge.ai_prompts', 'AI Prompts', true],
+  ['duplicate.rules.merge.ai_parameters', 'AI Parameters (Can only keep 1)', true],
+  ['duplicate.rules.merge.workflows', 'Workflows (Can only keep 1)', true],
+  ['duplicate.rules.merge.all', 'All (Includes more than listed above)', false],
+];
+const DUPLICATE_PRIORITY_ORDER_DEFAULT = [
+  'File Size',
+  'Resolution',
+  'File Format',
+  'Compression',
+  'Color / Grey Preference',
+  'Text / No Text Preference',
+  'Cropped / Full Preference',
+];
 
 // Loading progress tracking
 let gTotalOnPage = 0;
@@ -1191,18 +1256,82 @@ function deletePathsSequential(paths, onDone) {
   step();
 }
 
+function getDuplicateGroupItems(groupKey) {
+  return gMedia
+    .filter(item => String(item.duplicate_group_key || '') === String(groupKey || ''))
+    .slice()
+    .sort((a, b) => Number(a.duplicate_group_position || 0) - Number(b.duplicate_group_position || 0));
+}
+
+function computeAutoResolveKeepPaths(groupKey, settings = {}) {
+  const items = getDuplicateGroupItems(groupKey).filter(item => item && item.path);
+  if (!items.length) return [];
+  const keep = new Set();
+  const overallKeepPath = getDuplicateKeepPath(groupKey) || (items[0] && items[0].path) || '';
+  if (overallKeepPath) keep.add(overallKeepPath);
+
+  const pickFirst = (predicate) => {
+    const match = items.find(predicate);
+    if (match && match.path) keep.add(match.path);
+  };
+
+  if ((settings['duplicate.rules.color_policy'] || '') === 'keep_each') {
+    pickFirst(item => String(item.color_variant || '') === 'color');
+    pickFirst(item => String(item.color_variant || '') === 'grayscale');
+  }
+
+  if ((settings['duplicate.rules.crop_policy'] || '') === 'keep_each') {
+    pickFirst(item => String(item.duplicate_crop_variant || '') === 'full');
+    pickFirst(item => String(item.duplicate_crop_variant || '') === 'cropped');
+  }
+
+  if ((settings['duplicate.rules.file_size_policy'] || '') === 'keep_each') {
+    const sizes = items.map(item => Number(item.file_size) || 0);
+    const largest = Math.max(...sizes);
+    const smallest = Math.min(...sizes);
+    if (largest > smallest) {
+      pickFirst(item => (Number(item.file_size) || 0) === largest);
+      pickFirst(item => (Number(item.file_size) || 0) === smallest);
+    }
+  }
+
+  return Array.from(keep);
+}
+
+function runDuplicateGroupResolution(groupKey, settings, onDone) {
+  const items = getDuplicateGroupItems(groupKey);
+  const paths = items.map(item => item.path).filter(Boolean);
+  const keepPaths = new Set(computeAutoResolveKeepPaths(groupKey, settings));
+  const deletePaths = paths.filter(path => !keepPaths.has(path));
+  const mergeFirst = !!(settings && settings['duplicate.rules.merge_before_delete']);
+  const finish = () => deletePathsSequential(deletePaths, onDone);
+  if (mergeFirst && paths.length >= 2 && gBridge && gBridge.merge_duplicate_group_metadata) {
+    gBridge.merge_duplicate_group_metadata(paths);
+  }
+  finish();
+}
+
 function keepBestInDuplicateGroup(groupKey) {
-  const keepPath = getDuplicateKeepPath(groupKey);
-  if (!keepPath) return;
-  const deletePaths = gMedia
-    .filter(item => String(item.duplicate_group_key || '') === String(groupKey || '') && item.path && item.path !== keepPath)
-    .map(item => item.path);
-  if (!deletePaths.length) return;
+  if (!gBridge || !gBridge.get_settings) return;
   gPendingScrollAnchor = captureCurrentGroupScrollAnchor();
   setGlobalLoading(true, 'Deleting duplicate files...', 25);
-  deletePathsSequential(deletePaths, () => {
-    setGlobalLoading(false);
-    refreshFromBridge(gBridge, false);
+  gBridge.get_settings((settings) => {
+    const nextSettings = settings || {};
+    const keepPath = getDuplicateKeepPath(groupKey);
+    const items = getDuplicateGroupItems(groupKey);
+    const paths = items.map(item => item.path).filter(Boolean);
+    const deletePaths = paths.filter(path => path !== keepPath);
+    if (!keepPath || !deletePaths.length) {
+      setGlobalLoading(false);
+      return;
+    }
+    if (nextSettings['duplicate.rules.merge_before_delete'] && paths.length >= 2 && gBridge.merge_duplicate_group_metadata) {
+      gBridge.merge_duplicate_group_metadata(paths);
+    }
+    deletePathsSequential(deletePaths, () => {
+      setGlobalLoading(false);
+      refreshFromBridge(gBridge, false);
+    });
   });
 }
 
@@ -1229,18 +1358,25 @@ function autoResolveAllDuplicateGroups() {
   ));
   if (!groupKeys.length) return;
   gPendingScrollAnchor = captureCurrentGroupScrollAnchor();
-  setGlobalLoading(true, 'Resolving duplicate metadata...', 20);
-  groupKeys.forEach((groupKey) => {
-    const paths = gMedia
-      .filter(item => String(item.duplicate_group_key || '') === groupKey)
-      .map(item => item.path)
-      .filter(Boolean);
-    if (paths.length >= 2 && gBridge && gBridge.merge_duplicate_group_metadata) {
-      gBridge.merge_duplicate_group_metadata(paths);
-    }
+  setGlobalLoading(true, 'Auto resolving duplicate groups...', 20);
+  if (!gBridge || !gBridge.get_settings) {
+    setGlobalLoading(false);
+    return;
+  }
+  gBridge.get_settings((settings) => {
+    const nextSettings = settings || {};
+    const queue = groupKeys.slice();
+    const step = () => {
+      const nextGroup = queue.shift();
+      if (!nextGroup) {
+        setGlobalLoading(false);
+        refreshFromBridge(gBridge, false);
+        return;
+      }
+      runDuplicateGroupResolution(nextGroup, nextSettings, step);
+    };
+    step();
   });
-  setGlobalLoading(false);
-  refreshFromBridge(gBridge, false);
 }
 
 function deleteDuplicateCard(path) {
@@ -4655,6 +4791,7 @@ function wireSettings() {
   });
 
   wireMetadataSettings();
+  wireDuplicateSettings();
 }
 
 function metadataConfigFor(mode) {
@@ -4893,6 +5030,208 @@ function wireMetadataSettings() {
         mount.insertBefore(dragGroup, next ? target.nextSibling : target);
       }
     }
+  });
+}
+
+function duplicateSettingsArray(settings, key, defaults) {
+  const raw = settings && settings[key];
+  let order = [];
+  try { order = raw ? JSON.parse(raw) : []; } catch (e) { order = []; }
+  if (!Array.isArray(order)) order = [];
+  defaults.forEach(item => {
+    if (!order.includes(item)) order.push(item);
+  });
+  return order.filter(item => defaults.includes(item));
+}
+
+function duplicateRuleValue(settings, rule) {
+  const raw = settings && settings[rule.key];
+  const allowed = rule.options.map(([value]) => value);
+  return allowed.includes(raw) ? raw : rule.defaultValue;
+}
+
+function renderDuplicateSettings(settings) {
+  const mount = document.getElementById('duplicateSettingsMount');
+  if (!mount) return;
+  mount.innerHTML = '';
+
+  if (gDuplicateSettingsMode === 'priorities') {
+    const section = document.createElement('section');
+    section.className = 'metadata-group';
+    section.innerHTML = `
+      <div class="metadata-group-header">
+        <div class="metadata-group-title">Order of Importance</div>
+      </div>
+      <div class="metadata-group-body duplicate-sortable-list" id="duplicatePriorityList"></div>
+    `;
+    mount.appendChild(section);
+    const list = section.querySelector('#duplicatePriorityList');
+    duplicateSettingsArray(settings, 'duplicate.priorities.order', DUPLICATE_PRIORITY_ORDER_DEFAULT).forEach((label) => {
+      const row = document.createElement('div');
+      row.className = 'sortable-item';
+      row.draggable = true;
+      row.dataset.key = label;
+      row.innerHTML = `
+        <div class="drag-handle" title="Drag priority">☰</div>
+        <span>${escapeHtml(label)}</span>
+      `;
+      list.appendChild(row);
+    });
+    return;
+  }
+
+  DUPLICATE_RULE_POLICIES.forEach((rule, idx) => {
+    const field = document.createElement('section');
+    field.className = 'field duplicate-settings-section';
+    const selected = duplicateRuleValue(settings, rule);
+    field.innerHTML = `
+      <div class="field-label">${escapeHtml(rule.label)}</div>
+      <div class="segmented-control duplicate-policy-control" data-setting-key="${rule.key}">
+        ${rule.options.map(([value, label]) => `
+          <input type="radio" name="duplicate_rule_${idx}" value="${value}" id="duplicateRule_${idx}_${value}" ${selected === value ? 'checked' : ''} />
+          <label for="duplicateRule_${idx}_${value}">${escapeHtml(label)}</label>
+        `).join('')}
+      </div>
+    `;
+    mount.appendChild(field);
+  });
+
+  const formatSection = document.createElement('section');
+  formatSection.className = 'metadata-group duplicate-settings-section';
+  formatSection.innerHTML = `
+    <div class="metadata-group-header">
+      <div class="metadata-group-title">Preferred File Formats in Ranked Order</div>
+      <div class="hint">Drag and drop to sort</div>
+    </div>
+    <div class="metadata-group-body duplicate-sortable-list" id="duplicateFormatOrderList"></div>
+  `;
+  mount.appendChild(formatSection);
+  const formatList = formatSection.querySelector('#duplicateFormatOrderList');
+  duplicateSettingsArray(settings, 'duplicate.rules.format_order', DUPLICATE_FORMAT_ORDER_DEFAULT).forEach((format) => {
+    const row = document.createElement('div');
+    row.className = 'sortable-item';
+    row.draggable = true;
+    row.dataset.key = format;
+    row.innerHTML = `
+      <div class="drag-handle" title="Drag format">☰</div>
+      <span>${escapeHtml(format)}</span>
+    `;
+    formatList.appendChild(row);
+  });
+
+  const mergeSection = document.createElement('section');
+  mergeSection.className = 'metadata-group duplicate-settings-section';
+  mergeSection.innerHTML = `
+    <div class="metadata-group-header">
+      <label class="toggle duplicate-merge-toggle">
+        <input type="checkbox" id="duplicateMergeBeforeDelete" ${(settings && settings['duplicate.rules.merge_before_delete']) ? 'checked' : ''} />
+        <span class="metadata-group-title">Always merge metadata before deleting</span>
+      </label>
+    </div>
+    <div class="metadata-group-body duplicate-merge-fields">
+      <div class="field-label duplicate-merge-label">Metadata to merge</div>
+      ${DUPLICATE_MERGE_FIELDS.map(([key, label, defaultEnabled]) => {
+        const enabled = settings && settings[key];
+        const checked = enabled !== undefined ? !!enabled : !!defaultEnabled;
+        return `
+          <label class="toggle">
+            <input type="checkbox" class="duplicate-merge-field-toggle" data-setting-key="${key}" ${checked ? 'checked' : ''} />
+            <span>${escapeHtml(label)}</span>
+          </label>
+        `;
+      }).join('')}
+    </div>
+  `;
+  mount.appendChild(mergeSection);
+}
+
+function saveDuplicateSortableOrder(listId, settingKey) {
+  const list = document.getElementById(listId);
+  if (!list || !gBridge || !gBridge.set_setting_str) return;
+  const order = Array.from(list.querySelectorAll('.sortable-item')).map(el => el.dataset.key).filter(Boolean);
+  gBridge.set_setting_str(settingKey, JSON.stringify(order), () => {});
+}
+
+function wireDuplicateSettings() {
+  const mount = document.getElementById('duplicateSettingsMount');
+  if (!mount) return;
+
+  document.querySelectorAll('input[name="duplicate_settings_mode"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      if (!radio.checked) return;
+      gDuplicateSettingsMode = radio.value === 'priorities' ? 'priorities' : 'rules';
+      if (gBridge && gBridge.set_setting_str) {
+        gBridge.set_setting_str('duplicate.settings.active_tab', gDuplicateSettingsMode, () => {});
+      }
+      if (gBridge && gBridge.get_settings) {
+        gBridge.get_settings(renderDuplicateSettings);
+      }
+    });
+  });
+
+  mount.addEventListener('change', (e) => {
+    const policy = e.target.closest('.duplicate-policy-control input[type="radio"]');
+    if (policy && policy.checked && gBridge && gBridge.set_setting_str) {
+      const control = policy.closest('.duplicate-policy-control');
+      const settingKey = control && control.dataset.settingKey;
+      if (settingKey) gBridge.set_setting_str(settingKey, policy.value || '', () => {});
+      return;
+    }
+    const mergeBeforeDelete = e.target.closest('#duplicateMergeBeforeDelete');
+    if (mergeBeforeDelete && gBridge && gBridge.set_setting_bool) {
+      gBridge.set_setting_bool('duplicate.rules.merge_before_delete', !!mergeBeforeDelete.checked, () => {});
+      return;
+    }
+    const mergeField = e.target.closest('.duplicate-merge-field-toggle');
+    if (mergeField && gBridge && gBridge.set_setting_bool) {
+      gBridge.set_setting_bool(mergeField.dataset.settingKey, !!mergeField.checked, () => {});
+    }
+  });
+
+  let dragItem = null;
+  mount.addEventListener('dragstart', (e) => {
+    const item = e.target.closest('.sortable-item');
+    if (!item) return;
+    dragItem = item;
+    item.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  });
+
+  mount.addEventListener('dragend', () => {
+    if (!dragItem) return;
+    const parentId = dragItem.parentElement && dragItem.parentElement.id;
+    dragItem.classList.remove('dragging');
+    dragItem = null;
+    mount.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+    if (parentId === 'duplicateFormatOrderList') {
+      saveDuplicateSortableOrder(parentId, 'duplicate.rules.format_order');
+    } else if (parentId === 'duplicatePriorityList') {
+      saveDuplicateSortableOrder(parentId, 'duplicate.priorities.order');
+    }
+  });
+
+  mount.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    if (!dragItem) return;
+    const target = e.target.closest('.sortable-item');
+    if (target && target !== dragItem && target.parentElement === dragItem.parentElement) {
+      target.classList.add('drag-over');
+    }
+  });
+
+  mount.addEventListener('dragleave', (e) => {
+    const target = e.target.closest('.drag-over');
+    if (target) target.classList.remove('drag-over');
+  });
+
+  mount.addEventListener('drop', (e) => {
+    e.preventDefault();
+    if (!dragItem) return;
+    const target = e.target.closest('.sortable-item');
+    if (!target || target === dragItem || target.parentElement !== dragItem.parentElement) return;
+    const rect = target.getBoundingClientRect();
+    const next = (e.clientY - rect.top) > (rect.height / 2);
+    target.parentElement.insertBefore(dragItem, next ? target.nextSibling : target);
   });
 }
 
@@ -5278,6 +5617,11 @@ async function main() {
       const modeRadio = document.getElementById(`metadataMode${gActiveMetadataMode.charAt(0).toUpperCase()}${gActiveMetadataMode.slice(1)}`);
       if (modeRadio) modeRadio.checked = true;
       renderMetadataSettings(s || {});
+      const duplicateSettingsMode = (s && s['duplicate.settings.active_tab']) || 'rules';
+      gDuplicateSettingsMode = duplicateSettingsMode === 'priorities' ? 'priorities' : 'rules';
+      const duplicateModeRadio = document.getElementById(gDuplicateSettingsMode === 'priorities' ? 'duplicateSettingsPriorities' : 'duplicateSettingsRules');
+      if (duplicateModeRadio) duplicateModeRadio.checked = true;
+      renderDuplicateSettings(s || {});
 
       // Update settings
       const autoUpdate = document.getElementById('toggleAutoUpdate');
