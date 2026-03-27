@@ -1,11 +1,15 @@
 ﻿# MediaLens
 
+![Gallery](docs/Screenshots/MediaLens-Logo-1024.png)
+
 **MediaLens is a local-first media intelligence platform for creators, AI workflows, and large libraries.**
 
-It doesn't just organize files - it understands them, so you can stop digging through folders and start finding meaning instantly.
+It doesn’t just organize files — it understands how they relate, so you can stop digging through folders and start making decisions instantly.
 
-Extract prompts, analyze metadata, and navigate your entire library by time, context, and meaning.
+Extract prompts, analyze metadata, detect duplicates and variations, and navigate your entire library by time, context, and meaning.
+
 Browse thousands of files smoothly, and surface hidden metadata like AI prompts, EXIF data, and embedded comments.
+
 
 ---
 
@@ -19,6 +23,7 @@ Most media managers treat files like static objects.
 MediaLens treats them like **living data**.
 
 - Navigate your library by **collections, time, or folders**
+- Detect and clean up **duplicates and visually similar images**
 - Extract and edit **deep embedded metadata** (AI prompts, EXIF, workflows)
 - Stay fast even with tens of thousands of files
 - Stay flexible with **database + embedded metadata dual storage**
@@ -40,15 +45,59 @@ MediaLens is designed for people who manage **large, complex, or AI-generated me
 
 ## What Makes MediaLens Different?
 
-- Not cloud-locked - fully local and private
 - Not just tagging - understands embedded AI workflows and prompts
 - Not folder-bound - collections and metadata-first organization
 - Not static - built for evolving datasets and creative pipelines
+- Not blind cleanup — **explains why files are similar and which to keep**
 
 ---
 
 ## Key Features
 
+### Intelligent Duplicate & Similarity Detection
+
+MediaLens doesn’t just find identical files — it understands variations.
+
+#### Detect
+
+- Exact duplicates (content hash)
+- Visually similar images (perceptual hashing)
+- Resized, compressed, and edited variants
+- Color vs grayscale versions
+- Cropped vs full compositions
+
+#### Understand
+
+Each group is analyzed and labeled with meaningful differences:
+
+- Largest / smallest file size
+- Highest resolution
+- Preferred file format
+- Color vs grayscale
+- Cropped vs full composition
+- Metadata richness
+- Folder organization
+
+#### Decide (or let MediaLens decide for you)
+
+- ★ Best overall recommendation based on configurable priorities
+- Keep-best selection per group
+- Non-destructive metadata merging
+- Auto Resolve with flexible rules
+
+#### Stay in control
+
+- Configure ranking priorities (what “best” means to you)
+- Define variant rules (prefer this / prefer that / keep both)
+- Safely review before deleting
+- Never deletes files blindly — decisions are always explainable and reviewable
+- Designed to prevent destructive mistakes in large libraries
+
+![Gallery](docs/Screenshots/Screenshot-Similar-Group-1.png)
+
+![Gallery](docs/Screenshots/Screenshot-Duplicate-Settings-3.png)
+
+---
 ### Advanced Metadata System
 
 Go beyond filenames, and even beyond traditional metadata.
@@ -66,7 +115,7 @@ Go beyond filenames, and even beyond traditional metadata.
 - Edit metadata in bulk across files or folders
 - Persistent tagging via file hashing (even after moving/renaming files)
 
-![Gallery](docs/Screenshots/Screenshot-Metadata-AI-02.png)
+![Gallery](docs/Screenshots/Screenshot-Metadata-AI-01.png)  
 
 ---
 
@@ -82,7 +131,7 @@ Explore your media by **when it was created, modified, acquired, taken, or autom
 
 This transforms browsing from "where is it?" to **"when did I make it?"**
 
-![Gallery](docs/Screenshots/Screenshot-Timeline-02.png)
+![Gallery](docs/Screenshots/Screenshot-Timeline-01.png)  
 
 ---
 
@@ -98,6 +147,7 @@ This transforms browsing from "where is it?" to **"when did I make it?"**
 - Grid (various sizes)
 - List / Details / Content views
 
+  
 ---
 
 ### Smart Organization
@@ -144,6 +194,7 @@ Download the latest installer:
 ## Power Users (Run from Source)
 
 ```powershell
+
 git clone https://github.com/G1enB1and/MediaLens.git
 cd MediaLens
 python -m venv .venv
@@ -152,6 +203,7 @@ python -m pip install -U pip
 python -m pip install -e .
 python scripts\setup.py
 python run.py
+
 ```
 
 ---
@@ -162,7 +214,6 @@ MediaLens is evolving into a full intelligent media platform.
 
 ### Near-Term
 
-- Duplicate finder with smart merge logic
 - Compare mode (side-by-side / overlay)
 - Video preview in metadata panel
 - Batch rename engine
@@ -177,6 +228,7 @@ MediaLens is evolving into a full intelligent media platform.
 - Prompt library and workflow tools
 - "Chat with your images" (vision + LLM integration)
 - Segment Anything (SAM) integration
+- AI-assisted similarity validation for edge cases
 
 ---
 
