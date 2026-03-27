@@ -31,11 +31,31 @@ def _collect_file_stats(path: str) -> tuple[int, str, str]:
     return size, created, modified
 
 
-def _ensure_phash_column(conn: sqlite3.Connection) -> None:
+def _ensure_media_items_scan_columns(conn: sqlite3.Connection) -> None:
     cols = {row[1] for row in conn.execute("PRAGMA table_info(media_items)").fetchall()}
     if "phash" not in cols:
         conn.execute("ALTER TABLE media_items ADD COLUMN phash TEXT")
+    if "text_detected" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN text_detected INTEGER")
+    if "text_detection_score" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN text_detection_score REAL")
+    if "text_detection_version" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN text_detection_version INTEGER")
+    if "text_more_likely" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN text_more_likely INTEGER")
+    if "text_more_likely_score" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN text_more_likely_score REAL")
+    if "text_more_likely_version" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN text_more_likely_version INTEGER")
+    if "text_verified" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN text_verified INTEGER")
+    if "text_verification_score" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN text_verification_score REAL")
+    if "text_verification_version" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN text_verification_version INTEGER")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_media_items_phash ON media_items(phash)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_items_text_detected ON media_items(text_detected)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_items_text_more_likely ON media_items(text_more_likely)")
     conn.commit()
 
 
@@ -45,12 +65,21 @@ def add_media_item(
     media_type: str,
     content_hash: Optional[str] = None,
     phash: Optional[str] = None,
+    text_detected: Optional[bool] = None,
+    text_detection_score: Optional[float] = None,
+    text_detection_version: Optional[int] = None,
+    text_more_likely: Optional[bool] = None,
+    text_more_likely_score: Optional[float] = None,
+    text_more_likely_version: Optional[int] = None,
+    text_verified: Optional[bool] = None,
+    text_verification_score: Optional[float] = None,
+    text_verification_version: Optional[int] = None,
     width: Optional[int] = None,
     height: Optional[int] = None,
     duration_ms: Optional[int] = None,
     is_hidden: int = 0,
 ) -> int:
-    _ensure_phash_column(conn)
+    _ensure_media_items_scan_columns(conn)
     now = _utc_now_iso()
     normalized = normalize_windows_path(path)
     
@@ -59,11 +88,20 @@ def add_media_item(
 
     conn.execute(
         """
-        INSERT INTO media_items(path, content_hash, phash, media_type, file_size_bytes, file_created_time_utc, modified_time_utc, width, height, duration_ms, is_hidden, created_at_utc, updated_at_utc)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO media_items(path, content_hash, phash, text_detected, text_detection_score, text_detection_version, text_more_likely, text_more_likely_score, text_more_likely_version, text_verified, text_verification_score, text_verification_version, media_type, file_size_bytes, file_created_time_utc, modified_time_utc, width, height, duration_ms, is_hidden, created_at_utc, updated_at_utc)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(path) DO UPDATE SET
           content_hash=COALESCE(excluded.content_hash, content_hash),
           phash=COALESCE(excluded.phash, phash),
+          text_detected=COALESCE(excluded.text_detected, text_detected),
+          text_detection_score=COALESCE(excluded.text_detection_score, text_detection_score),
+          text_detection_version=COALESCE(excluded.text_detection_version, text_detection_version),
+          text_more_likely=COALESCE(excluded.text_more_likely, text_more_likely),
+          text_more_likely_score=COALESCE(excluded.text_more_likely_score, text_more_likely_score),
+          text_more_likely_version=COALESCE(excluded.text_more_likely_version, text_more_likely_version),
+          text_verified=COALESCE(excluded.text_verified, text_verified),
+          text_verification_score=COALESCE(excluded.text_verification_score, text_verification_score),
+          text_verification_version=COALESCE(excluded.text_verification_version, text_verification_version),
           media_type=excluded.media_type,
           file_size_bytes=excluded.file_size_bytes,
           file_created_time_utc=COALESCE(excluded.file_created_time_utc, file_created_time_utc),
@@ -74,7 +112,7 @@ def add_media_item(
           is_hidden=COALESCE(excluded.is_hidden, is_hidden),
           updated_at_utc=excluded.updated_at_utc
         """,
-        (normalized, content_hash, phash, media_type, size, created_time, mtime, width, height, duration_ms, is_hidden, now, now),
+        (normalized, content_hash, phash, (1 if text_detected else 0) if text_detected is not None else None, text_detection_score, text_detection_version, (1 if text_more_likely else 0) if text_more_likely is not None else None, text_more_likely_score, text_more_likely_version, (1 if text_verified else 0) if text_verified is not None else None, text_verification_score, text_verification_version, media_type, size, created_time, mtime, width, height, duration_ms, is_hidden, now, now),
     )
     row = conn.execute("SELECT id FROM media_items WHERE path = ?", (normalized,)).fetchone()
     if not row:
@@ -84,10 +122,10 @@ def add_media_item(
 
 
 def get_media_by_path(conn: sqlite3.Connection, path: str) -> Optional[dict]:
-    _ensure_phash_column(conn)
+    _ensure_media_items_scan_columns(conn)
     normalized = normalize_windows_path(path)
     row = conn.execute(
-        "SELECT id, path, content_hash, media_type, file_size_bytes, file_created_time_utc, modified_time_utc, exif_date_taken, metadata_date, width, height, duration_ms, is_hidden, phash FROM media_items WHERE path = ?",
+        "SELECT id, path, content_hash, media_type, file_size_bytes, file_created_time_utc, modified_time_utc, exif_date_taken, metadata_date, width, height, duration_ms, is_hidden, phash, text_detected, text_detection_score, text_detection_version, text_more_likely, text_more_likely_score, text_more_likely_version, text_verified, text_verification_score, text_verification_version FROM media_items WHERE path = ?",
         (normalized,),
     ).fetchone()
     if not row:
@@ -107,6 +145,15 @@ def get_media_by_path(conn: sqlite3.Connection, path: str) -> Optional[dict]:
         "duration_ms": row[11],
         "is_hidden": bool(row[12]),
         "phash": row[13],
+        "text_detected": None if row[14] is None else bool(row[14]),
+        "text_detection_score": row[15],
+        "text_detection_version": row[16],
+        "text_more_likely": None if row[17] is None else bool(row[17]),
+        "text_more_likely_score": row[18],
+        "text_more_likely_version": row[19],
+        "text_verified": None if row[20] is None else bool(row[20]),
+        "text_verification_score": row[21],
+        "text_verification_version": row[22],
     }
 
 
@@ -143,12 +190,21 @@ def upsert_media_item(
     media_type: str,
     content_hash: str,
     phash: str | None = None,
+    text_detected: bool | None = None,
+    text_detection_score: float | None = None,
+    text_detection_version: int | None = None,
+    text_more_likely: bool | None = None,
+    text_more_likely_score: float | None = None,
+    text_more_likely_version: int | None = None,
+    text_verified: bool | None = None,
+    text_verification_score: float | None = None,
+    text_verification_version: int | None = None,
     width: Optional[int] = None,
     height: Optional[int] = None,
     duration_ms: Optional[int] = None,
 ) -> int:
     """Upsert media item, handling renames/moves via content hash."""
-    _ensure_phash_column(conn)
+    _ensure_media_items_scan_columns(conn)
     now = _utc_now_iso()
     normalized = normalize_windows_path(path)
 
@@ -165,10 +221,10 @@ def upsert_media_item(
         conn.execute(
             """
                 UPDATE media_items 
-            SET content_hash = ?, phash = COALESCE(?, phash), file_size_bytes = ?, file_created_time_utc = ?, modified_time_utc = ?, width = ?, height = ?, duration_ms = ?, updated_at_utc = ? 
+            SET content_hash = ?, phash = COALESCE(?, phash), text_detected = COALESCE(?, text_detected), text_detection_score = COALESCE(?, text_detection_score), text_detection_version = COALESCE(?, text_detection_version), text_more_likely = COALESCE(?, text_more_likely), text_more_likely_score = COALESCE(?, text_more_likely_score), text_more_likely_version = COALESCE(?, text_more_likely_version), text_verified = COALESCE(?, text_verified), text_verification_score = COALESCE(?, text_verification_score), text_verification_version = COALESCE(?, text_verification_version), file_size_bytes = ?, file_created_time_utc = ?, modified_time_utc = ?, width = ?, height = ?, duration_ms = ?, updated_at_utc = ? 
             WHERE id = ?
             """,
-            (content_hash, phash, size, created_time, mtime, width, height, duration_ms, now, existing_by_path[0]),
+            (content_hash, phash, (1 if text_detected else 0) if text_detected is not None else None, text_detection_score, text_detection_version, (1 if text_more_likely else 0) if text_more_likely is not None else None, text_more_likely_score, text_more_likely_version, (1 if text_verified else 0) if text_verified is not None else None, text_verification_score, text_verification_version, size, created_time, mtime, width, height, duration_ms, now, existing_by_path[0]),
         )
         conn.commit()
         return int(existing_by_path[0])
@@ -194,10 +250,10 @@ def upsert_media_item(
             conn.execute(
                 """
                 UPDATE media_items 
-                SET path = ?, phash = COALESCE(?, phash), file_size_bytes = ?, file_created_time_utc = ?, modified_time_utc = ?, width = ?, height = ?, duration_ms = ?, updated_at_utc = ? 
+                SET path = ?, phash = COALESCE(?, phash), text_detected = COALESCE(?, text_detected), text_detection_score = COALESCE(?, text_detection_score), text_detection_version = COALESCE(?, text_detection_version), text_more_likely = COALESCE(?, text_more_likely), text_more_likely_score = COALESCE(?, text_more_likely_score), text_more_likely_version = COALESCE(?, text_more_likely_version), text_verified = COALESCE(?, text_verified), text_verification_score = COALESCE(?, text_verification_score), text_verification_version = COALESCE(?, text_verification_version), file_size_bytes = ?, file_created_time_utc = ?, modified_time_utc = ?, width = ?, height = ?, duration_ms = ?, updated_at_utc = ? 
                 WHERE id = ?
                 """,
-                (normalized, phash, size, created_time, mtime, width, height, duration_ms, now, media_id),
+                (normalized, phash, (1 if text_detected else 0) if text_detected is not None else None, text_detection_score, text_detection_version, (1 if text_more_likely else 0) if text_more_likely is not None else None, text_more_likely_score, text_more_likely_version, (1 if text_verified else 0) if text_verified is not None else None, text_verification_score, text_verification_version, size, created_time, mtime, width, height, duration_ms, now, media_id),
             )
             conn.commit()
             return int(media_id)
@@ -207,7 +263,7 @@ def upsert_media_item(
             pass
 
     # 3. Brand new item (or duplicate content at new path)
-    return add_media_item(conn, normalized, media_type, content_hash, phash=phash, width=width, height=height, duration_ms=duration_ms)
+    return add_media_item(conn, normalized, media_type, content_hash, phash=phash, text_detected=text_detected, text_detection_score=text_detection_score, text_detection_version=text_detection_version, text_more_likely=text_more_likely, text_more_likely_score=text_more_likely_score, text_more_likely_version=text_more_likely_version, text_verified=text_verified, text_verification_score=text_verification_score, text_verification_version=text_verification_version, width=width, height=height, duration_ms=duration_ms)
 
 
 def list_media_in_scope(
@@ -244,7 +300,7 @@ def _list_media_with_where(
     limit: Optional[int] = None,
     offset: Optional[int] = None,
 ) -> list[dict]:
-    _ensure_phash_column(conn)
+    _ensure_media_items_scan_columns(conn)
     if limit is not None:
         limit_sql = f" LIMIT {limit} OFFSET {offset or 0}"
     else:
@@ -266,6 +322,15 @@ def _list_media_with_where(
             m.height,
             m.duration_ms,
             m.is_hidden,
+            m.text_detected,
+            m.text_detection_score,
+            m.text_detection_version,
+            m.text_more_likely,
+            m.text_more_likely_score,
+            m.text_more_likely_version,
+            m.text_verified,
+            m.text_verification_score,
+            m.text_verification_version,
             meta.title,
             meta.description,
             meta.notes,
@@ -327,25 +392,34 @@ def _media_row_to_dict(row) -> dict:
         "height": row[11],
         "duration": (row[12] / 1000.0) if row[12] else None,
         "is_hidden": bool(row[13]),
-        "title": row[14],
-        "description": row[15],
-        "notes": row[16],
-        "ai_prompt": row[17],
-        "ai_negative_prompt": row[18],
-        "tool_name_found": row[19],
-        "tool_name_inferred": row[20],
-        "model_name": row[21],
-        "checkpoint_name": row[22],
-        "sampler": row[23],
-        "scheduler": row[24],
-        "cfg_scale": row[25],
-        "steps": row[26],
-        "seed": row[27],
-        "source_formats": row[28],
-        "metadata_families": row[29],
-        "ai_loras": row[30],
-        "tags": row[31],
-        "collection_names": row[32],
+        "text_detected": None if row[14] is None else bool(row[14]),
+        "text_detection_score": row[15],
+        "text_detection_version": row[16],
+        "text_more_likely": None if row[17] is None else bool(row[17]),
+        "text_more_likely_score": row[18],
+        "text_more_likely_version": row[19],
+        "text_verified": None if row[20] is None else bool(row[20]),
+        "text_verification_score": row[21],
+        "text_verification_version": row[22],
+        "title": row[23],
+        "description": row[24],
+        "notes": row[25],
+        "ai_prompt": row[26],
+        "ai_negative_prompt": row[27],
+        "tool_name_found": row[28],
+        "tool_name_inferred": row[29],
+        "model_name": row[30],
+        "checkpoint_name": row[31],
+        "sampler": row[32],
+        "scheduler": row[33],
+        "cfg_scale": row[34],
+        "steps": row[35],
+        "seed": row[36],
+        "source_formats": row[37],
+        "metadata_families": row[38],
+        "ai_loras": row[39],
+        "tags": row[40],
+        "collection_names": row[41],
     }
 
 

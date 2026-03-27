@@ -12,6 +12,15 @@ CREATE TABLE IF NOT EXISTS media_items (
   width INTEGER,
   height INTEGER,
   duration_ms INTEGER,
+  text_detected INTEGER,
+  text_detection_score REAL,
+  text_detection_version INTEGER,
+  text_more_likely INTEGER,
+  text_more_likely_score REAL,
+  text_more_likely_version INTEGER,
+  text_verified INTEGER,
+  text_verification_score REAL,
+  text_verification_version INTEGER,
   thumb_path TEXT,
   preview_path TEXT,
   is_hidden INTEGER DEFAULT 0,
@@ -23,6 +32,8 @@ CREATE INDEX IF NOT EXISTS idx_media_items_path ON media_items(path);
 CREATE INDEX IF NOT EXISTS idx_media_items_hash ON media_items(content_hash);
 CREATE INDEX IF NOT EXISTS idx_media_items_phash ON media_items(phash);
 CREATE INDEX IF NOT EXISTS idx_media_items_type ON media_items(media_type);
+CREATE INDEX IF NOT EXISTS idx_media_items_text_detected ON media_items(text_detected);
+CREATE INDEX IF NOT EXISTS idx_media_items_text_more_likely ON media_items(text_more_likely);
 
 CREATE TABLE IF NOT EXISTS media_paths_history (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

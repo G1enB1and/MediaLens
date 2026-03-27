@@ -2412,6 +2412,20 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   flex: 1 1 100%;
 }
 
+.files-count-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 /* Custom Select Replacement */
 .custom-select {
   position: relative;

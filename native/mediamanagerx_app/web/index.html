@@ -51,8 +51,11 @@
               <div data-value="image">Images</div>
               <div data-value="video">Videos</div>
               <div data-value="animated">Animated</div>
+                <div data-value="text_detected">Text Likely</div>
+                <div data-value="text_more_likely">Text More Likely</div>
+                <div data-value="text_verified">Text Verified</div>
+              </div>
             </div>
-          </div>
           <div class="custom-select" id="groupBySelect" tabindex="0">
             <div class="select-trigger">Group By: None</div>
             <div class="select-options">
@@ -63,6 +66,7 @@
               <div data-value="similar_only">Group By: Similar</div>
             </div>
           </div>
+          <div class="files-count-chip" id="galleryCountChip">0 Files</div>
           <div class="custom-select" id="similarityThresholdSelect" tabindex="0" hidden>
             <div class="select-trigger">Similarity Threshold: Low</div>
             <div class="select-options">
@@ -319,6 +323,20 @@
         </div>
         <div class="scan-progress-container">
           <div id="scanBar" class="scan-bar"></div>
+        </div>
+      </div>
+    </div>
+    <div id="textProcessingToast" class="scan-indicator" style="bottom: 88px;" hidden>
+      <div class="scan-content">
+        <div class="scan-text">
+          <span id="textProcessingLabel" class="scan-label">Detecting Text - Stage 1 - Likely</span>
+          <span id="textProcessingFile" class="scan-file">...</span>
+        </div>
+        <div class="scan-progress-container">
+          <div id="textProcessingBar" class="scan-bar"></div>
+        </div>
+        <div class="field-actions" style="margin-top: 8px;">
+          <button class="tb-btn" id="textProcessingCancel">Cancel</button>
         </div>
       </div>
     </div>

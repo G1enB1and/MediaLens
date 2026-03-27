@@ -987,6 +987,9 @@ class Bridge(QObject):
     childFoldersListed = Signal(str, list)  # request_id, folders
     mediaCounted = Signal(str, int)  # request_id, count
     mediaListed = Signal(str, list)  # request_id, items
+    textProcessingStarted = Signal(str, int)  # stage label, total items
+    textProcessingProgress = Signal(str, int, int)  # stage label, current, total
+    textProcessingFinished = Signal()
     
     # Update Signals
     updateAvailable = Signal(str, bool)  # version, manual
@@ -1081,6 +1084,11 @@ class Bridge(QObject):
         self._disk_cache: dict[str, Path] = {}
         self._disk_cache_key: str = "" # Hash of selected folders list
         self._last_full_scan_key: str = ""
+        self._text_processing_generation: int = 0
+        self._text_processing_paused: bool = False
+        self._text_processing_active: bool = False
+        self._text_processing_scope_key: tuple = ("none",)
+        self._text_processing_thread: threading.Thread | None = None
 
         # Connect blocking signal for cross-thread dialogs
         self.conflictDialogRequested.connect(self._invoke_conflict_dialog, Qt.BlockingQueuedConnection)
@@ -2118,6 +2126,330 @@ class Bridge(QObject):
             except Exception:
                 pass
 
+    @staticmethod
+    def _text_stage_label(stage_key: str) -> str:
+        mapping = {
+            "likely": "Detecting Text - Stage 1 - Likely",
+            "more_likely": "Detecting Text - Stage 2 - More Likely",
+            "verified": "Detecting Text - Stage 3 - Verified",
+        }
+        return mapping.get(stage_key, "Detecting Text")
+
+    def _text_processing_should_continue(self, generation: int | None = None) -> bool:
+        if generation is None:
+            return not self._text_processing_paused
+        return generation == self._text_processing_generation and not self._text_processing_paused
+
+    def _cancel_text_processing(self) -> None:
+        self._text_processing_generation += 1
+        self._text_processing_paused = False
+        self._text_processing_active = False
+        self._text_processing_scope_key = ("none",)
+        self._text_processing_thread = None
+
+    def _current_text_scope_key(self, folders: list[str] | None = None, collection_id: int | None = None) -> tuple:
+        if folders:
+            return ("folders", tuple(sorted(str(folder or "") for folder in folders if str(folder or "").strip())))
+        if collection_id is not None:
+            return ("collection", int(collection_id))
+        if self._selected_folders:
+            return ("folders", tuple(sorted(str(folder or "") for folder in self._selected_folders if str(folder or "").strip())))
+        if self._active_collection_id is not None:
+            return ("collection", int(self._active_collection_id))
+        return ("none",)
+
+    def _collect_text_scope_entries(self, folders: list[str] | None = None, collection_id: int | None = None) -> list[dict]:
+        if folders:
+            return self._get_reconciled_candidates(folders, "all", "")
+        if collection_id is not None:
+            return self._get_collection_candidates(collection_id, "all", "")
+        if self._selected_folders:
+            return self._get_reconciled_candidates(self._selected_folders, "all", "")
+        if self._active_collection_id is not None:
+            return self._get_collection_candidates(self._active_collection_id, "all", "")
+        return []
+
+    def _ensure_background_text_processing(self, folders: list[str] | None = None, collection_id: int | None = None) -> None:
+        scope_key = self._current_text_scope_key(folders, collection_id)
+        if scope_key == ("none",):
+            return
+        if self._text_processing_active and not self._text_processing_paused and self._text_processing_scope_key == scope_key:
+            return
+
+        self._text_processing_generation += 1
+        generation = self._text_processing_generation
+        self._text_processing_paused = False
+        self._text_processing_active = True
+        self._text_processing_scope_key = scope_key
+
+        resolved_folders = list(folders) if folders else (list(self._selected_folders) if self._selected_folders else [])
+        resolved_collection_id = collection_id if collection_id is not None else self._active_collection_id
+
+        def work() -> None:
+            try:
+                with self._scan_lock:
+                    if not self._text_processing_should_continue(generation):
+                        return
+                    entries = self._collect_text_scope_entries(resolved_folders, resolved_collection_id)
+                    if not entries:
+                        return
+                    if not self._backfill_scope_text_detection(entries, generation):
+                        return
+                    if not self._backfill_scope_text_more_likely(entries, generation):
+                        return
+                    self._backfill_scope_text_verification(entries, generation)
+            except Exception as exc:
+                try:
+                    self._log(f"Background text processing failed: {exc}")
+                except Exception:
+                    pass
+            finally:
+                if generation == self._text_processing_generation:
+                    self._text_processing_active = False
+                    self._text_processing_thread = None
+
+        thread = threading.Thread(target=work, daemon=True, name="text-processing")
+        self._text_processing_thread = thread
+        thread.start()
+
+    @Slot()
+    def resume_text_processing(self) -> None:
+        self._ensure_background_text_processing()
+
+    @Slot()
+    def pause_text_processing(self) -> None:
+        self._text_processing_paused = True
+
+    def _backfill_scope_text_detection(self, entries: list[dict], generation: int | None = None) -> bool:
+        from app.mediamanager.utils.text_detection import TEXT_DETECTION_VERSION, detect_likely_text_presence
+        from app.mediamanager.db.media_repo import add_media_item
+
+        eligible = [
+            entry for entry in entries
+            if not entry.get("is_folder")
+            and not (
+                entry.get("text_detected") is not None
+                and int(entry.get("text_detection_version") or 0) >= TEXT_DETECTION_VERSION
+            )
+        ]
+        total_eligible = len(eligible)
+        if total_eligible:
+            self.textProcessingStarted.emit(self._text_stage_label("likely"), total_eligible)
+        updates: list[tuple[int, float, int, str]] = []
+        processed = 0
+        completed = True
+        for entry in entries:
+            if not self._text_processing_should_continue(generation):
+                completed = False
+                break
+            if entry.get("is_folder"):
+                continue
+            if (
+                entry.get("text_detected") is not None
+                and int(entry.get("text_detection_version") or 0) >= TEXT_DETECTION_VERSION
+            ):
+                continue
+            processed += 1
+            self.textProcessingProgress.emit(self._text_stage_label("likely"), processed, total_eligible)
+            path = str(entry.get("path") or "").strip()
+            if not path:
+                continue
+            try:
+                p = Path(path)
+                if not p.exists() or not p.is_file():
+                    continue
+                if int(entry.get("id") or -1) < 0:
+                    media_type = str(entry.get("media_type") or "")
+                    real_path = str(entry.get("_real_path") or path)
+                    media_id = add_media_item(self.conn, real_path, media_type)
+                    entry["id"] = media_id
+                media_type = str(entry.get("media_type") or "")
+                analysis_path = p
+                if media_type == "video":
+                    poster = self._ensure_video_poster(p)
+                    if not poster or not poster.exists():
+                        continue
+                    analysis_path = poster
+                elif media_type != "image":
+                    continue
+                text_detected, text_score = detect_likely_text_presence(analysis_path)
+            except Exception:
+                text_detected, text_score = False, 0.0
+            entry["text_detected"] = bool(text_detected)
+            entry["text_detection_score"] = float(text_score or 0.0)
+            entry["text_detection_version"] = TEXT_DETECTION_VERSION
+            updates.append((1 if text_detected else 0, float(text_score or 0.0), TEXT_DETECTION_VERSION, path))
+        try:
+            if updates:
+                self.conn.executemany(
+                    "UPDATE media_items SET text_detected = ?, text_detection_score = ?, text_detection_version = ? WHERE path = ?",
+                    updates,
+                )
+                self.conn.commit()
+        except Exception as exc:
+            try:
+                self._log(f"text detection backfill failed: {exc}")
+            except Exception:
+                pass
+        finally:
+            if total_eligible:
+                self.textProcessingFinished.emit()
+        return completed
+
+    def _backfill_scope_text_more_likely(self, entries: list[dict], generation: int | None = None) -> bool:
+        from app.mediamanager.utils.text_detection import TEXT_MORE_LIKELY_VERSION, verify_text_presence_opencv
+        from app.mediamanager.db.media_repo import add_media_item
+
+        eligible = [
+            entry for entry in entries
+            if not entry.get("is_folder")
+            and bool(entry.get("text_detected"))
+            and not (
+                entry.get("text_more_likely") is not None
+                and int(entry.get("text_more_likely_version") or 0) >= TEXT_MORE_LIKELY_VERSION
+            )
+        ]
+        total_eligible = len(eligible)
+        if total_eligible:
+            self.textProcessingStarted.emit(self._text_stage_label("more_likely"), total_eligible)
+        updates: list[tuple[int, float, int, str]] = []
+        processed = 0
+        completed = True
+        for entry in entries:
+            if not self._text_processing_should_continue(generation):
+                completed = False
+                break
+            if entry.get("is_folder") or not bool(entry.get("text_detected")):
+                continue
+            if (
+                entry.get("text_more_likely") is not None
+                and int(entry.get("text_more_likely_version") or 0) >= TEXT_MORE_LIKELY_VERSION
+            ):
+                continue
+            processed += 1
+            self.textProcessingProgress.emit(self._text_stage_label("more_likely"), processed, total_eligible)
+            path = str(entry.get("path") or "").strip()
+            if not path:
+                continue
+            try:
+                p = Path(path)
+                if not p.exists() or not p.is_file():
+                    continue
+                if int(entry.get("id") or -1) < 0:
+                    media_type = str(entry.get("media_type") or "")
+                    real_path = str(entry.get("_real_path") or path)
+                    media_id = add_media_item(self.conn, real_path, media_type)
+                    entry["id"] = media_id
+                media_type = str(entry.get("media_type") or "")
+                analysis_path = p
+                if media_type == "video":
+                    poster = self._ensure_video_poster(p)
+                    if not poster or not poster.exists():
+                        continue
+                    analysis_path = poster
+                elif media_type != "image":
+                    continue
+                text_more_likely, score = verify_text_presence_opencv(analysis_path)
+            except Exception:
+                text_more_likely, score = False, 0.0
+            entry["text_more_likely"] = bool(text_more_likely)
+            entry["text_more_likely_score"] = float(score or 0.0)
+            entry["text_more_likely_version"] = TEXT_MORE_LIKELY_VERSION
+            updates.append((1 if text_more_likely else 0, float(score or 0.0), TEXT_MORE_LIKELY_VERSION, path))
+        try:
+            if updates:
+                self.conn.executemany(
+                    "UPDATE media_items SET text_more_likely = ?, text_more_likely_score = ?, text_more_likely_version = ? WHERE path = ?",
+                    updates,
+                )
+                self.conn.commit()
+        except Exception as exc:
+            try:
+                self._log(f"text more likely backfill failed: {exc}")
+            except Exception:
+                pass
+        finally:
+            if total_eligible:
+                self.textProcessingFinished.emit()
+        return completed
+
+    def _backfill_scope_text_verification(self, entries: list[dict], generation: int | None = None) -> bool:
+        from app.mediamanager.utils.text_detection import TEXT_VERIFICATION_VERSION, verify_text_presence_windows_ocr
+        from app.mediamanager.db.media_repo import add_media_item
+
+        eligible = [
+            entry for entry in entries
+            if not entry.get("is_folder")
+            and bool(entry.get("text_more_likely"))
+            and not (
+                entry.get("text_verified") is not None
+                and int(entry.get("text_verification_version") or 0) >= TEXT_VERIFICATION_VERSION
+            )
+        ]
+        total_eligible = len(eligible)
+        if total_eligible:
+            self.textProcessingStarted.emit(self._text_stage_label("verified"), total_eligible)
+        updates: list[tuple[int, float, int, str]] = []
+        processed = 0
+        completed = True
+        for entry in entries:
+            if not self._text_processing_should_continue(generation):
+                completed = False
+                break
+            if entry.get("is_folder") or not bool(entry.get("text_more_likely")):
+                continue
+            if (
+                entry.get("text_verified") is not None
+                and int(entry.get("text_verification_version") or 0) >= TEXT_VERIFICATION_VERSION
+            ):
+                continue
+            processed += 1
+            self.textProcessingProgress.emit(self._text_stage_label("verified"), processed, total_eligible)
+            path = str(entry.get("path") or "").strip()
+            if not path:
+                continue
+            try:
+                p = Path(path)
+                if not p.exists() or not p.is_file():
+                    continue
+                if int(entry.get("id") or -1) < 0:
+                    media_type = str(entry.get("media_type") or "")
+                    real_path = str(entry.get("_real_path") or path)
+                    media_id = add_media_item(self.conn, real_path, media_type)
+                    entry["id"] = media_id
+                media_type = str(entry.get("media_type") or "")
+                analysis_path = p
+                if media_type == "video":
+                    poster = self._ensure_video_poster(p)
+                    if not poster or not poster.exists():
+                        continue
+                    analysis_path = poster
+                elif media_type != "image":
+                    continue
+                text_verified, verify_score = verify_text_presence_windows_ocr(analysis_path)
+            except Exception:
+                text_verified, verify_score = False, 0.0
+            entry["text_verified"] = bool(text_verified)
+            entry["text_verification_score"] = float(verify_score or 0.0)
+            entry["text_verification_version"] = TEXT_VERIFICATION_VERSION
+            updates.append((1 if text_verified else 0, float(verify_score or 0.0), TEXT_VERIFICATION_VERSION, path))
+        try:
+            if updates:
+                self.conn.executemany(
+                    "UPDATE media_items SET text_verified = ?, text_verification_score = ?, text_verification_version = ? WHERE path = ?",
+                    updates,
+                )
+                self.conn.commit()
+        except Exception as exc:
+            try:
+                self._log(f"text verification backfill failed: {exc}")
+            except Exception:
+                pass
+        finally:
+            if total_eligible:
+                self.textProcessingFinished.emit()
+        return completed
+
     def _backfill_scope_content_hashes(self, entries: list[dict]) -> None:
         from app.mediamanager.utils.hashing import calculate_file_hash
 
@@ -2183,6 +2515,7 @@ class Bridge(QObject):
                 "ui.show_left_panel": bool(self.settings.value("ui/show_left_panel", True, type=bool)),
                 "ui.show_right_panel": bool(self.settings.value("ui/show_right_panel", True, type=bool)),
                 "ui.show_bottom_panel": bool(self.settings.value("ui/show_bottom_panel", True, type=bool)),
+                "ui.show_dismissed_progress_toasts": bool(self.settings.value("ui/show_dismissed_progress_toasts", False, type=bool)),
                 "ui.preview_above_details": self._preview_above_details_enabled(),
                 "ui.theme_mode": str(self.settings.value("ui/theme_mode", "dark", type=str) or "dark"),
                 "metadata.display.res": bool(self.settings.value("metadata/display/res", True, type=bool)),
@@ -2247,6 +2580,7 @@ class Bridge(QObject):
                 "ui.show_left_panel": True,
                 "ui.show_right_panel": True,
                 "ui.show_bottom_panel": True,
+                "ui.show_dismissed_progress_toasts": False,
                 "ui.preview_above_details": True,
                 "ui.theme_mode": "dark",
             }
@@ -2335,6 +2669,7 @@ class Bridge(QObject):
                 "ui.show_left_panel", 
                 "ui.show_right_panel", 
                 "ui.show_bottom_panel",
+                "ui.show_dismissed_progress_toasts",
                 "ui.preview_above_details",
                 "updates.check_on_launch"
             )
@@ -3383,6 +3718,15 @@ class Bridge(QObject):
                             "duplicate_size_variant": "",
                             "duplicate_file_format": "",
                             "review_group_mode": "",
+                            "text_detected": None,
+                            "text_detection_score": 0.0,
+                            "text_detection_version": 0,
+                            "text_more_likely": None,
+                            "text_more_likely_score": 0.0,
+                            "text_more_likely_version": 0,
+                            "text_verified": None,
+                            "text_verification_score": 0.0,
+                            "text_verification_version": 0,
                         }
                     )
                     continue
@@ -3428,6 +3772,15 @@ class Bridge(QObject):
                     "duplicate_size_variant": r.get("duplicate_size_variant") or "",
                     "duplicate_file_format": r.get("duplicate_file_format") or "",
                     "review_group_mode": r.get("review_group_mode") or "",
+                    "text_detected": r.get("text_detected"),
+                    "text_detection_score": float(r.get("text_detection_score") or 0.0),
+                    "text_detection_version": int(r.get("text_detection_version") or 0),
+                    "text_more_likely": r.get("text_more_likely"),
+                    "text_more_likely_score": float(r.get("text_more_likely_score") or 0.0),
+                    "text_more_likely_version": int(r.get("text_more_likely_version") or 0),
+                    "text_verified": r.get("text_verified"),
+                    "text_verification_score": float(r.get("text_verification_score") or 0.0),
+                    "text_verification_version": int(r.get("text_verification_version") or 0),
                 })
             return out
         except Exception: return []
@@ -3680,6 +4033,14 @@ class Bridge(QObject):
             entries = self._get_collection_candidates(self._active_collection_id, filter_type, search_query)
         else:
             entries = []
+        if filter_type in {"text_detected", "text_more_likely", "text_verified"}:
+            self._ensure_background_text_processing(folders if folders else None, self._active_collection_id if not folders else None)
+            if filter_type == "text_detected":
+                entries = [entry for entry in entries if bool(entry.get("text_detected"))]
+            elif filter_type == "text_more_likely":
+                entries = [entry for entry in entries if bool(entry.get("text_more_likely"))]
+            else:
+                entries = [entry for entry in entries if bool(entry.get("text_verified"))]
         review_mode = self._review_group_mode()
         if review_mode in {"similar", "similar_only"}:
             self._backfill_scope_content_hashes(entries)
@@ -3704,6 +4065,7 @@ class Bridge(QObject):
         scan_key = hashlib.sha1(",".join(sorted(str(folder) for folder in folders)).encode()).hexdigest()
         if self._last_full_scan_key == scan_key:
             return
+        self._cancel_text_processing()
         self._scan_abort = True
         def work():
             try:
@@ -3719,6 +4081,7 @@ class Bridge(QObject):
                     self._do_full_scan(paths, self.conn, emit_progress=True)
                     self._last_full_scan_key = scan_key
                     self.scanFinished.emit(primary, len(self._get_reconciled_candidates(folders, "all", search_query)))
+                self._ensure_background_text_processing(list(folders), None)
             except Exception as exc:
                 try:
                     self._log(f"Background scan failed: {exc}")
@@ -3793,8 +4156,17 @@ class Bridge(QObject):
                         d_s = self.get_video_duration_seconds(str(p))
                         if d_s > 0:
                             d_ms = int(d_s * 1000)
-                            
-                    media_id = upsert_media_item(conn, str(p), mtype, calculate_file_hash(p), phash=phash, width=width, height=height, duration_ms=d_ms)
+                        
+                    media_id = upsert_media_item(
+                        conn,
+                        str(p),
+                        mtype,
+                        calculate_file_hash(p),
+                        phash=phash,
+                        width=width,
+                        height=height,
+                        duration_ms=d_ms,
+                    )
                 if media_id is not None:
                     inspect_and_persist_if_supported(conn, media_id, str(p), "image" if p.suffix.lower() in image_exts else "video")
                 count += 1
@@ -4229,6 +4601,12 @@ class MainWindow(QMainWindow):
         self.act_preview_above_details.setChecked(self.bridge._preview_above_details_enabled())
         self.act_preview_above_details.triggered.connect(lambda checked=False: self._toggle_panel_setting("ui/preview_above_details"))
         view_menu.addAction(self.act_preview_above_details)
+
+        self.act_show_dismissed_progress_toasts = QAction("Show Dismissed Progress Toasts", self)
+        self.act_show_dismissed_progress_toasts.setCheckable(True)
+        self.act_show_dismissed_progress_toasts.setChecked(bool(self.bridge.settings.value("ui/show_dismissed_progress_toasts", False, type=bool)))
+        self.act_show_dismissed_progress_toasts.triggered.connect(lambda checked=False: self._toggle_panel_setting("ui/show_dismissed_progress_toasts"))
+        view_menu.addAction(self.act_show_dismissed_progress_toasts)
 
         view_menu.addSeparator()
 
@@ -5621,6 +5999,9 @@ class MainWindow(QMainWindow):
                     self.preview_sep.setVisible(visible)
                 if hasattr(self, "act_preview_above_details"):
                     self.act_preview_above_details.setChecked(bool(value))
+            elif key == "ui.show_dismissed_progress_toasts":
+                if hasattr(self, "act_show_dismissed_progress_toasts"):
+                    self.act_show_dismissed_progress_toasts.setChecked(bool(value))
             elif key == "ui.theme_mode":
                 self._update_native_styles(self._current_accent)
                 self._update_splitter_style(self._current_accent)

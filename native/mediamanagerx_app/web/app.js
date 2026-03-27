@@ -49,6 +49,13 @@ let gDuplicateKeepOverrides = new Map();
 let gDuplicateGroupOrder = new Map();
 let gScanActive = false;
 let gSimilarityThreshold = 'low';
+let gShowDismissedProgressToasts = false;
+let gTextProcessingDismissed = false;
+let gTextProcessingActive = false;
+let gTextProcessingStage = '';
+let gTextProcessingCurrent = 0;
+let gTextProcessingTotal = 0;
+let gRenderTextProcessingToast = null;
 const TIMELINE_INSET_PX = 20;
 const TIMELINE_THUMB_SIZE_PX = 14;
 const TIMELINE_TOP_YEAR_TOP_PX = 20;
@@ -81,6 +88,10 @@ function getReviewMode() {
 
 function isDuplicateModeActive() {
   return !!getReviewMode();
+}
+
+function isTextFilterActive() {
+  return gFilter === 'text_detected' || gFilter === 'text_more_likely' || gFilter === 'text_verified';
 }
 
 const METADATA_SETTINGS_CONFIG = {
@@ -331,6 +342,13 @@ function startNativeGalleryDrag(e, item, paths) {
 function setStatus(text) {
   const el = document.getElementById('status');
   if (el) el.textContent = text;
+}
+
+function updateGalleryCountChip(count) {
+  const el = document.getElementById('galleryCountChip');
+  if (!el) return;
+  const safeCount = Math.max(0, Number(count || 0));
+  el.textContent = `${safeCount.toLocaleString()} Files`;
 }
 
 function normalizeFolderPath(path) {
@@ -1119,6 +1137,85 @@ function wireScanIndicator() {
       setTimeout(() => {
         el.hidden = true;
       }, 2000);
+    });
+  }
+}
+
+function wireTextProcessingIndicator() {
+  const el = document.getElementById('textProcessingToast');
+  const label = document.getElementById('textProcessingLabel');
+  const file = document.getElementById('textProcessingFile');
+  const bar = document.getElementById('textProcessingBar');
+  const cancelBtn = document.getElementById('textProcessingCancel');
+  if (!el || !label || !file || !bar || !gBridge) return;
+
+  function render() {
+    if (!gTextProcessingActive) {
+      el.hidden = true;
+      return;
+    }
+    const allowVisible = isTextFilterActive() || gShowDismissedProgressToasts;
+    if (!allowVisible || (gTextProcessingDismissed && !gShowDismissedProgressToasts)) {
+      el.hidden = true;
+      return;
+    }
+    el.hidden = false;
+    label.textContent = gTextProcessingStage || 'Detecting Text';
+    if (gTextProcessingTotal > 0) {
+      file.textContent = `${gTextProcessingCurrent} / ${gTextProcessingTotal}`;
+      bar.style.width = `${Math.max(0, Math.min(100, Math.round((gTextProcessingCurrent / gTextProcessingTotal) * 100)))}%`;
+    } else {
+      file.textContent = 'Starting...';
+      bar.style.width = '0%';
+    }
+  }
+  gRenderTextProcessingToast = render;
+
+  el.onclick = () => {
+    gTextProcessingDismissed = true;
+    render();
+  };
+
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      gTextProcessingDismissed = true;
+      if (gBridge.pause_text_processing) {
+        gBridge.pause_text_processing();
+      }
+      render();
+    });
+  }
+
+  if (gBridge.textProcessingStarted) {
+    gBridge.textProcessingStarted.connect((stage, total) => {
+      gTextProcessingActive = true;
+      gTextProcessingStage = stage || 'Detecting Text';
+      gTextProcessingCurrent = 0;
+      gTextProcessingTotal = Math.max(0, Number(total || 0));
+      render();
+    });
+  }
+
+  if (gBridge.textProcessingProgress) {
+    gBridge.textProcessingProgress.connect((stage, current, total) => {
+      gTextProcessingActive = true;
+      gTextProcessingStage = stage || gTextProcessingStage || 'Detecting Text';
+      gTextProcessingCurrent = Math.max(0, Number(current || 0));
+      gTextProcessingTotal = Math.max(0, Number(total || 0));
+      render();
+    });
+  }
+
+  if (gBridge.textProcessingFinished) {
+    gBridge.textProcessingFinished.connect(() => {
+      gTextProcessingActive = false;
+      gTextProcessingCurrent = gTextProcessingTotal;
+      render();
+      if (isTextFilterActive() && gBridge) {
+        refreshFromBridge(gBridge, false);
+      }
     });
   }
 }
@@ -4149,6 +4246,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
   setupCustomSelect('filterSelect', (val) => {
     gFilter = val;
+    if (isTextFilterActive()) {
+      gTextProcessingDismissed = false;
+      if (gBridge && gBridge.resume_text_processing) {
+        gBridge.resume_text_processing();
+      }
+      if (gRenderTextProcessingToast) gRenderTextProcessingToast();
+    } else if (gRenderTextProcessingToast) {
+      gRenderTextProcessingToast();
+    }
     gPage = 0; // Reset page on filter change
     if (gBridge) refreshFromBridge(gBridge, true);
   });
@@ -4492,6 +4598,7 @@ function refreshFromBridge(bridge, resetPage = false) {
 
       if (gSelectedFolders.length === 0 && !gActiveCollection) {
         gTotal = 0;
+        updateGalleryCountChip(0);
         setGlobalLoading(false);
         renderMediaList([]);
         renderPager();
@@ -4510,6 +4617,7 @@ function refreshFromBridge(bridge, resetPage = false) {
       fetchMediaCount(gSelectedFolders, gFilter, gSearchQuery || '').then(function (count) {
         if (refreshToken !== gRefreshGeneration) return;
         gTotal = count || 0;
+        updateGalleryCountChip(gTotal);
         const useInfinite = shouldUseInfiniteScrollMode();
         const duplicateMode = isDuplicateModeActive();
         const limit = duplicateMode
@@ -5556,6 +5664,7 @@ async function main() {
     }
 
     wireScanIndicator();
+    wireTextProcessingIndicator();
 
     bridge.get_tools_status(function (st) {
       // Diagnostic data moved to About popup.
@@ -5589,10 +5698,12 @@ async function main() {
       }
       gGroupDateGranularity = (s && s['gallery.group_date_granularity']) || 'day';
       gSimilarityThreshold = (s && s['gallery.similarity_threshold']) || 'low';
+      gShowDismissedProgressToasts = !!(s && s['ui.show_dismissed_progress_toasts']);
       setCustomSelectValue('groupBySelect', gGroupBy);
       setCustomSelectValue('dateGranularitySelect', gGroupDateGranularity);
       setCustomSelectValue('similarityThresholdSelect', gSimilarityThreshold);
       syncGroupByUi();
+      if (gRenderTextProcessingToast) gRenderTextProcessingToast();
       if (viewModeChanged && gBridge) {
         refreshFromBridge(gBridge, false);
       }
@@ -5747,6 +5858,11 @@ async function main() {
         }
         if (key === 'ui.show_right_panel') {
           updateSidebarButtonIcons('right', !!value);
+          return;
+        }
+        if (key === 'ui.show_dismissed_progress_toasts') {
+          gShowDismissedProgressToasts = !!value;
+          if (gRenderTextProcessingToast) gRenderTextProcessingToast();
           return;
         }
         if (key === 'ui.theme_mode') {
