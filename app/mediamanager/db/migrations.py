@@ -80,7 +80,27 @@ def _ensure_media_item_date_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE media_items ADD COLUMN metadata_date TEXT")
     if "phash" not in cols:
         conn.execute("ALTER TABLE media_items ADD COLUMN phash TEXT")
+    if "text_detected" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN text_detected INTEGER")
+    if "text_detection_score" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN text_detection_score REAL")
+    if "text_detection_version" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN text_detection_version INTEGER")
+    if "text_more_likely" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN text_more_likely INTEGER")
+    if "text_more_likely_score" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN text_more_likely_score REAL")
+    if "text_more_likely_version" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN text_more_likely_version INTEGER")
+    if "text_verified" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN text_verified INTEGER")
+    if "text_verification_score" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN text_verification_score REAL")
+    if "text_verification_version" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN text_verification_version INTEGER")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_media_items_phash ON media_items(phash)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_items_text_detected ON media_items(text_detected)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_items_text_more_likely ON media_items(text_more_likely)")
 
 
 def init_db(db_path: str) -> None:
@@ -90,6 +110,14 @@ def init_db(db_path: str) -> None:
     # against columns that will be added by the migration helpers below.
     sql = sql.replace(
         "CREATE INDEX IF NOT EXISTS idx_media_items_phash ON media_items(phash);\n",
+        "",
+    )
+    sql = sql.replace(
+        "CREATE INDEX IF NOT EXISTS idx_media_items_text_detected ON media_items(text_detected);\n",
+        "",
+    )
+    sql = sql.replace(
+        "CREATE INDEX IF NOT EXISTS idx_media_items_text_more_likely ON media_items(text_more_likely);\n",
         "",
     )
     with sqlite3.connect(db_path) as conn:
