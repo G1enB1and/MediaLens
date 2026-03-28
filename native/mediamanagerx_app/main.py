@@ -5142,7 +5142,23 @@ class MainWindow(QMainWindow):
         folders_layout = QVBoxLayout(folders_section)
         folders_layout.setContentsMargins(0, 0, 0, 0)
         folders_layout.setSpacing(6)
-        folders_layout.addWidget(QLabel("Folders"))
+
+        folders_header_row = QWidget()
+        folders_header_layout = QHBoxLayout(folders_header_row)
+        folders_header_layout.setContentsMargins(0, 0, 0, 0)
+        folders_header_layout.setSpacing(6)
+        self.folders_header = QLabel("Folders")
+        folders_header_layout.addWidget(self.folders_header)
+        folders_header_layout.addStretch(1)
+
+        self.folders_menu_btn = QPushButton("...")
+        self.folders_menu_btn.setObjectName("foldersMenuButton")
+        self.folders_menu_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.folders_menu_btn.setFixedSize(QSize(26, 22))
+        self.folders_menu_btn.clicked.connect(self._show_folders_header_menu)
+        folders_header_layout.addWidget(self.folders_menu_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        folders_layout.addWidget(folders_header_row)
         folders_layout.addWidget(self.tree, 1)
 
         collections_section = QWidget()
@@ -6342,6 +6358,47 @@ class MainWindow(QMainWindow):
             self.bridge.unpin_folder(folder_path)
         elif chosen == act_explorer:
             self.bridge.open_in_explorer(folder_path)
+
+    def _show_folders_header_menu(self) -> None:
+        menu = QMenu(self)
+        act_expand_all = menu.addAction("Expand All")
+        act_collapse_all = menu.addAction("Collapse All")
+        chosen = menu.exec(self.folders_menu_btn.mapToGlobal(QPoint(0, self.folders_menu_btn.height())))
+        if chosen == act_expand_all:
+            self._expand_tree_from_root()
+        elif chosen == act_collapse_all:
+            self._collapse_tree_to_root()
+
+    def _expand_tree_branch(self, parent_index: QModelIndex) -> None:
+        model = self.tree.model()
+        if model is None or not parent_index.isValid():
+            return
+        row_count = model.rowCount(parent_index)
+        for row in range(row_count):
+            child_index = model.index(row, 0, parent_index)
+            if not child_index.isValid():
+                continue
+            if model.hasChildren(child_index):
+                self.tree.expand(child_index)
+                self._expand_tree_branch(child_index)
+
+    def _expand_tree_from_root(self) -> None:
+        root_index = self.tree.rootIndex()
+        if not root_index.isValid():
+            return
+        self.tree.expand(root_index)
+        self._expand_tree_branch(root_index)
+
+    def _collapse_tree_to_root(self) -> None:
+        root_index = self.tree.rootIndex()
+        if not root_index.isValid():
+            return
+        self.tree.collapseAll()
+        root_path = str(self._tree_root_path or "")
+        if root_path:
+            root_item = self.proxy_model.mapFromSource(self.fs_model.index(root_path))
+            if root_item.isValid():
+                self.tree.expand(root_item)
 
     def _reload_collections(self) -> None:
         if not hasattr(self, "collections_list"):
@@ -9231,6 +9288,18 @@ class MainWindow(QMainWindow):
             }}
             QLabel#pinnedFolderText[selected="true"] {{
                 font-weight: 700;
+            }}
+            QPushButton#foldersMenuButton {{
+                background-color: {Theme.get_control_bg(accent)};
+                border: 1px solid {Theme.get_border(accent)};
+                border-radius: 6px;
+                color: {text};
+                font-weight: 600;
+                padding: 0px 6px 2px 6px;
+            }}
+            QPushButton#foldersMenuButton:hover {{
+                background-color: {Theme.get_btn_save_hover(accent)};
+                border-color: {accent_str};
             }}
             QLabel {{ color: {text}; font-weight: bold; background: transparent; }}
             {scrollbar_style}
