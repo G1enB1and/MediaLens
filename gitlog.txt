@@ -1,0 +1,15 @@
+﻿* Added video player in preview above details and improved asynch calls related to the video player to prevent freezes and crashes
+* Moved the Preview Image above Details toggle to beside the Preview Header and kept Preview Header visible. Now toggle only hides image, not header
+* Added a toggle icon for the Preview Image above Details
+* Improved UI design for video player controls
+* Added Filter by Text Detected in 3 stages- Likely, More Likely, and Verified using OpenCV for stage 2 and OCR for stage 3.
+* Updated README and Screenshots to include duplicate and similar grouping, resolving, and settings
+* Released v1.1.2
+* Added settings for Duplicate and Similar Auto Resolve and Ranking
+* Added Cropped version label to smaller files with different aspect ratios within groups and favored cropped images towards best overall to a lesser degree than color and file size
+* Preserved page scroll position and group sort order after deleting files, changed logic for determining best overall amongst similar files
+* Released v1.1.1
+* Adjusted header Select box sizes, alignment, and responsive conditions for search bar and selected folder
+* Added Group by Similar and Similarity Threshold drop down menu. Replaced compressed version with Largest File Size and Smallest File Size with Largest counting towards Overall Best
+* Improved duplicate files view and logic
+* Added Group by Duplicates and View Duplicates with first version of grouped duplicates

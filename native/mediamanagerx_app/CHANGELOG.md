@@ -1,6 +1,30 @@
-﻿# Change Log
+# Change Log
 
-## v1.1.2 (Current)
+## v1.1.3 (Current)
+
+### Added
+
+- **Sidebar Video Player**  
+    In-place video playback directly above the metadata panel.
+- **Text Detection Filter**  
+    3-stage text detection system (Likely, More Likely, Verified) powered by OpenCV and OCR.
+
+### Changed
+
+- **Video Playback Stability**  
+    Improved async teardown of video pipelines to prevent UI freezes and crashes during navigation.
+- **Preview Toggle UX**  
+    Moved preview toggle beside the header using a dedicated outline icon, keeping the header consistently visible.
+- **Video Controls UI**  
+    Refined controls with clean borders, frosted glass backgrounds, and high-contrast white icons.
+- **Documentation**  
+    Updated README and screenshots to reflect duplicate grouping, resolution workflows, and settings.
+- **Branding**  
+    Updated app icon and logo.
+
+---
+
+## v1.1.2
 
 ### Added
 
@@ -404,4 +428,3 @@
 - Initial container-first masonry layout helper and design documentation.
 
 ---
-
