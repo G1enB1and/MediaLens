@@ -153,6 +153,8 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QListWidget,
     QListWidgetItem,
+    QStyledItemDelegate,
+    QStyle,
 )
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -988,6 +990,28 @@ class RootFilterProxyModel(QSortFilterProxyModel):
         self._root_path = str(Path(path).absolute()).replace("\\", "/").lower()
         self.invalidateFilter()
 
+    def _has_visible_child_dirs(self, raw_path: str) -> bool:
+        path_str = str(raw_path or "").strip()
+        if not path_str:
+            return False
+        try:
+            root = Path(path_str)
+            if not root.exists() or not root.is_dir():
+                return False
+            show_hidden = self.bridge._show_hidden_enabled()
+            for child in root.iterdir():
+                try:
+                    if not child.is_dir():
+                        continue
+                    if not show_hidden and self.bridge.repo.is_path_hidden(str(child)):
+                        continue
+                    return True
+                except Exception:
+                    continue
+        except Exception:
+            return False
+        return False
+
     def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:
         if not self._root_path:
             return True
@@ -1027,19 +1051,59 @@ class RootFilterProxyModel(QSortFilterProxyModel):
 
         return False
 
+    def hasChildren(self, parent: QModelIndex = QModelIndex()) -> bool:
+        if not parent.isValid():
+            return super().hasChildren(parent)
+
+        source_model = self.sourceModel()
+        if not isinstance(source_model, QFileSystemModel):
+            return super().hasChildren(parent)
+
+        source_index = self.mapToSource(parent)
+        if not source_index.isValid() or not source_model.isDir(source_index):
+            return False
+
+        raw_path = source_model.filePath(source_index)
+        return self._has_visible_child_dirs(raw_path)
+
     def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
+        source_idx = self.mapToSource(index)
+        source_model = self.sourceModel()
+        is_directory = isinstance(source_model, QFileSystemModel) and source_model.isDir(source_idx)
+
         # Prevent "customized" folder icons (which sometimes fail to load or are empty)
         # by forcing the standard folder icon for all directories.
-        if role == Qt.ItemDataRole.DecorationRole:
-            source_idx = self.mapToSource(index)
-            source_model = self.sourceModel()
-            if isinstance(source_model, QFileSystemModel) and source_model.isDir(source_idx):
-                if not self._fallback_icon:
-                    provider = QFileIconProvider()
-                    self._fallback_icon = provider.icon(QFileIconProvider.IconType.Folder)
-                return self._fallback_icon
+        if role == Qt.ItemDataRole.DecorationRole and is_directory:
+            if not self._fallback_icon:
+                provider = QFileIconProvider()
+                self._fallback_icon = provider.icon(QFileIconProvider.IconType.Folder)
+            return self._fallback_icon.pixmap(QSize(16, 16))
                 
         return super().data(index, role)
+
+
+class AccentSelectionTreeDelegate(QStyledItemDelegate):
+    """Paint selected tree rows with accent-colored bold text without tinting the folder icon."""
+
+    def __init__(self, bridge: "Bridge", parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.bridge = bridge
+
+    def paint(self, painter: QPainter, option, index) -> None:
+        opt = option
+        self.initStyleOption(opt, index)
+
+        if bool(opt.state & QStyle.StateFlag.State_Selected):
+            accent_str = str(self.bridge.settings.value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT)
+            accent = QColor(accent_str)
+            opt.font.setBold(True)
+            opt.palette.setColor(opt.palette.ColorRole.Text, accent)
+            opt.palette.setColor(opt.palette.ColorRole.WindowText, accent)
+            opt.palette.setColor(opt.palette.ColorRole.HighlightedText, accent)
+            opt.state &= ~QStyle.StateFlag.State_Selected
+            opt.state &= ~QStyle.StateFlag.State_HasFocus
+
+        super().paint(painter, opt, index)
 
 
 class Bridge(QObject):
@@ -5012,6 +5076,8 @@ class MainWindow(QMainWindow):
 
         self.tree = FolderTreeView()
         self.tree.setModel(self.proxy_model)
+        self.tree.setProperty("showDecorationSelected", False)
+        self.tree.setItemDelegate(AccentSelectionTreeDelegate(self.bridge, self.tree))
         
         # Set the tree root to the PARENT of our desired root folder
         # root_parent needs to be loaded by fs_model for visibility.
@@ -6125,6 +6191,7 @@ class MainWindow(QMainWindow):
             if path_str.replace("\\", "/").lower() == current_root_key:
                 item.setSelected(True)
                 self.pinned_folders_list.setCurrentItem(item)
+                self._set_pinned_folder_row_selected(row_widget, True)
         self.pinned_folders_list.blockSignals(False)
 
     def _build_pinned_folder_item_widget(self, folder_path: str) -> QWidget:
@@ -6139,7 +6206,8 @@ class MainWindow(QMainWindow):
 
         icon_label = QLabel()
         icon_label.setObjectName("pinnedFolderIcon")
-        icon_label.setPixmap(folder_icon.pixmap(QSize(16, 16)))
+        folder_pixmap = folder_icon.pixmap(QSize(16, 16))
+        icon_label.setPixmap(folder_pixmap)
         layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignVCenter)
 
         text_label = QLabel(Path(folder_path).name or folder_path)
@@ -6155,7 +6223,39 @@ class MainWindow(QMainWindow):
 
         item_height = max(28, row.sizeHint().height())
         row.setMinimumHeight(item_height)
+        row.setProperty("folderPixmap", folder_pixmap)
+        row.setProperty("iconLabel", icon_label)
+        row.setProperty("textLabel", text_label)
+        row.setProperty("pinLabel", pin_label)
+        self._set_pinned_folder_row_selected(row, False)
         return row
+
+    def _set_pinned_folder_row_selected(self, row: QWidget, selected: bool) -> None:
+        if row is None:
+            return
+
+        row.setProperty("selected", bool(selected))
+
+        text_label = row.property("textLabel")
+        if isinstance(text_label, QLabel):
+            text_label.setProperty("selected", bool(selected))
+            font = text_label.font()
+            font.setBold(bool(selected))
+            text_label.setFont(font)
+            text_label.style().unpolish(text_label)
+            text_label.style().polish(text_label)
+
+        icon_label = row.property("iconLabel")
+        folder_pixmap = row.property("folderPixmap")
+        if isinstance(icon_label, QLabel) and isinstance(folder_pixmap, QPixmap):
+            icon_label.setPixmap(folder_pixmap)
+            icon_label.setProperty("selected", bool(selected))
+            icon_label.style().unpolish(icon_label)
+            icon_label.style().polish(icon_label)
+
+        row.style().unpolish(row)
+        row.style().polish(row)
+        row.update()
 
     def _create_pinned_icon_pixmap(self, size: int = 14) -> QPixmap:
         asset_path = Path(__file__).with_name("web") / "icons" / "pin.svg"
@@ -6192,6 +6292,9 @@ class MainWindow(QMainWindow):
             item_key = str(item.data(Qt.ItemDataRole.UserRole) or "").replace("\\", "/").lower()
             is_match = bool(root_key) and item_key == root_key
             item.setSelected(is_match)
+            row_widget = self.pinned_folders_list.itemWidget(item)
+            if isinstance(row_widget, QWidget):
+                self._set_pinned_folder_row_selected(row_widget, is_match)
             if is_match:
                 matched_item = item
         if matched_item is not None:
@@ -9062,7 +9165,22 @@ class MainWindow(QMainWindow):
         # Left Panel (Folders)
         self.left_panel.setStyleSheet(f"""
             QWidget {{ background-color: {sb_bg_str}; color: {text}; }}
-            QTreeView {{ background-color: {sb_bg_str}; border: none; color: {text}; }}
+            QTreeView {{
+                background-color: {sb_bg_str};
+                border: none;
+                color: {text};
+                show-decoration-selected: 0;
+                selection-background-color: transparent;
+            }}
+            QTreeView::item:selected {{
+                background: transparent;
+            }}
+            QTreeView::item:selected:active {{
+                background: transparent;
+            }}
+            QTreeView::item:selected:!active {{
+                background: transparent;
+            }}
             QListWidget {{
                 background-color: {Theme.get_control_bg(accent)};
                 border: 1px solid {Theme.get_border(accent)};
@@ -9110,6 +9228,9 @@ class MainWindow(QMainWindow):
             QLabel#pinnedFolderText {{
                 color: {text};
                 font-weight: normal;
+            }}
+            QLabel#pinnedFolderText[selected="true"] {{
+                font-weight: 700;
             }}
             QLabel {{ color: {text}; font-weight: bold; background: transparent; }}
             {scrollbar_style}
