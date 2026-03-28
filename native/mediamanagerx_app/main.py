@@ -4997,7 +4997,6 @@ class MainWindow(QMainWindow):
         preview_header_layout.addStretch(1)
         self.btn_close_preview = QPushButton("×")
         self.btn_close_preview.setObjectName("btnClosePreview")
-        self.btn_close_preview.setText("x")
         self.btn_close_preview.setToolTip("Hide preview")
         self.btn_close_preview.setFixedSize(QSize(22, 22))
         self.btn_close_preview.clicked.connect(lambda: self.bridge.set_setting_bool("ui.preview_above_details", False))
@@ -5019,9 +5018,32 @@ class MainWindow(QMainWindow):
         self.preview_sep = self._add_sep("preview_sep_line")
         right_layout.addWidget(self.preview_sep)
 
+        # Details Header Row with Preview Toggle
+        self.details_header_row = QWidget()
+        self.details_header_row.setObjectName("detailsHeaderRow")
+        details_header_layout = QHBoxLayout(self.details_header_row)
+        details_header_layout.setContentsMargins(0, 0, 0, 0)
+        details_header_layout.setSpacing(0)
+
         self.details_header_lbl = QLabel("Details")
         self.details_header_lbl.setObjectName("detailsHeaderLabel")
-        right_layout.addWidget(self.details_header_lbl)
+        details_header_layout.addWidget(self.details_header_lbl)
+        details_header_layout.addStretch(1)
+
+        self.btn_show_preview_inline = QPushButton("⛶") # Unicode maximize/corners
+        self.btn_show_preview_inline.setObjectName("btnShowPreviewInline")
+        self.btn_show_preview_inline.setToolTip("Show preview image")
+        self.btn_show_preview_inline.setFixedSize(QSize(22, 22))
+        self.btn_show_preview_inline.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_show_preview_inline.clicked.connect(lambda: self.bridge.set_setting_bool("ui.preview_above_details", True))
+        details_header_layout.addWidget(self.btn_show_preview_inline)
+
+        # Initialize visibility
+        self.details_header_lbl.setVisible(True)
+        self.btn_show_preview_inline.setVisible(False)
+        self.details_header_row.setVisible(True)
+
+        right_layout.addWidget(self.details_header_row)
 
         self.meta_empty_state_lbl = QLabel("Select a file to show details")
         self.meta_empty_state_lbl.setObjectName("metaEmptyStateLabel")
@@ -5997,8 +6019,14 @@ class MainWindow(QMainWindow):
                     self.preview_header_row.setVisible(visible)
                     self.preview_image_lbl.setVisible(visible)
                     self.preview_sep.setVisible(visible)
+                if hasattr(self, "btn_show_preview_inline"):
+                    # Show the toggle-on icon ONLY if preview is hidden
+                    self.btn_show_preview_inline.setVisible(not visible)
                 if hasattr(self, "act_preview_above_details"):
                     self.act_preview_above_details.setChecked(bool(value))
+                if hasattr(self, "right_layout"):
+                    self.right_layout.activate()
+                    self._update_sidebar_input_widths()
             elif key == "ui.show_dismissed_progress_toasts":
                 if hasattr(self, "act_show_dismissed_progress_toasts"):
                     self.act_show_dismissed_progress_toasts.setChecked(bool(value))
@@ -6141,7 +6169,7 @@ class MainWindow(QMainWindow):
         self.preview_header_row.setVisible(False)
         self.preview_image_lbl.setVisible(False)
         self.preview_sep.setVisible(False)
-        self.details_header_lbl.setVisible(False)
+        self.details_header_row.setVisible(False)
         self.lbl_group_general.setVisible(False)
         self.lbl_group_camera.setVisible(False)
         self.lbl_group_ai.setVisible(False)
@@ -7365,7 +7393,13 @@ class MainWindow(QMainWindow):
         self.preview_header_row.setVisible(not is_bulk and self.bridge._preview_above_details_enabled())
         self.preview_image_lbl.setVisible(not is_bulk and self.bridge._preview_above_details_enabled())
         self.preview_sep.setVisible(not is_bulk and self.bridge._preview_above_details_enabled())
-        self.details_header_lbl.setVisible(not is_bulk)
+        self.details_header_row.setVisible(not is_bulk)
+        self.details_header_lbl.setVisible(True) # Ensure children are visible when row is shown
+        if hasattr(self, "btn_show_preview_inline"):
+            self.btn_show_preview_inline.setVisible(not is_bulk and not self.bridge._preview_above_details_enabled())
+        if hasattr(self, "right_layout"):
+            self.right_layout.activate()
+            self._update_sidebar_input_widths()
         self.btn_save_meta.setVisible(True)
         self.btn_clear_bulk_tags.setVisible(False)
         self.btn_import_exif.setVisible(not is_bulk)
@@ -8699,6 +8733,33 @@ class MainWindow(QMainWindow):
                 border: 1px solid {Theme.get_input_border(accent)};
                 border-radius: 4px;
                 padding: 4px;
+                color: {text};
+            }}
+            QPushButton#btnClosePreview, QPushButton#btnShowPreviewInline {{
+                background: transparent;
+                border: none;
+                border-radius: 4px;
+                color: {text_muted};
+                font-size: 14px;
+                padding: 0px;
+                margin: 0px;
+            }}
+            
+            QPushButton#btnShowPreviewInline {{
+                padding: 0px;
+                margin: 0px;
+                color: {text};
+                font-size: 14px;
+                font-weight: bold;
+            }}
+
+            QPushButton#btnClosePreview:hover, QPushButton#btnShowPreviewInline:hover {{
+                background-color: {Theme.get_control_bg(accent)};
+                color: {text};
+            }}
+            
+            QPushButton#btnClosePreview:hover, QPushButton#btnShowPreviewInline:hover {{
+                background-color: {Theme.get_control_bg(accent)};
                 color: {text};
             }}
             QPushButton#btnSaveMeta, QPushButton#btnImportExif, QPushButton#btnMergeHiddenMeta, QPushButton#btnSaveToExif {{
