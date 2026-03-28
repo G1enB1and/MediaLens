@@ -5029,6 +5029,14 @@ class MainWindow(QMainWindow):
         self._preview_aspect_ratio = 1.0
         right_layout.addWidget(self.preview_image_lbl)
 
+        # Video Overlay for Sidebar (In-place, parented directly to image label)
+        self._sidebar_video_layout = QVBoxLayout(self.preview_image_lbl)
+        self._sidebar_video_layout.setContentsMargins(0, 0, 0, 0)
+        self.sidebar_video_overlay = LightboxVideoOverlay(parent=self.preview_image_lbl)
+        self.sidebar_video_overlay.set_mode(True)
+        self._sidebar_video_layout.addWidget(self.sidebar_video_overlay)
+        self.sidebar_video_overlay.hide()
+
         self.preview_sep = self._add_sep("preview_sep_line")
         right_layout.addWidget(self.preview_sep)
 
@@ -6007,6 +6015,11 @@ class MainWindow(QMainWindow):
             elif key == "ui.preview_above_details":
                 if hasattr(self, "preview_header_row"):
                     visible = bool(value)
+                    
+                    # Stop video playback asynchronously before hiding the UI to prevent Qt FFmpeg deadlock
+                    if not visible and hasattr(self, "sidebar_video_overlay"):
+                        self.sidebar_video_overlay.close_overlay(notify_web=False)
+
                     # "Preview" title row stays visible; toggle image/sep and corresponding buttons
                     self.preview_header_row.setVisible(True)
                     self.preview_image_lbl.setVisible(visible)
@@ -6015,6 +6028,10 @@ class MainWindow(QMainWindow):
                         self.btn_close_preview.setVisible(visible)
                     if hasattr(self, "btn_show_preview_inline"):
                         self.btn_show_preview_inline.setVisible(not visible)
+
+                    # Reload the correct media (image or video) when toggled back on
+                    if visible:
+                        QTimer.singleShot(0, lambda: self._refresh_preview_for_path(getattr(self, "_current_path", None)))
                 if hasattr(self, "act_preview_above_details"):
                     self.act_preview_above_details.setChecked(bool(value))
                 if hasattr(self, "right_layout"):
@@ -6213,6 +6230,8 @@ class MainWindow(QMainWindow):
         return merged
 
     def _clear_preview_media(self) -> None:
+        if hasattr(self, "sidebar_video_overlay"):
+            self.sidebar_video_overlay.close_overlay(notify_web=False)
         if self._preview_movie is not None:
             self._preview_movie.stop()
             self.preview_image_lbl.setMovie(None)
@@ -6315,6 +6334,14 @@ class MainWindow(QMainWindow):
             self._set_preview_pixmap(None)
             return
         self._set_preview_pixmap(QPixmap.fromImage(img))
+
+        # Open video in sidebar overlay if applicable
+        if suffix in {".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}:
+             req = VideoRequest(path, autoplay=False, loop=True, muted=True)
+             if hasattr(self, "sidebar_video_overlay"):
+                 self.sidebar_video_overlay.open_video(req)
+        elif hasattr(self, "sidebar_video_overlay"):
+             self.sidebar_video_overlay.close_overlay(notify_web=False)
 
 
     def _rename_from_panel(self) -> None:
