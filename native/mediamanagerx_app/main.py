@@ -109,6 +109,7 @@ from PySide6.QtGui import (
     QColor,
     QDrag,
     QFontMetrics,
+    QImage,
     QImageReader,
     QIcon,
     QMovie,
@@ -156,6 +157,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage
+from PySide6.QtSvg import QSvgRenderer
 from native.mediamanagerx_app.video_overlay import LightboxVideoOverlay, VideoRequest
 from PySide6.QtCore import QSortFilterProxyModel, QModelIndex
 
@@ -883,6 +885,94 @@ class CollectionListWidget(QListWidget):
         event.ignore()
 
 
+class PinnedFolderListWidget(QListWidget):
+    """Flat pinned-folder list with drag-and-drop support for folders only."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDragEnabled(False)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.setMouseTracking(True)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        item = self.itemAt(event.position().toPoint())
+        self.setCursor(Qt.CursorShape.PointingHandCursor if item else Qt.CursorShape.ArrowCursor)
+        super().mouseMoveEvent(event)
+
+    @staticmethod
+    def _extract_folder_paths(mime: QMimeData, bridge: "Bridge | None") -> list[str]:
+        raw_paths: list[str] = []
+        if bridge and bridge.drag_paths:
+            raw_paths = list(bridge.drag_paths)
+        elif mime.hasUrls():
+            raw_paths = [url.toLocalFile() for url in mime.urls() if url.toLocalFile()]
+
+        folders: list[str] = []
+        seen: set[str] = set()
+        for raw_path in raw_paths:
+            path_str = str(raw_path or "").strip()
+            if not path_str:
+                continue
+            try:
+                p = Path(path_str)
+                if not p.exists() or not p.is_dir():
+                    continue
+                normalized = str(p.absolute())
+            except Exception:
+                continue
+            key = normalized.replace("\\", "/").lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            folders.append(normalized)
+        return folders
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        bridge = getattr(self.window(), "bridge", None)
+        folders = self._extract_folder_paths(event.mimeData(), bridge)
+        if folders:
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        bridge = getattr(self.window(), "bridge", None)
+        folders = self._extract_folder_paths(event.mimeData(), bridge)
+        if folders:
+            if bridge:
+                bridge.update_drag_tooltip(len(folders), True, "Pinned Folders")
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
+            return
+        if bridge:
+            bridge.hide_drag_tooltip()
+        super().dragMoveEvent(event)
+
+    def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:
+        bridge = getattr(self.window(), "bridge", None)
+        if bridge:
+            bridge.hide_drag_tooltip()
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        bridge = getattr(self.window(), "bridge", None)
+        if bridge:
+            bridge.hide_drag_tooltip()
+
+        folders = self._extract_folder_paths(event.mimeData(), bridge)
+        if not folders or not bridge:
+            event.ignore()
+            return
+
+        if bridge.pin_folders(folders) > 0:
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+
 class RootFilterProxyModel(QSortFilterProxyModel):
     """Filters a QFileSystemModel to only show a specific root folder and its children.
     
@@ -998,6 +1088,7 @@ class Bridge(QObject):
     
     dragOverFolder = Signal(str)
     collectionsChanged = Signal()
+    pinnedFoldersChanged = Signal(list)
     # Native Tooltip Controls
     updateTooltipRequested = Signal(int, bool, str) # count, isCopy, targetFolder
     hideTooltipRequested = Signal()
@@ -1173,6 +1264,113 @@ class Bridge(QObject):
         except Exception:
             pass
         self.selectionChanged.emit(self._selected_folders)
+
+    def _pinned_folders_setting_key(self) -> str:
+        return "folders/pinned"
+
+    def _normalize_pinned_folder_paths(self, folders: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for raw_path in folders or []:
+            path_str = str(raw_path or "").strip()
+            if not path_str:
+                continue
+            try:
+                path_obj = Path(path_str)
+                resolved = str(path_obj.absolute())
+            except Exception:
+                resolved = path_str
+            key = resolved.replace("\\", "/").lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append(resolved)
+        return normalized
+
+    def _read_pinned_folders(self) -> list[str]:
+        raw_value = self.settings.value(self._pinned_folders_setting_key(), "[]", type=str)
+        try:
+            parsed = json.loads(str(raw_value or "[]"))
+        except Exception:
+            parsed = []
+        if not isinstance(parsed, list):
+            parsed = []
+        normalized = self._normalize_pinned_folder_paths(parsed)
+        if normalized != parsed:
+            try:
+                self.settings.setValue(self._pinned_folders_setting_key(), json.dumps(normalized))
+            except Exception:
+                pass
+        return normalized
+
+    def _write_pinned_folders(self, folders: list[str]) -> None:
+        normalized = self._normalize_pinned_folder_paths(folders)
+        self.settings.setValue(self._pinned_folders_setting_key(), json.dumps(normalized))
+        self.settings.sync()
+        self.pinnedFoldersChanged.emit(normalized)
+
+    @Slot(result=list)
+    def list_pinned_folders(self) -> list:
+        return self._read_pinned_folders()
+
+    @Slot(str, result=bool)
+    def is_folder_pinned(self, folder_path: str) -> bool:
+        target = str(folder_path or "").strip()
+        if not target:
+            return False
+        try:
+            target = str(Path(target).absolute())
+        except Exception:
+            pass
+        target_key = target.replace("\\", "/").lower()
+        return any(path.replace("\\", "/").lower() == target_key for path in self._read_pinned_folders())
+
+    @Slot(str, result=bool)
+    def pin_folder(self, folder_path: str) -> bool:
+        return self.pin_folders([folder_path]) > 0
+
+    @Slot(list, result=int)
+    def pin_folders(self, folders: list[str]) -> int:
+        existing = self._read_pinned_folders()
+        existing_keys = {path.replace("\\", "/").lower() for path in existing}
+        added_count = 0
+        for raw_path in folders or []:
+            path_str = str(raw_path or "").strip()
+            if not path_str:
+                continue
+            try:
+                path_obj = Path(path_str)
+                if not path_obj.exists() or not path_obj.is_dir():
+                    continue
+                normalized = str(path_obj.absolute())
+            except Exception:
+                continue
+            key = normalized.replace("\\", "/").lower()
+            if key in existing_keys:
+                continue
+            existing.append(normalized)
+            existing_keys.add(key)
+            added_count += 1
+        if added_count:
+            self._write_pinned_folders(existing)
+        return added_count
+
+    @Slot(str, result=bool)
+    def unpin_folder(self, folder_path: str) -> bool:
+        target = str(folder_path or "").strip()
+        if not target:
+            return False
+        try:
+            target = str(Path(target).absolute())
+        except Exception:
+            pass
+        target_key = target.replace("\\", "/").lower()
+        existing = self._read_pinned_folders()
+        remaining = [path for path in existing if path.replace("\\", "/").lower() != target_key]
+        if remaining == existing:
+            return False
+        self._write_pinned_folders(remaining)
+        return True
 
     @Slot(list)
     def set_drag_paths(self, paths: list[str]) -> None:
@@ -4858,6 +5056,22 @@ class MainWindow(QMainWindow):
         self.left_sections_splitter.setChildrenCollapsible(False)
         self.left_sections_splitter.setHandleWidth(5)
 
+        pinned_section = QWidget()
+        pinned_layout = QVBoxLayout(pinned_section)
+        pinned_layout.setContentsMargins(0, 0, 0, 0)
+        pinned_layout.setSpacing(6)
+        self.pinned_header = QLabel("Pinned Folders")
+        pinned_layout.addWidget(self.pinned_header)
+
+        self.pinned_folders_list = PinnedFolderListWidget()
+        self.pinned_folders_list.setObjectName("pinnedFoldersList")
+        self.pinned_folders_list.setMinimumHeight(0)
+        self.pinned_folders_list.itemSelectionChanged.connect(self._on_pinned_folder_selection_changed)
+        self.pinned_folders_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.pinned_folders_list.customContextMenuRequested.connect(self._on_pinned_folders_context_menu)
+        pinned_layout.addWidget(self.pinned_folders_list, 1)
+        pinned_section.setMinimumHeight(self.pinned_header.sizeHint().height() + pinned_layout.contentsMargins().top())
+
         folders_section = QWidget()
         folders_layout = QVBoxLayout(folders_section)
         folders_layout.setContentsMargins(0, 0, 0, 0)
@@ -4881,20 +5095,24 @@ class MainWindow(QMainWindow):
         collections_layout.addWidget(self.collections_list, 1)
         collections_section.setMinimumHeight(self.collections_header.sizeHint().height() + collections_layout.contentsMargins().top())
 
+        self.left_sections_splitter.addWidget(pinned_section)
         self.left_sections_splitter.addWidget(folders_section)
         self.left_sections_splitter.addWidget(collections_section)
-        self.left_sections_splitter.setStretchFactor(0, 1)
-        self.left_sections_splitter.setStretchFactor(1, 0)
-        left_sections_state = self.bridge.settings.value("ui/left_sections_splitter_state")
+        self.left_sections_splitter.setStretchFactor(0, 0)
+        self.left_sections_splitter.setStretchFactor(1, 1)
+        self.left_sections_splitter.setStretchFactor(2, 0)
+        left_sections_state = self.bridge.settings.value("ui/left_sections_splitter_state_v2")
         if left_sections_state:
             self.left_sections_splitter.restoreState(left_sections_state)
         else:
-            self.left_sections_splitter.setSizes([430, 170])
+            self.left_sections_splitter.setSizes([140, 290, 170])
         self.left_sections_splitter.splitterMoved.connect(lambda *args: self._save_splitter_state())
 
         left_layout.addWidget(self.left_sections_splitter, 1)
 
+        self.bridge.pinnedFoldersChanged.connect(self._reload_pinned_folders)
         self.bridge.collectionsChanged.connect(self._reload_collections)
+        self._reload_pinned_folders()
         self._reload_collections()
 
         self._navigate_to_folder(str(default_root), record_history=True, re_root_tree=True)
@@ -5639,6 +5857,7 @@ class MainWindow(QMainWindow):
         root_idx = self.proxy_model.mapFromSource(self.fs_model.index(path_str))
         if root_idx.isValid():
             self.tree.expand(root_idx)
+        self._sync_pinned_selection_to_root()
 
     def _navigate_to_folder(self, folder_path: str, *, record_history: bool = True, refresh: bool = False, re_root_tree: bool = False) -> None:
         if not folder_path:
@@ -5879,6 +6098,148 @@ class MainWindow(QMainWindow):
                 self._set_selected_folders(paths)
                 self._update_navigation_state()
 
+    def _reload_pinned_folders(self) -> None:
+        if not hasattr(self, "pinned_folders_list"):
+            return
+        try:
+            pinned_folders = self.bridge.list_pinned_folders()
+        except Exception:
+            pinned_folders = []
+
+        current_root = str(self._tree_root_path or "")
+        current_root_key = current_root.replace("\\", "/").lower()
+
+        self.pinned_folders_list.blockSignals(True)
+        self.pinned_folders_list.clear()
+        for folder_path in pinned_folders:
+            path_str = str(folder_path or "").strip()
+            if not path_str:
+                continue
+            item = QListWidgetItem("")
+            item.setData(Qt.ItemDataRole.UserRole, path_str)
+            item.setToolTip(path_str)
+            self.pinned_folders_list.addItem(item)
+            row_widget = self._build_pinned_folder_item_widget(path_str)
+            item.setSizeHint(row_widget.sizeHint())
+            self.pinned_folders_list.setItemWidget(item, row_widget)
+            if path_str.replace("\\", "/").lower() == current_root_key:
+                item.setSelected(True)
+                self.pinned_folders_list.setCurrentItem(item)
+        self.pinned_folders_list.blockSignals(False)
+
+    def _build_pinned_folder_item_widget(self, folder_path: str) -> QWidget:
+        row = QWidget()
+        row.setObjectName("pinnedFolderRow")
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(8)
+
+        provider = QFileIconProvider()
+        folder_icon = provider.icon(QFileIconProvider.IconType.Folder)
+
+        icon_label = QLabel()
+        icon_label.setObjectName("pinnedFolderIcon")
+        icon_label.setPixmap(folder_icon.pixmap(QSize(16, 16)))
+        layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        text_label = QLabel(Path(folder_path).name or folder_path)
+        text_label.setObjectName("pinnedFolderText")
+        text_label.setToolTip(folder_path)
+        layout.addWidget(text_label, 1)
+
+        pin_label = QLabel()
+        pin_label.setObjectName("pinnedFolderPin")
+        pin_label.setPixmap(self._create_pinned_icon_pixmap())
+        pin_label.setToolTip("Pinned folder")
+        layout.addWidget(pin_label, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        item_height = max(28, row.sizeHint().height())
+        row.setMinimumHeight(item_height)
+        return row
+
+    def _create_pinned_icon_pixmap(self, size: int = 14) -> QPixmap:
+        asset_path = Path(__file__).with_name("web") / "icons" / "pin.svg"
+        renderer = QSvgRenderer(str(asset_path))
+        if not renderer.isValid():
+            return QPixmap()
+
+        logical_size = max(16, size + 2)
+        device_pixel_ratio = 2.0
+        canvas_size = int(logical_size * device_pixel_ratio)
+        inset = int(2 * device_pixel_ratio)
+        image = QImage(canvas_size, canvas_size, QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        renderer.render(painter, QRect(inset, inset, canvas_size - (inset * 2), canvas_size - (inset * 2)))
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        painter.fillRect(image.rect(), QColor(Theme.get_text_color()))
+        painter.end()
+
+        pixmap = QPixmap.fromImage(image)
+        pixmap.setDevicePixelRatio(device_pixel_ratio)
+        return pixmap
+
+    def _sync_pinned_selection_to_root(self) -> None:
+        if not hasattr(self, "pinned_folders_list"):
+            return
+        root_key = str(self._tree_root_path or "").replace("\\", "/").lower()
+        self.pinned_folders_list.blockSignals(True)
+        matched_item: QListWidgetItem | None = None
+        for row in range(self.pinned_folders_list.count()):
+            item = self.pinned_folders_list.item(row)
+            item_key = str(item.data(Qt.ItemDataRole.UserRole) or "").replace("\\", "/").lower()
+            is_match = bool(root_key) and item_key == root_key
+            item.setSelected(is_match)
+            if is_match:
+                matched_item = item
+        if matched_item is not None:
+            self.pinned_folders_list.setCurrentItem(matched_item)
+        else:
+            self.pinned_folders_list.clearSelection()
+            self.pinned_folders_list.setCurrentItem(None)
+        self.pinned_folders_list.blockSignals(False)
+
+    def _on_pinned_folder_selection_changed(self) -> None:
+        if not hasattr(self, "pinned_folders_list"):
+            return
+        item = self.pinned_folders_list.currentItem()
+        if not item:
+            return
+        folder_path = str(item.data(Qt.ItemDataRole.UserRole) or "")
+        if not folder_path:
+            return
+        self.tree.selectionModel().clearSelection()
+        if hasattr(self, "collections_list"):
+            self.collections_list.blockSignals(True)
+            self.collections_list.clearSelection()
+            self.collections_list.blockSignals(False)
+        self._navigate_to_folder(folder_path, record_history=True, re_root_tree=True)
+
+    def _on_pinned_folders_context_menu(self, pos: QPoint) -> None:
+        item = self.pinned_folders_list.itemAt(pos)
+        if not item:
+            return
+
+        folder_path = str(item.data(Qt.ItemDataRole.UserRole) or "")
+        if not folder_path:
+            return
+
+        menu = QMenu(self)
+        act_open = menu.addAction("Open Folder")
+        act_unpin = menu.addAction("Unpin Folder")
+        menu.addSeparator()
+        act_explorer = menu.addAction("Open in File Explorer")
+
+        chosen = menu.exec(self.pinned_folders_list.viewport().mapToGlobal(pos))
+        if chosen == act_open:
+            self._navigate_to_folder(folder_path, record_history=True, re_root_tree=True)
+        elif chosen == act_unpin:
+            self.bridge.unpin_folder(folder_path)
+        elif chosen == act_explorer:
+            self.bridge.open_in_explorer(folder_path)
+
     def _reload_collections(self) -> None:
         if not hasattr(self, "collections_list"):
             return
@@ -5929,6 +6290,10 @@ class MainWindow(QMainWindow):
         if collection_id <= 0:
             return
         self.tree.selectionModel().clearSelection()
+        if hasattr(self, "pinned_folders_list"):
+            self.pinned_folders_list.blockSignals(True)
+            self.pinned_folders_list.clearSelection()
+            self.pinned_folders_list.blockSignals(False)
         self.bridge.set_active_collection(collection_id)
 
     def _on_collections_context_menu(self, pos: QPoint) -> None:
@@ -8334,6 +8699,14 @@ class MainWindow(QMainWindow):
         else:
             act_hide = menu.addAction("Hide Folder")
 
+        is_pinned = self.bridge.is_folder_pinned(folder_path)
+        act_pin = None
+        act_unpin = None
+        if is_pinned:
+            act_unpin = menu.addAction("Unpin Folder")
+        else:
+            act_pin = menu.addAction("Pin Folder")
+
         act_rename = menu.addAction("Rename…")
         
         menu.addSeparator()
@@ -8364,6 +8737,12 @@ class MainWindow(QMainWindow):
             success = self.bridge.set_folder_hidden(folder_path, False)
             if success:
                 self.proxy_model.invalidateFilter()
+
+        if chosen == act_pin:
+            self.bridge.pin_folder(folder_path)
+
+        if chosen == act_unpin:
+            self.bridge.unpin_folder(folder_path)
 
         if chosen == act_select_all:
              self.web.page().runJavaScript("if(window.selectAll) window.selectAll();")
@@ -8704,9 +9083,39 @@ class MainWindow(QMainWindow):
                 background-color: {Theme.get_control_bg(accent)};
                 border: 1px solid {Theme.get_border(accent)};
             }}
+            QListWidget#pinnedFoldersList {{
+                background-color: transparent;
+                border: none;
+                border-radius: 0px;
+                padding: 0px;
+            }}
+            QListWidget#pinnedFoldersList::item {{
+                padding: 0px;
+                border: none;
+                border-radius: 6px;
+                background-color: transparent;
+            }}
+            QListWidget#pinnedFoldersList::item:selected {{
+                background-color: {Theme.get_accent_soft(accent)};
+                border: 1px solid {accent_str};
+            }}
+            QListWidget#pinnedFoldersList::item:hover {{
+                background-color: {Theme.get_control_bg(accent)};
+                border: 1px solid {Theme.get_border(accent)};
+            }}
+            QWidget#pinnedFolderRow, QLabel#pinnedFolderIcon, QLabel#pinnedFolderText, QLabel#pinnedFolderPin {{
+                background: transparent;
+                border: none;
+            }}
+            QLabel#pinnedFolderText {{
+                color: {text};
+                font-weight: normal;
+            }}
             QLabel {{ color: {text}; font-weight: bold; background: transparent; }}
             {scrollbar_style}
         """)
+        if hasattr(self, "pinned_folders_list"):
+            self._reload_pinned_folders()
         
         # Right Panel (Metadata) - Mirroring Left Panel Background precisely
         self.right_panel.setStyleSheet(f"background-color: {sb_bg_str}; border-left: none;")
@@ -9035,7 +9444,7 @@ class MainWindow(QMainWindow):
             self._save_main_panel_widths()
             self._save_bottom_panel_height()
             if hasattr(self, "left_sections_splitter"):
-                self.bridge.settings.setValue("ui/left_sections_splitter_state", self.left_sections_splitter.saveState())
+                self.bridge.settings.setValue("ui/left_sections_splitter_state_v2", self.left_sections_splitter.saveState())
         except Exception:
             pass
 

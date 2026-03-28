@@ -7,6 +7,7 @@ let gTotal = 0;
 let gMedia = []; // Current page items
 let gSelectedFolders = [];
 let gActiveCollection = null;
+let gPinnedFolders = new Set();
 let gBridge = null;
 let gPosterRequested = new Set();
 let gPosterObserver = null;
@@ -78,6 +79,18 @@ const DETAILS_COLUMN_CONFIG = [
   { key: 'size', label: 'Size', min: 25, width: 110, resizable: true },
 ];
 let gDetailsColumnWidths = Object.fromEntries(DETAILS_COLUMN_CONFIG.map(col => [col.key, col.width]));
+
+function normalizeFolderPath(path) {
+  return String(path || '').replace(/\//g, '\\').toLowerCase();
+}
+
+function syncPinnedFolders(nextFolders) {
+  gPinnedFolders = new Set((Array.isArray(nextFolders) ? nextFolders : []).map(normalizeFolderPath).filter(Boolean));
+}
+
+function isPinnedFolder(path) {
+  return gPinnedFolders.has(normalizeFolderPath(path));
+}
 
 function getReviewMode() {
   if (gGalleryViewMode === 'similar_only' || gGroupBy === 'similar_only') return 'similar_only';
@@ -3660,6 +3673,8 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
 
   const hideBtn = document.getElementById('ctxHide');
   const unhideBtn = document.getElementById('ctxUnhide');
+  const pinFolderBtn = document.getElementById('ctxPinFolder');
+  const unpinFolderBtn = document.getElementById('ctxUnpinFolder');
   const renameBtn = document.getElementById('ctxRename');
   const addToCollectionBtn = document.getElementById('ctxAddToCollection');
 
@@ -3682,6 +3697,8 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
     const el = document.getElementById(id);
     if (el) el.style.display = hasItem ? 'block' : 'none';
   });
+  if (pinFolderBtn) pinFolderBtn.style.display = hasItem && isFolder && !isPinnedFolder(item && item.path) ? 'block' : 'none';
+  if (unpinFolderBtn) unpinFolderBtn.style.display = hasItem && isFolder && isPinnedFolder(item && item.path) ? 'block' : 'none';
   const metaBtn = document.getElementById('ctxMeta');
   if (metaBtn) metaBtn.style.display = hasItem && !isFolder ? 'block' : 'none';
   if (addToCollectionBtn) addToCollectionBtn.style.display = (hasItem && !isFolder) || (!hasItem && hasSelectedMediaCards()) ? 'block' : 'none';
@@ -3908,6 +3925,16 @@ function wireCtxMenu() {
                  refreshFromBridge(gBridge);
              }
           });
+        }
+        break;
+      case 'ctxPinFolder':
+        if (item && item.path && item.is_folder && gBridge && gBridge.pin_folder) {
+          gBridge.pin_folder(item.path, function () { });
+        }
+        break;
+      case 'ctxUnpinFolder':
+        if (item && item.path && item.is_folder && gBridge && gBridge.unpin_folder) {
+          gBridge.unpin_folder(item.path, function () { });
         }
         break;
       case 'ctxRename':
@@ -5761,6 +5788,12 @@ async function main() {
       });
     }
 
+    if (bridge.list_pinned_folders) {
+      bridge.list_pinned_folders(function (folders) {
+        syncPinnedFolders(folders || []);
+      });
+    }
+
     // Initial sync
     refreshFromBridge(bridge);
 
@@ -5818,6 +5851,12 @@ async function main() {
     if (bridge.nativeDragFinished) {
       bridge.nativeDragFinished.connect(function () {
         clearGalleryDragState();
+      });
+    }
+
+    if (bridge.pinnedFoldersChanged) {
+      bridge.pinnedFoldersChanged.connect(function (folders) {
+        syncPinnedFolders(folders || []);
       });
     }
 
