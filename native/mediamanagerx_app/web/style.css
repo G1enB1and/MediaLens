@@ -2068,26 +2068,27 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 .video-play-indicator svg {
   width: 52px;
   height: 52px;
-  background: rgba(255, 255, 255, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.6);
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid black;
   border-radius: 50%;
   padding: 8px;
   filter: drop-shadow(0 4px 16px rgba(0, 0, 0, 0.6));
-  transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), background 0.2s ease;
+  transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   pointer-events: auto;
-  /* Only the circular button triggers playback */
   cursor: pointer;
+  color: white; /* Icon color */
+}
+
+.light-mode .video-play-indicator svg {
+  background: rgba(255, 255, 255, 0.45);
+  border: 1px solid white;
+  color: black;
 }
 
 .video-play-indicator:hover svg {
   transform: scale(1.1);
-  background: rgba(255, 255, 255, 0.45);
 }
 
-.video-play-indicator:hover {
-  background: transparent;
-  /* Don't darken the card on hover anymore */
-}
 
 /* Hide indicator when video is playing in-place (handled by native) */
 .card.playing-inplace .video-play-indicator {
