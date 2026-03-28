@@ -67,6 +67,8 @@ const TIMELINE_NAV_LANE_PX = 28;
 const TIMELINE_VIEWPORT_TOP_MARGIN_PX = -6;
 const TIMELINE_VIEWPORT_BOTTOM_MARGIN_PX = 32;
 const TIMELINE_MIN_HEIGHT_PX = 140;
+const HEADER_LOGO_LIGHT = 'MediaLens-Logo-3-64.png';
+const HEADER_LOGO_DARK = 'MediaLens-Logo-3-64.png';
 
 const GALLERY_VIEW_MODES = new Set(['masonry', 'grid_small', 'grid_medium', 'grid_large', 'grid_xlarge', 'list', 'content', 'details', 'duplicates', 'similar', 'similar_only']);
 const REVIEW_VIEW_MODES = new Set(['duplicates', 'similar', 'similar_only']);
@@ -5377,7 +5379,7 @@ function updateThemeAwareIcons(theme) {
   // Update Logo
   const logo = document.getElementById('mainLogo');
   if (logo) {
-    logo.src = isLight ? 'MediaLens-Logo-64.png' : 'MediaLens-Logo-Dark-64.png';
+    logo.src = isLight ? HEADER_LOGO_LIGHT : HEADER_LOGO_DARK;
   }
 
   // Update Sidebar Icons
