@@ -1,6 +1,28 @@
 # Change Log
 
-## v1.1.3 (Current)
+## v1.1.4 (Current)
+
+### Added
+
+- **Recycle Bin Delete Workflow**  
+    Added recycle-bin delete as the default behavior, a `Shift+Delete` permanent delete shortcut with confirmation, and a new setting to control recycle-bin usage.
+- **Pinned Folders Sidebar**  
+    Added pinned folders in the left sidebar with right-click add/remove actions and drag-and-drop support.
+
+### Changed
+
+- **Video Preview Reliability**  
+    Rebuilt the preview-above-details video pipeline to restore metadata, static posters, explicit in-place playback, lightbox double-click, and stable delete behavior without the earlier crashes.
+- **Accent Contrast**  
+    Improved accent-color readability in lower-contrast situations by dynamically increasing contrast where needed.
+- **File Tree Visual Polish**  
+    Refined tree and pinned-folder styling so selected folders use bold accent text without tinting icons, and chevrons only render when folders actually have children.
+- **Header Branding**  
+    Replaced the header logo.
+
+---
+
+## v1.1.3
 
 ### Added
 
