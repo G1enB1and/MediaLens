@@ -1096,6 +1096,11 @@ class AccentSelectionTreeDelegate(QStyledItemDelegate):
         if bool(opt.state & QStyle.StateFlag.State_Selected):
             accent_str = str(self.bridge.settings.value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT)
             accent = QColor(accent_str)
+            
+            # Mix 24% foreground text color into the accent color for better readability in both light and dark extremes
+            text_color = Theme.get_text_color()
+            accent = QColor(Theme.mix(text_color, accent, 0.76))
+
             opt.font.setBold(True)
             opt.palette.setColor(opt.palette.ColorRole.Text, accent)
             opt.palette.setColor(opt.palette.ColorRole.WindowText, accent)

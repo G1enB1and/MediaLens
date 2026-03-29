@@ -592,6 +592,11 @@ header {
   margin-bottom: 12px;
 }
 
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--accent);
+}
+
 .toggle {
   display: flex;
   gap: 10px;
@@ -1858,7 +1863,7 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 
 .duplicate-overall-best {
   padding-top: 2px;
-  color: color-mix(in srgb, var(--accent), white 18%);
+  color: color-mix(in srgb, var(--accent), var(--fg) 24%);
   font-weight: 700;
 }
 
