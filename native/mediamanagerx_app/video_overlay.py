@@ -756,6 +756,7 @@ class LightboxVideoOverlay(QWidget):
         was_visible = self.isVisible()
         try:
             self.player.stop()
+            self.player.setSource(QUrl())
         except Exception:
             pass
         self.setVisible(False)
