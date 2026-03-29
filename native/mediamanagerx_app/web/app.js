@@ -1357,15 +1357,57 @@ function deletePathsSequential(paths, onDone) {
       if (typeof onDone === 'function') onDone();
       return;
     }
-    if (!gBridge || !gBridge.delete_path) {
+    if (!gBridge) {
       step();
       return;
     }
-    gBridge.delete_path(next, function () {
+    deletePathFromUi(next, function () {
       step();
     });
   };
   step();
+}
+
+function deletePathFromUi(path, onDone) {
+  if (!path || !gBridge) {
+    if (typeof onDone === 'function') onDone(false);
+    return;
+  }
+  const finish = (ok) => {
+    if (typeof onDone === 'function') onDone(!!ok);
+  };
+  if (!gBridge.get_settings) {
+    if (!gBridge.delete_path) {
+      finish(false);
+      return;
+    }
+    gBridge.delete_path(path, finish);
+    return;
+  }
+  gBridge.get_settings((settings) => {
+    const useRecycleBin = settings && settings['gallery.use_recycle_bin'] !== undefined
+      ? !!settings['gallery.use_recycle_bin']
+      : true;
+    if (useRecycleBin) {
+      if (!gBridge.delete_path) {
+        finish(false);
+        return;
+      }
+      gBridge.delete_path(path, finish);
+      return;
+    }
+    const parts = String(path).split(/[/\\]/);
+    const name = parts[parts.length - 1] || path;
+    if (!window.confirm(`Permanently delete "${name}"?`)) {
+      finish(false);
+      return;
+    }
+    if (!gBridge.delete_path_permanent) {
+      finish(false);
+      return;
+    }
+    gBridge.delete_path_permanent(path, finish);
+  });
 }
 
 function getDuplicateGroupItems(groupKey) {
@@ -1492,10 +1534,10 @@ function autoResolveAllDuplicateGroups() {
 }
 
 function deleteDuplicateCard(path) {
-  if (!path || !gBridge || !gBridge.delete_path) return;
+  if (!path || !gBridge) return;
   gPendingScrollAnchor = captureCurrentGroupScrollAnchor();
   setGlobalLoading(true, 'Deleting file...', 25);
-  gBridge.delete_path(path, function () {
+  deletePathFromUi(path, function () {
     setGlobalLoading(false);
     refreshFromBridge(gBridge, false);
   });
@@ -3980,8 +4022,8 @@ function wireCtxMenu() {
         }
         break;
       case 'ctxDelete':
-        if (item && item.path && gBridge && gBridge.delete_path) {
-          gBridge.delete_path(item.path, (ok) => { if (ok) refreshFromBridge(gBridge); });
+        if (item && item.path && gBridge) {
+          deletePathFromUi(item.path, (ok) => { if (ok) refreshFromBridge(gBridge); });
         }
         break;
       case 'ctxCut':
@@ -4827,6 +4869,7 @@ function wireSettings() {
 
   const startInput = document.getElementById('startFolder');
   const restoreToggle = document.getElementById('toggleRestoreLast');
+  const useRecycleBinToggle = document.getElementById('toggleUseRecycleBin');
   const toggleShowHidden = document.getElementById('toggleShowHidden');
   const accentInput = document.getElementById('accentColor');
 
@@ -4866,6 +4909,13 @@ function wireSettings() {
       gBridge.set_setting_bool('gallery.restore_last', !!restoreToggle.checked, function () {
         syncStartFolderEnabled();
       });
+    });
+  }
+
+  if (useRecycleBinToggle) {
+    useRecycleBinToggle.addEventListener('change', () => {
+      if (!gBridge || !gBridge.set_setting_bool) return;
+      gBridge.set_setting_bool('gallery.use_recycle_bin', !!useRecycleBinToggle.checked, function () {});
     });
   }
 
@@ -5707,6 +5757,9 @@ async function main() {
 
       const r = document.getElementById('toggleRestoreLast');
       if (r) r.checked = !!(s && s['gallery.restore_last']);
+
+      const rec = document.getElementById('toggleUseRecycleBin');
+      if (rec) rec.checked = (s && s['gallery.use_recycle_bin'] !== undefined) ? !!s['gallery.use_recycle_bin'] : true;
       // keep start folder UI in sync
       syncStartFolderEnabled && syncStartFolderEnabled();
 

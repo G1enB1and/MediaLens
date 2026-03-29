@@ -27,6 +27,16 @@ from math import gcd
 from packaging.version import Version
 from pathlib import Path
 
+def send_to_recycle_bin(path: str) -> bool:
+    try:
+        import send2trash
+        send2trash.send2trash(str(Path(path).resolve()))
+        return True
+    except Exception:
+        return False
+
+
+
 def _install_stderr_filter() -> None:
     """Suppress noisy C-level FFmpeg log lines written directly to stderr fd 2.
 
@@ -1294,7 +1304,7 @@ class Bridge(QObject):
                 cmd += ["-ss", "0.5"]
             cmd += ["-i", str(video_path), "-frames:v", "1", "-vf", vf, "-q:v", "4", str(out)]
             
-            r = _run_hidden_subprocess(cmd, capture_output=True, text=True)
+            r = _run_hidden_subprocess(cmd, capture_output=True, text=True, timeout=5)
             if r.returncode != 0:
                 return None
             return out if out.exists() else None
@@ -3479,9 +3489,54 @@ class Bridge(QObject):
     def delete_path(self, path_str: str) -> bool:
         try:
             p = Path(path_str)
-            if not p.exists(): return False
-            if p.is_dir(): shutil.rmtree(p)
-            else: p.unlink()
+            if not p.exists():
+                self.fileOpFinished.emit("delete", False, path_str, "")
+                return False
+
+            self.close_native_video()
+            QApplication.processEvents()
+
+            use_recycle = bool(self.settings.value("gallery/use_recycle_bin", True, type=bool))
+            if use_recycle:
+                deleted = send_to_recycle_bin(path_str)
+                if not deleted and p.exists():
+                    if p.is_dir():
+                        shutil.rmtree(p)
+                    else:
+                        p.unlink()
+            else:
+                if p.is_dir():
+                    shutil.rmtree(p)
+                else:
+                    p.unlink()
+
+            from app.mediamanager.utils.pathing import normalize_windows_path
+            self.conn.execute("DELETE FROM media_items WHERE path = ?", (normalize_windows_path(path_str),))
+            self.conn.commit()
+            self._disk_cache = {}
+            self._disk_cache_key = ""
+            self.fileOpFinished.emit("delete", True, path_str, "")
+            return True
+        except Exception:
+            self.fileOpFinished.emit("delete", False, path_str, "")
+            return False
+
+    @Slot(str, result=bool)
+    def delete_path_permanent(self, path_str: str) -> bool:
+        try:
+            p = Path(path_str)
+            if not p.exists():
+                self.fileOpFinished.emit("delete", False, path_str, "")
+                return False
+
+            self.close_native_video()
+            QApplication.processEvents()
+
+            if p.is_dir():
+                shutil.rmtree(p)
+            else:
+                p.unlink()
+
             from app.mediamanager.utils.pathing import normalize_windows_path
             self.conn.execute("DELETE FROM media_items WHERE path = ?", (normalize_windows_path(path_str),))
             self.conn.commit()
@@ -3522,7 +3577,7 @@ class Bridge(QObject):
             ffprobe = self._ffprobe_bin()
             if not ffprobe: return 0.0
             cmd = [ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(video_path)]
-            r = _run_hidden_subprocess(cmd, capture_output=True, text=True, check=True)
+            r = _run_hidden_subprocess(cmd, capture_output=True, text=True, check=True, timeout=5)
             return float((r.stdout or "").strip() or 0.0)
         except Exception: return 0.0
 
@@ -3572,7 +3627,7 @@ class Bridge(QObject):
                 w, h, is_malformed = self._probe_video_size(video_path)
             else:
                 is_malformed = (w % 2 != 0 or h % 2 != 0)
-                
+
             if is_malformed:
                 self.videoPreprocessingStatus.emit("Preparing video...")
                 def work():
@@ -3582,16 +3637,19 @@ class Bridge(QObject):
                             pw, ph, _ = self._probe_video_size(fixed)
                             self.videoPreprocessingStatus.emit("")
                             self.openVideoRequested.emit(str(fixed), bool(autoplay), bool(loop), bool(muted), int(pw), int(ph))
-                        else: self.videoPreprocessingStatus.emit("Error preparing video.")
-                    except Exception: self.videoPreprocessingStatus.emit("Error preparing video.")
+                        else:
+                            self.videoPreprocessingStatus.emit("Error preparing video.")
+                    except Exception:
+                        self.videoPreprocessingStatus.emit("Error preparing video.")
                 threading.Thread(target=work, daemon=True).start()
-            else: self.openVideoRequested.emit(str(video_path), bool(autoplay), bool(loop), bool(muted), int(w), int(h))
+            else:
+                self.openVideoRequested.emit(str(video_path), bool(autoplay), bool(loop), bool(muted), int(w), int(h))
             return True
-        except Exception: return False
+        except Exception:
+            return False
 
     @Slot(str, int, int, int, int, bool, bool, bool, int, int)
     def open_native_video_inplace(self, video_path: str, x: int, y: int, w: int, h: int, autoplay: bool, loop: bool, muted: bool, vw: int = 0, vh: int = 0) -> None:
-        # If loop is false, double check duration (for previously scanned files without duration metadata)
         if not loop:
             d_s = self.get_video_duration_seconds(video_path)
             if 0 < d_s < 60:
@@ -3601,6 +3659,7 @@ class Bridge(QObject):
             if not path_obj.exists() or not path_obj.is_file():
                 self._log(f"Rejected open_native_video_inplace for non-file path: {video_path}")
                 return
+
             if vw <= 0 or vh <= 0:
                 vw, vh, is_malformed = self._probe_video_size(video_path)
             else:
@@ -3615,8 +3674,10 @@ class Bridge(QObject):
                             pw, ph, _ = self._probe_video_size(fixed)
                             self.videoPreprocessingStatus.emit("")
                             self.openVideoInPlaceRequested.emit(str(fixed), int(x), int(y), int(w), int(h), bool(autoplay), bool(loop), bool(muted), int(pw), int(ph))
-                        else: self.videoPreprocessingStatus.emit("Error preparing video.")
-                    except Exception: self.videoPreprocessingStatus.emit("Error preparing video.")
+                        else:
+                            self.videoPreprocessingStatus.emit("Error preparing video.")
+                    except Exception:
+                        self.videoPreprocessingStatus.emit("Error preparing video.")
                 threading.Thread(target=work, daemon=True).start()
             else:
                 self.openVideoInPlaceRequested.emit(str(video_path), int(x), int(y), int(w), int(h), bool(autoplay), bool(loop), bool(muted), int(vw), int(vh))
@@ -3668,14 +3729,19 @@ class Bridge(QObject):
         vf = f"scale={ew}:{eh},setsar=1,format=yuv420p"
         cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "warning", "-i", str(video_path), "-vf", vf, "-c:v", "mjpeg", "-q:v", "3", "-c:a", "copy", out_path]
         try:
-            if _run_hidden_subprocess(cmd, capture_output=True, timeout=60).returncode == 0: return out_path
-        except Exception: pass
+            if _run_hidden_subprocess(cmd, capture_output=True, timeout=60).returncode == 0:
+                return out_path
+        except Exception:
+            pass
         return None
 
     @Slot(result=bool)
     def close_native_video(self) -> bool:
-        try: self.closeVideoRequested.emit(); return True
-        except Exception: return False
+        try:
+            self.closeVideoRequested.emit()
+            return True
+        except Exception:
+            return False
 
     @Slot(str, result=dict)
     def get_media_metadata(self, path: str) -> dict:
@@ -3730,6 +3796,10 @@ class Bridge(QObject):
                 "ai_prompt": ai_prompt, "ai_negative_prompt": ai_negative_prompt,
                 "ai_params": ai_params, "ai_tool_summary": ai_tool_summary,
                 "tags": list_media_tags(self.conn, m["id"]), "has_metadata": bool(meta or ai_meta),
+                "media_type": m.get("media_type") or "",
+                "width": m.get("width"),
+                "height": m.get("height"),
+                "duration_ms": m.get("duration_ms"),
                 "exif_date_taken": m.get("exif_date_taken") or "",
                 "metadata_date": m.get("metadata_date") or "",
                 "file_created_time": m.get("file_created_time") or "",
@@ -4699,6 +4769,8 @@ class MainWindow(QMainWindow):
     _DEFAULT_CENTER_WIDTH = 700
     _DEFAULT_RIGHT_PANEL_WIDTH = 300
     _DEFAULT_BOTTOM_PANEL_HEIGHT = 220
+    videoSidebarMetadataReady = Signal(str, dict)
+    videoSidebarPosterReady = Signal(str, str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -4720,6 +4792,8 @@ class MainWindow(QMainWindow):
         self.bridge.videoPreprocessingStatus.connect(self._on_video_preprocessing_status)
         self.bridge.uiFlagChanged.connect(self._apply_ui_flag)
         self.bridge.metadataRequested.connect(self._show_metadata_for_path)
+        self.videoSidebarMetadataReady.connect(self._on_video_sidebar_metadata_ready)
+        self.videoSidebarPosterReady.connect(self._on_video_sidebar_poster_ready)
         self.bridge.loadFolderRequested.connect(self._on_load_folder_requested)
         self.bridge.startNativeDragRequested.connect(self._start_native_gallery_drag)
         self.bridge.navigateToFolderRequested.connect(self._on_navigate_to_folder_requested)
@@ -4786,6 +4860,11 @@ class MainWindow(QMainWindow):
         self.act_delete.setShortcut("Del")
         self.act_delete.triggered.connect(self._on_delete_shortcut)
         self.addAction(self.act_delete)
+
+        self.act_shift_delete = QAction("Permanent Delete", self)
+        self.act_shift_delete.setShortcut("Shift+Del")
+        self.act_shift_delete.triggered.connect(self._on_shift_delete_shortcut)
+        self.addAction(self.act_shift_delete)
 
         self.act_rename = QAction("Rename", self)
         self.act_rename.setShortcut("F2")
@@ -5001,13 +5080,29 @@ class MainWindow(QMainWindow):
         paths = self._get_focused_paths()
         if not paths: return
         
-        # Confirmation for multiple or folder deletion
-        count = len(paths)
-        msg = f"Are you sure you want to delete {count} items?" if count > 1 else f"Are you sure you want to delete '{Path(paths[0]).name}'?"
-        ret = QMessageBox.question(self, "Confirm Delete", msg, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        if ret == QMessageBox.StandardButton.Yes:
+        use_recycle = bool(self.bridge.settings.value("gallery/use_recycle_bin", True, type=bool))
+        if use_recycle:
             for p in paths:
                 self.bridge.delete_path(p)
+        else:
+            count = len(paths)
+            msg = f"Are you sure you want to permanently delete {count} items?" if count > 1 else f"Are you sure you want to permanently delete '{Path(paths[0]).name}'?"
+            ret = QMessageBox.question(self, "Confirm Permanent Delete", msg, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if ret == QMessageBox.StandardButton.Yes:
+                for p in paths:
+                    self.bridge.delete_path_permanent(p)
+
+    def _on_shift_delete_shortcut(self) -> None:
+        if self._is_input_focused(): return
+        paths = self._get_focused_paths()
+        if not paths: return
+        
+        count = len(paths)
+        msg = f"Are you sure you want to permanently delete {count} items?" if count > 1 else f"Are you sure you want to permanently delete '{Path(paths[0]).name}'?"
+        ret = QMessageBox.question(self, "Confirm Permanent Delete", msg, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if ret == QMessageBox.StandardButton.Yes:
+            for p in paths:
+                self.bridge.delete_path_permanent(p)
 
     def _on_rename_shortcut(self) -> None:
         if self._is_input_focused(): return
@@ -5303,6 +5398,14 @@ class MainWindow(QMainWindow):
         preview_header_layout.addWidget(self.preview_header_lbl)
         preview_header_layout.addStretch(1)
 
+        self.btn_play_preview = QPushButton("Play")
+        self.btn_play_preview.setObjectName("btnPlayPreview")
+        self.btn_play_preview.setToolTip("Open selected video preview")
+        self.btn_play_preview.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_play_preview.clicked.connect(self._play_selected_video_in_sidebar)
+        self.btn_play_preview.hide()
+        preview_header_layout.addWidget(self.btn_play_preview)
+
         # Toggle OFF (Hide) button
         self.btn_close_preview = QPushButton("×")
         self.btn_close_preview.setObjectName("btnClosePreview")
@@ -5329,6 +5432,7 @@ class MainWindow(QMainWindow):
         self.preview_image_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.preview_image_lbl.setText("No preview")
         self.preview_image_lbl.setWordWrap(True)
+        self.preview_image_lbl.setCursor(Qt.CursorShape.ArrowCursor)
         self._preview_source_pixmap: QPixmap | None = None
         self._preview_movie: QMovie | None = None
         self._preview_aspect_ratio = 1.0
@@ -5339,8 +5443,22 @@ class MainWindow(QMainWindow):
         self._sidebar_video_layout.setContentsMargins(0, 0, 0, 0)
         self.sidebar_video_overlay = LightboxVideoOverlay(parent=self.preview_image_lbl)
         self.sidebar_video_overlay.set_mode(True)
+        self.sidebar_video_overlay.on_close = self._sync_sidebar_video_preview_controls
         self._sidebar_video_layout.addWidget(self.sidebar_video_overlay)
         self.sidebar_video_overlay.hide()
+
+        self.btn_preview_overlay_play = QPushButton(self.preview_image_lbl)
+        self.btn_preview_overlay_play.setObjectName("btnPreviewOverlayPlay")
+        self.btn_preview_overlay_play.setToolTip("Play video in preview")
+        self.btn_preview_overlay_play.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_preview_overlay_play.setFixedSize(QSize(52, 52))
+        self.btn_preview_overlay_play.setIconSize(QSize(30, 30))
+        self._update_preview_play_button_icon()
+        self.btn_preview_overlay_play.clicked.connect(self._play_selected_video_in_sidebar)
+        self.btn_preview_overlay_play.installEventFilter(self)
+        self.btn_preview_overlay_play.hide()
+        self.btn_preview_overlay_play.raise_()
+        self._video_preview_transition_active = False
 
         self.preview_sep = self._add_sep("preview_sep_line")
         right_layout.addWidget(self.preview_sep)
@@ -6554,6 +6672,8 @@ class MainWindow(QMainWindow):
                     self.preview_header_row.setVisible(True)
                     self.preview_image_lbl.setVisible(visible)
                     self.preview_sep.setVisible(visible)
+                    if hasattr(self, "btn_play_preview"):
+                        self.btn_play_preview.setVisible(False)
                     if hasattr(self, "btn_close_preview"):
                         self.btn_close_preview.setVisible(visible)
                     if hasattr(self, "btn_show_preview_inline"):
@@ -6567,6 +6687,7 @@ class MainWindow(QMainWindow):
                 if hasattr(self, "right_layout"):
                     self.right_layout.activate()
                     self._update_sidebar_input_widths()
+                self._sync_sidebar_video_preview_controls()
             elif key == "ui.show_dismissed_progress_toasts":
                 if hasattr(self, "act_show_dismissed_progress_toasts"):
                     self.act_show_dismissed_progress_toasts.setChecked(bool(value))
@@ -6598,12 +6719,15 @@ class MainWindow(QMainWindow):
         self.preview_header_row.setVisible(True)
         self.preview_image_lbl.setVisible(visible)
         self.preview_sep.setVisible(visible)
+        if hasattr(self, "btn_play_preview"):
+            self.btn_play_preview.setVisible(False)
         if hasattr(self, "btn_close_preview"):
             self.btn_close_preview.setVisible(visible)
         if hasattr(self, "btn_show_preview_inline"):
             self.btn_show_preview_inline.setVisible(not visible)
         if hasattr(self, "act_preview_above_details"):
             self.act_preview_above_details.setChecked(visible)
+        self._sync_sidebar_video_preview_controls()
 
     def _wrap_button_text(self, button: QPushButton, base_text: str, max_width: int) -> None:
         metrics = QFontMetrics(button.font())
@@ -6770,6 +6894,99 @@ class MainWindow(QMainWindow):
         self._preview_source_pixmap = None
         self._preview_aspect_ratio = 1.0
         self.preview_image_lbl.setPixmap(QPixmap())
+        self._sync_sidebar_video_preview_controls()
+
+    def _selected_video_path(self) -> str | None:
+        path = getattr(self, "_current_path", None)
+        if not path:
+            return None
+        if Path(path).suffix.lower() not in {".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}:
+            return None
+        return path
+
+    def _set_preview_play_button_hovered(self, hovered: bool) -> None:
+        if not hasattr(self, "btn_preview_overlay_play"):
+            return
+        size = 57 if hovered else 52
+        self.btn_preview_overlay_play.setFixedSize(QSize(size, size))
+        self._position_sidebar_preview_play_button()
+
+    def _position_sidebar_preview_play_button(self) -> None:
+        if not hasattr(self, "btn_preview_overlay_play"):
+            return
+        btn = self.btn_preview_overlay_play
+        host = self.preview_image_lbl
+        x = max(0, (host.width() - btn.width()) // 2)
+        y = max(0, (host.height() - btn.height()) // 2)
+        btn.move(x, y)
+        btn.raise_()
+
+    def _sync_sidebar_video_preview_controls(self) -> None:
+        if not hasattr(self, "btn_preview_overlay_play"):
+            return
+        path = self._selected_video_path()
+        preview_visible = hasattr(self, "preview_image_lbl") and self.preview_image_lbl.isVisible()
+        has_preview = (
+            (self._preview_movie is not None) or
+            (self._preview_source_pixmap is not None and not self._preview_source_pixmap.isNull())
+        )
+        overlay_open = hasattr(self, "sidebar_video_overlay") and self.sidebar_video_overlay.isVisible()
+        show_overlay_play = bool(path and preview_visible and has_preview and not overlay_open)
+        self.btn_preview_overlay_play.setVisible(show_overlay_play)
+        self.btn_preview_overlay_play.setEnabled(show_overlay_play)
+        self._position_sidebar_preview_play_button()
+
+    def _update_preview_play_button_icon(self) -> None:
+        if not hasattr(self, "btn_preview_overlay_play"):
+            return
+        asset_path = Path(__file__).with_name("web") / "icons" / "play.svg"
+        renderer = QSvgRenderer(str(asset_path))
+        if not renderer.isValid():
+            self.btn_preview_overlay_play.setIcon(QIcon())
+            return
+
+        canvas_size = 42
+        icon_rect = QRect(6, 6, 30, 30)
+
+        shadow_mask = QImage(canvas_size, canvas_size, QImage.Format.Format_ARGB32_Premultiplied)
+        shadow_mask.fill(Qt.GlobalColor.transparent)
+        shadow_painter = QPainter(shadow_mask)
+        shadow_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        renderer.render(shadow_painter, icon_rect)
+        shadow_painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        shadow_painter.fillRect(shadow_mask.rect(), QColor(0, 0, 0, 255))
+        shadow_painter.end()
+
+        icon_image = QImage(canvas_size, canvas_size, QImage.Format.Format_ARGB32_Premultiplied)
+        icon_image.fill(Qt.GlobalColor.transparent)
+        icon_painter = QPainter(icon_image)
+        icon_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        renderer.render(icon_painter, icon_rect)
+        icon_painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        icon_painter.fillRect(icon_image.rect(), QColor("#ffffff"))
+        icon_painter.end()
+
+        image = QImage(canvas_size, canvas_size, QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        glow_layers = [
+            (0, 0, 0.55),
+            (-1, 0, 0.40), (1, 0, 0.40), (0, -1, 0.40), (0, 1, 0.40),
+            (-2, 0, 0.28), (2, 0, 0.28), (0, -2, 0.28), (0, 2, 0.28),
+            (-1, -1, 0.22), (1, 1, 0.22), (-1, 1, 0.22), (1, -1, 0.22),
+            (-3, 0, 0.14), (3, 0, 0.14), (0, -3, 0.14), (0, 3, 0.14),
+        ]
+        for dx, dy, opacity in glow_layers:
+            painter.setOpacity(opacity)
+            painter.drawImage(dx, dy, shadow_mask)
+
+        painter.setOpacity(1.0)
+        painter.drawImage(0, 0, icon_image)
+        painter.end()
+
+        self.btn_preview_overlay_play.setIcon(QIcon(QPixmap.fromImage(image)))
 
     def _update_preview_display(self, placeholder: str = "No preview") -> None:
         available_w = max(120, self._right_panel_content_width() - 8)
@@ -6782,6 +6999,9 @@ class MainWindow(QMainWindow):
             self._preview_movie.setScaledSize(QSize(available_w, target_h))
             if self._preview_movie.state() != QMovie.MovieState.Running:
                 self._preview_movie.start()
+            if hasattr(self, "sidebar_video_overlay") and self.sidebar_video_overlay.isVisible():
+                self.sidebar_video_overlay.setGeometry(self.preview_image_lbl.rect())
+            self._sync_sidebar_video_preview_controls()
             return
 
         if self._preview_source_pixmap is not None and not self._preview_source_pixmap.isNull():
@@ -6794,10 +7014,16 @@ class MainWindow(QMainWindow):
             )
             self.preview_image_lbl.setFixedHeight(max(96, scaled.height()))
             self.preview_image_lbl.setPixmap(scaled)
+            if hasattr(self, "sidebar_video_overlay") and self.sidebar_video_overlay.isVisible():
+                self.sidebar_video_overlay.setGeometry(self.preview_image_lbl.rect())
+            self._sync_sidebar_video_preview_controls()
             return
 
         self.preview_image_lbl.setFixedHeight(96)
         self.preview_image_lbl.setText(placeholder)
+        if hasattr(self, "sidebar_video_overlay") and self.sidebar_video_overlay.isVisible():
+            self.sidebar_video_overlay.setGeometry(self.preview_image_lbl.rect())
+        self._sync_sidebar_video_preview_controls()
 
     def _set_preview_pixmap(self, pixmap: QPixmap | None, placeholder: str = "No preview") -> None:
         self._clear_preview_media()
@@ -6824,6 +7050,81 @@ class MainWindow(QMainWindow):
         self.preview_image_lbl.setMovie(movie)
         self._update_preview_display("No preview")
 
+    def _load_video_preview_async(self, path: str) -> None:
+        def work() -> None:
+            poster_path = ""
+            try:
+                poster = self.bridge._ensure_video_poster(Path(path))
+                if poster and poster.exists():
+                    poster_path = str(poster)
+            except Exception:
+                poster_path = ""
+            self.videoSidebarPosterReady.emit(path, poster_path)
+        threading.Thread(target=work, daemon=True).start()
+
+    @Slot(str, str)
+    def _on_video_sidebar_poster_ready(self, path: str, poster_path: str) -> None:
+        if getattr(self, "_current_path", None) != path:
+            return
+        if poster_path and Path(poster_path).exists():
+            self._refresh_preview_for_path(path)
+        else:
+            self._set_preview_pixmap(None, "No video preview")
+
+    def _play_selected_video_in_sidebar(self) -> None:
+        if getattr(self, "_video_preview_transition_active", False):
+            return
+        path = self._selected_video_path()
+        if not path:
+            return
+        width = int(getattr(self, "_current_video_width", 0) or 0)
+        height = int(getattr(self, "_current_video_height", 0) or 0)
+        duration_ms = int(getattr(self, "_current_video_duration_ms", 0) or 0)
+        should_loop = 0 < duration_ms < 60000
+        if hasattr(self, "video_overlay") and self.video_overlay.isVisible():
+            self.video_overlay.close_overlay(notify_web=False)
+        if hasattr(self, "sidebar_video_overlay"):
+            self.sidebar_video_overlay.setGeometry(self.preview_image_lbl.rect())
+            self.sidebar_video_overlay.set_mode(True)
+            self.sidebar_video_overlay.open_video(
+                VideoRequest(
+                    path=path,
+                    autoplay=True,
+                    loop=should_loop,
+                    muted=True,
+                    width=width,
+                    height=height,
+                )
+            )
+            self.sidebar_video_overlay.raise_()
+        self._sync_sidebar_video_preview_controls()
+
+    def _open_selected_video_lightbox(self) -> None:
+        if getattr(self, "_video_preview_transition_active", False):
+            return
+        path = self._selected_video_path()
+        if not path:
+            return
+        width = int(getattr(self, "_current_video_width", 0) or 0)
+        height = int(getattr(self, "_current_video_height", 0) or 0)
+        duration_ms = int(getattr(self, "_current_video_duration_ms", 0) or 0)
+        should_loop = 0 < duration_ms < 60000
+        self._video_preview_transition_active = True
+        if hasattr(self, "sidebar_video_overlay"):
+            self.sidebar_video_overlay.close_overlay(notify_web=False)
+        if hasattr(self, "video_overlay"):
+            self.video_overlay.close_overlay(notify_web=False)
+        QApplication.processEvents()
+
+        def _finish_open() -> None:
+            try:
+                self.bridge.open_native_video(path, True, should_loop, True, width, height)
+            finally:
+                self._video_preview_transition_active = False
+                self._sync_sidebar_video_preview_controls()
+
+        QTimer.singleShot(120, _finish_open)
+
     def _refresh_preview_for_path(self, path: str | None) -> None:
         if not hasattr(self, "preview_image_lbl"):
             return
@@ -6837,9 +7138,12 @@ class MainWindow(QMainWindow):
         suffix = p.suffix.lower()
         preview_path = p
         if suffix in {".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}:
-            poster = self.bridge._ensure_video_poster(p)
-            if not poster or not poster.exists():
-                self._set_preview_pixmap(None, "No video preview")
+            poster = self.bridge._video_poster_path(p)
+            if not poster.exists():
+                self._set_preview_pixmap(None, "Loading video preview...")
+                if hasattr(self, "sidebar_video_overlay"):
+                    self.sidebar_video_overlay.close_overlay(notify_web=False)
+                self._load_video_preview_async(str(p))
                 return
             preview_path = poster
         reader = QImageReader(str(preview_path))
@@ -6864,12 +7168,9 @@ class MainWindow(QMainWindow):
             self._set_preview_pixmap(None)
             return
         self._set_preview_pixmap(QPixmap.fromImage(img))
-
-        # Open video in sidebar overlay if applicable
         if suffix in {".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}:
-             req = VideoRequest(path, autoplay=False, loop=True, muted=True)
-             if hasattr(self, "sidebar_video_overlay"):
-                 self.sidebar_video_overlay.open_video(req)
+            if hasattr(self, "sidebar_video_overlay"):
+                self.sidebar_video_overlay.close_overlay(notify_web=False)
         elif hasattr(self, "sidebar_video_overlay"):
              self.sidebar_video_overlay.close_overlay(notify_web=False)
 
@@ -7937,11 +8238,13 @@ class MainWindow(QMainWindow):
             return
 
         is_bulk = len(paths) > 1
+        primary_path = paths[0] if paths else None
+        is_video = bool(primary_path and Path(primary_path).suffix.lower() in {".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"})
         self._set_metadata_empty_state(False)
         self._current_paths = paths # Store list for bulk save
-        self._current_path = paths[0] if not is_bulk else None
-        self._refresh_preview_for_path(paths[0] if not is_bulk else None)
-        metadata_kind = self._metadata_kind_for_path(paths[0] if paths else None)
+        self._current_path = primary_path if not is_bulk else None
+        self._refresh_preview_for_path(primary_path if not is_bulk else None)
+        metadata_kind = self._metadata_kind_for_path(primary_path)
         self._current_metadata_kind = metadata_kind
         self._setup_metadata_layout(metadata_kind)
 
@@ -7949,6 +8252,9 @@ class MainWindow(QMainWindow):
         self.preview_image_lbl.setVisible(not is_bulk and self.bridge._preview_above_details_enabled())
         self.preview_sep.setVisible(not is_bulk and self.bridge._preview_above_details_enabled())
         self.details_header_lbl.setVisible(not is_bulk)
+        self.preview_image_lbl.setCursor(Qt.CursorShape.ArrowCursor)
+        if hasattr(self, "btn_play_preview"):
+            self.btn_play_preview.setVisible(False)
         if hasattr(self, "btn_close_preview"):
             self.btn_close_preview.setVisible(not is_bulk and self.bridge._preview_above_details_enabled())
         if hasattr(self, "btn_show_preview_inline"):
@@ -7956,6 +8262,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "right_layout"):
             self.right_layout.activate()
             self._update_sidebar_input_widths()
+        self._sync_sidebar_video_preview_controls()
         self.btn_save_meta.setVisible(True)
         self.btn_clear_bulk_tags.setVisible(False)
         self.btn_import_exif.setVisible(not is_bulk)
@@ -8156,6 +8463,9 @@ class MainWindow(QMainWindow):
         if not is_bulk:
             path = paths[0]
             p = Path(path)
+            self._current_video_width = 0
+            self._current_video_height = 0
+            self._current_video_duration_ms = 0
             self.meta_filename_edit.setText(p.name)
             self.meta_path_lbl.setText(f"Folder: {p.parent}")
             data = {}
@@ -8208,6 +8518,16 @@ class MainWindow(QMainWindow):
                 if file_modified_date:
                     self.meta_file_modified_date_lbl.setText(f"Date Modified: {file_modified_date}")
                 
+                width = int(data.get("width") or 0)
+                height = int(data.get("height") or 0)
+                self._current_video_width = width
+                self._current_video_height = height
+                if width > 0 and height > 0:
+                    self.meta_res_lbl.setText(f"Resolution: {width} x {height} px")
+                duration_ms = int(data.get("duration_ms") or 0)
+                self._current_video_duration_ms = duration_ms
+                if duration_ms > 0:
+                    self.meta_duration_lbl.setText(f"Duration: {self._format_duration_seconds(duration_ms / 1000.0)}")
             except Exception:
                 pass
 
@@ -8224,18 +8544,33 @@ class MainWindow(QMainWindow):
             except Exception:
                 self.meta_size_lbl.setText("File Size:")
 
-            # 3. Real-time Harvest (Update/Enrich Labels)
-            ext = p.suffix.lower()
-            if ext in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}:
+            if is_video:
                 try:
-                    reader = QImageReader(str(p))
-                    sz = reader.size()
-                    if sz.isValid():
-                        self.meta_res_lbl.setText(f"Resolution: {sz.width()} × {sz.height()} px")
-                    else:
-                        self.meta_res_lbl.setText("Resolution: ")
+                    stat = p.stat()
+                    created_iso = datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc).replace(microsecond=0).isoformat()
+                    modified_iso = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat()
+                    self.meta_file_created_date_lbl.setText(f"Date Created: {self._format_sidebar_datetime(created_iso)}")
+                    self.meta_file_modified_date_lbl.setText(f"Date Modified: {self._format_sidebar_datetime(modified_iso)}")
                 except Exception:
-                    self.meta_res_lbl.setText("Resolution: ")
+                    pass
+                self.meta_fps_lbl.setText("FPS: ")
+                self.meta_codec_lbl.setText("Codec: ")
+                self.meta_audio_lbl.setText("Audio: ")
+                self._load_video_sidebar_metadata_async(path)
+            else:
+
+                # 3. Real-time Harvest (Update/Enrich Labels)
+                ext = p.suffix.lower()
+                if ext in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}:
+                    try:
+                        reader = QImageReader(str(p))
+                        sz = reader.size()
+                        if sz.isValid():
+                            self.meta_res_lbl.setText(f"Resolution: {sz.width()} x {sz.height()} px")
+                        else:
+                            self.meta_res_lbl.setText("Resolution: ")
+                    except Exception:
+                        self.meta_res_lbl.setText("Resolution: ")
 
                 # Additional info via Pillow
                 try:
@@ -8311,21 +8646,13 @@ class MainWindow(QMainWindow):
 
                 except Exception as e:
                     print(f"Metadata Read Error for {p.name}: {e}")
-            else:
-                vw, vh, _ = self.bridge._probe_video_size(str(p))
-                if vw > 0 and vh > 0:
-                    self.meta_res_lbl.setText(f"Resolution: {vw} × {vh} px")
-                else:
-                    self.meta_res_lbl.setText("Resolution: ")
-                video_meta = self._probe_video_details(str(p))
-                if video_meta.get("duration"):
-                    self.meta_duration_lbl.setText(f"Duration: {video_meta['duration']}")
-                if video_meta.get("fps"):
-                    self.meta_fps_lbl.setText(f"FPS: {video_meta['fps']}")
-                if video_meta.get("codec"):
-                    self.meta_codec_lbl.setText(f"Codec: {video_meta['codec']}")
-                if video_meta.get("audio"):
-                    self.meta_audio_lbl.setText(f"Audio: {video_meta['audio']}")
+                # video metadata probing disabled for stability during selection
+                # video metadata probing disabled for stability during selection
+                # video metadata probing disabled for stability during selection
+                # video metadata probing disabled for stability during selection
+                # video metadata probing disabled for stability during selection
+                # video metadata probing disabled for stability during selection
+                # video metadata probing disabled for stability during selection
         
             self.btn_save_meta.setProperty("baseText", "Save Changes to Database")
             self.btn_clear_bulk_tags.setProperty("baseText", "Clear All Tags")
@@ -8598,6 +8925,29 @@ class MainWindow(QMainWindow):
             "codec": str((video_stream or {}).get("codec_name") or "").upper(),
             "audio": "Yes" if audio_stream else "No",
         }
+
+    def _load_video_sidebar_metadata_async(self, path: str) -> None:
+        def work() -> None:
+            payload: dict[str, str] = {}
+            try:
+                payload = self._probe_video_details(path)
+            except Exception:
+                payload = {}
+            self.videoSidebarMetadataReady.emit(path, payload)
+        threading.Thread(target=work, daemon=True).start()
+
+    @Slot(str, dict)
+    def _on_video_sidebar_metadata_ready(self, path: str, payload: dict) -> None:
+        if getattr(self, "_current_path", None) != path:
+            return
+        if payload.get("duration"):
+            self.meta_duration_lbl.setText(f"Duration: {payload['duration']}")
+        if payload.get("fps"):
+            self.meta_fps_lbl.setText(f"FPS: {payload['fps']}")
+        if payload.get("codec"):
+            self.meta_codec_lbl.setText(f"Codec: {payload['codec']}")
+        if payload.get("audio"):
+            self.meta_audio_lbl.setText(f"Audio: {payload['audio']}")
 
     def _probe_animated_image_details(self, path: str) -> dict[str, str]:
         try:
@@ -8950,16 +9300,32 @@ class MainWindow(QMainWindow):
 
     def _delete_item(self, path_str: str):
         p = Path(path_str)
-        if p.is_dir():
-            reply = QMessageBox.question(
-                self, "Confirm Delete",
-                f"Are you sure you want to delete the folder and all its contents?\n\n{p.name}",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            if reply != QMessageBox.StandardButton.Yes:
-                return
         
-        self.bridge.delete_path(path_str)
+        modifiers = QApplication.keyboardModifiers()
+        is_shift_down = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+        
+        use_recycle = not is_shift_down and bool(self.bridge.settings.value("gallery/use_recycle_bin", True, type=bool))
+        
+        if use_recycle:
+            self.bridge.delete_path(path_str)
+        else:
+            if p.is_dir():
+                reply = QMessageBox.question(
+                    self, "Confirm Permanent Delete",
+                    f"Are you sure you want to permanently delete the folder and all its contents?\n\n{p.name}",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
+            else:
+                reply = QMessageBox.question(
+                    self, "Confirm Permanent Delete",
+                    f"Are you sure you want to permanently delete this file?\n\n{p.name}",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
+            self.bridge.delete_path_permanent(path_str)
 
     def choose_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Choose a media folder")
@@ -9092,6 +9458,9 @@ class MainWindow(QMainWindow):
 
     def _close_video_overlay(self) -> None:
         self.video_overlay.close_overlay(notify_web=False)
+        if hasattr(self, "sidebar_video_overlay"):
+            self.sidebar_video_overlay.close_overlay(notify_web=False)
+        self._sync_sidebar_video_preview_controls()
 
     def _update_splitter_style(self, accent_color: str) -> None:
         """Update QSplitter handles with light grey idle and accent color hover."""
@@ -9392,6 +9761,18 @@ class MainWindow(QMainWindow):
                 background-color: {Theme.get_control_bg(accent)};
                 color: {text};
             }}
+            QPushButton#btnPreviewOverlayPlay {{
+                background-color: {"rgba(255, 255, 255, 115)" if is_light else "rgba(0, 0, 0, 115)"};
+                border: 1px solid {"white" if is_light else "black"};
+                border-radius: 26px;
+                padding-left: 2px;
+            }}
+            QPushButton#btnPreviewOverlayPlay:hover {{
+                background-color: {"rgba(255, 255, 255, 115)" if is_light else "rgba(0, 0, 0, 115)"};
+            }}
+            QPushButton#btnPreviewOverlayPlay:pressed {{
+                background-color: {"rgba(255, 255, 255, 115)" if is_light else "rgba(0, 0, 0, 115)"};
+            }}
             QPushButton#btnSaveMeta, QPushButton#btnImportExif, QPushButton#btnMergeHiddenMeta, QPushButton#btnSaveToExif {{
                 background-color: {Theme.get_btn_save_bg(accent)};
                 color: {text};
@@ -9421,6 +9802,7 @@ class MainWindow(QMainWindow):
                 border-color: {accent_str};
             }}
         """)
+        self._update_preview_play_button_icon()
         
         self._update_app_style(accent)
 
@@ -9656,6 +10038,22 @@ class MainWindow(QMainWindow):
             pass
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if watched is getattr(self, "btn_preview_overlay_play", None):
+            if event.type() == QEvent.Type.Enter:
+                self._set_preview_play_button_hovered(True)
+            elif event.type() in {QEvent.Type.Leave, QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease}:
+                self._set_preview_play_button_hovered(False)
+        if event.type() == QEvent.Type.MouseButtonDblClick:
+            preview_widgets = {
+                getattr(self, "preview_image_lbl", None),
+                getattr(self, "sidebar_video_overlay", None),
+                getattr(getattr(self, "sidebar_video_overlay", None), "video_view", None),
+            }
+            if watched in preview_widgets:
+                if hasattr(event, "button") and event.button() == Qt.MouseButton.LeftButton:
+                    if self._selected_video_path():
+                        self._open_selected_video_lightbox()
+                        return True
         if event.type() == QEvent.Type.MouseButtonPress:
             # 1. Ignore ALL mouse buttons if a native popup/menu is active.
             # This protects against "Select All Files in Folder" from the tree context menu.
@@ -9741,6 +10139,7 @@ class MainWindow(QMainWindow):
             self.video_overlay.raise_()
         if hasattr(self, "preview_image_lbl"):
             self._update_preview_display()
+        self._position_sidebar_preview_play_button()
 
     def about(self) -> None:
         st = self.bridge.get_tools_status()
