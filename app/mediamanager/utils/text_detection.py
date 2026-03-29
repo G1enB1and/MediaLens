@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import json
+import time
 import re
 import tempfile
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
+from threading import Lock
 
 import numpy as np
 from PIL import Image
@@ -29,9 +34,218 @@ try:
 except AttributeError:  # pragma: no cover - Pillow < 9 compatibility
     _RESAMPLE = Image.BILINEAR
 
-TEXT_DETECTION_VERSION = 17
+TEXT_DETECTION_VERSION = 24
 TEXT_MORE_LIKELY_VERSION = 7
 TEXT_VERIFICATION_VERSION = 18
+_TEXT_LOG_LOCK = Lock()
+_TEXT_STAGE1_TO_STAGE2_SCORE = 0.22
+_TEXT_STAGE1_DIRECT_TO_OCR_SCORE = 0.68
+_TEXT_STAGE1_FALLBACK_DETECTED_SCORE = 0.50
+_TEXT_STAGE2_STRONG_DETECTED_SCORE = 0.96
+_TEXT_STAGE1_EARLY_EXIT_SCORE = 0.78
+_TEXT_RESCUE_MIN_STAGE1_SCORE = 0.24
+_TEXT_STAGE_MAX_CANDIDATES = 2
+
+
+@dataclass(frozen=True)
+class _TextRegionSpec:
+    name: str
+    zone: str
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+
+
+_TEXT_REGION_SPECS: tuple[_TextRegionSpec, ...] = (
+    _TextRegionSpec("top_center", "center", 0.14, 0.0, 0.86, 0.28),
+    _TextRegionSpec("bottom_center", "center", 0.12, 0.72, 0.88, 1.0),
+    _TextRegionSpec("bottom_left", "bottom-left", 0.0, 0.58, 0.42, 1.0),
+    _TextRegionSpec("bottom_right", "bottom-right", 0.58, 0.58, 1.0, 1.0),
+    _TextRegionSpec("top_left", "top-left", 0.0, 0.0, 0.42, 0.42),
+    _TextRegionSpec("top_right", "top-right", 0.58, 0.0, 1.0, 0.42),
+    _TextRegionSpec("full_frame", "center", 0.0, 0.0, 1.0, 1.0),
+    _TextRegionSpec("center", "center", 0.21, 0.21, 0.79, 0.79),
+)
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def _text_log_dir() -> Path:
+    path = _repo_root() / "logs" / "TextDetection"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _append_text_detection_log(payload: dict) -> None:
+    log_path = _text_log_dir() / f"text_detection_{datetime.now(timezone.utc):%Y%m%d}.jsonl"
+    line = json.dumps(payload, sort_keys=True, ensure_ascii=True)
+    with _TEXT_LOG_LOCK:
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(line)
+            handle.write("\n")
+
+
+def _crop_region_by_spec(img: np.ndarray, spec: _TextRegionSpec) -> np.ndarray:
+    h, w = img.shape[:2]
+    if h <= 0 or w <= 0:
+        return img
+    x0 = max(0, min(w - 1, int(round(w * spec.x0))))
+    y0 = max(0, min(h - 1, int(round(h * spec.y0))))
+    x1 = max(x0 + 1, min(w, int(round(w * spec.x1))))
+    y1 = max(y0 + 1, min(h, int(round(h * spec.y1))))
+    return img[y0:y1, x0:x1]
+
+
+def _build_stage1_named_variants(region: np.ndarray) -> list[tuple[str, np.ndarray]]:
+    variants = _build_stage1_region_variants(region)
+    names = ["base", "enhanced", "high_contrast_dark", "high_contrast_light"]
+    return [
+        (names[idx] if idx < len(names) else f"variant_{idx}", variant)
+        for idx, variant in enumerate(variants)
+    ]
+
+
+def _build_stage2_named_variants(region: np.ndarray) -> list[tuple[str, np.ndarray]]:
+    return [
+        ("base", region),
+        ("enhanced", _enhance_region_for_text(region)),
+    ]
+
+
+def _build_ocr_named_variants(
+    region: np.ndarray,
+    *,
+    include_threshold_variants: bool = True,
+) -> list[tuple[str, Image.Image]]:
+    if region.size == 0:
+        return []
+    variants: list[tuple[str, Image.Image]] = []
+    base = Image.fromarray(region, mode="L")
+    variants.append(("base", base))
+
+    rw, rh = base.size
+    scale = 1
+    if max(rw, rh) < 900:
+        scale = 3 if max(rw, rh) < 360 else 2
+    if scale > 1:
+        base = base.resize(
+            (max(1, rw * scale), max(1, rh * scale)),
+            resample=Image.Resampling.BICUBIC if hasattr(Image, "Resampling") else Image.BICUBIC,
+        )
+        variants.append(("upscaled", base))
+
+    arr = np.asarray(base, dtype=np.uint8)
+    if include_threshold_variants and arr.size > 0:
+        threshold = int(np.percentile(arr, 70))
+        binary = np.where(arr >= threshold, 255, 0).astype(np.uint8)
+        variants.append(("high_contrast", Image.fromarray(binary, mode="L")))
+        variants.append(("inverted", Image.fromarray(255 - binary, mode="L")))
+
+    deduped: list[tuple[str, Image.Image]] = []
+    seen: set[tuple[int, int, bytes]] = set()
+    for name, variant in variants:
+        try:
+            key = (variant.size[0], variant.size[1], variant.tobytes()[:128])
+        except Exception:
+            key = (variant.size[0], variant.size[1], b"")
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append((name, variant))
+    return deduped
+
+
+def _ocr_available() -> bool:
+    return OcrEngine is not None and Language is not None and StorageFile is not None and BitmapDecoder is not None
+
+
+def _region_supports_stage2_shortcut(region_name: str | None) -> bool:
+    return str(region_name or "") in {"top_left", "top_right", "bottom_left", "bottom_right"}
+
+
+def _region_spec_by_name(region_name: str | None) -> _TextRegionSpec | None:
+    return next((item for item in _TEXT_REGION_SPECS if item.name == str(region_name or "")), None)
+
+
+def _candidate_by_name(candidates: list[dict], region_name: str) -> dict | None:
+    return next((item for item in candidates if item.get("name") == region_name), None)
+
+
+def _evaluate_stage1_region(spec: _TextRegionSpec, working_region: np.ndarray) -> dict:
+    best_score = 0.0
+    best_likely = False
+    best_variation = "base"
+    for variation_name, variant in _build_stage1_named_variants(working_region):
+        likely, score = _detect_likely_text_presence_array(variant.astype(np.float32))
+        if score > best_score:
+            best_score = float(score or 0.0)
+            best_variation = variation_name
+        if likely:
+            best_likely = True
+    return {
+        "name": spec.name,
+        "zone": spec.zone,
+        "score": round(float(best_score), 3),
+        "variation": best_variation,
+        "positive": best_likely,
+    }
+
+
+def _evaluate_stage2_region(spec: _TextRegionSpec, working_region: np.ndarray) -> dict:
+    best_score = 0.0
+    best_verified = False
+    best_variation = "base"
+    for variation_name, variant in _build_stage2_named_variants(working_region):
+        verified, score = _verify_text_presence_opencv_array(variant, max_side=768)
+        if score > best_score:
+            best_score = float(score or 0.0)
+            best_variation = variation_name
+        if verified:
+            best_verified = True
+    return {
+        "stage": "stage2",
+        "method": "opencv",
+        "status": "positive" if best_verified else "negative",
+        "zone": spec.zone,
+        "region": spec.name,
+        "variation": best_variation,
+        "confidence": round(float(best_score), 3),
+    }
+
+
+def _verify_text_presence_windows_ocr_variants(
+    variants: list[tuple[str, Image.Image]],
+) -> tuple[bool, float, str | None]:
+    if not _ocr_available():
+        return False, 0.0, None
+    try:
+        best_verified = False
+        best_score = 0.0
+        best_variant: str | None = None
+        with tempfile.TemporaryDirectory(prefix="medialens_ocr_") as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            for idx, (variant_name, variant) in enumerate(variants):
+                temp_path = tmpdir_path / f"ocr_variant_{idx}.png"
+                try:
+                    variant.save(temp_path)
+                    import asyncio
+                    verified, score = asyncio.run(_verify_text_presence_windows_ocr_async(temp_path))
+                except Exception:
+                    verified, score = False, 0.0
+                if score > best_score:
+                    best_score = float(score or 0.0)
+                    best_variant = variant_name
+                if verified:
+                    best_verified = True
+                    best_score = max(best_score, float(score or 0.0))
+                    best_variant = variant_name
+                    break
+        return best_verified, round(float(best_score), 3), best_variant
+    except Exception:
+        return False, 0.0, None
 
 
 def _line_cluster_score(
@@ -850,3 +1064,301 @@ def detect_likely_text_presence(path: str | Path, max_side: int = 512) -> tuple[
         if best_likely:
             break
     return best_likely, round(float(best_score), 3)
+
+
+def detect_text_presence(
+    path: str | Path,
+    *,
+    source_path: str | Path | None = None,
+    max_side: int = 512,
+) -> tuple[bool, float]:
+    started_at = time.perf_counter()
+    analysis_path = Path(path)
+    source_value = str(source_path or analysis_path)
+    log_payload: dict = {
+        "timestamp_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        "pipeline_version": TEXT_DETECTION_VERSION,
+        "source_path": source_value,
+        "analysis_path": str(analysis_path),
+        "detected": False,
+        "final_confidence": 0.0,
+        "final_zone": None,
+        "final_region": None,
+        "final_method": None,
+        "final_variation": None,
+        "stages": [],
+    }
+
+    try:
+        with Image.open(analysis_path) as img:
+            try:
+                img.draft("L", (max_side, max_side))
+            except Exception:
+                pass
+            original_gray = img.convert("L")
+            original_arr = np.asarray(original_gray, dtype=np.uint8)
+            working_gray = original_gray.copy()
+            if max(working_gray.size) > max_side:
+                working_gray.thumbnail((max_side, max_side), _RESAMPLE)
+            working_arr = np.asarray(working_gray, dtype=np.uint8)
+    except Exception as exc:
+        log_payload["error"] = str(exc)
+        _append_text_detection_log(log_payload)
+        return False, 0.0
+
+    if original_arr.size == 0 or working_arr.size == 0 or min(original_arr.shape[:2]) < 24 or min(working_arr.shape[:2]) < 24:
+        log_payload["error"] = "image_too_small"
+        _append_text_detection_log(log_payload)
+        return False, 0.0
+
+    stage1_candidates: list[dict] = []
+    best_stage1: dict | None = None
+    best_negative_confidence = 0.0
+    rescue_support: dict[str, dict] = {}
+
+    for spec in _TEXT_REGION_SPECS:
+        stage1_started = time.perf_counter()
+        working_region = _crop_region_by_spec(working_arr, spec)
+        if working_region.size == 0 or min(working_region.shape[:2]) < 24:
+            continue
+        stage1_result = _evaluate_stage1_region(spec, working_region)
+        stage1_candidates.append(stage1_result)
+        if best_stage1 is None or stage1_result["score"] > float(best_stage1.get("score") or 0.0):
+            best_stage1 = stage1_result
+        if spec.name in {"top_center", "bottom_center"}:
+            rescue_support[spec.name] = stage1_result
+        log_payload["stages"].append(
+            {
+                "stage": "stage1",
+                "method": "heuristic",
+                "status": "positive" if stage1_result["positive"] else "negative",
+                "zone": stage1_result["zone"],
+                "region": stage1_result["name"],
+                "variation": stage1_result["variation"],
+                "confidence": stage1_result["score"],
+                "elapsed_ms": round((time.perf_counter() - stage1_started) * 1000.0, 2),
+            }
+        )
+        if stage1_result["score"] < _TEXT_STAGE1_TO_STAGE2_SCORE:
+            log_payload["stages"].append(
+                {
+                    "stage": "stage2",
+                    "method": "opencv",
+                    "status": "skipped",
+                    "zone": stage1_result["zone"],
+                    "region": stage1_result["name"],
+                    "variation": None,
+                    "confidence": stage1_result["score"],
+                    "reason": "stage1_below_threshold",
+                    "elapsed_ms": 0.0,
+                }
+            )
+            log_payload["stages"].append(
+                {
+                    "stage": "stage3",
+                    "method": "ocr",
+                    "status": "skipped",
+                    "zone": stage1_result["zone"],
+                    "region": stage1_result["name"],
+                    "variation": None,
+                    "confidence": stage1_result["score"],
+                    "reason": "stage1_below_threshold",
+                    "elapsed_ms": 0.0,
+                }
+            )
+            continue
+
+        stage2_result: dict | None = None
+        if stage1_result["score"] >= _TEXT_STAGE1_DIRECT_TO_OCR_SCORE:
+            log_payload["stages"].append(
+                {
+                    "stage": "stage2",
+                    "method": "opencv",
+                    "status": "skipped",
+                    "zone": stage1_result["zone"],
+                    "region": stage1_result["name"],
+                    "variation": None,
+                    "confidence": stage1_result["score"],
+                    "reason": "stage1_direct_to_ocr",
+                    "elapsed_ms": 0.0,
+                }
+            )
+        else:
+            stage2_started = time.perf_counter()
+            stage2_result = _evaluate_stage2_region(spec, working_region)
+            stage2_result["elapsed_ms"] = round((time.perf_counter() - stage2_started) * 1000.0, 2)
+            log_payload["stages"].append(stage2_result)
+            if stage2_result["status"] != "positive":
+                best_negative_confidence = max(best_negative_confidence, float(stage2_result["confidence"] or 0.0))
+                log_payload["stages"].append(
+                    {
+                        "stage": "stage3",
+                        "method": "ocr",
+                        "status": "skipped",
+                        "zone": stage2_result["zone"],
+                        "region": stage2_result["region"],
+                        "variation": None,
+                        "confidence": stage2_result["confidence"],
+                        "reason": "stage2_negative",
+                        "elapsed_ms": 0.0,
+                    }
+                )
+                continue
+            if (
+                stage2_result["confidence"] >= _TEXT_STAGE2_STRONG_DETECTED_SCORE
+                and _region_supports_stage2_shortcut(stage2_result.get("region"))
+                and stage1_result.get("name") == stage2_result.get("region")
+            ):
+                log_payload["stages"].append(
+                    {
+                        "stage": "stage3",
+                        "method": "ocr",
+                        "status": "skipped",
+                        "zone": stage2_result["zone"],
+                        "region": stage2_result["region"],
+                        "variation": None,
+                        "confidence": stage2_result["confidence"],
+                        "reason": "stage2_strong_shortcut",
+                        "elapsed_ms": 0.0,
+                    }
+                )
+                log_payload["detected"] = True
+                log_payload["final_confidence"] = float(stage2_result["confidence"])
+                log_payload["final_zone"] = stage2_result["zone"]
+                log_payload["final_region"] = stage2_result["region"]
+                log_payload["final_method"] = "opencv"
+                log_payload["final_variation"] = stage2_result["variation"]
+                log_payload["elapsed_ms"] = round((time.perf_counter() - started_at) * 1000.0, 2)
+                _append_text_detection_log(log_payload)
+                return True, float(log_payload["final_confidence"])
+
+        if not _ocr_available():
+            upstream = stage2_result if stage2_result and stage2_result["status"] == "positive" else stage1_result
+            fallback_detected = bool(stage1_result["score"] >= _TEXT_STAGE1_FALLBACK_DETECTED_SCORE) or bool(
+                stage2_result and stage2_result["status"] == "positive"
+            )
+            log_payload["stages"].append(
+                {
+                    "stage": "stage3",
+                    "method": "ocr",
+                    "status": "skipped",
+                    "zone": stage1_result["zone"],
+                    "region": stage1_result["name"],
+                    "variation": None,
+                    "confidence": float(upstream.get("confidence") or upstream.get("score") or 0.0),
+                    "reason": "ocr_unavailable",
+                    "elapsed_ms": 0.0,
+                }
+            )
+            if fallback_detected:
+                log_payload["detected"] = True
+                log_payload["final_confidence"] = float(upstream.get("confidence") or upstream.get("score") or 0.0)
+                log_payload["final_zone"] = upstream["zone"]
+                log_payload["final_region"] = upstream.get("region") or upstream.get("name")
+                log_payload["final_method"] = "opencv" if "confidence" in upstream else "heuristic"
+                log_payload["final_variation"] = upstream["variation"]
+                log_payload["elapsed_ms"] = round((time.perf_counter() - started_at) * 1000.0, 2)
+                _append_text_detection_log(log_payload)
+                return True, float(log_payload["final_confidence"])
+            continue
+
+        original_region = _crop_region_by_spec(original_arr, spec)
+        stage3_started = time.perf_counter()
+        upstream_confidence = float((stage2_result or {}).get("confidence") or stage1_result.get("score") or 0.0)
+        ocr_verified, ocr_score, ocr_variation = _verify_text_presence_windows_ocr_variants(
+            _build_ocr_named_variants(
+                original_region,
+                include_threshold_variants=upstream_confidence < 0.85,
+            )
+        )
+        log_payload["stages"].append(
+            {
+                "stage": "stage3",
+                "method": "ocr",
+                "status": "positive" if ocr_verified else "negative",
+                "zone": spec.zone,
+                "region": spec.name,
+                "variation": ocr_variation,
+                "confidence": ocr_score,
+                "elapsed_ms": round((time.perf_counter() - stage3_started) * 1000.0, 2),
+            }
+        )
+        if ocr_verified:
+            log_payload["detected"] = True
+            log_payload["final_confidence"] = float(ocr_score or 0.0)
+            log_payload["final_zone"] = spec.zone
+            log_payload["final_region"] = spec.name
+            log_payload["final_method"] = "ocr"
+            log_payload["final_variation"] = ocr_variation
+            log_payload["elapsed_ms"] = round((time.perf_counter() - started_at) * 1000.0, 2)
+            _append_text_detection_log(log_payload)
+            return True, float(log_payload["final_confidence"])
+        best_negative_confidence = max(best_negative_confidence, float(ocr_score or 0.0))
+
+    top_center_candidate = rescue_support.get("top_center")
+    bottom_center_candidate = rescue_support.get("bottom_center")
+    rescue_candidates = [
+        candidate
+        for candidate in (top_center_candidate, bottom_center_candidate)
+        if candidate is not None and float(candidate.get("score") or 0.0) >= _TEXT_RESCUE_MIN_STAGE1_SCORE
+    ]
+    if _ocr_available() and rescue_candidates:
+        rescue_started = time.perf_counter()
+        rescue_result: dict | None = None
+        for rescue_candidate in sorted(rescue_candidates, key=lambda item: float(item.get("score") or 0.0), reverse=True):
+            rescue_spec = _region_spec_by_name(str(rescue_candidate.get("name") or ""))
+            if rescue_spec is None:
+                continue
+            rescue_region = _crop_region_by_spec(original_arr, rescue_spec)
+            rescue_verified, rescue_score, rescue_variation = _verify_text_presence_windows_ocr_variants(
+                _build_ocr_named_variants(rescue_region, include_threshold_variants=True)
+            )
+            if rescue_result is None or rescue_score > float(rescue_result.get("confidence") or 0.0):
+                rescue_result = {
+                    "stage": "stage3_rescue",
+                    "method": "ocr",
+                    "status": "positive" if rescue_verified else "negative",
+                    "zone": rescue_spec.zone,
+                    "region": rescue_spec.name,
+                    "variation": rescue_variation,
+                    "confidence": rescue_score,
+                    "elapsed_ms": 0.0,
+                }
+            if rescue_verified:
+                break
+        if rescue_result is not None:
+            rescue_result["elapsed_ms"] = round((time.perf_counter() - rescue_started) * 1000.0, 2)
+            log_payload["stages"].append(rescue_result)
+            if rescue_result["status"] == "positive":
+                log_payload["detected"] = True
+                log_payload["final_confidence"] = float(rescue_result["confidence"] or 0.0)
+                log_payload["final_zone"] = rescue_result["zone"]
+                log_payload["final_region"] = rescue_result["region"]
+                log_payload["final_method"] = "ocr"
+                log_payload["final_variation"] = rescue_result["variation"]
+                log_payload["elapsed_ms"] = round((time.perf_counter() - started_at) * 1000.0, 2)
+                _append_text_detection_log(log_payload)
+                return True, float(log_payload["final_confidence"])
+    else:
+        log_payload["stages"].append(
+            {
+                "stage": "stage3_rescue",
+                "method": "ocr",
+                "status": "skipped",
+                "zone": "center",
+                "region": None,
+                "variation": None,
+                "confidence": 0.0,
+                "reason": "no_top_bottom_center_support",
+                "elapsed_ms": 0.0,
+            }
+        )
+
+    log_payload["final_confidence"] = max(
+        best_negative_confidence,
+        float(best_stage1["score"]) if best_stage1 else 0.0,
+    )
+
+    log_payload["elapsed_ms"] = round((time.perf_counter() - started_at) * 1000.0, 2)
+    _append_text_detection_log(log_payload)
+    return bool(log_payload["detected"]), float(log_payload["final_confidence"])

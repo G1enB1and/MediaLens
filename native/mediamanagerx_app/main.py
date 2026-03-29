@@ -2405,12 +2405,7 @@ class Bridge(QObject):
 
     @staticmethod
     def _text_stage_label(stage_key: str) -> str:
-        mapping = {
-            "likely": "Detecting Text - Stage 1 - Likely",
-            "more_likely": "Detecting Text - Stage 2 - More Likely",
-            "verified": "Detecting Text - Stage 3 - Verified",
-        }
-        return mapping.get(stage_key, "Detecting Text")
+        return "Detecting Text"
 
     def _text_processing_should_continue(self, generation: int | None = None) -> bool:
         if generation is None:
@@ -2470,11 +2465,7 @@ class Bridge(QObject):
                     entries = self._collect_text_scope_entries(resolved_folders, resolved_collection_id)
                     if not entries:
                         return
-                    if not self._backfill_scope_text_detection(entries, generation):
-                        return
-                    if not self._backfill_scope_text_more_likely(entries, generation):
-                        return
-                    self._backfill_scope_text_verification(entries, generation)
+                    self._backfill_scope_text_detection(entries, generation)
             except Exception as exc:
                 try:
                     self._log(f"Background text processing failed: {exc}")
@@ -2498,7 +2489,7 @@ class Bridge(QObject):
         self._text_processing_paused = True
 
     def _backfill_scope_text_detection(self, entries: list[dict], generation: int | None = None) -> bool:
-        from app.mediamanager.utils.text_detection import TEXT_DETECTION_VERSION, detect_likely_text_presence
+        from app.mediamanager.utils.text_detection import TEXT_DETECTION_VERSION, detect_text_presence
         from app.mediamanager.db.media_repo import add_media_item
 
         eligible = [
@@ -2511,7 +2502,7 @@ class Bridge(QObject):
         ]
         total_eligible = len(eligible)
         if total_eligible:
-            self.textProcessingStarted.emit(self._text_stage_label("likely"), total_eligible)
+            self.textProcessingStarted.emit(self._text_stage_label("detected"), total_eligible)
         updates: list[tuple[int, float, int, str]] = []
         processed = 0
         completed = True
@@ -2527,7 +2518,7 @@ class Bridge(QObject):
             ):
                 continue
             processed += 1
-            self.textProcessingProgress.emit(self._text_stage_label("likely"), processed, total_eligible)
+            self.textProcessingProgress.emit(self._text_stage_label("detected"), processed, total_eligible)
             path = str(entry.get("path") or "").strip()
             if not path:
                 continue
@@ -2549,7 +2540,7 @@ class Bridge(QObject):
                     analysis_path = poster
                 elif media_type != "image":
                     continue
-                text_detected, text_score = detect_likely_text_presence(analysis_path)
+                text_detected, text_score = detect_text_presence(analysis_path, source_path=path)
             except Exception:
                 text_detected, text_score = False, 0.0
             entry["text_detected"] = bool(text_detected)
@@ -4372,12 +4363,7 @@ class Bridge(QObject):
             entries = []
         if filter_type in {"text_detected", "text_more_likely", "text_verified"}:
             self._ensure_background_text_processing(folders if folders else None, self._active_collection_id if not folders else None)
-            if filter_type == "text_detected":
-                entries = [entry for entry in entries if bool(entry.get("text_detected"))]
-            elif filter_type == "text_more_likely":
-                entries = [entry for entry in entries if bool(entry.get("text_more_likely"))]
-            else:
-                entries = [entry for entry in entries if bool(entry.get("text_verified"))]
+            entries = [entry for entry in entries if bool(entry.get("text_detected"))]
         review_mode = self._review_group_mode()
         if review_mode in {"similar", "similar_only"}:
             self._backfill_scope_content_hashes(entries)

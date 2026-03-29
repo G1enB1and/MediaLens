@@ -105,8 +105,12 @@ function isDuplicateModeActive() {
   return !!getReviewMode();
 }
 
+function normalizeTextFilter(filterValue) {
+  return filterValue === 'text_more_likely' || filterValue === 'text_verified' ? 'text_detected' : filterValue;
+}
+
 function isTextFilterActive() {
-  return gFilter === 'text_detected' || gFilter === 'text_more_likely' || gFilter === 'text_verified';
+  return normalizeTextFilter(gFilter) === 'text_detected';
 }
 
 const METADATA_SETTINGS_CONFIG = {
@@ -4316,7 +4320,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   setupCustomSelect('filterSelect', (val) => {
-    gFilter = val;
+    gFilter = normalizeTextFilter(val);
     if (isTextFilterActive()) {
       gTextProcessingDismissed = false;
       if (gBridge && gBridge.resume_text_processing) {
