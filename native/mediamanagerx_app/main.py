@@ -6366,6 +6366,7 @@ class MainWindow(QMainWindow):
 
         current_root = str(self._tree_root_path or "")
         current_root_key = current_root.replace("\\", "/").lower()
+        show_hidden = self.bridge._show_hidden_enabled()
 
         self.pinned_folders_list.blockSignals(True)
         self.pinned_folders_list.clear()
@@ -6373,11 +6374,15 @@ class MainWindow(QMainWindow):
             path_str = str(folder_path or "").strip()
             if not path_str:
                 continue
+            is_hidden = self.bridge.repo.is_path_hidden(path_str)
+            if is_hidden and not show_hidden:
+                continue
             item = QListWidgetItem("")
             item.setData(Qt.ItemDataRole.UserRole, path_str)
+            item.setData(Qt.ItemDataRole.UserRole + 1, bool(is_hidden))
             item.setToolTip(path_str)
             self.pinned_folders_list.addItem(item)
-            row_widget = self._build_pinned_folder_item_widget(path_str)
+            row_widget = self._build_pinned_folder_item_widget(path_str, is_hidden=is_hidden)
             item.setSizeHint(row_widget.sizeHint())
             self.pinned_folders_list.setItemWidget(item, row_widget)
             if path_str.replace("\\", "/").lower() == current_root_key:
@@ -6386,7 +6391,7 @@ class MainWindow(QMainWindow):
                 self._set_pinned_folder_row_selected(row_widget, True)
         self.pinned_folders_list.blockSignals(False)
 
-    def _build_pinned_folder_item_widget(self, folder_path: str) -> QWidget:
+    def _build_pinned_folder_item_widget(self, folder_path: str, *, is_hidden: bool = False) -> QWidget:
         row = QWidget()
         row.setObjectName("pinnedFolderRow")
         layout = QHBoxLayout(row)
@@ -6419,6 +6424,13 @@ class MainWindow(QMainWindow):
         row.setProperty("iconLabel", icon_label)
         row.setProperty("textLabel", text_label)
         row.setProperty("pinLabel", pin_label)
+        row.setProperty("hidden", bool(is_hidden))
+        text_label.setProperty("hidden", bool(is_hidden))
+        icon_label.setProperty("hidden", bool(is_hidden))
+        pin_label.setProperty("hidden", bool(is_hidden))
+        if is_hidden:
+            row.setToolTip(f"{folder_path}\nHidden")
+            pin_label.setToolTip("Pinned folder\nHidden")
         self._set_pinned_folder_row_selected(row, False)
         return row
 
@@ -6520,9 +6532,16 @@ class MainWindow(QMainWindow):
         folder_path = str(item.data(Qt.ItemDataRole.UserRole) or "")
         if not folder_path:
             return
+        is_hidden = bool(item.data(Qt.ItemDataRole.UserRole + 1))
 
         menu = QMenu(self)
         act_open = menu.addAction("Open Folder")
+        act_hide = None
+        act_unhide = None
+        if is_hidden:
+            act_unhide = menu.addAction("Unhide Folder")
+        else:
+            act_hide = menu.addAction("Hide Folder")
         act_unpin = menu.addAction("Unpin Folder")
         menu.addSeparator()
         act_explorer = menu.addAction("Open in File Explorer")
@@ -6530,6 +6549,14 @@ class MainWindow(QMainWindow):
         chosen = menu.exec(self.pinned_folders_list.viewport().mapToGlobal(pos))
         if chosen == act_open:
             self._navigate_to_folder(folder_path, record_history=True, re_root_tree=True)
+        elif chosen == act_hide:
+            if self.bridge.set_folder_hidden(folder_path, True):
+                self.proxy_model.invalidateFilter()
+                self._reload_pinned_folders()
+        elif chosen == act_unhide:
+            if self.bridge.set_folder_hidden(folder_path, False):
+                self.proxy_model.invalidateFilter()
+                self._reload_pinned_folders()
         elif chosen == act_unpin:
             self.bridge.unpin_folder(folder_path)
         elif chosen == act_explorer:
@@ -6760,6 +6787,8 @@ class MainWindow(QMainWindow):
             elif key == "gallery.show_hidden":
                 if hasattr(self, "proxy_model"):
                     self.proxy_model.invalidateFilter()
+                if hasattr(self, "pinned_folders_list"):
+                    self._reload_pinned_folders()
             if key == "ui.show_left_panel" and hasattr(self, "act_toggle_left_panel"):
                 self.act_toggle_left_panel.setChecked(bool(value))
         except Exception:
@@ -6939,8 +6968,11 @@ class MainWindow(QMainWindow):
         if overlay is not None:
             overlay.close_overlay(notify_web=False)
         if self._preview_movie is not None:
+            try:
+                self._preview_movie.frameChanged.disconnect(self._on_preview_movie_frame_changed)
+            except Exception:
+                pass
             self._preview_movie.stop()
-            self.preview_image_lbl.setMovie(None)
             self._preview_movie.deleteLater()
             self._preview_movie = None
         self._preview_source_pixmap = None
@@ -6958,6 +6990,30 @@ class MainWindow(QMainWindow):
             overlay.hide()
             self.sidebar_video_overlay = overlay
         return overlay
+
+    def _render_preview_movie_frame(self) -> None:
+        movie = self._preview_movie
+        if movie is None:
+            return
+        frame = movie.currentPixmap()
+        if frame.isNull():
+            return
+        available_w = max(120, self._right_panel_content_width() - 8)
+        scaled = frame.scaled(
+            available_w,
+            320,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self.preview_image_lbl.setPixmap(scaled)
+        self.preview_image_lbl.setFixedHeight(max(96, scaled.height()))
+        overlay = getattr(self, "sidebar_video_overlay", None)
+        if overlay is not None and overlay.isVisible():
+            overlay.setGeometry(self.preview_image_lbl.rect())
+
+    def _on_preview_movie_frame_changed(self, _frame_number: int) -> None:
+        self._render_preview_movie_frame()
+        self._sync_sidebar_video_preview_controls()
 
     def _selected_video_path(self) -> str | None:
         path = getattr(self, "_current_path", None)
@@ -7059,10 +7115,17 @@ class MainWindow(QMainWindow):
 
         if self._preview_movie is not None:
             self.preview_image_lbl.setText("")
-            self.preview_image_lbl.setFixedHeight(target_h)
-            self._preview_movie.setScaledSize(QSize(available_w, target_h))
+            movie_rect = self._preview_movie.currentPixmap().rect()
+            if movie_rect.isEmpty():
+                movie_rect = self._preview_movie.frameRect()
+            movie_w = max(1, movie_rect.width())
+            movie_h = max(1, movie_rect.height())
+            movie_aspect = max(0.2, movie_w / movie_h)
+            scaled_h = max(96, min(320, int(available_w / movie_aspect)))
+            self.preview_image_lbl.setFixedHeight(scaled_h)
             if self._preview_movie.state() != QMovie.MovieState.Running:
                 self._preview_movie.start()
+            self._render_preview_movie_frame()
             overlay = getattr(self, "sidebar_video_overlay", None)
             if overlay is not None and overlay.isVisible():
                 overlay.setGeometry(self.preview_image_lbl.rect())
@@ -7111,10 +7174,21 @@ class MainWindow(QMainWindow):
         movie.setCacheMode(QMovie.CacheMode.CacheAll)
         movie.setSpeed(100)
         movie.finished.connect(movie.start)
+        try:
+            movie.start()
+            movie.jumpToFrame(0)
+            movie_rect = movie.currentPixmap().rect()
+            if movie_rect.isEmpty():
+                movie_rect = movie.frameRect()
+            if not movie_rect.isEmpty() and movie_rect.height() > 0:
+                aspect_ratio = movie_rect.width() / movie_rect.height()
+            movie.stop()
+        except Exception:
+            pass
         self._preview_movie = movie
+        movie.frameChanged.connect(self._on_preview_movie_frame_changed)
         self._preview_aspect_ratio = max(0.2, aspect_ratio)
         self.preview_image_lbl.setText("")
-        self.preview_image_lbl.setMovie(movie)
         self._update_preview_display("No preview")
 
     def _load_video_preview_async(self, path: str) -> None:
@@ -9733,6 +9807,9 @@ class MainWindow(QMainWindow):
             QLabel#pinnedFolderText {{
                 color: {text};
                 font-weight: normal;
+            }}
+            QLabel#pinnedFolderText[hidden="true"] {{
+                color: {text_muted};
             }}
             QLabel#pinnedFolderText[selected="true"] {{
                 font-weight: 700;
