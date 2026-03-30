@@ -204,6 +204,7 @@
           <div class="modal-title">Settings</div>
           <div class="settings-nav">
             <button class="settings-nav-item active" data-pane="general">General</button>
+            <button class="settings-nav-item" data-pane="player">Player</button>
             <button class="settings-nav-item" data-pane="appearance">Appearance</button>
             <button class="settings-nav-item" data-pane="metadata">Metadata</button>
             <button class="settings-nav-item" data-pane="duplicates">Duplicate and Similarity Auto Resolve Rules</button>
@@ -255,6 +256,40 @@
               <div class="field-actions" style="margin-top: 12px; align-items: center; gap: 12px;">
                 <button class="tb-btn" id="btnCheckUpdate">Check for Updates</button>
                 <div id="updateStatusText" class="hint">Version: <span id="currentVersionText">v1.0.1-alpha</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-pane" id="pane-player" hidden>
+            <div class="pane-title">Player</div>
+            <label class="toggle">
+              <input type="checkbox" id="toggleMuteVideoByDefault" checked />
+              <span>Mute video by default</span>
+            </label>
+            <label class="toggle">
+              <input type="checkbox" id="toggleAutoplayGalleryAnimatedGifs" checked />
+              <span>Autoplay animated GIFs in gallery</span>
+            </label>
+            <label class="toggle">
+              <input type="checkbox" id="toggleAutoplayPreviewAnimatedGifs" checked />
+              <span>Autoplay animated GIFs in details preview</span>
+            </label>
+            <div class="field">
+              <div class="field-label">Video looping</div>
+              <div class="segmented-control" id="videoLoopModeGroup">
+                <input type="radio" name="video_loop_mode" value="all" id="videoLoopAll" />
+                <label for="videoLoopAll">Loop all videos</label>
+                <input type="radio" name="video_loop_mode" value="none" id="videoLoopNone" />
+                <label for="videoLoopNone">Don't loop videos</label>
+                <input type="radio" name="video_loop_mode" value="short" id="videoLoopShort" checked />
+                <label for="videoLoopShort">Loop videos under cutoff</label>
+              </div>
+            </div>
+            <div class="field">
+              <div class="field-label">Video length loop cutoff</div>
+              <div class="field-row">
+                <input class="text" id="videoLoopCutoffSeconds" type="number" min="1" step="1" value="90" />
+                <div class="hint">seconds</div>
               </div>
             </div>
           </div>

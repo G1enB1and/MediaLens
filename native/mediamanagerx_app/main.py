@@ -2835,6 +2835,41 @@ class Bridge(QObject):
         allowed = {"day", "month", "year"}
         return value if value in allowed else "day"
 
+    def _mute_video_by_default_enabled(self) -> bool:
+        return bool(self.settings.value("gallery/mute_video_by_default", True, type=bool))
+
+    def _autoplay_gallery_animated_gifs_enabled(self) -> bool:
+        if self.settings.contains("player/autoplay_gallery_animated_gifs"):
+            return bool(self.settings.value("player/autoplay_gallery_animated_gifs", True, type=bool))
+        return bool(self.settings.value("player/autoplay_animated_gifs", True, type=bool))
+
+    def _autoplay_preview_animated_gifs_enabled(self) -> bool:
+        if self.settings.contains("player/autoplay_preview_animated_gifs"):
+            return bool(self.settings.value("player/autoplay_preview_animated_gifs", True, type=bool))
+        return bool(self.settings.value("player/autoplay_animated_gifs", True, type=bool))
+
+    def _video_loop_mode(self) -> str:
+        value = str(self.settings.value("player/video_loop_mode", "short", type=str) or "short").strip().lower()
+        return value if value in {"all", "none", "short"} else "short"
+
+    def _video_loop_cutoff_seconds(self) -> int:
+        raw = self.settings.value("player/video_loop_cutoff_seconds", "90", type=str)
+        try:
+            seconds = int(str(raw or "90").strip())
+        except Exception:
+            seconds = 90
+        return max(1, seconds)
+
+    def _should_loop_video(self, duration_ms: int) -> bool:
+        mode = self._video_loop_mode()
+        if mode == "all":
+            return True
+        if mode == "none":
+            return False
+        duration_ms = int(duration_ms or 0)
+        cutoff_ms = self._video_loop_cutoff_seconds() * 1000
+        return 0 < duration_ms < cutoff_ms
+
     @Slot(result=dict)
     def get_settings(self) -> dict:
         try:
@@ -2842,6 +2877,11 @@ class Bridge(QObject):
                 "gallery.randomize": self._randomize_enabled(),
                 "gallery.restore_last": self._restore_last_enabled(),
                 "gallery.show_hidden": self._show_hidden_enabled(),
+                "gallery.mute_video_by_default": self._mute_video_by_default_enabled(),
+                "player.autoplay_gallery_animated_gifs": self._autoplay_gallery_animated_gifs_enabled(),
+                "player.autoplay_preview_animated_gifs": self._autoplay_preview_animated_gifs_enabled(),
+                "player.video_loop_mode": self._video_loop_mode(),
+                "player.video_loop_cutoff_seconds": self._video_loop_cutoff_seconds(),
                 "gallery.start_folder": self._start_folder_setting(),
                 "gallery.view_mode": self._gallery_view_mode(),
                 "gallery.group_by": self._gallery_group_by(),
@@ -2907,6 +2947,11 @@ class Bridge(QObject):
                 "gallery.randomize": False,
                 "gallery.restore_last": False,
                 "gallery.show_hidden": False,
+                "gallery.mute_video_by_default": True,
+                "player.autoplay_gallery_animated_gifs": True,
+                "player.autoplay_preview_animated_gifs": True,
+                "player.video_loop_mode": "short",
+                "player.video_loop_cutoff_seconds": 90,
                 "gallery.start_folder": "",
                 "gallery.view_mode": "masonry",
                 "gallery.group_by": "none",
@@ -3003,6 +3048,9 @@ class Bridge(QObject):
                 "gallery.randomize", 
                 "gallery.restore_last", 
                 "gallery.show_hidden",
+                "gallery.mute_video_by_default",
+                "player.autoplay_gallery_animated_gifs",
+                "player.autoplay_preview_animated_gifs",
                 "ui.show_left_panel", 
                 "ui.show_right_panel", 
                 "ui.show_bottom_panel",
@@ -3014,7 +3062,7 @@ class Bridge(QObject):
                 return False
             qkey = key.replace(".", "/")
             self.settings.setValue(qkey, bool(value))
-            if key.startswith("ui.") or key.startswith("metadata.display.") or key == "gallery.show_hidden":
+            if key.startswith("ui.") or key.startswith("metadata.display.") or key in {"gallery.show_hidden", "gallery.mute_video_by_default", "player.autoplay_gallery_animated_gifs", "player.autoplay_preview_animated_gifs"}:
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, bool(value))
             return True
@@ -3024,7 +3072,7 @@ class Bridge(QObject):
     @Slot(str, str, result=bool)
     def set_setting_str(self, key: str, value: str) -> bool:
         try:
-            if key not in ("gallery.start_folder", "gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "gallery.similarity_threshold", "ui.accent_color", "ui.theme_mode", "metadata.display.order", "duplicate.settings.active_tab") and not key.startswith("metadata.layout.") and not key.startswith("duplicate.rules.") and key != "duplicate.priorities.order":
+            if key not in ("gallery.start_folder", "gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "gallery.similarity_threshold", "ui.accent_color", "ui.theme_mode", "metadata.display.order", "duplicate.settings.active_tab", "player.video_loop_mode", "player.video_loop_cutoff_seconds") and not key.startswith("metadata.layout.") and not key.startswith("duplicate.rules.") and key != "duplicate.priorities.order":
                 return False
             if key == "gallery.view_mode":
                 allowed = {"masonry", "grid_small", "grid_medium", "grid_large", "grid_xlarge", "list", "content", "details", "duplicates", "similar", "similar_only"}
@@ -3041,6 +3089,14 @@ class Bridge(QObject):
                     return False
             elif key == "duplicate.settings.active_tab":
                 if value not in {"rules", "priorities"}:
+                    return False
+            elif key == "player.video_loop_mode":
+                if value not in {"all", "none", "short"}:
+                    return False
+            elif key == "player.video_loop_cutoff_seconds":
+                try:
+                    value = str(max(1, int(str(value or "90").strip())))
+                except Exception:
                     return False
             qkey = key.replace(".", "/")
             self.settings.setValue(qkey, str(value or ""))
@@ -3715,7 +3771,7 @@ class Bridge(QObject):
     def open_native_video_inplace(self, video_path: str, x: int, y: int, w: int, h: int, autoplay: bool, loop: bool, muted: bool, vw: int = 0, vh: int = 0) -> None:
         if not loop:
             d_s = self.get_video_duration_seconds(video_path)
-            if 0 < d_s < 60:
+            if self._should_loop_video(int(float(d_s or 0) * 1000)):
                 loop = True
         try:
             path_obj = Path(video_path)
@@ -6769,6 +6825,18 @@ class MainWindow(QMainWindow):
                     self.right_layout.activate()
                     self._update_sidebar_input_widths()
                 self._sync_sidebar_video_preview_controls()
+            elif key == "player.autoplay_preview_animated_gifs":
+                if getattr(self, "_preview_movie", None) is not None:
+                    if bool(value):
+                        self._update_preview_display()
+                    else:
+                        try:
+                            self._preview_movie.stop()
+                            self._preview_movie.jumpToFrame(0)
+                        except Exception:
+                            pass
+                        self._render_preview_movie_frame()
+                        self._sync_sidebar_video_preview_controls()
             elif key == "ui.theme_mode":
                 self._update_native_styles(self._current_accent)
                 self._update_splitter_style(self._current_accent)
@@ -7123,8 +7191,11 @@ class MainWindow(QMainWindow):
             movie_aspect = max(0.2, movie_w / movie_h)
             scaled_h = max(96, min(320, int(available_w / movie_aspect)))
             self.preview_image_lbl.setFixedHeight(scaled_h)
-            if self._preview_movie.state() != QMovie.MovieState.Running:
+            autoplay_gifs = self.bridge._autoplay_preview_animated_gifs_enabled()
+            if autoplay_gifs and self._preview_movie.state() != QMovie.MovieState.Running:
                 self._preview_movie.start()
+            elif not autoplay_gifs and self._preview_movie.state() == QMovie.MovieState.Running:
+                self._preview_movie.stop()
             self._render_preview_movie_frame()
             overlay = getattr(self, "sidebar_video_overlay", None)
             if overlay is not None and overlay.isVisible():
@@ -7218,10 +7289,11 @@ class MainWindow(QMainWindow):
         path = self._selected_video_path()
         if not path:
             return
+        muted = self.bridge._mute_video_by_default_enabled()
         width = int(getattr(self, "_current_video_width", 0) or 0)
         height = int(getattr(self, "_current_video_height", 0) or 0)
         duration_ms = int(getattr(self, "_current_video_duration_ms", 0) or 0)
-        should_loop = 0 < duration_ms < 60000
+        should_loop = self.bridge._should_loop_video(duration_ms)
         if hasattr(self, "video_overlay") and self.video_overlay.isVisible():
             self.video_overlay.close_overlay(notify_web=False)
         overlay = self._ensure_sidebar_video_overlay()
@@ -7232,7 +7304,7 @@ class MainWindow(QMainWindow):
                 path=path,
                 autoplay=True,
                 loop=should_loop,
-                muted=True,
+                muted=muted,
                 width=width,
                 height=height,
             )
@@ -7246,10 +7318,11 @@ class MainWindow(QMainWindow):
         path = self._selected_video_path()
         if not path:
             return
+        muted = self.bridge._mute_video_by_default_enabled()
         width = int(getattr(self, "_current_video_width", 0) or 0)
         height = int(getattr(self, "_current_video_height", 0) or 0)
         duration_ms = int(getattr(self, "_current_video_duration_ms", 0) or 0)
-        should_loop = 0 < duration_ms < 60000
+        should_loop = self.bridge._should_loop_video(duration_ms)
         self._video_preview_transition_active = True
         overlay = getattr(self, "sidebar_video_overlay", None)
         if overlay is not None:
@@ -7260,7 +7333,7 @@ class MainWindow(QMainWindow):
 
         def _finish_open() -> None:
             try:
-                self.bridge.open_native_video(path, True, should_loop, True, width, height)
+                self.bridge.open_native_video(path, True, should_loop, muted, width, height)
             finally:
                 self._video_preview_transition_active = False
                 self._sync_sidebar_video_preview_controls()
@@ -7303,7 +7376,7 @@ class MainWindow(QMainWindow):
                 size = reader.size()
 
         aspect_ratio = max(0.2, size.width() / max(1, size.height())) if size.isValid() else 1.0
-        if suffix == ".gif":
+        if suffix == ".gif" and self.bridge._autoplay_preview_animated_gifs_enabled():
             self._set_preview_movie(p, aspect_ratio)
             return
         img = reader.read()
