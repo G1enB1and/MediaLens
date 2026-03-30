@@ -1,25 +1,41 @@
 # Python caches
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # Local test/temp artifacts
 .tmp-tests/
+.codex-ai-tests/
+/tmp/
 
 # Local runtime data
 data/
+/logs/*
+!/logs/.gitkeep
+!/logs/*/
+!/logs/*/.gitkeep
 
 # Local env/editor
 .venv/
 .env
+.python-version
 .DS_Store
 
 # Build artifacts
 /build/
 /dist/
+/\.pyinstaller-temp/
+/\.pyinstaller-dist/
+/*.egg-info/
 *.spec
 app.ico
 MediaManagerX_Setup.exe
 MediaLens_Setup.exe
+pybuild.log
 
 # Tests and Logs
 /tests/

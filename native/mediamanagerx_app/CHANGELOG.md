@@ -1,6 +1,65 @@
 # Change Log
 
-## v1.1.4 (Current)
+## v1.1.5 (Current)
+
+### Added
+
+#### Duplicate Review Controls
+
+- Added a `Mark as Best` toggle, restored the `Keep Best` action, and introduced `Delete Unchecked Files`.  
+- Multiple files can now be marked as `Keep`, with a separate `Best` designation.
+
+#### Player Settings
+
+- Added a dedicated `Player` settings category with controls for default mute behavior, gallery GIF autoplay, details preview GIF autoplay, video loop mode, and loop cutoff length.
+
+---
+
+### Changed
+
+#### Animated GIF Behavior
+
+- Split autoplay behavior between the gallery and details preview.  
+- The gallery now uses still posters when autoplay is disabled.
+
+#### Preview & Video Reliability
+
+- Improved preview consistency by fixing GIF stretching and cropping in the preview-above-details area.  
+- The preview player now consistently respects the mute-by-default setting.
+
+#### Pinned Folder Visibility
+
+- Pinned folders now follow the same hidden-folder logic as the file tree and gallery.
+
+#### File Tree Navigation
+
+- File tree now rebuilds and reselects correctly when navigating outside the current branch using Back or Up.
+
+#### Preview Toggle Placement
+
+- Removed the duplicate `Preview Image Above Details` entry from the native `View` menu.
+
+---
+
+### Fixed
+
+#### FFmpeg Filename Crash
+
+-Resolved crashes caused by special characters in filenames by using safe aliases for FFmpeg and FFprobe calls while preserving original filenames in the UI.
+
+#### Text Detection
+
+- Improved text detection speed and accuracy.
+
+### Removed
+
+#### View Menu Preview Toggle
+
+- Removed the duplicate `Preview Image Above Details` toggle from the native `View` menu.
+
+---
+
+## v1.1.4
 
 ### Added
 

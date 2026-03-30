@@ -25,5 +25,5 @@ python3 scripts/demo_ingest.py \
 This is just a quick sanity check for ingest + selection + scoped listing before the UI exists.
 
 ## What `make test` does
-- Runs full unit test suite (`tests/test_*.py`) via `python3 scripts/dev_check.py`
+- Runs full unit test suite (`tests/test_*.py`) via `python tests/dev_check.py`
 - Exits non-zero on failure for easy CI/automation use

@@ -11,7 +11,24 @@ All agents MUST read and adhere to these documents before proposing or implement
 - **[DECISIONS.md](file:///c:/My_Projects/MediaManagerX/MediaManagerX/DECISIONS.md)**: Locked technical choices (frameworks, storage models, etc.).
 - **[README.md](file:///c:/My_Projects/MediaManagerX/MediaManagerX/README.md)**: Repo layout and local development setup.
 
-## 2. Progress and Coordination Files
+## 2. Canonical Repo Conventions
+
+Before creating files or looking up named workflows, agents should follow the canonical location guide in `.agent/README.md`.
+
+Required conventions:
+
+- Workflow docs live in `docs/workflows/`
+- Agent workflow mirrors live in `.agent/workflows/`
+- Tests live in `tests/`
+- Logs live in `logs/`
+- Temporary/debug artifacts live in `tmp/` or `.tmp-tests/`
+- Utility scripts live in `scripts/`
+
+Do not create new ad hoc files in the repository root unless the app/build explicitly requires it or the user explicitly requests it.
+
+When a user names a workflow like `build-installer` or `version-bump`, check `docs/workflows/` first, then `.agent/workflows/`, instead of assuming a root-level file.
+
+## 3. Progress and Coordination Files
 
 To avoid stepping on each other's toes, agents should track their work using the following lifecycle.
 
@@ -30,7 +47,7 @@ Agents may store these files in different locations depending on their configura
 
 **Always check both the root and the `.gemini/` folder (recursively for recent activity) to synchronize with other agents before starting a new task.**
 
-## 3. Communication Standards
+## 4. Communication Standards
 
 - **Proactive Updates**: If you start a new task, create/update a `task.md`.
 - **User Review**: Always request review for an `implementation_plan.md` before making architecture-level changes.

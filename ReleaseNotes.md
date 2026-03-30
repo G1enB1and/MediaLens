@@ -1,50 +1,39 @@
-## MediaLens v1.1.4
+## MediaLens v1.1.5
 
 ### ✨ Summary
 
-This was a stabilization-focused release that improved video previews and file deletion safety.
-
-After significant rework, video playback is now more stable, and file deletion has been redesigned to be safer, more predictable, and user-controlled.
-
-This update also introduces pinned folders and several UI refinements that improve clarity and consistency.
+This release improves duplicate cleanup workflows and media playback control while refining navigation and preview behavior for a smoother, more predictable experience. It also greatly improves text detection speed and accuracy.
 
 ---
 
 ### 🔥 Highlights
 
-- **Video Preview System Rebuilt**  
-  The entire preview-above-details video pipeline was reworked to eliminate crashes and inconsistent behavior.  
-  Metadata, static previews, in-place playback, and lightbox playback are now all functioning reliably again.
+#### **Flexible Duplicate Cleanup**
 
-- **Safer Delete Workflow (Finally Feels Right)**  
-  - `Del` → Sends files to Recycle Bin (default)  
-  - `Shift+Delete` → Permanent delete with confirmation  
-  - New setting allows full control over delete behavior  
+Choose the workflow that fits your needs:
 
-  This resolves prior instability and makes deletion predictable and safe.
+- Mark a single file as best and use `Keep Best`, or
+- Select multiple files and use `Delete Unchecked Files`
 
-- **Pinned Folders Sidebar**  
-  Quickly access important locations:
-  - Right-click to pin/unpin folders  
-  - Drag & drop support  
-  - Clean integration with existing file tree  
+#### **Granular Player Controls**
 
----
+Playback behavior is now fully customizable:
 
-### 🎨 UX & Visual Refinements
+- Separate GIF autoplay settings for gallery and details preview
+- Configurable video looping behavior
+- Default mute behavior control
 
-- **File Tree Improvements**
-  - Selected folders now use bold accent text (no more muddy tinting)
-  - Icons remain clean and readable
-  - Chevrons only appear when folders actually have children
+#### **Text Detection**
 
-- **Adaptive Accent Contrast**
-  Accent colors now dynamically adjust for readability in low-contrast situations
-
-- **Updated Header Branding**
-  Refreshed logo for improved visual consistency
+- Significantly improved text detection speed and accuracy
 
 ---
 
-📄 Full Changelog:
-https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md
+### 🛠 Notes
+
+- File-tree navigation now rebuilds and reselects correctly when moving outside the current branch using Back or Up.
+- GIF previews and muted playback behavior have been refined for more consistent and predictable results.
+- Fixed Bug that could cause crashes for filenames with special characters.
+
+Full Changelog:
+<https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md>

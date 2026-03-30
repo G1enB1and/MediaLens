@@ -4,6 +4,8 @@ description: /version-bump - Bumps version in all files and updates CHANGELOG.md
 
 This workflow automates the version release process.
 
+Canonical human-facing copy: `docs/workflows/version-bump.md`
+
 1. **Calculate New Version**:
     * Read the current version from `VERSION`.
     * If an argument is provided (e.g., `/version-bump 1.0.5`), use that.

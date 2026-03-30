@@ -256,6 +256,13 @@ MediaLens is evolving into a full intelligent media platform.
 
 ---
 
+## Release Workflows
+
+- Installer build workflow: [docs/workflows/build-installer.md](docs/workflows/build-installer.md)
+- Version bump workflow: [docs/workflows/version-bump.md](docs/workflows/version-bump.md)
+
+---
+
 ## Philosophy
 
 MediaLens is built around a simple idea:
