@@ -5058,12 +5058,6 @@ class MainWindow(QMainWindow):
         self.act_toggle_right_panel.triggered.connect(lambda checked=False: self._toggle_panel_setting("ui/show_right_panel"))
         view_menu.addAction(self.act_toggle_right_panel)
 
-        self.act_preview_above_details = QAction("Preview Image Above Details", self)
-        self.act_preview_above_details.setCheckable(True)
-        self.act_preview_above_details.setChecked(self.bridge._preview_above_details_enabled())
-        self.act_preview_above_details.triggered.connect(lambda checked=False: self._toggle_panel_setting("ui/preview_above_details"))
-        view_menu.addAction(self.act_preview_above_details)
-
         self.act_show_dismissed_progress_toasts = QAction("Show Hidden Progress Toasts", self)
         self.act_show_dismissed_progress_toasts.triggered.connect(self.bridge.reveal_progress_toasts)
         view_menu.addAction(self.act_show_dismissed_progress_toasts)
@@ -6127,7 +6121,17 @@ class MainWindow(QMainWindow):
         self._suppress_tree_selection_history = True
         try:
             if root_idx.isValid():
-                self.tree.setCurrentIndex(root_idx)
+                selection_model = self.tree.selectionModel()
+                if selection_model is not None:
+                    selection_model.clearSelection()
+                    selection_model.setCurrentIndex(
+                        root_idx,
+                        QItemSelectionModel.SelectionFlag.ClearAndSelect
+                        | QItemSelectionModel.SelectionFlag.Rows
+                        | QItemSelectionModel.SelectionFlag.Current,
+                    )
+                else:
+                    self.tree.setCurrentIndex(root_idx)
                 self.tree.scrollTo(root_idx)
                 self.tree.expand(root_idx)
         finally:
@@ -6173,6 +6177,24 @@ class MainWindow(QMainWindow):
             self.tree.expand(root_idx)
         self._sync_pinned_selection_to_root()
 
+    def _tree_needs_reroot_for_path(self, folder_path: str) -> bool:
+        path_str = str(folder_path or "").strip()
+        current_root = str(self._tree_root_path or "").strip()
+        if not path_str or not current_root:
+            return True
+        try:
+            from app.mediamanager.utils.pathing import normalize_windows_path
+            norm_target = normalize_windows_path(path_str).rstrip("/")
+            norm_root = normalize_windows_path(current_root).rstrip("/")
+        except Exception:
+            norm_target = path_str.replace("\\", "/").rstrip("/").lower()
+            norm_root = current_root.replace("\\", "/").rstrip("/").lower()
+        if not norm_target or not norm_root:
+            return True
+        if norm_target == norm_root:
+            return False
+        return not norm_target.startswith(norm_root + "/")
+
     def _navigate_to_folder(self, folder_path: str, *, record_history: bool = True, refresh: bool = False, re_root_tree: bool = False) -> None:
         if not folder_path:
             return
@@ -6184,6 +6206,7 @@ class MainWindow(QMainWindow):
         path_str = str(p.absolute())
         current_path = self.bridge._selected_folders[0] if self.bridge._selected_folders else ""
         is_new_target = path_str != current_path
+        re_root_tree = bool(re_root_tree or self._tree_needs_reroot_for_path(path_str))
 
         if is_new_target or refresh:
             self._set_selected_folders([path_str])
