@@ -50,13 +50,16 @@ let gDuplicateKeepOverrides = new Map();
 let gDuplicateGroupOrder = new Map();
 let gScanActive = false;
 let gSimilarityThreshold = 'low';
-let gShowDismissedProgressToasts = false;
 let gTextProcessingDismissed = false;
 let gTextProcessingActive = false;
+let gTextProcessingPaused = false;
+let gTextProcessingWaiting = false;
+let gTextProcessingForceVisible = false;
 let gTextProcessingStage = '';
 let gTextProcessingCurrent = 0;
 let gTextProcessingTotal = 0;
 let gRenderTextProcessingToast = null;
+let gRenderScanToast = null;
 const TIMELINE_INSET_PX = 20;
 const TIMELINE_THUMB_SIZE_PX = 14;
 const TIMELINE_TOP_YEAR_TOP_PX = 20;
@@ -1125,36 +1128,48 @@ function wireScanIndicator() {
   const bar = document.getElementById('scanBar');
   if (!el || !file || !bar) return;
 
+  function render() {
+    if (!gScanActive) {
+      el.hidden = true;
+      return;
+    }
+    if (gScanManuallyHidden) {
+      el.hidden = true;
+      return;
+    }
+    el.hidden = false;
+  }
+  gRenderScanToast = render;
+
   el.onclick = () => {
     gScanManuallyHidden = true;
-    el.hidden = true;
+    render();
   };
 
   if (gBridge.scanProgress) {
     gBridge.scanProgress.connect((fileName, percent) => {
-      if (gScanManuallyHidden) return;
-      el.hidden = false;
       file.textContent = fileName;
       bar.style.width = `${percent}%`;
+      render();
     });
   }
 
   if (gBridge.scanStarted) {
     gBridge.scanStarted.connect(() => {
       gScanManuallyHidden = false;
-      el.hidden = false;
       bar.style.width = '0%';
       file.textContent = 'Initializing...';
+      render();
     });
   }
 
   if (gBridge.scanFinished) {
     gBridge.scanFinished.connect(() => {
-      // Keep it visible for a second then hide
+      render();
       file.textContent = 'Finished';
       bar.style.width = '100%';
       setTimeout(() => {
-        el.hidden = true;
+        render();
       }, 2000);
     });
   }
@@ -1165,7 +1180,7 @@ function wireTextProcessingIndicator() {
   const label = document.getElementById('textProcessingLabel');
   const file = document.getElementById('textProcessingFile');
   const bar = document.getElementById('textProcessingBar');
-  const cancelBtn = document.getElementById('textProcessingCancel');
+  const pauseBtn = document.getElementById('textProcessingPause');
   if (!el || !label || !file || !bar || !gBridge) return;
 
   function render() {
@@ -1173,13 +1188,17 @@ function wireTextProcessingIndicator() {
       el.hidden = true;
       return;
     }
-    const allowVisible = isTextFilterActive() || gShowDismissedProgressToasts;
-    if (!allowVisible || (gTextProcessingDismissed && !gShowDismissedProgressToasts)) {
+    const allowVisible = isTextFilterActive() || gTextProcessingForceVisible;
+    if (!allowVisible || gTextProcessingDismissed) {
       el.hidden = true;
       return;
     }
     el.hidden = false;
-    label.textContent = gTextProcessingStage || 'Detecting Text';
+    label.textContent = gTextProcessingWaiting
+      ? (gTextProcessingStage || 'Detecting Text')
+      : gTextProcessingPaused
+      ? `${gTextProcessingStage || 'Detecting Text'} (Paused)`
+      : (gTextProcessingStage || 'Detecting Text');
     if (gTextProcessingTotal > 0) {
       file.textContent = `${gTextProcessingCurrent} / ${gTextProcessingTotal}`;
       bar.style.width = `${Math.max(0, Math.min(100, Math.round((gTextProcessingCurrent / gTextProcessingTotal) * 100)))}%`;
@@ -1187,29 +1206,45 @@ function wireTextProcessingIndicator() {
       file.textContent = 'Starting...';
       bar.style.width = '0%';
     }
+    if (pauseBtn) {
+      pauseBtn.textContent = gTextProcessingPaused ? 'Resume' : 'Pause';
+      pauseBtn.disabled = gTextProcessingWaiting;
+    }
   }
   gRenderTextProcessingToast = render;
 
   el.onclick = () => {
     gTextProcessingDismissed = true;
+    gTextProcessingForceVisible = false;
     render();
   };
 
-  if (cancelBtn) {
-    cancelBtn.addEventListener('click', (event) => {
+  if (pauseBtn) {
+    pauseBtn.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      gTextProcessingDismissed = true;
-      if (gBridge.pause_text_processing) {
+      if (gTextProcessingPaused) {
+        gTextProcessingPaused = false;
+        gTextProcessingWaiting = false;
+        gTextProcessingDismissed = false;
+        gTextProcessingForceVisible = true;
+        if (gBridge.resume_text_processing) {
+          gBridge.resume_text_processing();
+        }
+      } else if (gBridge.pause_text_processing) {
+        gTextProcessingPaused = true;
+        gTextProcessingWaiting = false;
         gBridge.pause_text_processing();
       }
       render();
     });
   }
 
-  if (gBridge.textProcessingStarted) {
+    if (gBridge.textProcessingStarted) {
     gBridge.textProcessingStarted.connect((stage, total) => {
       gTextProcessingActive = true;
+      gTextProcessingPaused = false;
+      gTextProcessingWaiting = !!(stage && String(stage).toLowerCase().includes('waiting'));
       gTextProcessingStage = stage || 'Detecting Text';
       gTextProcessingCurrent = 0;
       gTextProcessingTotal = Math.max(0, Number(total || 0));
@@ -1220,6 +1255,8 @@ function wireTextProcessingIndicator() {
   if (gBridge.textProcessingProgress) {
     gBridge.textProcessingProgress.connect((stage, current, total) => {
       gTextProcessingActive = true;
+      gTextProcessingPaused = false;
+      gTextProcessingWaiting = false;
       gTextProcessingStage = stage || gTextProcessingStage || 'Detecting Text';
       gTextProcessingCurrent = Math.max(0, Number(current || 0));
       gTextProcessingTotal = Math.max(0, Number(total || 0));
@@ -1230,6 +1267,9 @@ function wireTextProcessingIndicator() {
   if (gBridge.textProcessingFinished) {
     gBridge.textProcessingFinished.connect(() => {
       gTextProcessingActive = false;
+      gTextProcessingPaused = false;
+      gTextProcessingWaiting = false;
+      gTextProcessingForceVisible = false;
       gTextProcessingCurrent = gTextProcessingTotal;
       render();
       if (isTextFilterActive() && gBridge) {
@@ -4321,8 +4361,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   setupCustomSelect('filterSelect', (val) => {
     gFilter = normalizeTextFilter(val);
+    if (gRenderScanToast) gRenderScanToast();
     if (isTextFilterActive()) {
+      gTextProcessingPaused = false;
+      gTextProcessingWaiting = false;
       gTextProcessingDismissed = false;
+      gTextProcessingForceVisible = true;
       if (gBridge && gBridge.resume_text_processing) {
         gBridge.resume_text_processing();
       }
@@ -5784,11 +5828,11 @@ async function main() {
       }
       gGroupDateGranularity = (s && s['gallery.group_date_granularity']) || 'day';
       gSimilarityThreshold = (s && s['gallery.similarity_threshold']) || 'low';
-      gShowDismissedProgressToasts = !!(s && s['ui.show_dismissed_progress_toasts']);
       setCustomSelectValue('groupBySelect', gGroupBy);
       setCustomSelectValue('dateGranularitySelect', gGroupDateGranularity);
       setCustomSelectValue('similarityThresholdSelect', gSimilarityThreshold);
       syncGroupByUi();
+      if (gRenderScanToast) gRenderScanToast();
       if (gRenderTextProcessingToast) gRenderTextProcessingToast();
       if (viewModeChanged && gBridge) {
         refreshFromBridge(gBridge, false);
@@ -5919,6 +5963,18 @@ async function main() {
       });
     }
 
+    if (bridge.progressToastsRevealRequested) {
+      bridge.progressToastsRevealRequested.connect(function () {
+        gScanManuallyHidden = false;
+        if (gTextProcessingActive) {
+          gTextProcessingDismissed = false;
+          gTextProcessingForceVisible = true;
+        }
+        if (gRenderScanToast) gRenderScanToast();
+        if (gRenderTextProcessingToast) gRenderTextProcessingToast();
+      });
+    }
+
     if (bridge.accentColorChanged) {
       bridge.accentColorChanged.connect(function (v) {
         document.documentElement.style.setProperty('--accent', v);
@@ -5956,11 +6012,6 @@ async function main() {
         }
         if (key === 'ui.show_right_panel') {
           updateSidebarButtonIcons('right', !!value);
-          return;
-        }
-        if (key === 'ui.show_dismissed_progress_toasts') {
-          gShowDismissedProgressToasts = !!value;
-          if (gRenderTextProcessingToast) gRenderTextProcessingToast();
           return;
         }
         if (key === 'ui.theme_mode') {

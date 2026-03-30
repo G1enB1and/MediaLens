@@ -154,6 +154,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QMenu,
     QInputDialog,
+    QPlainTextEdit,
     QTextEdit,
     QLineEdit,
     QFrame,
@@ -1159,6 +1160,7 @@ class Bridge(QObject):
     textProcessingStarted = Signal(str, int)  # stage label, total items
     textProcessingProgress = Signal(str, int, int)  # stage label, current, total
     textProcessingFinished = Signal()
+    progressToastsRevealRequested = Signal()
     
     # Update Signals
     updateAvailable = Signal(str, bool)  # version, manual
@@ -1278,6 +1280,50 @@ class Bridge(QObject):
     def _video_poster_path(self, video_path: Path) -> Path:
         return self._thumb_dir / f"{self._thumb_key(video_path)}.jpg"
 
+    def _video_needs_ascii_runtime_path(self, video_path: Path) -> bool:
+        try:
+            raw = str(video_path)
+        except Exception:
+            return False
+        return any(ord(ch) > 127 for ch in raw)
+
+    def _video_runtime_alias_path(self, video_path: Path) -> Path:
+        runtime_dir = _appdata_runtime_dir() / "video-runtime-aliases"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        suffix = video_path.suffix or ".bin"
+        return runtime_dir / f"{self._thumb_key(video_path)}{suffix.lower()}"
+
+    def _video_runtime_path(self, video_path: str | Path) -> str:
+        path_obj = Path(video_path)
+        if not self._video_needs_ascii_runtime_path(path_obj):
+            return str(path_obj)
+
+        alias_path = self._video_runtime_alias_path(path_obj)
+        try:
+            src_stat = path_obj.stat()
+        except Exception:
+            return str(path_obj)
+
+        try:
+            if alias_path.exists():
+                alias_stat = alias_path.stat()
+                if alias_stat.st_size == src_stat.st_size and alias_stat.st_mtime >= (src_stat.st_mtime - 1):
+                    return str(alias_path)
+                alias_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+        try:
+            shutil.copy2(str(path_obj), str(alias_path))
+            self._log(f"Using ASCII-safe runtime alias for video path: {path_obj.name}")
+            return str(alias_path)
+        except Exception as exc:
+            try:
+                self._log(f"Failed to create ASCII-safe runtime alias for '{path_obj.name}': {exc}")
+            except Exception:
+                pass
+            return str(path_obj)
+
     def _ffmpeg_bin(self) -> str | None:
         return shutil.which("ffmpeg")
 
@@ -1296,13 +1342,14 @@ class Bridge(QObject):
             out.parent.mkdir(parents=True, exist_ok=True)
             ext = video_path.suffix.lower()
             is_vid = ext in {".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}
+            runtime_path = self._video_runtime_path(video_path) if is_vid else str(video_path)
             # For images, don't use -ss as it can fail for 0-duration files
             vf = "thumbnail,scale=min(640\\,iw):-2" if is_vid else "scale=min(640\\,iw):-2"
             
             cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error"]
             if is_vid:
                 cmd += ["-ss", "0.5"]
-            cmd += ["-i", str(video_path), "-frames:v", "1", "-vf", vf, "-q:v", "4", str(out)]
+            cmd += ["-i", runtime_path, "-frames:v", "1", "-vf", vf, "-q:v", "4", str(out)]
             
             r = _run_hidden_subprocess(cmd, capture_output=True, text=True, timeout=5)
             if r.returncode != 0:
@@ -2405,6 +2452,8 @@ class Bridge(QObject):
 
     @staticmethod
     def _text_stage_label(stage_key: str) -> str:
+        if stage_key == "waiting":
+            return "Detecting Text (Waiting for Scan)"
         return "Detecting Text"
 
     def _text_processing_should_continue(self, generation: int | None = None) -> bool:
@@ -2441,7 +2490,13 @@ class Bridge(QObject):
             return self._get_collection_candidates(self._active_collection_id, "all", "")
         return []
 
-    def _ensure_background_text_processing(self, folders: list[str] | None = None, collection_id: int | None = None) -> None:
+    def _ensure_background_text_processing(
+        self,
+        folders: list[str] | None = None,
+        collection_id: int | None = None,
+        *,
+        allow_concurrent_scan: bool = False,
+    ) -> None:
         scope_key = self._current_text_scope_key(folders, collection_id)
         if scope_key == ("none",):
             return
@@ -2453,19 +2508,29 @@ class Bridge(QObject):
         self._text_processing_paused = False
         self._text_processing_active = True
         self._text_processing_scope_key = scope_key
+        if self._scan_lock.locked() and not allow_concurrent_scan:
+            self.textProcessingStarted.emit(self._text_stage_label("waiting"), 0)
 
         resolved_folders = list(folders) if folders else (list(self._selected_folders) if self._selected_folders else [])
         resolved_collection_id = collection_id if collection_id is not None else self._active_collection_id
 
         def work() -> None:
             try:
-                with self._scan_lock:
+                if allow_concurrent_scan:
                     if not self._text_processing_should_continue(generation):
                         return
                     entries = self._collect_text_scope_entries(resolved_folders, resolved_collection_id)
                     if not entries:
                         return
                     self._backfill_scope_text_detection(entries, generation)
+                else:
+                    with self._scan_lock:
+                        if not self._text_processing_should_continue(generation):
+                            return
+                        entries = self._collect_text_scope_entries(resolved_folders, resolved_collection_id)
+                        if not entries:
+                            return
+                        self._backfill_scope_text_detection(entries, generation)
             except Exception as exc:
                 try:
                     self._log(f"Background text processing failed: {exc}")
@@ -2482,11 +2547,15 @@ class Bridge(QObject):
 
     @Slot()
     def resume_text_processing(self) -> None:
-        self._ensure_background_text_processing()
+        self._ensure_background_text_processing(allow_concurrent_scan=True)
 
     @Slot()
     def pause_text_processing(self) -> None:
         self._text_processing_paused = True
+
+    @Slot()
+    def reveal_progress_toasts(self) -> None:
+        self.progressToastsRevealRequested.emit()
 
     def _backfill_scope_text_detection(self, entries: list[dict], generation: int | None = None) -> bool:
         from app.mediamanager.utils.text_detection import TEXT_DETECTION_VERSION, detect_text_presence
@@ -2560,7 +2629,7 @@ class Bridge(QObject):
             except Exception:
                 pass
         finally:
-            if total_eligible:
+            if total_eligible and completed:
                 self.textProcessingFinished.emit()
         return completed
 
@@ -3567,7 +3636,8 @@ class Bridge(QObject):
         try:
             ffprobe = self._ffprobe_bin()
             if not ffprobe: return 0.0
-            cmd = [ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(video_path)]
+            runtime_path = self._video_runtime_path(video_path)
+            cmd = [ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", runtime_path]
             r = _run_hidden_subprocess(cmd, capture_output=True, text=True, check=True, timeout=5)
             return float((r.stdout or "").strip() or 0.0)
         except Exception: return 0.0
@@ -3575,7 +3645,8 @@ class Bridge(QObject):
     def _probe_video_size(self, video_path: str) -> tuple[int, int, bool]:
         ffprobe = self._ffprobe_bin()
         if not ffprobe: return (0, 0, False)
-        cmd = [ffprobe, "-v", "quiet", "-print_format", "json", "-show_streams", str(video_path)]
+        runtime_path = self._video_runtime_path(video_path)
+        cmd = [ffprobe, "-v", "quiet", "-print_format", "json", "-show_streams", runtime_path]
         try:
             import json
             r = _run_hidden_subprocess(cmd, capture_output=True, text=True, timeout=5)
@@ -3614,6 +3685,7 @@ class Bridge(QObject):
             if not path_obj.exists() or not path_obj.is_file():
                 self._log(f"Rejected open_native_video for non-file path: {video_path}")
                 return False
+            runtime_path = self._video_runtime_path(video_path)
             if w <= 0 or h <= 0:
                 w, h, is_malformed = self._probe_video_size(video_path)
             else:
@@ -3634,7 +3706,7 @@ class Bridge(QObject):
                         self.videoPreprocessingStatus.emit("Error preparing video.")
                 threading.Thread(target=work, daemon=True).start()
             else:
-                self.openVideoRequested.emit(str(video_path), bool(autoplay), bool(loop), bool(muted), int(w), int(h))
+                self.openVideoRequested.emit(runtime_path, bool(autoplay), bool(loop), bool(muted), int(w), int(h))
             return True
         except Exception:
             return False
@@ -3650,6 +3722,7 @@ class Bridge(QObject):
             if not path_obj.exists() or not path_obj.is_file():
                 self._log(f"Rejected open_native_video_inplace for non-file path: {video_path}")
                 return
+            runtime_path = self._video_runtime_path(video_path)
 
             if vw <= 0 or vh <= 0:
                 vw, vh, is_malformed = self._probe_video_size(video_path)
@@ -3671,7 +3744,7 @@ class Bridge(QObject):
                         self.videoPreprocessingStatus.emit("Error preparing video.")
                 threading.Thread(target=work, daemon=True).start()
             else:
-                self.openVideoInPlaceRequested.emit(str(video_path), int(x), int(y), int(w), int(h), bool(autoplay), bool(loop), bool(muted), int(vw), int(vh))
+                self.openVideoInPlaceRequested.emit(runtime_path, int(x), int(y), int(w), int(h), bool(autoplay), bool(loop), bool(muted), int(vw), int(vh))
         except Exception:
             pass
 
@@ -3712,13 +3785,14 @@ class Bridge(QObject):
         import tempfile
         ffmpeg = self._ffmpeg_bin()
         if not ffmpeg: return None
+        runtime_path = self._video_runtime_path(video_path)
         ew, eh = (w if w % 2 == 0 else w - 1), (h if h % 2 == 0 else h - 1)
         if ew <= 0 or eh <= 0: return None
         tmp = tempfile.NamedTemporaryFile(prefix="mmx_fixed_", suffix=".mkv", delete=False)
         tmp.close()
         out_path = tmp.name
         vf = f"scale={ew}:{eh},setsar=1,format=yuv420p"
-        cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "warning", "-i", str(video_path), "-vf", vf, "-c:v", "mjpeg", "-q:v", "3", "-c:a", "copy", out_path]
+        cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "warning", "-i", runtime_path, "-vf", vf, "-c:v", "mjpeg", "-q:v", "3", "-c:a", "copy", out_path]
         try:
             if _run_hidden_subprocess(cmd, capture_output=True, timeout=60).returncode == 0:
                 return out_path
@@ -4934,10 +5008,8 @@ class MainWindow(QMainWindow):
         self.act_preview_above_details.triggered.connect(lambda checked=False: self._toggle_panel_setting("ui/preview_above_details"))
         view_menu.addAction(self.act_preview_above_details)
 
-        self.act_show_dismissed_progress_toasts = QAction("Show Dismissed Progress Toasts", self)
-        self.act_show_dismissed_progress_toasts.setCheckable(True)
-        self.act_show_dismissed_progress_toasts.setChecked(bool(self.bridge.settings.value("ui/show_dismissed_progress_toasts", False, type=bool)))
-        self.act_show_dismissed_progress_toasts.triggered.connect(lambda checked=False: self._toggle_panel_setting("ui/show_dismissed_progress_toasts"))
+        self.act_show_dismissed_progress_toasts = QAction("Show Hidden Progress Toasts", self)
+        self.act_show_dismissed_progress_toasts.triggered.connect(self.bridge.reveal_progress_toasts)
         view_menu.addAction(self.act_show_dismissed_progress_toasts)
 
         view_menu.addSeparator()
@@ -5027,7 +5099,7 @@ class MainWindow(QMainWindow):
     def _is_input_focused(self) -> bool:
         """Check if focus is in a text input where shortcuts should be ignored."""
         f = QApplication.focusWidget()
-        return isinstance(f, (QLineEdit, QTextEdit))
+        return isinstance(f, (QLineEdit, QTextEdit, QPlainTextEdit))
 
     def _on_copy_shortcut(self) -> None:
         if self._is_input_focused(): return
@@ -5424,14 +5496,9 @@ class MainWindow(QMainWindow):
         self._preview_aspect_ratio = 1.0
         right_layout.addWidget(self.preview_image_lbl)
 
-        # Video Overlay for Sidebar (In-place, parented directly to image label)
-        self._sidebar_video_layout = QVBoxLayout(self.preview_image_lbl)
-        self._sidebar_video_layout.setContentsMargins(0, 0, 0, 0)
-        self.sidebar_video_overlay = LightboxVideoOverlay(parent=self.preview_image_lbl)
-        self.sidebar_video_overlay.set_mode(True)
-        self.sidebar_video_overlay.on_close = self._sync_sidebar_video_preview_controls
-        self._sidebar_video_layout.addWidget(self.sidebar_video_overlay)
-        self.sidebar_video_overlay.hide()
+        # Sidebar preview overlay is manually positioned to the preview label's rect.
+        # Avoid also putting it in a layout, which can produce bad geometry/clipping.
+        self.sidebar_video_overlay: LightboxVideoOverlay | None = None
 
         self.btn_preview_overlay_play = QPushButton(self.preview_image_lbl)
         self.btn_preview_overlay_play.setObjectName("btnPreviewOverlayPlay")
@@ -5742,7 +5809,7 @@ class MainWindow(QMainWindow):
         self.meta_ai_raw_paths_edit.setMaximumHeight(70)
 
         self.lbl_notes_cap = QLabel("Notes:")
-        self.meta_notes = QTextEdit()
+        self.meta_notes = QPlainTextEdit()
         self.meta_notes.setPlaceholderText("Personal notes...")
         self.meta_notes.setMaximumHeight(90)
 
@@ -6651,8 +6718,9 @@ class MainWindow(QMainWindow):
                     visible = bool(value)
                     
                     # Stop video playback asynchronously before hiding the UI to prevent Qt FFmpeg deadlock
-                    if not visible and hasattr(self, "sidebar_video_overlay"):
-                        self.sidebar_video_overlay.close_overlay(notify_web=False)
+                    overlay = getattr(self, "sidebar_video_overlay", None)
+                    if not visible and overlay is not None:
+                        overlay.close_overlay(notify_web=False)
 
                     # "Preview" title row stays visible; toggle image/sep and corresponding buttons
                     self.preview_header_row.setVisible(True)
@@ -6674,9 +6742,6 @@ class MainWindow(QMainWindow):
                     self.right_layout.activate()
                     self._update_sidebar_input_widths()
                 self._sync_sidebar_video_preview_controls()
-            elif key == "ui.show_dismissed_progress_toasts":
-                if hasattr(self, "act_show_dismissed_progress_toasts"):
-                    self.act_show_dismissed_progress_toasts.setChecked(bool(value))
             elif key == "ui.theme_mode":
                 self._update_native_styles(self._current_accent)
                 self._update_splitter_style(self._current_accent)
@@ -6775,7 +6840,7 @@ class MainWindow(QMainWindow):
         available_w = self._right_panel_content_width()
         self.preview_image_lbl.setFixedWidth(available_w)
         for widget in self.scroll_container.findChildren(QWidget):
-            if not isinstance(widget, (QLineEdit, QTextEdit)):
+            if not isinstance(widget, (QLineEdit, QTextEdit, QPlainTextEdit)):
                 continue
             widget.setMinimumWidth(0)
             widget.setMaximumWidth(16777215)
@@ -6870,8 +6935,9 @@ class MainWindow(QMainWindow):
         return merged
 
     def _clear_preview_media(self) -> None:
-        if hasattr(self, "sidebar_video_overlay"):
-            self.sidebar_video_overlay.close_overlay(notify_web=False)
+        overlay = getattr(self, "sidebar_video_overlay", None)
+        if overlay is not None:
+            overlay.close_overlay(notify_web=False)
         if self._preview_movie is not None:
             self._preview_movie.stop()
             self.preview_image_lbl.setMovie(None)
@@ -6881,6 +6947,17 @@ class MainWindow(QMainWindow):
         self._preview_aspect_ratio = 1.0
         self.preview_image_lbl.setPixmap(QPixmap())
         self._sync_sidebar_video_preview_controls()
+
+    def _ensure_sidebar_video_overlay(self) -> LightboxVideoOverlay:
+        overlay = getattr(self, "sidebar_video_overlay", None)
+        if overlay is None:
+            overlay = LightboxVideoOverlay(parent=self.preview_image_lbl)
+            overlay.set_mode(True)
+            overlay.on_close = self._sync_sidebar_video_preview_controls
+            overlay.setGeometry(self.preview_image_lbl.rect())
+            overlay.hide()
+            self.sidebar_video_overlay = overlay
+        return overlay
 
     def _selected_video_path(self) -> str | None:
         path = getattr(self, "_current_path", None)
@@ -6916,7 +6993,8 @@ class MainWindow(QMainWindow):
             (self._preview_movie is not None) or
             (self._preview_source_pixmap is not None and not self._preview_source_pixmap.isNull())
         )
-        overlay_open = hasattr(self, "sidebar_video_overlay") and self.sidebar_video_overlay.isVisible()
+        overlay = getattr(self, "sidebar_video_overlay", None)
+        overlay_open = overlay is not None and overlay.isVisible()
         show_overlay_play = bool(path and preview_visible and has_preview and not overlay_open)
         self.btn_preview_overlay_play.setVisible(show_overlay_play)
         self.btn_preview_overlay_play.setEnabled(show_overlay_play)
@@ -6985,8 +7063,9 @@ class MainWindow(QMainWindow):
             self._preview_movie.setScaledSize(QSize(available_w, target_h))
             if self._preview_movie.state() != QMovie.MovieState.Running:
                 self._preview_movie.start()
-            if hasattr(self, "sidebar_video_overlay") and self.sidebar_video_overlay.isVisible():
-                self.sidebar_video_overlay.setGeometry(self.preview_image_lbl.rect())
+            overlay = getattr(self, "sidebar_video_overlay", None)
+            if overlay is not None and overlay.isVisible():
+                overlay.setGeometry(self.preview_image_lbl.rect())
             self._sync_sidebar_video_preview_controls()
             return
 
@@ -7000,15 +7079,17 @@ class MainWindow(QMainWindow):
             )
             self.preview_image_lbl.setFixedHeight(max(96, scaled.height()))
             self.preview_image_lbl.setPixmap(scaled)
-            if hasattr(self, "sidebar_video_overlay") and self.sidebar_video_overlay.isVisible():
-                self.sidebar_video_overlay.setGeometry(self.preview_image_lbl.rect())
+            overlay = getattr(self, "sidebar_video_overlay", None)
+            if overlay is not None and overlay.isVisible():
+                overlay.setGeometry(self.preview_image_lbl.rect())
             self._sync_sidebar_video_preview_controls()
             return
 
         self.preview_image_lbl.setFixedHeight(96)
         self.preview_image_lbl.setText(placeholder)
-        if hasattr(self, "sidebar_video_overlay") and self.sidebar_video_overlay.isVisible():
-            self.sidebar_video_overlay.setGeometry(self.preview_image_lbl.rect())
+        overlay = getattr(self, "sidebar_video_overlay", None)
+        if overlay is not None and overlay.isVisible():
+            overlay.setGeometry(self.preview_image_lbl.rect())
         self._sync_sidebar_video_preview_controls()
 
     def _set_preview_pixmap(self, pixmap: QPixmap | None, placeholder: str = "No preview") -> None:
@@ -7069,20 +7150,20 @@ class MainWindow(QMainWindow):
         should_loop = 0 < duration_ms < 60000
         if hasattr(self, "video_overlay") and self.video_overlay.isVisible():
             self.video_overlay.close_overlay(notify_web=False)
-        if hasattr(self, "sidebar_video_overlay"):
-            self.sidebar_video_overlay.setGeometry(self.preview_image_lbl.rect())
-            self.sidebar_video_overlay.set_mode(True)
-            self.sidebar_video_overlay.open_video(
-                VideoRequest(
-                    path=path,
-                    autoplay=True,
-                    loop=should_loop,
-                    muted=True,
-                    width=width,
-                    height=height,
-                )
+        overlay = self._ensure_sidebar_video_overlay()
+        overlay.setGeometry(self.preview_image_lbl.rect())
+        overlay.set_mode(True)
+        overlay.open_video(
+            VideoRequest(
+                path=path,
+                autoplay=True,
+                loop=should_loop,
+                muted=True,
+                width=width,
+                height=height,
             )
-            self.sidebar_video_overlay.raise_()
+        )
+        overlay.raise_()
         self._sync_sidebar_video_preview_controls()
 
     def _open_selected_video_lightbox(self) -> None:
@@ -7096,8 +7177,9 @@ class MainWindow(QMainWindow):
         duration_ms = int(getattr(self, "_current_video_duration_ms", 0) or 0)
         should_loop = 0 < duration_ms < 60000
         self._video_preview_transition_active = True
-        if hasattr(self, "sidebar_video_overlay"):
-            self.sidebar_video_overlay.close_overlay(notify_web=False)
+        overlay = getattr(self, "sidebar_video_overlay", None)
+        if overlay is not None:
+            overlay.close_overlay(notify_web=False)
         if hasattr(self, "video_overlay"):
             self.video_overlay.close_overlay(notify_web=False)
         QApplication.processEvents()
@@ -7127,8 +7209,9 @@ class MainWindow(QMainWindow):
             poster = self.bridge._video_poster_path(p)
             if not poster.exists():
                 self._set_preview_pixmap(None, "Loading video preview...")
-                if hasattr(self, "sidebar_video_overlay"):
-                    self.sidebar_video_overlay.close_overlay(notify_web=False)
+                overlay = getattr(self, "sidebar_video_overlay", None)
+                if overlay is not None:
+                    overlay.close_overlay(notify_web=False)
                 self._load_video_preview_async(str(p))
                 return
             preview_path = poster
@@ -7155,10 +7238,13 @@ class MainWindow(QMainWindow):
             return
         self._set_preview_pixmap(QPixmap.fromImage(img))
         if suffix in {".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}:
-            if hasattr(self, "sidebar_video_overlay"):
-                self.sidebar_video_overlay.close_overlay(notify_web=False)
-        elif hasattr(self, "sidebar_video_overlay"):
-             self.sidebar_video_overlay.close_overlay(notify_web=False)
+            overlay = getattr(self, "sidebar_video_overlay", None)
+            if overlay is not None:
+                overlay.close_overlay(notify_web=False)
+        else:
+            overlay = getattr(self, "sidebar_video_overlay", None)
+            if overlay is not None:
+                overlay.close_overlay(notify_web=False)
 
 
     def _rename_from_panel(self) -> None:
@@ -8877,7 +8963,8 @@ class MainWindow(QMainWindow):
         ffprobe = self.bridge._ffprobe_bin()
         if not ffprobe:
             return {}
-        cmd = [ffprobe, "-v", "quiet", "-print_format", "json", "-show_streams", "-show_format", str(video_path)]
+        runtime_path = self.bridge._video_runtime_path(video_path)
+        cmd = [ffprobe, "-v", "quiet", "-print_format", "json", "-show_streams", "-show_format", runtime_path]
         try:
             probe = json.loads(_run_hidden_subprocess(cmd, capture_output=True, text=True, timeout=5).stdout or "{}")
         except Exception:
@@ -9444,8 +9531,9 @@ class MainWindow(QMainWindow):
 
     def _close_video_overlay(self) -> None:
         self.video_overlay.close_overlay(notify_web=False)
-        if hasattr(self, "sidebar_video_overlay"):
-            self.sidebar_video_overlay.close_overlay(notify_web=False)
+        overlay = getattr(self, "sidebar_video_overlay", None)
+        if overlay is not None:
+            overlay.close_overlay(notify_web=False)
         self._sync_sidebar_video_preview_controls()
 
     def _update_splitter_style(self, accent_color: str) -> None:
@@ -9713,7 +9801,7 @@ class MainWindow(QMainWindow):
                 border-radius: 8px;
                 padding: 6px;
             }}
-            QLineEdit, QTextEdit {{
+            QLineEdit, QTextEdit, QPlainTextEdit {{
                 background-color: {Theme.get_input_bg(accent)};
                 border: 1px solid {Theme.get_input_border(accent)};
                 border-radius: 4px;
@@ -10198,7 +10286,7 @@ class MainWindow(QMainWindow):
                 background-color: {bg};
                 color: {fg};
             }}
-            QTextEdit {{
+            QTextEdit, QPlainTextEdit {{
                 background-color: {content_bg};
                 color: {fg};
                 border: 1px solid {border};
