@@ -118,12 +118,14 @@ from PySide6.QtGui import (
     QActionGroup,
     QColor,
     QDrag,
+    QFont,
     QFontMetrics,
     QImage,
     QImageReader,
     QIcon,
     QMovie,
     QPainter,
+    QPalette,
     QCursor,
     QPixmap,
     QMouseEvent,
@@ -1122,6 +1124,600 @@ class AccentSelectionTreeDelegate(QStyledItemDelegate):
         super().paint(painter, opt, index)
 
 
+class CompareRevealViewer(QWidget):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("compareRevealViewer")
+        self.setMouseTracking(True)
+        self.setMinimumSize(260, 180)
+        self._left_path = ""
+        self._right_path = ""
+        self._left_image: QImage | None = None
+        self._right_image: QImage | None = None
+        self._zoom = 1.0
+        self._pan = QPoint(0, 0)
+        self._slider_ratio = 0.5
+        self._drag_mode = ""
+        self._drag_start_pos = QPoint()
+        self._pan_start = QPoint()
+        self._isolate_slot = ""
+
+    def _load_image(self, path: str) -> QImage | None:
+        clean = str(path or "").strip()
+        if not clean:
+            return None
+        reader = QImageReader(clean)
+        reader.setAutoTransform(True)
+        image = reader.read()
+        if image.isNull():
+            return None
+        return image
+
+    def set_images(self, left_path: str, right_path: str) -> None:
+        left_path = str(left_path or "")
+        right_path = str(right_path or "")
+        if left_path != self._left_path:
+            self._left_path = left_path
+            self._left_image = self._load_image(left_path)
+        if right_path != self._right_path:
+            self._right_path = right_path
+            self._right_image = self._load_image(right_path)
+        self.update()
+
+    def set_isolated_slot(self, slot_name: str) -> None:
+        slot = str(slot_name or "").strip().lower()
+        if slot not in {"left", "right", ""}:
+            slot = ""
+        if slot != self._isolate_slot:
+            self._isolate_slot = slot
+            self.update()
+
+    def _canvas_size(self) -> QSize:
+        widths = [
+            image.width()
+            for image in (self._left_image, self._right_image)
+            if image is not None and not image.isNull()
+        ]
+        heights = [
+            image.height()
+            for image in (self._left_image, self._right_image)
+            if image is not None and not image.isNull()
+        ]
+        return QSize(max(widths, default=1), max(heights, default=1))
+
+    def _fit_scale(self) -> float:
+        canvas = self._canvas_size()
+        if canvas.width() <= 0 or canvas.height() <= 0 or self.width() <= 0 or self.height() <= 0:
+            return 1.0
+        return min(self.width() / canvas.width(), self.height() / canvas.height())
+
+    def _scaled_canvas_rect(self, scale: float) -> QRect:
+        canvas = self._canvas_size()
+        scaled_w = max(1, round(canvas.width() * scale))
+        scaled_h = max(1, round(canvas.height() * scale))
+        left = round((self.width() - scaled_w) / 2 + self._pan.x())
+        top = round((self.height() - scaled_h) / 2 + self._pan.y())
+        return QRect(left, top, scaled_w, scaled_h)
+
+    def _draw_image(self, painter: QPainter, image: QImage | None, canvas_rect: QRect, clip_rect: QRect | None) -> None:
+        if image is None or image.isNull():
+            return
+        canvas_size = self._canvas_size()
+        draw_w = max(1, round(image.width() * canvas_rect.width() / max(1, canvas_size.width())))
+        draw_h = max(1, round(image.height() * canvas_rect.height() / max(1, canvas_size.height())))
+        draw_x = canvas_rect.x() + round((canvas_rect.width() - draw_w) / 2)
+        draw_y = canvas_rect.y() + round((canvas_rect.height() - draw_h) / 2)
+        target_rect = QRect(draw_x, draw_y, draw_w, draw_h)
+        painter.save()
+        if clip_rect is not None:
+            painter.setClipRect(clip_rect)
+        painter.drawImage(target_rect, image)
+        painter.restore()
+
+    def _clamp_pan(self) -> None:
+        scale = self._fit_scale() * self._zoom
+        canvas_rect = self._scaled_canvas_rect(scale)
+        max_x = max(0, round((canvas_rect.width() - self.width()) / 2))
+        max_y = max(0, round((canvas_rect.height() - self.height()) / 2))
+        if canvas_rect.width() <= self.width():
+            self._pan.setX(0)
+        else:
+            self._pan.setX(max(-max_x, min(max_x, self._pan.x())))
+        if canvas_rect.height() <= self.height():
+            self._pan.setY(0)
+        else:
+            self._pan.setY(max(-max_y, min(max_y, self._pan.y())))
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        painter.fillRect(self.rect(), QColor("#121212"))
+
+        available_left = self._left_image is not None and not self._left_image.isNull()
+        available_right = self._right_image is not None and not self._right_image.isNull()
+        if not available_left and not available_right:
+            painter.setPen(QColor("#8a8a8a"))
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Drop or browse two images to compare")
+            return
+
+        scale = self._fit_scale() * self._zoom
+        canvas_rect = self._scaled_canvas_rect(scale)
+        slider_x = canvas_rect.left() + round(canvas_rect.width() * self._slider_ratio)
+        left_clip = QRect(self.rect().left(), self.rect().top(), max(0, slider_x - self.rect().left()), self.rect().height())
+        right_clip = QRect(slider_x, self.rect().top(), max(0, self.rect().right() - slider_x + 1), self.rect().height())
+
+        isolate_left = self._isolate_slot == "left" and available_left
+        isolate_right = self._isolate_slot == "right" and available_right
+        if isolate_left:
+            self._draw_image(painter, self._left_image, canvas_rect, None)
+        elif isolate_right:
+            self._draw_image(painter, self._right_image, canvas_rect, None)
+        else:
+            self._draw_image(painter, self._left_image, canvas_rect, left_clip)
+            self._draw_image(painter, self._right_image, canvas_rect, right_clip)
+
+        if not isolate_left and not isolate_right and available_left and available_right:
+            painter.save()
+            painter.setPen(QPen(QColor("#ffffff"), 2))
+            painter.drawLine(slider_x, canvas_rect.top(), slider_x, canvas_rect.bottom())
+            handle_rect = QRect(slider_x - 8, round(canvas_rect.center().y() - 28), 16, 56)
+            painter.setBrush(QColor("#ffffff"))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(handle_rect, 8, 8)
+            painter.restore()
+
+    def wheelEvent(self, event) -> None:
+        delta = event.angleDelta().y()
+        if delta == 0:
+            event.ignore()
+            return
+        old_scale = self._fit_scale() * self._zoom
+        old_rect = self._scaled_canvas_rect(old_scale)
+        scene_x = (event.position().x() - old_rect.left()) / max(old_scale, 0.0001)
+        scene_y = (event.position().y() - old_rect.top()) / max(old_scale, 0.0001)
+        step = 1.15 if delta > 0 else (1 / 1.15)
+        self._zoom = max(1.0, min(12.0, self._zoom * step))
+        if self._zoom <= 1.001:
+            self._zoom = 1.0
+            self._pan = QPoint(0, 0)
+        else:
+            new_scale = self._fit_scale() * self._zoom
+            base_left = (self.width() - self._canvas_size().width() * new_scale) / 2
+            base_top = (self.height() - self._canvas_size().height() * new_scale) / 2
+            self._pan = QPoint(
+                round(event.position().x() - base_left - scene_x * new_scale),
+                round(event.position().y() - base_top - scene_y * new_scale),
+            )
+            self._clamp_pan()
+        self.update()
+        event.accept()
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mousePressEvent(event)
+            return
+        scale = self._fit_scale() * self._zoom
+        canvas_rect = self._scaled_canvas_rect(scale)
+        slider_x = canvas_rect.left() + round(canvas_rect.width() * self._slider_ratio)
+        if abs(event.position().x() - slider_x) <= 16 and canvas_rect.adjusted(-10, -10, 10, 10).contains(event.position().toPoint()):
+            self._drag_mode = "slider"
+        elif self._zoom > 1.0:
+            self._drag_mode = "pan"
+            self._drag_start_pos = event.position().toPoint()
+            self._pan_start = QPoint(self._pan)
+        else:
+            self._drag_mode = ""
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._drag_mode == "slider":
+            scale = self._fit_scale() * self._zoom
+            canvas_rect = self._scaled_canvas_rect(scale)
+            if canvas_rect.width() > 0:
+                self._slider_ratio = max(0.0, min(1.0, (event.position().x() - canvas_rect.left()) / canvas_rect.width()))
+                self.update()
+            event.accept()
+            return
+        if self._drag_mode == "pan":
+            delta = event.position().toPoint() - self._drag_start_pos
+            self._pan = self._pan_start + delta
+            self._clamp_pan()
+            self.update()
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        self._drag_mode = ""
+        super().mouseReleaseEvent(event)
+
+    def resizeEvent(self, event) -> None:
+        self._clamp_pan()
+        super().resizeEvent(event)
+
+
+class CompareSlotCard(QFrame):
+    slotPathDropped = Signal(str, str)
+    slotSwapRequested = Signal(str, str)
+    browseRequested = Signal(str)
+    isolateRequested = Signal(str)
+    isolateReleased = Signal()
+    keepToggled = Signal(str, bool)
+    bestRequested = Signal(str)
+    deleteRequested = Signal(str, str)
+
+    def __init__(self, slot_name: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.slot_name = str(slot_name)
+        self.setObjectName("compareSlotCard")
+        self.setAcceptDrops(True)
+        self._entry: dict = {}
+        self._drag_start_pos: QPoint | None = None
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        self.name_label = QLabel("Drop image here")
+        self.name_label.setObjectName("compareSlotName")
+        layout.addWidget(self.name_label)
+
+        self.thumb_frame = QFrame()
+        self.thumb_frame.setObjectName("compareSlotThumbCard")
+        thumb_layout = QVBoxLayout(self.thumb_frame)
+        thumb_layout.setContentsMargins(10, 10, 10, 10)
+        thumb_layout.setSpacing(0)
+
+        self.thumb_label = QLabel()
+        self.thumb_label.setObjectName("compareSlotThumb")
+        self.thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.thumb_label.setMinimumSize(180, 120)
+        self.thumb_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        thumb_layout.addWidget(self.thumb_label, 1)
+        layout.addWidget(self.thumb_frame, 1)
+
+        self.meta_label = QLabel("Browse or drag an image from the gallery")
+        self.meta_label.setObjectName("compareSlotMeta")
+        self.meta_label.setWordWrap(True)
+        layout.addWidget(self.meta_label)
+
+        self.reasons_label = QLabel("")
+        self.reasons_label.setObjectName("compareSlotReasons")
+        self.reasons_label.setWordWrap(True)
+        layout.addWidget(self.reasons_label)
+
+        self.best_label = QLabel("")
+        self.best_label.setObjectName("compareSlotBest")
+        self.best_label.setWordWrap(True)
+        layout.addWidget(self.best_label)
+
+        controls = QHBoxLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(10)
+
+        self.keep_toggle = QCheckBox("Keep")
+        self.keep_toggle.stateChanged.connect(self._emit_keep_changed)
+        controls.addWidget(self.keep_toggle)
+
+        self.best_toggle = QCheckBox("Mark as Best")
+        self.best_toggle.stateChanged.connect(self._emit_best_changed)
+        controls.addWidget(self.best_toggle)
+
+        self.delete_btn = QPushButton("Delete")
+        self.delete_btn.clicked.connect(self._emit_delete_clicked)
+        controls.addWidget(self.delete_btn)
+
+        controls.addStretch(1)
+        layout.addLayout(controls)
+
+        self.browse_btn = QPushButton("Browse…")
+        self.browse_btn.clicked.connect(lambda: self.browseRequested.emit(self.slot_name))
+        layout.addWidget(self.browse_btn)
+
+        self._render_entry({})
+
+    def apply_theme_styles(self, text: str, text_muted: str, accent_hex: str, accent_raw: str, thumb_bg: str, border: str) -> None:
+        name_font = QFont(self.name_label.font())
+        name_font.setBold(True)
+        self.name_label.setFont(name_font)
+
+        reason_font = QFont(self.reasons_label.font())
+        reason_font.setBold(True)
+        self.reasons_label.setFont(reason_font)
+        self.best_label.setFont(reason_font)
+
+        self.name_label.setStyleSheet(f"color: {text}; font-weight: 600;")
+        self.meta_label.setStyleSheet(f"color: {text_muted};")
+        self.reasons_label.setStyleSheet(f"color: {accent_hex}; font-weight: 700;")
+        self.best_label.setStyleSheet(f"color: {accent_hex}; font-weight: 700;")
+        self.thumb_frame.setStyleSheet(
+            f"background-color: {thumb_bg}; border: 1px solid {border}; border-radius: 10px;"
+        )
+        self.thumb_label.setStyleSheet(
+            f"background: transparent; color: {text_muted}; border: none; padding: 0px;"
+        )
+        accent_color = QColor(accent_raw)
+        btn_base = Theme.get_input_bg(accent_color)
+        btn_hover = Theme.get_btn_save_hover(accent_color)
+        btn_border = Theme.get_input_border(accent_color)
+        btn_border_hover = Theme.mix(Theme.get_border(accent_color), accent_color, 0.28)
+        btn_text = Theme.mix(text, QColor("#000000" if Theme.get_is_light() else "#ffffff"), 0.0)
+        check_svg = (Path(__file__).with_name("web") / "scrollbar_arrows" / "check.svg").as_posix()
+        button_qss = (
+            f"QPushButton {{ background-color: {btn_base}; color: {btn_text}; border: 1px solid {btn_border}; "
+            f"border-radius: 8px; padding: 6px 10px; }}"
+            f"QPushButton:hover {{ background-color: {btn_hover}; border-color: {btn_border_hover}; }}"
+        )
+        for button in (self.browse_btn, self.delete_btn):
+            button.setStyleSheet(button_qss)
+
+        checkbox_qss = (
+            f"QCheckBox {{ color: {text_muted}; spacing: 6px; }}"
+            f"QCheckBox::indicator {{ width: 14px; height: 14px; border-radius: 4px; "
+            f"border: 1px solid {btn_border}; background-color: {btn_base}; }}"
+            f"QCheckBox::indicator:checked {{ background-color: {accent_raw}; border-color: {accent_raw}; image: url('{check_svg}'); }}"
+            f"QCheckBox::indicator:hover {{ border-color: {btn_border_hover}; }}"
+        )
+        self.keep_toggle.setStyleSheet(checkbox_qss)
+        self.best_toggle.setStyleSheet(checkbox_qss)
+        for widget in (
+            self.name_label,
+            self.meta_label,
+            self.reasons_label,
+            self.best_label,
+            self.thumb_frame,
+            self.thumb_label,
+            self.keep_toggle,
+            self.best_toggle,
+            self.browse_btn,
+            self.delete_btn,
+            self,
+        ):
+            try:
+                widget.style().unpolish(widget)
+                widget.style().polish(widget)
+                widget.update()
+            except Exception:
+                pass
+
+    def _emit_keep_changed(self, state: int) -> None:
+        path = str(self._entry.get("path") or "")
+        if path:
+            self.keepToggled.emit(path, state == int(Qt.CheckState.Checked))
+
+    def _emit_best_changed(self, state: int) -> None:
+        path = str(self._entry.get("path") or "")
+        if path and state == int(Qt.CheckState.Checked):
+            self.bestRequested.emit(path)
+
+    def _emit_delete_clicked(self) -> None:
+        path = str(self._entry.get("path") or "")
+        if path:
+            self.deleteRequested.emit(self.slot_name, path)
+
+    def _load_thumb(self, path: str) -> QPixmap | None:
+        clean = str(path or "").strip()
+        if not clean:
+            return None
+        reader = QImageReader(clean)
+        reader.setAutoTransform(True)
+        image = reader.read()
+        if image.isNull():
+            return None
+        pixmap = QPixmap.fromImage(image)
+        return pixmap.scaled(220, 150, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+
+    def _render_entry(self, entry: dict) -> None:
+        self._entry = dict(entry or {})
+        path = str(self._entry.get("path") or "")
+        has_entry = bool(path)
+        self.setProperty("empty", not has_entry)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        if not has_entry:
+            self.name_label.setText("Drop image here")
+            self.thumb_label.setPixmap(QPixmap())
+            self.thumb_label.setText("Left" if self.slot_name == "left" else "Right")
+            self.meta_label.setText("Browse or drag an image from the gallery")
+            self.reasons_label.setText("")
+            self.best_label.setText("")
+            self.keep_toggle.blockSignals(True)
+            self.keep_toggle.setChecked(False)
+            self.keep_toggle.blockSignals(False)
+            self.best_toggle.blockSignals(True)
+            self.best_toggle.setChecked(False)
+            self.best_toggle.blockSignals(False)
+            self.delete_btn.setEnabled(False)
+            return
+
+        self.name_label.setText(str(self._entry.get("name") or Path(path).name))
+        thumb = self._load_thumb(path)
+        self.thumb_label.setText("")
+        self.thumb_label.setPixmap(thumb or QPixmap())
+        self.meta_label.setText(
+            "\n".join(
+                [
+                    part for part in [
+                        str(self._entry.get("resolution_text") or ""),
+                        " • ".join(
+                            [
+                                part for part in [
+                                    str(self._entry.get("file_size_text") or ""),
+                                    str(self._entry.get("modified_time_text") or ""),
+                                ]
+                                if part
+                            ]
+                        ),
+                    ]
+                    if part
+                ]
+            )
+        )
+        reasons = list(self._entry.get("duplicate_category_reasons") or [])[:5]
+        self.reasons_label.setText("\n".join(reasons))
+        self.best_label.setText("\u2605 Best overall" if self._entry.get("compare_marked_best") else "")
+        self.keep_toggle.blockSignals(True)
+        self.keep_toggle.setChecked(bool(self._entry.get("compare_keep_checked")))
+        self.keep_toggle.blockSignals(False)
+        self.best_toggle.blockSignals(True)
+        self.best_toggle.setChecked(bool(self._entry.get("compare_marked_best")))
+        self.best_toggle.blockSignals(False)
+        self.delete_btn.setEnabled(True)
+
+    def set_entry(self, entry: dict) -> None:
+        self._render_entry(entry)
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if event.mimeData().hasUrls() or event.mimeData().hasFormat("application/x-medialens-compare-slot"):
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        if event.mimeData().hasUrls() or event.mimeData().hasFormat("application/x-medialens-compare-slot"):
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        if event.mimeData().hasFormat("application/x-medialens-compare-slot"):
+            source_slot = bytes(event.mimeData().data("application/x-medialens-compare-slot")).decode("utf-8", errors="ignore")
+            if source_slot and source_slot != self.slot_name:
+                self.slotSwapRequested.emit(source_slot, self.slot_name)
+                event.acceptProposedAction()
+                return
+        if event.mimeData().hasUrls():
+            for url in event.mimeData().urls():
+                local = url.toLocalFile()
+                if local:
+                    self.slotPathDropped.emit(self.slot_name, local)
+                    event.acceptProposedAction()
+                    return
+        super().dropEvent(event)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            if str(self._entry.get("path") or ""):
+                self._drag_start_pos = event.position().toPoint()
+            self.isolateRequested.emit(self.slot_name)
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if (
+            self._drag_start_pos is not None
+            and str(self._entry.get("path") or "")
+            and (event.position().toPoint() - self._drag_start_pos).manhattanLength() >= QApplication.startDragDistance()
+        ):
+            mime = QMimeData()
+            mime.setData("application/x-medialens-compare-slot", self.slot_name.encode("utf-8"))
+            mime.setUrls([QUrl.fromLocalFile(str(self._entry.get("path") or ""))])
+            drag = QDrag(self)
+            drag.setMimeData(mime)
+            thumb = self.thumb_label.pixmap()
+            if thumb is not None and not thumb.isNull():
+                drag.setPixmap(thumb)
+            drag.exec(Qt.DropAction.MoveAction)
+            self._drag_start_pos = None
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        self._drag_start_pos = None
+        self.isolateReleased.emit()
+        super().mouseReleaseEvent(event)
+
+
+class ComparePanel(QWidget):
+    def __init__(self, bridge: "Bridge", parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.bridge = bridge
+        self.setObjectName("comparePanel")
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        self.left_slot = CompareSlotCard("left")
+        self.viewer = CompareRevealViewer()
+        self.right_slot = CompareSlotCard("right")
+        self.viewer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+        layout.addWidget(self.left_slot, 0)
+        layout.addWidget(self.viewer, 1)
+        layout.addWidget(self.right_slot, 0)
+
+        for slot in (self.left_slot, self.right_slot):
+            slot.slotPathDropped.connect(self.bridge.set_compare_path)
+            slot.slotSwapRequested.connect(self.bridge.swap_compare_slots)
+            slot.browseRequested.connect(self._browse_for_slot)
+            slot.isolateRequested.connect(self.viewer.set_isolated_slot)
+            slot.isolateReleased.connect(lambda: self.viewer.set_isolated_slot(""))
+            slot.keepToggled.connect(self.bridge.set_compare_keep_path)
+            slot.bestRequested.connect(self.bridge.set_compare_best_path)
+            slot.deleteRequested.connect(self._delete_compare_path)
+
+        self.bridge.compareStateChanged.connect(self._apply_compare_state)
+        self.bridge.accentColorChanged.connect(self._on_accent_changed)
+        self._apply_compare_state(self.bridge.get_compare_state())
+        self._on_accent_changed(str(self.bridge.settings.value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT))
+
+    def apply_theme_styles(self, text: str, text_muted: str, accent_hex: str, accent_raw: str, thumb_bg: str, border: str) -> None:
+        for slot in (self.left_slot, self.right_slot):
+            slot.apply_theme_styles(text, text_muted, accent_hex, accent_raw, thumb_bg, border)
+        viewer_border = Theme.mix(Theme.get_border(QColor(accent_raw)), QColor(accent_raw), 0.45)
+        viewer_bg = Theme.mix(Theme.get_control_bg(QColor(accent_raw)), QColor(accent_raw), 0.08 if Theme.get_is_light() else 0.06)
+        self.viewer.setStyleSheet(
+            f"background-color: {viewer_bg}; border: 1px solid {viewer_border}; border-radius: 10px;"
+        )
+        try:
+            self.style().unpolish(self)
+            self.style().polish(self)
+            self.update()
+        except Exception:
+            pass
+
+    @Slot(str)
+    def _on_accent_changed(self, accent_color: str) -> None:
+        accent = QColor(str(accent_color or Theme.ACCENT_DEFAULT))
+        text = Theme.get_text_color()
+        text_muted = Theme.get_text_muted()
+        accent_text = Theme.mix(text, accent, 0.76)
+        thumb_bg = Theme.mix(Theme.get_control_bg(accent), accent, 0.12 if Theme.get_is_light() else 0.10)
+        thumb_border = Theme.mix(Theme.get_border(accent), accent, 0.45)
+        self.apply_theme_styles(text, text_muted, accent_text, accent.name(), thumb_bg, thumb_border)
+        for widget in (self.left_slot, self.right_slot, self.viewer):
+            try:
+                widget.style().unpolish(widget)
+                widget.style().polish(widget)
+                widget.update()
+                widget.repaint()
+            except Exception:
+                pass
+
+    def _browse_for_slot(self, slot_name: str) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Choose image to compare",
+            "",
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff *.avif *.heic *.heif)",
+        )
+        if path:
+            self.bridge.set_compare_path(slot_name, path)
+
+    def _delete_compare_path(self, slot_name: str, path: str) -> None:
+        if self.bridge.delete_path(path):
+            self.bridge.clear_compare_slot(slot_name)
+
+    @Slot("QVariantMap")
+    def _apply_compare_state(self, state: dict) -> None:
+        payload = dict(state or {})
+        left_entry = dict(payload.get("left") or {})
+        right_entry = dict(payload.get("right") or {})
+        self.left_slot.set_entry(left_entry)
+        self.right_slot.set_entry(right_entry)
+        self.viewer.set_images(str(left_entry.get("path") or ""), str(right_entry.get("path") or ""))
+
+
 class Bridge(QObject):
     selectedFolderChanged = Signal(str)
     openVideoRequested = Signal(str, bool, bool, bool, int, int)  # path, autoplay, loop, muted, w, h
@@ -1135,6 +1731,7 @@ class Bridge(QObject):
     videoPausedChanged = Signal(bool)
 
     uiFlagChanged = Signal(str, bool)  # key, value
+    compareStateChanged = Signal("QVariantMap")
     metadataRequested = Signal(list)
     loadFolderRequested = Signal(str)
     startNativeDragRequested = Signal(list, str, int, int)
@@ -1261,6 +1858,9 @@ class Bridge(QObject):
         self._text_processing_active: bool = False
         self._text_processing_scope_key: tuple = ("none",)
         self._text_processing_thread: threading.Thread | None = None
+        self._compare_paths: dict[str, str] = {"left": "", "right": ""}
+        self._compare_keep_paths: set[str] = set()
+        self._compare_best_path: str = ""
 
         # Connect blocking signal for cross-thread dialogs
         self.conflictDialogRequested.connect(self._invoke_conflict_dialog, Qt.BlockingQueuedConnection)
@@ -2967,6 +3567,208 @@ class Bridge(QObject):
                 "ui.theme_mode": "dark",
             }
 
+    def _normalize_compare_slot_name(self, slot_name: str) -> str:
+        return "right" if str(slot_name or "").strip().lower() == "right" else "left"
+
+    def _ensure_compare_media_record(self, path: str) -> dict:
+        from app.mediamanager.db.media_repo import add_media_item, get_media_by_path
+
+        clean = str(path or "").strip()
+        if not clean:
+            return {}
+        media = get_media_by_path(self.conn, clean)
+        if media:
+            return media
+        p = Path(clean)
+        if not p.exists() or not p.is_file():
+            return {}
+        media_type = "image" if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif", ".tif", ".tiff", ".heic", ".heif"} else "video"
+        add_media_item(self.conn, clean, media_type)
+        return get_media_by_path(self.conn, clean) or {}
+
+    def _build_compare_entry(self, path: str) -> dict:
+        clean = str(path or "").strip()
+        if not clean:
+            return {}
+        p = Path(clean)
+        if not p.exists() or not p.is_file():
+            return {}
+        media = dict(self._ensure_compare_media_record(clean) or {})
+        try:
+            stat = p.stat()
+        except Exception:
+            stat = None
+        width = int(media.get("width") or 0)
+        height = int(media.get("height") or 0)
+        if width <= 0 or height <= 0:
+            try:
+                reader = QImageReader(clean)
+                reader.setAutoTransform(True)
+                size = reader.size()
+                if size.isValid():
+                    width = max(width, size.width())
+                    height = max(height, size.height())
+            except Exception:
+                pass
+        file_size = int(media.get("file_size") or 0)
+        if file_size <= 0 and stat is not None:
+            file_size = int(stat.st_size)
+        modified_time = self._iso_to_ns(media.get("modified_time"))
+        file_created_time = self._iso_to_ns(media.get("file_created_time"))
+        if modified_time <= 0 and stat is not None:
+            modified_time = int(stat.st_mtime_ns)
+        if file_created_time <= 0 and stat is not None:
+            file_created_time = int(stat.st_ctime_ns)
+        entry = {
+            "path": clean,
+            "name": p.name,
+            "media_type": str(media.get("media_type") or "image"),
+            "file_size": file_size,
+            "width": width,
+            "height": height,
+            "modified_time": modified_time,
+            "file_created_time": file_created_time,
+            "exif_date_taken": media.get("exif_date_taken") or "",
+            "metadata_date": media.get("metadata_date") or "",
+            "preferred_date": 0,
+            "text_detected": media.get("text_detected"),
+        }
+        entry["preferred_date"] = self._preferred_date_ns(entry)
+        entry["file_size_text"] = self._format_file_size(file_size)
+        entry["resolution_text"] = f"{width} x {height}" if width > 0 and height > 0 else ""
+        entry["modified_time_text"] = self._format_compare_datetime(modified_time)
+        return entry
+
+    def _format_file_size(self, file_size: int) -> str:
+        size = float(file_size or 0)
+        if size <= 0:
+            return ""
+        units = ["B", "KB", "MB", "GB", "TB"]
+        unit_index = 0
+        while size >= 1024 and unit_index < len(units) - 1:
+            size /= 1024.0
+            unit_index += 1
+        return f"{size:.1f} {units[unit_index]}" if unit_index else f"{int(size)} B"
+
+    def _format_compare_datetime(self, value_ns: int) -> str:
+        try:
+            if int(value_ns or 0) <= 0:
+                return ""
+            dt = datetime.fromtimestamp(int(value_ns) / 1_000_000_000, tz=timezone.utc).astimezone()
+            return dt.strftime("%Y-%m-%d %I:%M %p").lstrip("0")
+        except Exception:
+            return ""
+
+    def _build_compare_payload(self) -> dict:
+        slot_entries: dict[str, dict] = {}
+        ranked_entries: list[dict] = []
+        for slot_name in ("left", "right"):
+            entry = self._build_compare_entry(self._compare_paths.get(slot_name, ""))
+            slot_entries[slot_name] = entry
+            if entry:
+                ranked_entries.append(dict(entry))
+        ranked = self._rank_duplicate_group(ranked_entries) if ranked_entries else []
+        ranked_by_path = {str(entry.get("path") or ""): entry for entry in ranked}
+        auto_best_path = next((str(entry.get("path") or "") for entry in ranked if entry.get("duplicate_is_overall_best")), "")
+        active_paths = {str(entry.get("path") or "") for entry in slot_entries.values() if entry}
+        if self._compare_best_path not in active_paths:
+            self._compare_best_path = ""
+        self._compare_keep_paths = {path for path in self._compare_keep_paths if path in active_paths}
+        effective_best_path = self._compare_best_path or auto_best_path
+        payload = {
+            "visible": bool(self.settings.value("ui/show_bottom_panel", True, type=bool)),
+            "left": {},
+            "right": {},
+            "best_path": effective_best_path,
+            "keep_paths": list(self._compare_keep_paths),
+        }
+        for slot_name, base_entry in slot_entries.items():
+            path = str(base_entry.get("path") or "")
+            entry = dict(ranked_by_path.get(path) or base_entry or {})
+            if entry:
+                entry["compare_keep_checked"] = path in self._compare_keep_paths
+                entry["compare_marked_best"] = path == effective_best_path
+            payload[slot_name] = entry
+        return payload
+
+    def _emit_compare_state_changed(self) -> None:
+        self.compareStateChanged.emit(self.get_compare_state())
+
+    @Slot(result="QVariantMap")
+    def get_compare_state(self) -> dict:
+        return self._build_compare_payload()
+
+    @Slot()
+    def open_compare_panel(self) -> None:
+        self.set_setting_bool("ui.show_bottom_panel", True)
+        self._emit_compare_state_changed()
+
+    @Slot(str)
+    def clear_compare_slot(self, slot_name: str) -> None:
+        slot = self._normalize_compare_slot_name(slot_name)
+        self._compare_paths[slot] = ""
+        self._emit_compare_state_changed()
+
+    @Slot(str, str)
+    def set_compare_path(self, slot_name: str, path: str) -> None:
+        slot = self._normalize_compare_slot_name(slot_name)
+        clean = str(path or "").strip()
+        if not clean:
+            return
+        p = Path(clean)
+        if not p.exists() or not p.is_file():
+            return
+        self._compare_paths[slot] = str(p.absolute())
+        self.set_setting_bool("ui.show_bottom_panel", True)
+        self._emit_compare_state_changed()
+
+    @Slot(str, str)
+    def swap_compare_slots(self, source_slot: str, target_slot: str) -> None:
+        src = self._normalize_compare_slot_name(source_slot)
+        dst = self._normalize_compare_slot_name(target_slot)
+        if src == dst:
+            return
+        self._compare_paths[src], self._compare_paths[dst] = self._compare_paths.get(dst, ""), self._compare_paths.get(src, "")
+        self._emit_compare_state_changed()
+
+    @Slot(list)
+    def compare_paths(self, paths: list[str]) -> None:
+        clean = [str(Path(path).absolute()) for path in (paths or []) if str(path or "").strip()]
+        if not clean:
+            return
+        self._compare_paths["left"] = clean[0]
+        if len(clean) > 1:
+            self._compare_paths["right"] = clean[1]
+        self.set_setting_bool("ui.show_bottom_panel", True)
+        self._emit_compare_state_changed()
+
+    @Slot(str)
+    def compare_path_auto(self, path: str) -> None:
+        clean = str(path or "").strip()
+        if not clean:
+            return
+        slot = "left" if not self._compare_paths.get("left") else "right" if not self._compare_paths.get("right") else "right"
+        self.set_compare_path(slot, clean)
+
+    @Slot(str, bool)
+    def set_compare_keep_path(self, path: str, checked: bool) -> None:
+        clean = str(path or "").strip()
+        if not clean:
+            return
+        if checked:
+            self._compare_keep_paths.add(clean)
+        else:
+            self._compare_keep_paths.discard(clean)
+        self._emit_compare_state_changed()
+
+    @Slot(str)
+    def set_compare_best_path(self, path: str) -> None:
+        clean = str(path or "").strip()
+        if not clean:
+            return
+        self._compare_best_path = clean
+        self._emit_compare_state_changed()
+
     @Slot(result=str)
     def get_app_version(self) -> str:
         return __version__
@@ -3065,6 +3867,8 @@ class Bridge(QObject):
             if key.startswith("ui.") or key.startswith("metadata.display.") or key in {"gallery.show_hidden", "gallery.mute_video_by_default", "player.autoplay_gallery_animated_gifs", "player.autoplay_preview_animated_gifs"}:
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, bool(value))
+            if key == "ui.show_bottom_panel":
+                self._emit_compare_state_changed()
             return True
         except Exception:
             return False
@@ -3101,6 +3905,7 @@ class Bridge(QObject):
             qkey = key.replace(".", "/")
             self.settings.setValue(qkey, str(value or ""))
             if key == "ui.accent_color":
+                self.settings.sync()
                 self.accentColorChanged.emit(str(value or "#8ab4f8"))
             elif key == "ui.theme_mode":
                 self.settings.sync()
@@ -5964,14 +6769,14 @@ class MainWindow(QMainWindow):
         bottom_layout.setContentsMargins(14, 10, 14, 14)
         bottom_layout.setSpacing(6)
 
-        self.bottom_panel_header = QLabel("AI Chat")
+        self.bottom_panel_header = QLabel("Image Comparison")
         self.bottom_panel_header.setObjectName("bottomPanelHeader")
+        self.bottom_panel_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
         bottom_layout.addWidget(self.bottom_panel_header)
 
-        self.bottom_panel_placeholder = QLabel("Chat panel layout placeholder")
-        self.bottom_panel_placeholder.setObjectName("bottomPanelPlaceholder")
-        self.bottom_panel_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        bottom_layout.addWidget(self.bottom_panel_placeholder, 1)
+        self.compare_panel = ComparePanel(self.bridge, self.bottom_panel)
+        bottom_layout.addWidget(self.compare_panel, 1)
+        self._apply_compare_panel_theme(accent_val)
 
         center_splitter.addWidget(center)
         center_splitter.addWidget(self.bottom_panel)
@@ -9733,6 +10538,11 @@ class MainWindow(QMainWindow):
         self._current_accent = accent_color
         self._update_native_styles(accent_color)
         self._update_splitter_style(accent_color)
+        self._apply_compare_panel_theme(accent_color)
+        if hasattr(self, "compare_panel"):
+            self.compare_panel.update()
+            self.compare_panel.repaint()
+        QTimer.singleShot(0, lambda: self._apply_compare_panel_theme(accent_color))
         
         # Update tooltip theme
         if hasattr(self, "native_tooltip"):
@@ -9940,16 +10750,74 @@ class MainWindow(QMainWindow):
                     color: {text};
                     font-weight: bold;
                     background: transparent;
+                    font-size: 14px;
+                    qproperty-alignment: AlignCenter;
                 }}
-                QLabel#bottomPanelPlaceholder {{
-                    color: {text_muted};
+                QWidget#comparePanel {{
+                    background: transparent;
+                }}
+                QFrame#compareSlotCard {{
                     background-color: {Theme.get_control_bg(accent)};
                     border: 1px solid {Theme.get_border(accent)};
                     border-radius: 10px;
-                    padding: 18px;
+                }}
+                QFrame#compareSlotCard[empty="true"] {{
+                    border-style: dashed;
+                }}
+                QLabel#compareSlotName {{
+                    color: {text};
+                    font-weight: 600;
+                }}
+                QLabel#compareSlotThumb {{
+                    background-color: {Theme.get_control_bg(accent)};
+                    border: 1px solid {Theme.get_border(accent)};
+                    border-radius: 10px;
+                    color: {text_muted};
+                    padding: 12px;
+                    margin-top: 2px;
+                    margin-bottom: 2px;
+                }}
+                QLabel#compareSlotMeta {{
+                    color: {text_muted};
+                }}
+                QLabel#compareSlotReasons {{
+                    color: {Theme.mix(QColor(text), accent, 0.7).name()};
+                    font-weight: 700;
+                }}
+                QLabel#compareSlotBest {{
+                    color: {Theme.mix(QColor(text), accent, 0.78).name()};
+                    font-weight: 700;
+                }}
+                QWidget#compareRevealViewer {{
+                    background-color: {Theme.get_control_bg(accent)};
+                    border: 1px solid {Theme.get_border(accent)};
+                    border-radius: 10px;
+                }}
+                QCheckBox {{
+                    color: {text_muted};
+                }}
+                QCheckBox::indicator {{
+                    width: 14px;
+                    height: 14px;
+                }}
+                QPushButton {{
+                    background-color: {Theme.get_input_bg(accent)};
+                    color: {text};
+                    border: 1px solid {Theme.get_input_border(accent)};
+                    border-radius: 6px;
+                    padding: 6px 10px;
+                }}
+                QPushButton:hover {{
+                    border-color: {accent.name()};
                 }}
                 {scrollbar_style}
             """)
+            if hasattr(self, "bottom_panel_header"):
+                self.bottom_panel_header.setStyleSheet(
+                    f"color: {text}; font-weight: 700; font-size: 14px; background: transparent;"
+                )
+            if hasattr(self, "compare_panel"):
+                self._apply_compare_panel_theme(accent_str)
         
         self.scroll_area.setStyleSheet(f"""
             QScrollArea {{ background-color: {sb_bg_str}; border: none; }}
@@ -10212,6 +11080,35 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    def _apply_compare_panel_theme(self, accent_color: str) -> None:
+        if not hasattr(self, "compare_panel") or not hasattr(self, "bottom_panel_header"):
+            return
+        accent = QColor(accent_color)
+        is_light = Theme.get_is_light()
+        text = Theme.get_text_color()
+        text_muted = Theme.get_text_muted()
+        compare_accent = Theme.mix(text, accent, 0.76)
+        thumb_bg = Theme.mix(Theme.get_control_bg(accent), accent, 0.12 if is_light else 0.10)
+        thumb_border = Theme.mix(Theme.get_border(accent), accent, 0.45)
+
+        header_font = QFont(self.bottom_panel_header.font())
+        header_font.setBold(True)
+        self.bottom_panel_header.setFont(header_font)
+        header_palette = QPalette(self.bottom_panel_header.palette())
+        header_palette.setColor(QPalette.ColorRole.WindowText, QColor(text))
+        self.bottom_panel_header.setPalette(header_palette)
+
+        self.compare_panel.apply_theme_styles(text, text_muted, compare_accent, accent_color, thumb_bg, thumb_border)
+        try:
+            self.bottom_panel.style().unpolish(self.bottom_panel)
+            self.bottom_panel.style().polish(self.bottom_panel)
+            self.bottom_panel.update()
+            self.compare_panel.style().unpolish(self.compare_panel)
+            self.compare_panel.style().polish(self.compare_panel)
+            self.compare_panel.update()
+        except Exception:
+            pass
+
     def _on_video_next(self) -> None:
         try:
             self.web.page().runJavaScript("try{ window.lightboxNext && window.lightboxNext(); }catch(e){}")
@@ -10260,6 +11157,8 @@ class MainWindow(QMainWindow):
                     self._save_main_panel_widths()
             self.bridge.settings.setValue(qkey, new)
             self.bridge.uiFlagChanged.emit(qkey.replace("/", "."), new)
+            if qkey == "ui/show_bottom_panel":
+                self.bridge.compareStateChanged.emit(self.bridge.get_compare_state())
         except Exception:
             pass
 

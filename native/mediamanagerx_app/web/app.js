@@ -66,6 +66,7 @@ let gTextProcessingCurrent = 0;
 let gTextProcessingTotal = 0;
 let gRenderTextProcessingToast = null;
 let gRenderScanToast = null;
+let gCompareState = { visible: false, left: {}, right: {}, best_path: '', keep_paths: [] };
 const TIMELINE_INSET_PX = 20;
 const TIMELINE_THUMB_SIZE_PX = 14;
 const TIMELINE_TOP_YEAR_TOP_PX = 20;
@@ -117,6 +118,16 @@ function syncPinnedFolders(nextFolders) {
 
 function isPinnedFolder(path) {
   return gPinnedFolders.has(normalizeFolderPath(path));
+}
+
+function compareSlotPath(slotName) {
+  if (!gCompareState) return '';
+  const slot = slotName === 'right' ? gCompareState.right : gCompareState.left;
+  return slot && slot.path ? String(slot.path) : '';
+}
+
+function compareHasEmptySlot() {
+  return !compareSlotPath('left') || !compareSlotPath('right');
 }
 
 function getReviewMode() {
@@ -3991,6 +4002,29 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
   if (selectAllBtn) selectAllBtn.style.display = hasItem ? 'none' : 'block';
   const clearSelectionBtn = document.getElementById('ctxSelectNone');
   if (clearSelectionBtn) clearSelectionBtn.style.display = (gSelectedPaths.size > 0) ? 'block' : 'none';
+  const compareImagesBtn = document.getElementById('ctxCompareImages');
+  const compareImageBtn = document.getElementById('ctxCompareImage');
+  const compareLeftBtn = document.getElementById('ctxCompareLeft');
+  const compareRightBtn = document.getElementById('ctxCompareRight');
+  const compareTargetPaths = (() => {
+    if (item && item.path) {
+      if (gSelectedPaths.has(item.path)) {
+        return Array.from(gSelectedPaths).filter(path => {
+          const selectedItem = gMedia.find(entry => entry.path === path);
+          return selectedItem && !selectedItem.is_folder;
+        });
+      }
+      return item.is_folder ? [] : [item.path];
+    }
+    return Array.from(gSelectedPaths).filter(path => {
+      const selectedItem = gMedia.find(entry => entry.path === path);
+      return selectedItem && !selectedItem.is_folder;
+    });
+  })();
+  if (compareImagesBtn) compareImagesBtn.style.display = compareTargetPaths.length === 2 ? 'block' : 'none';
+  if (compareImageBtn) compareImageBtn.style.display = compareTargetPaths.length === 1 && compareHasEmptySlot() ? 'block' : 'none';
+  if (compareLeftBtn) compareLeftBtn.style.display = compareTargetPaths.length === 1 && !!compareSlotPath('left') ? 'block' : 'none';
+  if (compareRightBtn) compareRightBtn.style.display = compareTargetPaths.length === 1 && !!compareSlotPath('right') ? 'block' : 'none';
   const collapseAllBtn = document.getElementById('ctxCollapseAll');
   const expandAllBtn = document.getElementById('ctxExpandAll');
   const showGroupActions = gGroupBy === 'date' || isDuplicateModeActive();
@@ -4125,6 +4159,40 @@ function wireCtxMenu() {
     }
 
     switch (btn.id) {
+      case 'ctxCompareImages': {
+        const comparePaths = getTargetPaths().filter(path => {
+          const selectedItem = gMedia.find(entry => entry.path === path);
+          return selectedItem && !selectedItem.is_folder;
+        }).slice(0, 2);
+        if (comparePaths.length === 2 && gBridge && gBridge.compare_paths) {
+          gBridge.compare_paths(comparePaths);
+        }
+        hideCtx();
+        break;
+      }
+      case 'ctxCompareImage': {
+        const comparePaths = getTargetPaths().filter(path => {
+          const selectedItem = gMedia.find(entry => entry.path === path);
+          return selectedItem && !selectedItem.is_folder;
+        });
+        if (comparePaths.length && gBridge && gBridge.compare_path_auto) {
+          gBridge.compare_path_auto(comparePaths[0]);
+        }
+        hideCtx();
+        break;
+      }
+      case 'ctxCompareLeft':
+      case 'ctxCompareRight': {
+        const comparePaths = getTargetPaths().filter(path => {
+          const selectedItem = gMedia.find(entry => entry.path === path);
+          return selectedItem && !selectedItem.is_folder;
+        });
+        if (comparePaths.length && gBridge && gBridge.set_compare_path) {
+          gBridge.set_compare_path(btn.id === 'ctxCompareLeft' ? 'left' : 'right', comparePaths[0]);
+        }
+        hideCtx();
+        break;
+      }
       case 'ctxExplorer':
         if (item && item.path && gBridge && gBridge.open_in_explorer) {
           gBridge.open_in_explorer(item.path);
@@ -5877,6 +5945,16 @@ async function main() {
         gCurrentTargetFolderName = folderName || '';
       });
     }
+    if (bridge.compareStateChanged) {
+      bridge.compareStateChanged.connect(function (state) {
+        gCompareState = state || { visible: false, left: {}, right: {}, best_path: '', keep_paths: [] };
+      });
+    }
+    if (bridge.get_compare_state) {
+      bridge.get_compare_state(function (state) {
+        gCompareState = state || { visible: false, left: {}, right: {}, best_path: '', keep_paths: [] };
+      });
+    }
 
     if (bridge.updateAvailable) {
       bridge.updateAvailable.connect(function (newVer, manual) {
@@ -5937,6 +6015,15 @@ async function main() {
         if (toast.classList.contains('info-only')) {
            toast.hidden = true;
            if (gUpdateToastTimer) clearTimeout(gUpdateToastTimer);
+        }
+      });
+    }
+
+    const compareBtn = document.getElementById('openComparePanel');
+    if (compareBtn) {
+      compareBtn.addEventListener('click', () => {
+        if (gBridge && gBridge.open_compare_panel) {
+          gBridge.open_compare_panel();
         }
       });
     }
