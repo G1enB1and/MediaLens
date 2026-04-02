@@ -1438,13 +1438,14 @@ class CompareSlotCard(QFrame):
 
         self.delete_btn = QPushButton("Delete")
         self.delete_btn.clicked.connect(self._emit_delete_clicked)
-        controls.addWidget(self.delete_btn)
+        self.delete_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        controls.addWidget(self.delete_btn, 1)
 
-        controls.addStretch(1)
         layout.addLayout(controls)
 
         self.browse_btn = QPushButton("Browse…")
         self.browse_btn.clicked.connect(lambda: self.browseRequested.emit(self.slot_name))
+        self.browse_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout.addWidget(self.browse_btn)
 
         self._render_entry({})
@@ -1488,6 +1489,10 @@ class CompareSlotCard(QFrame):
         )
         for button in (self.browse_btn, self.delete_btn):
             button.setStyleSheet(button_qss)
+        self.browse_btn.setMinimumWidth(0)
+        self.browse_btn.setMaximumWidth(16777215)
+        self.delete_btn.setMinimumWidth(0)
+        self.delete_btn.setMaximumWidth(16777215)
 
         checkbox_qss = (
             f"QCheckBox {{ color: {text_muted}; spacing: 6px; }}"
