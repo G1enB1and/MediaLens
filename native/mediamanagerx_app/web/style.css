@@ -332,6 +332,7 @@ header {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  min-height: 0;
 }
 
 .settings-sidebar .modal-title {
@@ -342,10 +343,13 @@ header {
 
 .settings-nav {
   flex: 1;
+  min-height: 0;
   padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .settings-nav-item {

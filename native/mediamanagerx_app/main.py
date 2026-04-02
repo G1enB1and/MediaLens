@@ -1944,6 +1944,7 @@ class Bridge(QObject):
         self._compare_paths: dict[str, str] = {"left": "", "right": ""}
         self._compare_keep_paths: set[str] = set()
         self._compare_best_path: str = ""
+        self._settings_modal_bottom_restore: bool | None = None
 
         # Connect blocking signal for cross-thread dialogs
         self.conflictDialogRequested.connect(self._invoke_conflict_dialog, Qt.BlockingQueuedConnection)
@@ -3832,6 +3833,22 @@ class Bridge(QObject):
             return
         slot = "left" if not self._compare_paths.get("left") else "right" if not self._compare_paths.get("right") else "right"
         self.set_compare_path(slot, clean)
+
+    @Slot()
+    def settings_modal_opened(self) -> None:
+        if self._settings_modal_bottom_restore is not None:
+            return
+        was_visible = bool(self.settings.value("ui/show_bottom_panel", True, type=bool))
+        self._settings_modal_bottom_restore = was_visible
+        if was_visible:
+            self.set_setting_bool("ui.show_bottom_panel", False)
+
+    @Slot()
+    def settings_modal_closed(self) -> None:
+        restore = self._settings_modal_bottom_restore
+        self._settings_modal_bottom_restore = None
+        if restore:
+            self.set_setting_bool("ui.show_bottom_panel", True)
 
     @Slot(str, bool)
     def set_compare_keep_path(self, path: str, checked: bool) -> None:

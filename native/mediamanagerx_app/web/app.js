@@ -5109,6 +5109,9 @@ function wirePager() {
 function openSettings() {
   const m = document.getElementById('settingsModal');
   if (m) m.hidden = false;
+  if (gBridge && gBridge.settings_modal_opened) {
+    gBridge.settings_modal_opened();
+  }
 }
 
 // Called from native menu
@@ -5117,6 +5120,9 @@ window.__mmx_openSettings = openSettings;
 function closeSettings() {
   const m = document.getElementById('settingsModal');
   if (m) m.hidden = true;
+  if (gBridge && gBridge.settings_modal_closed) {
+    gBridge.settings_modal_closed();
+  }
 }
 
 function syncStartFolderEnabled() {
