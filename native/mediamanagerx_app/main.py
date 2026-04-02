@@ -1129,7 +1129,7 @@ class CompareRevealViewer(QWidget):
         super().__init__(parent)
         self.setObjectName("compareRevealViewer")
         self.setMouseTracking(True)
-        self.setMinimumSize(260, 180)
+        self.setMinimumHeight(0)
         self._left_path = ""
         self._right_path = ""
         self._left_image: QImage | None = None
@@ -1141,6 +1141,7 @@ class CompareRevealViewer(QWidget):
         self._drag_start_pos = QPoint()
         self._pan_start = QPoint()
         self._isolate_slot = ""
+        self._auto_center_on_pair = True
 
     def _load_image(self, path: str) -> QImage | None:
         clean = str(path or "").strip()
@@ -1154,6 +1155,8 @@ class CompareRevealViewer(QWidget):
         return image
 
     def set_images(self, left_path: str, right_path: str) -> None:
+        had_left = self._left_image is not None and not self._left_image.isNull()
+        had_right = self._right_image is not None and not self._right_image.isNull()
         left_path = str(left_path or "")
         right_path = str(right_path or "")
         if left_path != self._left_path:
@@ -1162,6 +1165,18 @@ class CompareRevealViewer(QWidget):
         if right_path != self._right_path:
             self._right_path = right_path
             self._right_image = self._load_image(right_path)
+        has_left = self._left_image is not None and not self._left_image.isNull()
+        has_right = self._right_image is not None and not self._right_image.isNull()
+        if has_left and not has_right:
+            self._slider_ratio = 1.0
+            self._auto_center_on_pair = True
+        elif has_right and not has_left:
+            self._slider_ratio = 0.0
+            self._auto_center_on_pair = True
+        elif has_left and has_right:
+            if (had_left != had_right) and self._auto_center_on_pair:
+                self._slider_ratio = 0.5
+                self._auto_center_on_pair = False
         self.update()
 
     def set_isolated_slot(self, slot_name: str) -> None:
@@ -1342,6 +1357,7 @@ class CompareSlotCard(QFrame):
     browseRequested = Signal(str)
     isolateRequested = Signal(str)
     isolateReleased = Signal()
+    swapStarted = Signal()
     keepToggled = Signal(str, bool)
     bestRequested = Signal(str)
     deleteRequested = Signal(str, str)
@@ -1351,35 +1367,52 @@ class CompareSlotCard(QFrame):
         self.slot_name = str(slot_name)
         self.setObjectName("compareSlotCard")
         self.setAcceptDrops(True)
+        self.setMinimumHeight(0)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
         self._entry: dict = {}
         self._drag_start_pos: QPoint | None = None
+        self._thumb_source_pixmap: QPixmap | None = None
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setContentsMargins(10, 0, 10, 10)
         layout.setSpacing(8)
 
         self.name_label = QLabel("Drop image here")
         self.name_label.setObjectName("compareSlotName")
-        layout.addWidget(self.name_label)
+        self.name_label.setContentsMargins(0, 0, 0, 0)
+        self.name_label.setMinimumHeight(0)
 
         self.thumb_frame = QFrame()
         self.thumb_frame.setObjectName("compareSlotThumbCard")
+        self.thumb_frame.setMinimumHeight(0)
         thumb_layout = QVBoxLayout(self.thumb_frame)
-        thumb_layout.setContentsMargins(10, 10, 10, 10)
+        thumb_layout.setContentsMargins(6, 4, 6, 4)
         thumb_layout.setSpacing(0)
+
+        thumb_layout.addWidget(self.name_label)
+
+        self.thumb_wrap = QWidget()
+        self.thumb_wrap.setMinimumHeight(0)
+        thumb_wrap_layout = QVBoxLayout(self.thumb_wrap)
+        thumb_wrap_layout.setContentsMargins(0, 5, 0, 5)
+        thumb_wrap_layout.setSpacing(0)
 
         self.thumb_label = QLabel()
         self.thumb_label.setObjectName("compareSlotThumb")
         self.thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.thumb_label.setMinimumSize(180, 120)
-        self.thumb_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        thumb_layout.addWidget(self.thumb_label, 1)
-        layout.addWidget(self.thumb_frame, 1)
+        self.thumb_label.setMinimumSize(0, 50)
+        self.thumb_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        thumb_wrap_layout.addWidget(self.thumb_label, 1)
+        thumb_layout.addWidget(self.thumb_wrap, 1)
 
         self.meta_label = QLabel("Browse or drag an image from the gallery")
         self.meta_label.setObjectName("compareSlotMeta")
         self.meta_label.setWordWrap(True)
-        layout.addWidget(self.meta_label)
+        self.meta_label.setContentsMargins(0, 0, 0, 0)
+        self.meta_label.setMinimumHeight(0)
+        thumb_layout.addWidget(self.meta_label)
+        layout.addWidget(self.thumb_frame, 1)
 
         self.reasons_label = QLabel("")
         self.reasons_label.setObjectName("compareSlotReasons")
@@ -1426,15 +1459,20 @@ class CompareSlotCard(QFrame):
         self.reasons_label.setFont(reason_font)
         self.best_label.setFont(reason_font)
 
-        self.name_label.setStyleSheet(f"color: {text}; font-weight: 600;")
-        self.meta_label.setStyleSheet(f"color: {text_muted};")
+        self.name_label.setStyleSheet(
+            f"color: {text}; font-weight: 600; margin: 0px; padding: 0px; border: none; background: transparent;"
+        )
+        self.meta_label.setStyleSheet(
+            f"color: {text_muted}; margin: 0px; padding: 0px; border: none; background: transparent;"
+        )
         self.reasons_label.setStyleSheet(f"color: {accent_hex}; font-weight: 700;")
         self.best_label.setStyleSheet(f"color: {accent_hex}; font-weight: 700;")
         self.thumb_frame.setStyleSheet(
             f"background-color: {thumb_bg}; border: 1px solid {border}; border-radius: 10px;"
         )
+        self.thumb_wrap.setStyleSheet("background: transparent; border: none;")
         self.thumb_label.setStyleSheet(
-            f"background: transparent; color: {text_muted}; border: none; padding: 0px;"
+            f"background: transparent; color: {text_muted}; border: none; padding: 0px; margin: 0px;"
         )
         accent_color = QColor(accent_raw)
         btn_base = Theme.get_input_bg(accent_color)
@@ -1504,8 +1542,22 @@ class CompareSlotCard(QFrame):
         image = reader.read()
         if image.isNull():
             return None
-        pixmap = QPixmap.fromImage(image)
-        return pixmap.scaled(220, 150, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        return QPixmap.fromImage(image)
+
+    def _update_thumb_pixmap(self) -> None:
+        if self._thumb_source_pixmap is None or self._thumb_source_pixmap.isNull():
+            self.thumb_label.setPixmap(QPixmap())
+            return
+        available = self.thumb_label.size()
+        if available.width() <= 0 or available.height() <= 0:
+            self.thumb_label.setPixmap(self._thumb_source_pixmap)
+            return
+        scaled = self._thumb_source_pixmap.scaled(
+            available,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self.thumb_label.setPixmap(scaled)
 
     def _render_entry(self, entry: dict) -> None:
         self._entry = dict(entry or {})
@@ -1516,6 +1568,7 @@ class CompareSlotCard(QFrame):
         self.style().polish(self)
         if not has_entry:
             self.name_label.setText("Drop image here")
+            self._thumb_source_pixmap = None
             self.thumb_label.setPixmap(QPixmap())
             self.thumb_label.setText("Left" if self.slot_name == "left" else "Right")
             self.meta_label.setText("Browse or drag an image from the gallery")
@@ -1531,9 +1584,9 @@ class CompareSlotCard(QFrame):
             return
 
         self.name_label.setText(str(self._entry.get("name") or Path(path).name))
-        thumb = self._load_thumb(path)
+        self._thumb_source_pixmap = self._load_thumb(path)
         self.thumb_label.setText("")
-        self.thumb_label.setPixmap(thumb or QPixmap())
+        self._update_thumb_pixmap()
         self.meta_label.setText(
             "\n".join(
                 [
@@ -1608,6 +1661,7 @@ class CompareSlotCard(QFrame):
             and str(self._entry.get("path") or "")
             and (event.position().toPoint() - self._drag_start_pos).manhattanLength() >= QApplication.startDragDistance()
         ):
+            self.swapStarted.emit()
             mime = QMimeData()
             mime.setData("application/x-medialens-compare-slot", self.slot_name.encode("utf-8"))
             mime.setUrls([QUrl.fromLocalFile(str(self._entry.get("path") or ""))])
@@ -1626,12 +1680,18 @@ class CompareSlotCard(QFrame):
         self.isolateReleased.emit()
         super().mouseReleaseEvent(event)
 
+    def resizeEvent(self, event) -> None:
+        self._update_thumb_pixmap()
+        super().resizeEvent(event)
+
 
 class ComparePanel(QWidget):
     def __init__(self, bridge: "Bridge", parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.bridge = bridge
         self.setObjectName("comparePanel")
+        self.setMinimumHeight(0)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1640,11 +1700,22 @@ class ComparePanel(QWidget):
         self.left_slot = CompareSlotCard("left")
         self.viewer = CompareRevealViewer()
         self.right_slot = CompareSlotCard("right")
+        self.left_scroll = QScrollArea()
+        self.right_scroll = QScrollArea()
+        for scroll, slot in ((self.left_scroll, self.left_slot), (self.right_scroll, self.right_slot)):
+            scroll.setWidget(slot)
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.Shape.NoFrame)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            scroll.setMinimumHeight(0)
+            scroll.setMinimumWidth(0)
+            scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.viewer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-        layout.addWidget(self.left_slot, 0)
+        layout.addWidget(self.left_scroll, 0)
         layout.addWidget(self.viewer, 1)
-        layout.addWidget(self.right_slot, 0)
+        layout.addWidget(self.right_scroll, 0)
 
         for slot in (self.left_slot, self.right_slot):
             slot.slotPathDropped.connect(self.bridge.set_compare_path)
@@ -1652,6 +1723,7 @@ class ComparePanel(QWidget):
             slot.browseRequested.connect(self._browse_for_slot)
             slot.isolateRequested.connect(self.viewer.set_isolated_slot)
             slot.isolateReleased.connect(lambda: self.viewer.set_isolated_slot(""))
+            slot.swapStarted.connect(lambda: self.viewer.set_isolated_slot(""))
             slot.keepToggled.connect(self.bridge.set_compare_keep_path)
             slot.bestRequested.connect(self.bridge.set_compare_best_path)
             slot.deleteRequested.connect(self._delete_compare_path)
@@ -1664,6 +1736,12 @@ class ComparePanel(QWidget):
     def apply_theme_styles(self, text: str, text_muted: str, accent_hex: str, accent_raw: str, thumb_bg: str, border: str) -> None:
         for slot in (self.left_slot, self.right_slot):
             slot.apply_theme_styles(text, text_muted, accent_hex, accent_raw, thumb_bg, border)
+        scrollbar_style = (
+            "QScrollArea { background: transparent; border: none; }"
+            "QWidget { background: transparent; }"
+        )
+        self.left_scroll.setStyleSheet(scrollbar_style)
+        self.right_scroll.setStyleSheet(scrollbar_style)
         viewer_border = Theme.mix(Theme.get_border(QColor(accent_raw)), QColor(accent_raw), 0.45)
         viewer_bg = Theme.mix(Theme.get_control_bg(QColor(accent_raw)), QColor(accent_raw), 0.08 if Theme.get_is_light() else 0.06)
         self.viewer.setStyleSheet(
@@ -6765,6 +6843,8 @@ class MainWindow(QMainWindow):
 
         self.bottom_panel = QWidget()
         self.bottom_panel.setObjectName("bottomPanel")
+        self.bottom_panel.setMinimumHeight(0)
+        self.bottom_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         bottom_layout = QVBoxLayout(self.bottom_panel)
         bottom_layout.setContentsMargins(14, 10, 14, 14)
         bottom_layout.setSpacing(6)
