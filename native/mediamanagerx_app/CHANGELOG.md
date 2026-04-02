@@ -1,6 +1,49 @@
 # Change Log
 
-## v1.1.5 (Current)
+## v1.1.6 (Current)
+
+### Added
+
+#### Image Comparison Mode
+
+- Added a new `Image Comparison` panel beneath the gallery with left and right image slots plus a central overlay viewer.
+- Added drag-and-drop, browse-button, and gallery context-menu entry points for loading images into comparison.
+- Added an in-place reveal slider that shows the left image on one side and the right image on the other for fast visual A/B review.
+- Added synchronized mouse-wheel zoom with cursor focus plus shared pan behavior so both images stay aligned during close inspection.
+- Added thumbnail hold-to-isolate preview so either image can be viewed alone temporarily without leaving comparison mode.
+
+#### Comparison Workflow Integration
+
+- Added comparison actions that work with the existing duplicate and similarity review system, including `Keep`, `Mark as Best`, and `Delete`.
+- Added recalculated labels and best-overall suggestions for the current two-image comparison set instead of reusing stale labels from larger similarity groups.
+- Added contextual gallery actions for `Compare Images`, `Compare Image`, `Compare With Left`, and `Compare With Right`.
+
+---
+
+### Changed
+
+#### Bottom Panel Use
+
+- Repurposed the existing bottom panel shell from the AI placeholder into the new Image Comparison workspace.
+- Opening Settings now temporarily hides the Image Comparison panel so the settings modal can use the full center height before restoring the panel afterward.
+
+#### Comparison Panel Polish
+
+- Refined comparison card layout so filename and metadata live inside each image card while labels and actions remain below.
+- Improved thumbnail resizing behavior to preserve aspect ratio without cropping or stretching while remaining responsive as the panel is resized.
+- Improved slider behavior so it snaps fully to the loaded side when only one image is present, then auto-centers once when a second image is added.
+- Improved small-window behavior with scrollable comparison side columns, tighter card spacing, better control alignment, and settings-category scrolling.
+- Improved comparison accent styling so labels, controls, checkboxes, and image cards update correctly with theme accent changes.
+
+---
+
+### Removed
+
+- Removed the unused AI chat placeholder content from the bottom panel in favor of the new Image Comparison workspace.
+
+---
+
+## v1.1.5
 
 ### Added
 
