@@ -10,7 +10,6 @@ Extract prompts, analyze metadata, detect duplicates and variations, and navigat
 
 Browse thousands of files smoothly, and surface hidden metadata like AI prompts, EXIF data, and embedded comments.
 
-
 ---
 
 ![Gallery](docs/Screenshots/Screenshot-Masonry-02.png)
@@ -65,6 +64,7 @@ MediaLens doesn’t just find identical files — it understands variations.
 - Resized, compressed, and edited variants
 - Color vs grayscale versions
 - Cropped vs full compositions
+- Text/Watermark Added/Removed
 
 #### Understand
 
@@ -77,6 +77,7 @@ Each group is analyzed and labeled with meaningful differences:
 - Cropped vs full composition
 - Metadata richness
 - Folder organization
+- Text Detection
 
 #### Decide (or let MediaLens decide for you)
 
@@ -98,6 +99,36 @@ Each group is analyzed and labeled with meaningful differences:
 ![Gallery](docs/Screenshots/Screenshot-Duplicate-Settings-3.png)
 
 ---
+
+### Image Comparison
+
+Evaluate two images in place without leaving your workflow.
+
+- Side-by-side slots with a central **reveal slider** for precise visual comparison
+- Drag-and-drop, browse, or right-click actions like `Compare Images` and `Compare With Left/Right`
+- Synchronized zoom and pan keep both images perfectly aligned during inspection
+- Hold-to-isolate preview lets you instantly focus on one image at a time
+- Reuses similarity card design for a consistent, familiar experience
+
+#### Smarter decisions, not just visual checks
+
+- Labels are recalculated for the current two-image comparison (not reused from larger groups)
+- Highlights meaningful differences like:
+  - Largest vs smallest file
+  - Newer vs older edit
+  - Color vs grayscale
+  - Cropped vs full composition
+- ★ Best overall recommendation adapts to the current comparison context
+
+#### Built into your cleanup workflow
+
+- Keep, Mark as Best, and Delete actions work seamlessly with existing duplicate resolution
+- Compare → decide → clean up without switching tools or losing context
+
+![Gallery](docs/Screenshots/Screenshot-Compare-Medium.png)
+
+---
+
 ### Advanced Metadata System
 
 Go beyond filenames, and even beyond traditional metadata.
@@ -131,6 +162,7 @@ Explore your media by **when it was created, modified, acquired, taken, or autom
 
 This transforms browsing from "where is it?" to **"when did I make it?"**
 
+![[Screenshot-Timeline-01.png]]
 ![Gallery](docs/Screenshots/Screenshot-Timeline-01.png)  
 
 ---
@@ -147,7 +179,6 @@ This transforms browsing from "where is it?" to **"when did I make it?"**
 - Grid (various sizes)
 - List / Details / Content views
 
-  
 ---
 
 ### Smart Organization
@@ -214,8 +245,6 @@ MediaLens is evolving into a full intelligent media platform.
 
 ### Near-Term
 
-- Compare mode (side-by-side / overlay)
-- Video preview in metadata panel
 - Batch rename engine
 - Improved metadata automation and syncing
 
@@ -253,13 +282,6 @@ MediaLens is evolving into a full intelligent media platform.
 ## Tests / Validation
 
 `python tests/dev_check.py`
-
----
-
-## Release Workflows
-
-- Installer build workflow: [docs/workflows/build-installer.md](docs/workflows/build-installer.md)
-- Version bump workflow: [docs/workflows/version-bump.md](docs/workflows/version-bump.md)
 
 ---
 

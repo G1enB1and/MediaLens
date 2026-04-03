@@ -1200,6 +1200,44 @@ class CompareRevealViewer(QWidget):
         ]
         return QSize(max(widths, default=1), max(heights, default=1))
 
+    def has_different_aspect_ratios(self) -> bool:
+        left_image = self._left_image
+        right_image = self._right_image
+        if (
+            left_image is None
+            or left_image.isNull()
+            or right_image is None
+            or right_image.isNull()
+        ):
+            return False
+        tolerance_px = 2.0
+        scaled_right_height = right_image.height() * (left_image.width() / max(1, right_image.width()))
+        scaled_right_width = right_image.width() * (left_image.height() / max(1, right_image.height()))
+        scaled_left_height = left_image.height() * (right_image.width() / max(1, left_image.width()))
+        scaled_left_width = left_image.width() * (right_image.height() / max(1, left_image.height()))
+        return not (
+            abs(left_image.height() - scaled_right_height) <= tolerance_px
+            or abs(left_image.width() - scaled_right_width) <= tolerance_px
+            or abs(right_image.height() - scaled_left_height) <= tolerance_px
+            or abs(right_image.width() - scaled_left_width) <= tolerance_px
+        )
+
+    def upscale_match_message(self) -> str:
+        left_image = self._left_image
+        right_image = self._right_image
+        if (
+            left_image is None
+            or left_image.isNull()
+            or right_image is None
+            or right_image.isNull()
+        ):
+            return ""
+        left_area = left_image.width() * left_image.height()
+        right_area = right_image.width() * right_image.height()
+        if left_area <= 0 or right_area <= 0 or left_area == right_area:
+            return ""
+        return "Upscaled Left to match" if left_area < right_area else "Upscaled Right to match"
+
     def _fit_scale(self) -> float:
         canvas = self._canvas_size()
         if canvas.width() <= 0 or canvas.height() <= 0 or self.width() <= 0 or self.height() <= 0:
@@ -1217,9 +1255,12 @@ class CompareRevealViewer(QWidget):
     def _draw_image(self, painter: QPainter, image: QImage | None, canvas_rect: QRect, clip_rect: QRect | None) -> None:
         if image is None or image.isNull():
             return
-        canvas_size = self._canvas_size()
-        draw_w = max(1, round(image.width() * canvas_rect.width() / max(1, canvas_size.width())))
-        draw_h = max(1, round(image.height() * canvas_rect.height() / max(1, canvas_size.height())))
+        target_size = image.size().scaled(
+            canvas_rect.size(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+        )
+        draw_w = max(1, target_size.width())
+        draw_h = max(1, target_size.height())
         draw_x = canvas_rect.x() + round((canvas_rect.width() - draw_w) / 2)
         draw_y = canvas_rect.y() + round((canvas_rect.height() - draw_h) / 2)
         target_rect = QRect(draw_x, draw_y, draw_w, draw_h)
@@ -1705,8 +1746,17 @@ class ComparePanel(QWidget):
         self.left_slot = CompareSlotCard("left")
         self.viewer = CompareRevealViewer()
         self.right_slot = CompareSlotCard("right")
+        self.viewer_warning = QLabel("")
+        self.viewer_warning.setObjectName("compareViewerWarning")
+        self.viewer_warning.setVisible(False)
         self.left_scroll = QScrollArea()
         self.right_scroll = QScrollArea()
+        self.viewer_wrap = QWidget()
+        viewer_layout = QVBoxLayout(self.viewer_wrap)
+        viewer_layout.setContentsMargins(0, 0, 0, 0)
+        viewer_layout.setSpacing(8)
+        viewer_layout.addWidget(self.viewer, 1)
+        viewer_layout.addWidget(self.viewer_warning, 0, Qt.AlignmentFlag.AlignHCenter)
         for scroll, slot in ((self.left_scroll, self.left_slot), (self.right_scroll, self.right_slot)):
             scroll.setWidget(slot)
             scroll.setWidgetResizable(True)
@@ -1717,9 +1767,10 @@ class ComparePanel(QWidget):
             scroll.setMinimumWidth(0)
             scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.viewer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.viewer_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         layout.addWidget(self.left_scroll, 0)
-        layout.addWidget(self.viewer, 1)
+        layout.addWidget(self.viewer_wrap, 1)
         layout.addWidget(self.right_scroll, 0)
 
         for slot in (self.left_slot, self.right_slot):
@@ -1751,6 +1802,9 @@ class ComparePanel(QWidget):
         viewer_bg = Theme.mix(Theme.get_control_bg(QColor(accent_raw)), QColor(accent_raw), 0.08 if Theme.get_is_light() else 0.06)
         self.viewer.setStyleSheet(
             f"background-color: {viewer_bg}; border: 1px solid {viewer_border}; border-radius: 10px;"
+        )
+        self.viewer_warning.setStyleSheet(
+            f"color: {accent_hex}; font-weight: 700; background: transparent; border: none;"
         )
         try:
             self.style().unpolish(self)
@@ -1799,6 +1853,14 @@ class ComparePanel(QWidget):
         self.left_slot.set_entry(left_entry)
         self.right_slot.set_entry(right_entry)
         self.viewer.set_images(str(left_entry.get("path") or ""), str(right_entry.get("path") or ""))
+        status_lines: list[str] = []
+        upscale_message = self.viewer.upscale_match_message()
+        if upscale_message:
+            status_lines.append(upscale_message)
+        if self.viewer.has_different_aspect_ratios():
+            status_lines.append("Different Aspect Ratios")
+        self.viewer_warning.setText("\n".join(status_lines))
+        self.viewer_warning.setVisible(bool(status_lines))
 
 
 class Bridge(QObject):
