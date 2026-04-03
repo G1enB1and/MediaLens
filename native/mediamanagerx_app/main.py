@@ -1400,7 +1400,7 @@ class CompareSlotCard(QFrame):
     isolateReleased = Signal()
     swapStarted = Signal()
     keepToggled = Signal(str, bool)
-    bestRequested = Signal(str)
+    bestRequested = Signal(str, bool)
     deleteRequested = Signal(str, str)
 
     def __init__(self, slot_name: str, parent: QWidget | None = None) -> None:
@@ -1470,11 +1470,11 @@ class CompareSlotCard(QFrame):
         controls.setSpacing(10)
 
         self.keep_toggle = QCheckBox("Keep")
-        self.keep_toggle.stateChanged.connect(self._emit_keep_changed)
+        self.keep_toggle.clicked.connect(self._emit_keep_changed)
         controls.addWidget(self.keep_toggle)
 
-        self.best_toggle = QCheckBox("Mark as Best")
-        self.best_toggle.stateChanged.connect(self._emit_best_changed)
+        self.best_toggle = QCheckBox("Best Overall")
+        self.best_toggle.clicked.connect(self._emit_best_changed)
         controls.addWidget(self.best_toggle)
 
         self.delete_btn = QPushButton("Delete")
@@ -1564,15 +1564,16 @@ class CompareSlotCard(QFrame):
             except Exception:
                 pass
 
-    def _emit_keep_changed(self, state: int) -> None:
+    def _emit_keep_changed(self, checked: bool) -> None:
         path = str(self._entry.get("path") or "")
         if path:
-            self.keepToggled.emit(path, state == int(Qt.CheckState.Checked))
+            self.keepToggled.emit(path, bool(checked))
 
-    def _emit_best_changed(self, state: int) -> None:
+    def _emit_best_changed(self, checked: bool) -> None:
         path = str(self._entry.get("path") or "")
-        if path and state == int(Qt.CheckState.Checked):
-            self.bestRequested.emit(path)
+        if not path:
+            return
+        self.bestRequested.emit(path, bool(checked))
 
     def _emit_delete_clicked(self) -> None:
         path = str(self._entry.get("path") or "")
@@ -1654,7 +1655,12 @@ class CompareSlotCard(QFrame):
         )
         reasons = list(self._entry.get("duplicate_category_reasons") or [])[:5]
         self.reasons_label.setText("\n".join(reasons))
-        self.best_label.setText("\u2605 Best overall" if self._entry.get("compare_marked_best") else "")
+        if self._entry.get("compare_best_in_pair"):
+            self.best_label.setText("\u2605 Best in Comparison")
+        elif self._entry.get("compare_marked_best"):
+            self.best_label.setText("\u2605 Best Overall")
+        else:
+            self.best_label.setText("")
         self.keep_toggle.blockSignals(True)
         self.keep_toggle.setChecked(bool(self._entry.get("compare_keep_checked")))
         self.keep_toggle.blockSignals(False)
@@ -1780,8 +1786,8 @@ class ComparePanel(QWidget):
             slot.isolateRequested.connect(self.viewer.set_isolated_slot)
             slot.isolateReleased.connect(lambda: self.viewer.set_isolated_slot(""))
             slot.swapStarted.connect(lambda: self.viewer.set_isolated_slot(""))
-            slot.keepToggled.connect(self.bridge.set_compare_keep_path)
-            slot.bestRequested.connect(self.bridge.set_compare_best_path)
+            slot.keepToggled.connect(self._set_compare_keep_path)
+            slot.bestRequested.connect(self._set_compare_best_path)
             slot.deleteRequested.connect(self._delete_compare_path)
 
         self.bridge.compareStateChanged.connect(self._apply_compare_state)
@@ -1845,6 +1851,33 @@ class ComparePanel(QWidget):
         if self.bridge.delete_path(path):
             self.bridge.clear_compare_slot(slot_name)
 
+    def _set_compare_keep_path(self, path: str, checked: bool) -> None:
+        self.bridge.set_compare_keep_path(path, checked)
+        self.bridge.compareKeepPathChanged.emit(str(path or ""), bool(checked))
+
+    def _set_compare_best_path(self, path: str, checked: bool) -> None:
+        def _apply_best_toggle_selection(chosen_path: str) -> None:
+            target = str(chosen_path or "")
+            for slot in (self.left_slot, self.right_slot):
+                slot_path = str(getattr(slot, "_entry", {}).get("path") or "")
+                slot.best_toggle.blockSignals(True)
+                slot.best_toggle.setChecked(bool(target) and slot_path == target)
+                slot.best_toggle.blockSignals(False)
+                slot.best_toggle.update()
+                slot.best_toggle.repaint()
+
+        if checked:
+            chosen = str(path or "")
+            _apply_best_toggle_selection(chosen)
+            self.bridge.set_compare_best_path(path)
+            self.bridge.compareBestPathChanged.emit(chosen, True)
+        else:
+            current_best = str(self.bridge.get_compare_state().get("best_path") or "")
+            if current_best == str(path or ""):
+                _apply_best_toggle_selection("")
+                self.bridge.clear_compare_best_path()
+                self.bridge.compareBestPathChanged.emit(str(path or ""), False)
+
     @Slot("QVariantMap")
     def _apply_compare_state(self, state: dict) -> None:
         payload = dict(state or {})
@@ -1877,6 +1910,9 @@ class Bridge(QObject):
 
     uiFlagChanged = Signal(str, bool)  # key, value
     compareStateChanged = Signal("QVariantMap")
+    compareSelectionStateChanged = Signal(str, list)
+    compareKeepPathChanged = Signal(str, bool)
+    compareBestPathChanged = Signal(str, bool)
     metadataRequested = Signal(list)
     loadFolderRequested = Signal(str)
     startNativeDragRequested = Signal(list, str, int, int)
@@ -2006,6 +2042,8 @@ class Bridge(QObject):
         self._compare_paths: dict[str, str] = {"left": "", "right": ""}
         self._compare_keep_paths: set[str] = set()
         self._compare_best_path: str = ""
+        self._compare_selection_revision: int = 0
+        self._compare_state_emit_pending: bool = False
         self._settings_modal_bottom_restore: bool | None = None
 
         # Connect blocking signal for cross-thread dialogs
@@ -3815,30 +3853,39 @@ class Bridge(QObject):
                 ranked_entries.append(dict(entry))
         ranked = self._rank_duplicate_group(ranked_entries) if ranked_entries else []
         ranked_by_path = {str(entry.get("path") or ""): entry for entry in ranked}
-        auto_best_path = next((str(entry.get("path") or "") for entry in ranked if entry.get("duplicate_is_overall_best")), "")
+        comparison_best_path = next((str(entry.get("path") or "") for entry in ranked if entry.get("duplicate_is_overall_best")), "")
         active_paths = {str(entry.get("path") or "") for entry in slot_entries.values() if entry}
-        if self._compare_best_path not in active_paths:
-            self._compare_best_path = ""
         self._compare_keep_paths = {path for path in self._compare_keep_paths if path in active_paths}
-        effective_best_path = self._compare_best_path or auto_best_path
         payload = {
             "visible": bool(self.settings.value("ui/show_bottom_panel", True, type=bool)),
             "left": {},
             "right": {},
-            "best_path": effective_best_path,
+            "best_path": self._compare_best_path,
+            "comparison_best_path": comparison_best_path,
             "keep_paths": list(self._compare_keep_paths),
+            "selection_revision": int(self._compare_selection_revision),
         }
         for slot_name, base_entry in slot_entries.items():
             path = str(base_entry.get("path") or "")
             entry = dict(ranked_by_path.get(path) or base_entry or {})
             if entry:
                 entry["compare_keep_checked"] = path in self._compare_keep_paths
-                entry["compare_marked_best"] = path == effective_best_path
+                entry["compare_marked_best"] = bool(self._compare_best_path) and path == self._compare_best_path
+                entry["compare_best_in_pair"] = path == comparison_best_path
             payload[slot_name] = entry
         return payload
 
     def _emit_compare_state_changed(self) -> None:
-        self.compareStateChanged.emit(self.get_compare_state())
+        if self._compare_state_emit_pending:
+            return
+        self._compare_state_emit_pending = True
+
+        def _emit() -> None:
+            self._compare_state_emit_pending = False
+            state = self.get_compare_state()
+            self.compareStateChanged.emit(state)
+
+        QTimer.singleShot(0, _emit)
 
     @Slot(result="QVariantMap")
     def get_compare_state(self) -> dict:
@@ -3917,18 +3964,53 @@ class Bridge(QObject):
         clean = str(path or "").strip()
         if not clean:
             return
+        before = clean in self._compare_keep_paths
         if checked:
             self._compare_keep_paths.add(clean)
         else:
             self._compare_keep_paths.discard(clean)
+        after = clean in self._compare_keep_paths
+        if before == after:
+            return
+        self._compare_selection_revision += 1
         self._emit_compare_state_changed()
+
+    @Slot(str, list)
+    def set_compare_selection_state(self, best_path: str, keep_paths: list) -> None:
+        clean_best_path = str(best_path or "").strip()
+        clean_keep_paths = {
+            str(path or "").strip()
+            for path in (keep_paths or [])
+            if str(path or "").strip()
+        }
+        changed = False
+        if self._compare_best_path != clean_best_path:
+            self._compare_best_path = clean_best_path
+            changed = True
+        if self._compare_keep_paths != clean_keep_paths:
+            self._compare_keep_paths = clean_keep_paths
+            changed = True
+        if changed:
+            self._compare_selection_revision += 1
+            self._emit_compare_state_changed()
 
     @Slot(str)
     def set_compare_best_path(self, path: str) -> None:
         clean = str(path or "").strip()
         if not clean:
             return
+        if self._compare_best_path == clean:
+            return
         self._compare_best_path = clean
+        self._compare_selection_revision += 1
+        self._emit_compare_state_changed()
+
+    @Slot()
+    def clear_compare_best_path(self) -> None:
+        if not self._compare_best_path:
+            return
+        self._compare_best_path = ""
+        self._compare_selection_revision += 1
         self._emit_compare_state_changed()
 
     @Slot(result=str)

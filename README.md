@@ -18,6 +18,14 @@ Built to be safe and transparent—MediaLens never deletes files blindly and alw
 
 ---
 
+### Why not just use a duplicate cleaner?
+
+Most tools show you duplicates.
+
+MediaLens shows you what actually changed—and helps you choose the best version without guessing.
+
+---
+
 ## More than just duplicate cleanup
 
 Once your library is under control, MediaLens helps you:
@@ -31,7 +39,7 @@ Once your library is under control, MediaLens helps you:
 
 ## Built For
 
-MediaLens is built for people with large or complex image libraries—especially where duplicates, variations, or AI-generated content make organization difficult.
+MediaLens is built for anyone dealing with duplicate-heavy or complex image libraries—especially where variations, edits, or AI-generated images make it hard to know what to keep.
 
 - AI image/video generators
 - Photographers with large photo archives
@@ -91,14 +99,14 @@ Each group is analyzed and labeled with meaningful differences:
 - Cropped vs full composition
 - Metadata richness
 - Folder organization
-- Text Detection
+- Text detection
 
 #### Decide (or let MediaLens decide for you)
 
 - ★ Best overall recommendation based on configurable priorities
 - Keep-best selection per group
 - Non-destructive metadata merging
-- Auto Resolve with flexible rules
+- Auto-resolve with flexible rules
 
 ![Gallery](docs/Screenshots/Screenshot-Similar-Group-1.png)
 

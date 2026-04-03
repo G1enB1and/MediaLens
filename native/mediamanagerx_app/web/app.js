@@ -48,6 +48,8 @@ let gTimelineVisibleGroupKeys = new Set();
 let gTimelineActiveGroupKey = '';
 let gDuplicateKeepOverrides = new Map();
 let gDuplicateBestOverrides = new Map();
+let gLastCompareSeedKey = '';
+let gLastCompareSelectionRevision = -1;
 let gDuplicateGroupOrder = new Map();
 let gMuteVideoByDefault = true;
 let gAutoplayGalleryAnimatedGifs = true;
@@ -126,8 +128,143 @@ function compareSlotPath(slotName) {
   return slot && slot.path ? String(slot.path) : '';
 }
 
+function normalizeMediaPath(path) {
+  return String(path || '').replace(/\//g, '\\').trim().toLowerCase();
+}
+
 function compareHasEmptySlot() {
   return !compareSlotPath('left') || !compareSlotPath('right');
+}
+
+function getCompareActivePaths() {
+  return Array.from(new Set(['left', 'right'].map(compareSlotPath).filter(Boolean)));
+}
+
+function getComparePathsForDuplicateGroup(groupKey) {
+  const key = String(groupKey || '');
+  if (!key) return [];
+  const groupPaths = new Set(
+    gMedia
+      .filter(item => String(item.duplicate_group_key || '') === key)
+      .map(item => normalizeMediaPath(item.path))
+      .filter(Boolean)
+  );
+  return getCompareActivePaths().filter(path => groupPaths.has(normalizeMediaPath(path)));
+}
+
+function getDuplicateGroupKeyForPath(path) {
+  const normalizedPath = normalizeMediaPath(path);
+  const item = gMedia.find(entry => normalizeMediaPath(entry.path) === normalizedPath);
+  return String(item && item.duplicate_group_key || '');
+}
+
+function maybeSeedCompareStateFromReview() {
+  const comparePaths = getCompareActivePaths();
+  if (!comparePaths.length) {
+    gLastCompareSeedKey = '';
+    return;
+  }
+  const groupKeys = Array.from(new Set(comparePaths.map(getDuplicateGroupKeyForPath).filter(Boolean)));
+  if (groupKeys.length !== 1) return;
+  const groupKey = groupKeys[0];
+  const seedKey = `${comparePaths.slice().sort().join('|')}::${groupKey}`;
+  if (seedKey === gLastCompareSeedKey) return;
+  gLastCompareSeedKey = seedKey;
+  const keepPaths = getDuplicateKeepPaths(groupKey).slice().sort();
+  const bestPath = getDuplicateBestPath(groupKey);
+  syncCompareStateFromReviewGroup(groupKey, keepPaths, bestPath);
+}
+
+function syncCompareStateFromReviewGroup(groupKey, keepPaths, bestPath) {
+  if (!gBridge) return;
+  const comparePaths = getComparePathsForDuplicateGroup(groupKey);
+  if (!comparePaths.length) return;
+  const keepSet = new Set((Array.isArray(keepPaths) ? keepPaths : [keepPaths]).map(v => String(v || '')).filter(Boolean));
+  const nextBestPath = String(bestPath || '');
+  const nextKeepPaths = comparePaths.filter(path => keepSet.has(path));
+  if (gBridge.set_compare_selection_state) {
+    gBridge.set_compare_selection_state(nextBestPath, nextKeepPaths);
+    return;
+  }
+  comparePaths.forEach((path) => {
+    if (gBridge.set_compare_keep_path) gBridge.set_compare_keep_path(path, keepSet.has(path));
+  });
+  if (nextBestPath && gBridge.set_compare_best_path) {
+    gBridge.set_compare_best_path(nextBestPath);
+  }
+}
+
+function syncDuplicateGroupFromCompareSelection(bestPath, keepPaths) {
+  const comparePaths = getCompareActivePaths();
+  if (!comparePaths.length) return;
+  const groupKeys = Array.from(new Set(comparePaths.map(getDuplicateGroupKeyForPath).filter(Boolean)));
+  if (groupKeys.length !== 1) return;
+  const groupKey = groupKeys[0];
+  const normalizedComparePaths = new Set(comparePaths.map(normalizeMediaPath).filter(Boolean));
+  const normalizedKeepPaths = new Set((Array.isArray(keepPaths) ? keepPaths : []).map(normalizeMediaPath).filter(Boolean));
+  const normalizedBestPath = normalizeMediaPath(bestPath);
+  const groupItems = gMedia.filter(item => String(item.duplicate_group_key || '') === groupKey);
+  const existingKeepPaths = getDuplicateKeepPaths(groupKey);
+  const normalizedExistingKeepPaths = new Set(existingKeepPaths.map(normalizeMediaPath).filter(Boolean));
+  const nextKeepPaths = [];
+  groupItems.forEach((item) => {
+    const rawPath = String(item.path || '');
+    const normalizedPath = normalizeMediaPath(rawPath);
+    if (!normalizedPath) return;
+    if (normalizedComparePaths.has(normalizedPath)) {
+      if (normalizedKeepPaths.has(normalizedPath)) nextKeepPaths.push(rawPath);
+      return;
+    }
+    if (normalizedExistingKeepPaths.has(normalizedPath)) nextKeepPaths.push(rawPath);
+  });
+  setDuplicateKeepPaths(groupKey, nextKeepPaths);
+
+  const currentBestPath = getDuplicateBestPath(groupKey);
+  const normalizedCurrentBestPath = normalizeMediaPath(currentBestPath);
+  if (normalizedBestPath && normalizedComparePaths.has(normalizedBestPath)) {
+    const matchingItem = groupItems.find(item => normalizeMediaPath(item.path) === normalizedBestPath);
+    setDuplicateBestPath(groupKey, matchingItem ? String(matchingItem.path || '') : '');
+    return;
+  }
+  if (!normalizedBestPath && normalizedComparePaths.has(normalizedCurrentBestPath)) {
+    setDuplicateBestPath(groupKey, '');
+  }
+}
+
+function syncDuplicateKeepFromComparePath(path, checked) {
+  const groupKey = getDuplicateGroupKeyForPath(path);
+  if (!groupKey) return;
+  const normalizedTargetPath = normalizeMediaPath(path);
+  const groupItems = gMedia.filter(item => String(item.duplicate_group_key || '') === groupKey);
+  const existingKeepPaths = getDuplicateKeepPaths(groupKey);
+  const normalizedExistingKeepPaths = new Set(existingKeepPaths.map(normalizeMediaPath).filter(Boolean));
+  const nextKeepPaths = [];
+  groupItems.forEach((item) => {
+    const rawPath = String(item.path || '');
+    const normalizedPath = normalizeMediaPath(rawPath);
+    if (!normalizedPath) return;
+    if (normalizedPath === normalizedTargetPath) {
+      if (checked) nextKeepPaths.push(rawPath);
+      return;
+    }
+    if (normalizedExistingKeepPaths.has(normalizedPath)) nextKeepPaths.push(rawPath);
+  });
+  setDuplicateKeepPaths(groupKey, nextKeepPaths);
+}
+
+function syncDuplicateBestFromComparePath(path, checked) {
+  const groupKey = getDuplicateGroupKeyForPath(path);
+  if (!groupKey) return;
+  if (!checked) {
+    const currentBestPath = getDuplicateBestPath(groupKey);
+    if (normalizeMediaPath(currentBestPath) === normalizeMediaPath(path)) {
+      setDuplicateBestPath(groupKey, '');
+    }
+    return;
+  }
+  const groupItems = gMedia.filter(item => String(item.duplicate_group_key || '') === groupKey);
+  const matchingItem = groupItems.find(item => normalizeMediaPath(item.path) === normalizeMediaPath(path));
+  setDuplicateBestPath(groupKey, matchingItem ? String(matchingItem.path || '') : '');
 }
 
 function getReviewMode() {
@@ -1459,9 +1596,10 @@ function setDuplicateKeepPaths(groupKey, paths) {
   const key = String(groupKey || '');
   if (!key) return;
   const nextPaths = Array.from(new Set((Array.isArray(paths) ? paths : [paths]).map(v => String(v || '')).filter(Boolean)));
+  const normalizedNextPaths = new Set(nextPaths.map(normalizeMediaPath).filter(Boolean));
   gDuplicateKeepOverrides.set(key, new Set(nextPaths));
   document.querySelectorAll(`.card[data-duplicate-group-key="${CSS.escape(key)}"]`).forEach((card) => {
-    const checked = nextPaths.includes(card.getAttribute('data-path') || '');
+    const checked = normalizedNextPaths.has(normalizeMediaPath(card.getAttribute('data-path') || ''));
     card.setAttribute('data-duplicate-keep', checked ? 'true' : 'false');
     const toggle = card.querySelector('.duplicate-keep-toggle');
     if (toggle) toggle.checked = checked;
@@ -1471,16 +1609,19 @@ function setDuplicateKeepPaths(groupKey, paths) {
 function setDuplicateBestPath(groupKey, path) {
   const key = String(groupKey || '');
   const nextPath = String(path || '');
-  if (!key || !nextPath) return;
-  gDuplicateBestOverrides.set(key, nextPath);
+  if (!key) return;
+  if (nextPath) gDuplicateBestOverrides.set(key, nextPath);
+  else gDuplicateBestOverrides.delete(key);
+  const normalizedNextPath = normalizeMediaPath(nextPath);
   document.querySelectorAll(`.card[data-duplicate-group-key="${CSS.escape(key)}"]`).forEach((card) => {
-    const checked = (card.getAttribute('data-path') || '') === nextPath;
+    const checked = !!normalizedNextPath && normalizeMediaPath(card.getAttribute('data-path') || '') === normalizedNextPath;
     card.setAttribute('data-duplicate-best', checked ? 'true' : 'false');
     const toggle = card.querySelector('.duplicate-best-toggle');
     if (toggle) toggle.checked = checked;
     const overall = card.querySelector('.duplicate-overall-best');
     if (overall) overall.hidden = !checked;
   });
+  syncCompareStateFromReviewGroup(key, getDuplicateKeepPaths(key), nextPath);
 }
 
 function toggleDuplicateKeepPath(groupKey, path, checked) {
@@ -1490,7 +1631,9 @@ function toggleDuplicateKeepPath(groupKey, path, checked) {
   const keepPaths = new Set(getDuplicateKeepPaths(key));
   if (checked) keepPaths.add(nextPath);
   else keepPaths.delete(nextPath);
-  setDuplicateKeepPaths(key, Array.from(keepPaths));
+  const nextKeepPaths = Array.from(keepPaths);
+  setDuplicateKeepPaths(key, nextKeepPaths);
+  syncCompareStateFromReviewGroup(key, nextKeepPaths, getDuplicateBestPath(key));
 }
 
 function deletePathsSequential(paths, onDone) {
@@ -3314,7 +3457,7 @@ function createStructuredCard(item, idx) {
     });
     bestLabel.appendChild(bestToggle);
     const bestText = document.createElement('span');
-    bestText.textContent = 'Mark as Best';
+    bestText.textContent = 'Best Overall';
     bestLabel.appendChild(bestText);
     controls.appendChild(bestLabel);
 
@@ -3916,6 +4059,11 @@ function renderDuplicateMediaList(el, items) {
       const bestPath = getDuplicateBestPath(group.key);
       if (bestPath) setDuplicateBestPath(group.key, bestPath);
     });
+    syncDuplicateGroupFromCompareSelection(
+      String(gCompareState && gCompareState.best_path || ''),
+      Array.isArray(gCompareState && gCompareState.keep_paths) ? gCompareState.keep_paths : []
+    );
+    maybeSeedCompareStateFromReview();
     const unobserved = el.querySelectorAll('img[data-src]:not([src]), img[data-video-path]:not([src])');
     unobserved.forEach(img => {
       if (gPosterRequested.has(img)) return;
@@ -5954,11 +6102,31 @@ async function main() {
     if (bridge.compareStateChanged) {
       bridge.compareStateChanged.connect(function (state) {
         gCompareState = state || { visible: false, left: {}, right: {}, best_path: '', keep_paths: [] };
+        const selectionRevision = Number(gCompareState && gCompareState.selection_revision);
+        if (Number.isFinite(selectionRevision) && selectionRevision !== gLastCompareSelectionRevision) {
+          gLastCompareSelectionRevision = selectionRevision;
+        }
+        maybeSeedCompareStateFromReview();
+      });
+    }
+    if (bridge.compareKeepPathChanged) {
+      bridge.compareKeepPathChanged.connect(function (path, checked) {
+        syncDuplicateKeepFromComparePath(path, !!checked);
+      });
+    }
+    if (bridge.compareBestPathChanged) {
+      bridge.compareBestPathChanged.connect(function (path, checked) {
+        syncDuplicateBestFromComparePath(path, !!checked);
       });
     }
     if (bridge.get_compare_state) {
       bridge.get_compare_state(function (state) {
         gCompareState = state || { visible: false, left: {}, right: {}, best_path: '', keep_paths: [] };
+        const selectionRevision = Number(gCompareState && gCompareState.selection_revision);
+        if (Number.isFinite(selectionRevision)) {
+          gLastCompareSelectionRevision = selectionRevision;
+        }
+        maybeSeedCompareStateFromReview();
       });
     }
 
