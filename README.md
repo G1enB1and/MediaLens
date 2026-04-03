@@ -1,7 +1,5 @@
 ﻿# MediaLens
 
-![[MediaLens-Logo-1024.png]]
-
 ![Gallery](docs/Screenshots/MediaLens-Logo-1024.png)
 
 **MediaLens helps you clean up duplicate and similar images with confidence—by showing exactly how files differ and which one to keep.**
