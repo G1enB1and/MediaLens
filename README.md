@@ -100,6 +100,8 @@ Each group is analyzed and labeled with meaningful differences:
 - Non-destructive metadata merging
 - Auto Resolve with flexible rules
 
+![Gallery](docs/Screenshots/Screenshot-Similar-Group-1.png)
+
 #### Stay in control
 
 - Configure ranking priorities (what “best” means to you)
@@ -107,8 +109,6 @@ Each group is analyzed and labeled with meaningful differences:
 - Safely review before deleting
 - Never deletes files blindly — decisions are always explainable and reviewable
 - Designed to prevent destructive mistakes in large libraries
-
-![Gallery](docs/Screenshots/Screenshot-Similar-Group-1.png)
 
 ![Gallery](docs/Screenshots/Screenshot-Duplicate-Settings-3.png)
 
