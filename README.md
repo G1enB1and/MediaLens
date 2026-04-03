@@ -1,40 +1,41 @@
 ﻿# MediaLens
 
+![[MediaLens-Logo-1024.png]]
+
 ![Gallery](docs/Screenshots/MediaLens-Logo-1024.png)
 
-**MediaLens is a local-first media intelligence platform for creators, AI workflows, and large libraries.**
+**MediaLens helps you clean up duplicate and similar images with confidence—by showing exactly how files differ and which one to keep.**
 
-It doesn’t just organize files — it understands how they relate, so you can stop digging through folders and start making decisions instantly.
+If you’ve ever tried to clean up duplicates and:
 
-Extract prompts, analyze metadata, detect duplicates and variations, and navigate your entire library by time, context, and meaning.
+- Didn’t know which version to keep
+- Ended up with multiple slightly different edits
+- Or avoided deleting anything because you might lose the best one
 
-Browse thousands of files smoothly, and surface hidden metadata like AI prompts, EXIF data, and embedded comments.
+MediaLens is built for exactly that.
+
+Instead of just showing duplicates, MediaLens breaks down how files differ—size, resolution, edits, format, and more—then helps you make the right decision with confidence.
+
+Built to be safe and transparent—MediaLens never deletes files blindly and always shows exactly why one file is preferred over another.
 
 ---
 
-![Gallery](docs/Screenshots/Screenshot-Masonry-02.png)
+## More than just duplicate cleanup
 
----
+Once your library is under control, MediaLens helps you:
 
-## Why MediaLens?
-
-Most media managers treat files like static objects.
-MediaLens treats them like **living data**.
-
-- Navigate your library by **collections, time, or folders**
-- Detect and clean up **duplicates and visually similar images**
-- Extract and edit **deep embedded metadata** (AI prompts, EXIF, workflows)
-- Stay fast even with tens of thousands of files
-- Stay flexible with **database + embedded metadata dual storage**
-- Designed to scale from personal libraries to **dataset-scale collections**
+- Organize and group files beyond folders using collections and metadata
+- Instantly find files by what they contain, how they were created, or when they were made
+- Extract hidden data like AI prompts, EXIF, and embedded comments
+- Navigate large libraries without slowing down
 
 ---
 
 ## Built For
 
-MediaLens is designed for people who manage **large, complex, or AI-generated media libraries**:
+MediaLens is built for people with large or complex image libraries—especially where duplicates, variations, or AI-generated content make organization difficult.
 
-- AI artists (Stable Diffusion, ComfyUI, Midjourney workflows)
+- AI image/video generators
 - Photographers with large photo archives
 - Video editors and content creators
 - Researchers building datasets or tagging systems
@@ -44,10 +45,25 @@ MediaLens is designed for people who manage **large, complex, or AI-generated me
 
 ## What Makes MediaLens Different?
 
-- Not just tagging - understands embedded AI workflows and prompts
-- Not folder-bound - collections and metadata-first organization
-- Not static - built for evolving datasets and creative pipelines
-- Not blind cleanup — **explains why files are similar and which to keep**
+- Unlike traditional duplicate cleaners, MediaLens doesn’t just detect duplicates — it explains their differences and helps you make the right decision.
+- No blind cleanup — **Transparent explanations for why files are similar and which to keep**
+- Define rules for automatic cleanup based on what matters most to you.
+- Instead of guessing, you see exactly what changed—resolution, edits, format, text, color, and more—so you can make the right call instantly.
+- Go beyond surface-level metadata to find embedded AI prompts and even full generation workflows hidden inside your files
+- Collections go beyond traditional folders, letting you organize files based on metadata instead of location.
+
+---
+
+### What it feels like
+
+1. Scan your library
+2. See duplicates grouped instantly
+3. Open comparison and inspect differences
+4. Choose the best version (or let MediaLens suggest one)
+5. Optionally tell MediaLens what matters most to you or stick with recommended settings
+6. Clean up safely and move on
+
+No guesswork. No accidental deletes. No digging through folders.
 
 ---
 
@@ -64,7 +80,7 @@ MediaLens doesn’t just find identical files — it understands variations.
 - Resized, compressed, and edited variants
 - Color vs grayscale versions
 - Cropped vs full compositions
-- Text/Watermark Added/Removed
+- Text or watermark added/removed
 
 #### Understand
 
@@ -162,7 +178,6 @@ Explore your media by **when it was created, modified, acquired, taken, or autom
 
 This transforms browsing from "where is it?" to **"when did I make it?"**
 
-![[Screenshot-Timeline-01.png]]
 ![Gallery](docs/Screenshots/Screenshot-Timeline-01.png)  
 
 ---
@@ -208,6 +223,14 @@ This transforms browsing from "where is it?" to **"when did I make it?"**
 
 ---
 
+### Masonry View
+
+Masonry view gallery feels like a multi-media collage, able to play multiple animated gifs and videos in place with no wasted space or lag.
+
+![Gallery](docs/Screenshots/Screenshot-Masonry-02.png)
+
+---
+
 ## Getting Started
 
 ### Recommended (Windows)
@@ -245,6 +268,7 @@ MediaLens is evolving into a full intelligent media platform.
 
 ### Near-Term
 
+- Advanced search UI via expandable menu options
 - Batch rename engine
 - Improved metadata automation and syncing
 
@@ -276,22 +300,6 @@ MediaLens is evolving into a full intelligent media platform.
 - Dataset creation tools (AI training workflows)
 - Bulk metadata generation and export
 - Media analysis and filtering tools
-
----
-
-## Tests / Validation
-
-`python tests/dev_check.py`
-
----
-
-## Philosophy
-
-MediaLens is built around a simple idea:
-
-> Your media is more than files - it's context, memory, and meaning.
-
-This app is designed to help you navigate that meaning, not just store data.
 
 ---
 
