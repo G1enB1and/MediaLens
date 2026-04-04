@@ -1,6 +1,32 @@
 # Change Log
 
-## v1.1.6 (Current)
+## v1.1.7 (Current)
+
+### Added
+
+#### Comparison Guidance
+
+- Added comparison status labels that call out when one side was upscaled to match the other and when the compared images use different aspect ratios
+
+### Changed
+
+#### Comparison Matching
+
+- Updated the center comparison viewer so the smaller image is resized to match the larger image during direct A/B inspection
+- Refined aspect-ratio detection so images with effectively matching proportions are not mislabeled because of small resolution differences
+
+#### Comparison Review Controls
+
+- Improved comparison `Keep` and `Best Overall` behavior so comparison selections stay aligned with similar-image review state more consistently
+- Updated comparison labels so `Best Overall` remains reserved for the full similar-image group while the panel separately calls out `Best in Comparison`
+
+#### Documentation
+
+- Refreshed README positioning and screenshots to emphasize duplicate finding, similar image review, and the Image Comparison workflow more clearly
+
+---
+
+## v1.1.6
 
 ### Added
 

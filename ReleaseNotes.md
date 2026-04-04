@@ -1,21 +1,20 @@
-## MediaLens v1.1.6
+# MediaLens v1.1.7
+
+## Release Notes
 
 ### Summary
 
-This release introduces Image Comparison, a new workspace for evaluating two images in place without leaving the gallery. It integrates directly with duplicate and similarity review, making it faster to inspect differences, choose the better version, and clean up near-duplicates with confidence.
+This release sharpens the Image Comparison workflow so it is easier to judge mismatched files at a glance and review near-duplicates with clearer visual cues. It also refreshes the README to better highlight duplicate and similar-image cleanup.
 
 ### Highlights
 
-New Image Comparison panel with left and right image slots plus a central reveal slider for true in-place A/B review
-Load images using drag and drop, browse buttons, or gallery context menu actions such as Compare Images and Compare With Left/Right
-Synchronized zoom and pan keep both images aligned during close inspection, with hold-to-isolate preview on either side for quick single-image checks
-Comparison cards preserve keep/best actions and recalculate smart labels specifically for the current two-image decision instead of reusing broader group context
+- Smaller images in the comparison viewer now scale up to match the larger image for more useful side-by-side inspection.
+- The comparison panel now shows clearer status messages for upscaled images and aspect-ratio differences.
+- Comparison review labels were clarified so `Best Overall` stays tied to the full similar-image group while the panel can separately identify the best image in the current comparison.
 
 ### Notes
 
-The former bottom AI placeholder area now hosts Image Comparison
-Opening Settings temporarily hides the comparison panel so the settings window can use the full center height
-Settings categories now scroll properly when the settings window is reduced in size
+- README copy and screenshots were updated to put duplicate finding, similar-image review, and Image Comparison front and center.
 
 ---
 
