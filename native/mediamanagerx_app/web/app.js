@@ -11,8 +11,9 @@ let gPinnedFolders = new Set();
 let gBridge = null;
 let gPosterRequested = new Set();
 let gPosterObserver = null;
-let gSort = 'name_asc';
+let gSort = 'none';
 let gFilter = 'all';
+let gFilterGroups = { media: 'all', text: 'all' };
 let gCurrentTargetFolderName = '';
 let gCurrentDropFolderPath = '';
 let gCurrentDragPaths = [];
@@ -282,8 +283,53 @@ function normalizeTextFilter(filterValue) {
   return filterValue === 'text_more_likely' || filterValue === 'text_verified' ? 'text_detected' : filterValue;
 }
 
+function normalizeMediaFilter(filterValue) {
+  return ['image', 'video', 'animated'].includes(filterValue) ? filterValue : 'all';
+}
+
+function normalizeFilterValue(filterValue) {
+  const raw = String(filterValue || 'all').trim();
+  if (!raw || raw === 'all') return { media: 'all', text: 'all' };
+  if (!raw.includes(':')) {
+    const normalizedText = normalizeTextFilter(raw);
+    if (normalizedText === 'text_detected' || normalizedText === 'no_text_detected') {
+      return { media: 'all', text: normalizedText };
+    }
+    return { media: normalizeMediaFilter(raw), text: 'all' };
+  }
+  const groups = { media: 'all', text: 'all' };
+  raw.split(';').forEach((part) => {
+    const [groupRaw, valueRaw] = String(part || '').split(':');
+    const group = String(groupRaw || '').trim();
+    const value = String(valueRaw || '').trim();
+    if (group === 'media') groups.media = normalizeMediaFilter(value);
+    if (group === 'text') groups.text = normalizeTextFilter(value) === 'no_text_detected' ? 'no_text_detected' : (normalizeTextFilter(value) === 'text_detected' ? 'text_detected' : 'all');
+  });
+  return groups;
+}
+
+function serializeFilterValue(groups) {
+  const media = normalizeMediaFilter(groups && groups.media);
+  const normalizedText = normalizeTextFilter(groups && groups.text);
+  const text = normalizedText === 'text_detected' || normalizedText === 'no_text_detected' ? normalizedText : 'all';
+  const parts = [];
+  if (media !== 'all') parts.push(`media:${media}`);
+  if (text !== 'all') parts.push(`text:${text}`);
+  return parts.length ? parts.join(';') : 'all';
+}
+
+function getFilterTriggerText(groups) {
+  const labels = [];
+  if (groups.media === 'image') labels.push('Images');
+  else if (groups.media === 'video') labels.push('Videos');
+  else if (groups.media === 'animated') labels.push('Animated GIFs');
+  if (groups.text === 'text_detected') labels.push('Text Detected');
+  else if (groups.text === 'no_text_detected') labels.push('No Text Detected');
+  return labels.length ? `Filter: ${labels.join(' | ')}` : 'Filter: All';
+}
+
 function isTextFilterActive() {
-  const normalized = normalizeTextFilter(gFilter);
+  const normalized = normalizeTextFilter(gFilterGroups.text);
   return normalized === 'text_detected' || normalized === 'no_text_detected';
 }
 
@@ -677,7 +723,7 @@ function fetchMediaList(folders, limit, offset, sortBy, filterType, searchQuery)
         folders || [],
         Number(limit || 0),
         Number(offset || 0),
-        sortBy || 'name_asc',
+        sortBy || 'none',
         filterType || 'all',
         searchQuery || ''
       );
@@ -691,7 +737,7 @@ function fetchMediaList(folders, limit, offset, sortBy, filterType, searchQuery)
       folders || [],
       Number(limit || 0),
       Number(offset || 0),
-      sortBy || 'name_asc',
+      sortBy || 'none',
       filterType || 'all',
       searchQuery || '',
       function (items) {
@@ -4685,6 +4731,46 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  function setupGroupedFilterSelect(id, onChange) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const trigger = el.querySelector('.select-trigger');
+    const options = el.querySelector('.select-options');
+
+    function render(groups) {
+      gFilterGroups = normalizeFilterValue(serializeFilterValue(groups));
+      gFilter = serializeFilterValue(gFilterGroups);
+      trigger.textContent = getFilterTriggerText(gFilterGroups);
+      options.querySelectorAll('[data-group]').forEach((opt) => {
+        const group = opt.getAttribute('data-group');
+        const value = opt.getAttribute('data-value');
+        opt.classList.toggle('selected', gFilterGroups[group] === value);
+      });
+    }
+
+    render(gFilterGroups);
+
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.querySelectorAll('.custom-select').forEach(s => {
+        if (s !== el) s.classList.remove('open');
+      });
+      el.classList.toggle('open');
+    });
+
+    options.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const opt = e.target.closest('[data-group][data-value]');
+      if (!opt) return;
+      const group = opt.getAttribute('data-group');
+      const value = opt.getAttribute('data-value');
+      const nextGroups = { ...gFilterGroups };
+      nextGroups[group] = nextGroups[group] === value ? 'all' : value;
+      render(nextGroups);
+      onChange(gFilter);
+    });
+  }
+
   // Close on outside click and handle global deselection
   document.addEventListener('click', (e) => {
     document.querySelectorAll('.custom-select').forEach(s => s.classList.remove('open'));
@@ -4732,8 +4818,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (gBridge) refreshFromBridge(gBridge, true);
   });
 
-  setupCustomSelect('filterSelect', (val) => {
-    gFilter = normalizeTextFilter(val);
+  setupGroupedFilterSelect('filterSelect', (val) => {
+    gFilter = val;
     if (gRenderScanToast) gRenderScanToast();
     if (isTextFilterActive()) {
       gTextProcessingPaused = false;

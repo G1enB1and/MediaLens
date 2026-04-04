@@ -2533,6 +2533,12 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   outline: none;
 }
 
+#filterSelect {
+  width: 265px;
+  min-width: 265px;
+  max-width: min(100%, 420px);
+}
+
 #groupBySelect {
   width: 232px;
   min-width: 232px;
@@ -2575,6 +2581,12 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 
   .custom-select {
     width: 133px;
+  }
+
+  #filterSelect {
+    width: min(265px, 100%);
+    min-width: 200px;
+    max-width: min(100%, 420px);
   }
 
   #groupBySelect {
@@ -2647,6 +2659,50 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   transition: background 0.1s;
 }
 
+.select-options .select-group-label {
+  padding: 8px 12px 4px;
+  cursor: default;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.select-options .select-group-label:hover {
+  background: transparent;
+}
+
+.select-options [data-group] {
+  position: relative;
+  padding-left: 32px;
+}
+
+.select-options [data-group]::before {
+  content: '';
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  transform: translateY(-50%);
+  background: transparent;
+}
+
+.select-options [data-group]::after {
+  content: '';
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  width: 4px;
+  height: 8px;
+  border-right: 2px solid transparent;
+  border-bottom: 2px solid transparent;
+  transform: translateY(-58%) rotate(45deg);
+}
+
 .select-options div:hover {
   background: var(--hover-bg);
 }
@@ -2654,6 +2710,16 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 .select-options div.selected {
   color: color-mix(in srgb, var(--fg), var(--accent) 65%);
   font-weight: 600;
+}
+
+.select-options [data-group].selected::before {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.select-options [data-group].selected::after {
+  border-right-color: #fff;
+  border-bottom-color: #fff;
 }
 
 /* Scanning Indicator */

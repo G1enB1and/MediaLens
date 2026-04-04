@@ -36,9 +36,10 @@
         </div>
         <div class="controls">
           <div class="custom-select" id="sortSelect" tabindex="0">
-            <div class="select-trigger">Sort: Name (A-Z)</div>
+            <div class="select-trigger">Sort: None</div>
             <div class="select-options">
-              <div data-value="name_asc" class="selected">Name (A-Z)</div>
+              <div data-value="none" class="selected">None</div>
+              <div data-value="name_asc">Name (A-Z)</div>
               <div data-value="name_desc">Name (Z-A)</div>
               <div data-value="date_desc">Date (Newest)</div>
               <div data-value="date_asc">Date (Oldest)</div>
@@ -47,16 +48,17 @@
             </div>
           </div>
           <div class="custom-select" id="filterSelect" tabindex="0">
-            <div class="select-trigger">Filter: All Types</div>
+            <div class="select-trigger">Filter: All</div>
             <div class="select-options">
-              <div data-value="all" class="selected">All Types</div>
-              <div data-value="image">Images</div>
-              <div data-value="video">Videos</div>
-              <div data-value="animated">Animated</div>
-              <div data-value="text_detected">Text Detected</div>
-              <div data-value="no_text_detected">No Text Detected</div>
-              </div>
+              <div class="select-group-label">Media Type</div>
+              <div data-group="media" data-value="image">Images</div>
+              <div data-group="media" data-value="video">Videos</div>
+              <div data-group="media" data-value="animated">Animated GIFs</div>
+              <div class="select-group-label">Text Detection</div>
+              <div data-group="text" data-value="text_detected">Text Detected</div>
+              <div data-group="text" data-value="no_text_detected">No Text Detected</div>
             </div>
+          </div>
           <div class="custom-select" id="groupBySelect" tabindex="0">
             <div class="select-trigger">Group By: None</div>
             <div class="select-options">

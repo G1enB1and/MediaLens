@@ -5483,7 +5483,7 @@ class Bridge(QObject):
             return False
 
     @Slot(list, int, int, str, str, str, result=list)
-    def list_media(self, folders, limit=100, offset=0, sort_by="name_asc", filter_type="all", search_query="") -> list:
+    def list_media(self, folders, limit=100, offset=0, sort_by="none", filter_type="all", search_query="") -> list:
         try:
             try:
                 self.conn.commit()
@@ -5596,12 +5596,12 @@ class Bridge(QObject):
         except Exception: return []
 
     @Slot(str, list, int, int, str, str, str)
-    def list_media_async(self, request_id: str, folders, limit=100, offset=0, sort_by="name_asc", filter_type="all", search_query="") -> None:
+    def list_media_async(self, request_id: str, folders, limit=100, offset=0, sort_by="none", filter_type="all", search_query="") -> None:
         req = str(request_id or "")
         folder_list = list(folders or [])
         lim = int(limit or 0)
         off = int(offset or 0)
-        sort = str(sort_by or "name_asc")
+        sort = str(sort_by or "none")
         ftype = str(filter_type or "all")
         query = str(search_query or "")
 
@@ -5618,7 +5618,7 @@ class Bridge(QObject):
                 self.conn.commit()
             except Exception:
                 pass
-            return len(self._get_gallery_entries(folders, "name_asc", filter_type, search_query))
+            return len(self._get_gallery_entries(folders, "none", filter_type, search_query))
         except Exception: return 0
 
     @Slot(str, list, str, str)
@@ -5639,6 +5639,7 @@ class Bridge(QObject):
         from app.mediamanager.utils.pathing import normalize_windows_path
         ALL_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif", ".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}
         image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"}
+        media_filter, _ = self._parse_filter_groups(filter_type)
         if not folders: return []
         current_key = hashlib.sha1(",".join(sorted(folders)).encode()).hexdigest()
         if self._disk_cache and self._disk_cache_key == current_key: disk_files = self._disk_cache
@@ -5679,9 +5680,9 @@ class Bridge(QObject):
                 surviving.append({"id": -1, "path": norm, "media_type": ("image" if p_obj.suffix.lower() in image_exts else "video"), "file_size": None, "modified_time": None, "duration": None, "_real_path": p_obj})
         
         candidates = surviving
-        if filter_type == "image": candidates = [r for r in candidates if r["path"].lower().endswith(tuple(image_exts)) and not self._is_animated(Path(r["path"]))]
-        elif filter_type == "video": candidates = [r for r in candidates if not r["path"].lower().endswith(tuple(image_exts))]
-        elif filter_type == "animated": candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
+        if media_filter == "image": candidates = [r for r in candidates if r["path"].lower().endswith(tuple(image_exts)) and not self._is_animated(Path(r["path"]))]
+        elif media_filter == "video": candidates = [r for r in candidates if not r["path"].lower().endswith(tuple(image_exts))]
+        elif media_filter == "animated": candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
         
         if search_query.strip():
             candidates = [r for r in candidates if self._matches_media_search(r, search_query)]
@@ -5691,6 +5692,7 @@ class Bridge(QObject):
         from app.mediamanager.db.media_repo import list_media_in_collection
         image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"}
         show_hidden = self._show_hidden_enabled()
+        media_filter, _ = self._parse_filter_groups(filter_type)
         
         raw_candidates = list_media_in_collection(self.conn, int(collection_id))
         candidates = []
@@ -5701,11 +5703,11 @@ class Bridge(QObject):
             if path_obj.exists() and path_obj.is_file():
                 candidates.append(r)
                 
-        if filter_type == "image":
+        if media_filter == "image":
             candidates = [r for r in candidates if r["path"].lower().endswith(tuple(image_exts)) and not self._is_animated(Path(r["path"]))]
-        elif filter_type == "video":
+        elif media_filter == "video":
             candidates = [r for r in candidates if not r["path"].lower().endswith(tuple(image_exts))]
-        elif filter_type == "animated":
+        elif media_filter == "animated":
             candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
             
         if search_query.strip():
@@ -5715,6 +5717,34 @@ class Bridge(QObject):
     def _matches_media_search(self, row: dict, search_query: str) -> bool:
         from app.mediamanager.search_query import matches_media_search
         return matches_media_search(row, search_query)
+
+    @staticmethod
+    def _parse_filter_groups(filter_type: str) -> tuple[str, str]:
+        raw = str(filter_type or "all").strip()
+        media_filter = "all"
+        text_filter = "all"
+        if not raw or raw == "all":
+            return media_filter, text_filter
+        if ":" not in raw:
+            if raw in {"text_detected", "text_more_likely", "text_verified"}:
+                return media_filter, "text_detected"
+            if raw == "no_text_detected":
+                return media_filter, "no_text_detected"
+            if raw in {"image", "video", "animated"}:
+                return raw, text_filter
+            return media_filter, text_filter
+        for part in raw.split(";"):
+            group, _, value = str(part or "").partition(":")
+            group = group.strip().lower()
+            value = value.strip().lower()
+            if group == "media" and value in {"image", "video", "animated"}:
+                media_filter = value
+            elif group == "text":
+                if value in {"text_detected", "text_more_likely", "text_verified"}:
+                    text_filter = "text_detected"
+                elif value == "no_text_detected":
+                    text_filter = "no_text_detected"
+        return media_filter, text_filter
 
     @staticmethod
     def _iso_to_ns(value) -> int:
@@ -5805,9 +5835,14 @@ class Bridge(QObject):
         folders = [row for row in entries if row.get("is_folder")]
         media = [row for row in entries if not row.get("is_folder")]
 
-        if self._randomize_enabled() and sort_by == "name_asc":
+        if self._randomize_enabled() and sort_by == "none":
             folders.sort(key=name_key)
             random.Random(self._session_shuffle_seed).shuffle(media)
+            return folders + media
+
+        if sort_by == "none":
+            folders.sort(key=name_key)
+            media.sort(key=name_key)
             return folders + media
 
         if sort_by == "name_desc":
@@ -5834,7 +5869,8 @@ class Bridge(QObject):
         media.sort(key=name_key)
         return folders + media
 
-    def _get_gallery_entries(self, folders: list[str], sort_by: str = "name_asc", filter_type: str = "all", search_query: str = "") -> list[dict]:
+    def _get_gallery_entries(self, folders: list[str], sort_by: str = "none", filter_type: str = "all", search_query: str = "") -> list[dict]:
+        _, text_filter = self._parse_filter_groups(filter_type)
         if folders:
             entries = self._get_reconciled_candidates(folders, filter_type, search_query)
             if self._gallery_view_mode() not in {"masonry", "duplicates", "similar", "similar_only"} and self._review_group_mode() is None:
@@ -5843,9 +5879,9 @@ class Bridge(QObject):
             entries = self._get_collection_candidates(self._active_collection_id, filter_type, search_query)
         else:
             entries = []
-        if filter_type in {"text_detected", "text_more_likely", "text_verified", "no_text_detected"}:
+        if text_filter in {"text_detected", "no_text_detected"}:
             self._ensure_background_text_processing(folders if folders else None, self._active_collection_id if not folders else None)
-            if filter_type == "no_text_detected":
+            if text_filter == "no_text_detected":
                 entries = [entry for entry in entries if not bool(entry.get("text_detected"))]
             else:
                 entries = [entry for entry in entries if bool(entry.get("text_detected"))]
