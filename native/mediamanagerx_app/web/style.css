@@ -2379,6 +2379,16 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   font: inherit;
 }
 
+.folder-address-input::selection {
+  background: var(--accent);
+  color: #fff;
+}
+
+.folder-address-input::-moz-selection {
+  background: var(--accent);
+  color: #fff;
+}
+
 .folder-address-segment {
   height: 24px;
   padding: 0 8px;
@@ -2449,7 +2459,9 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   border-radius: 8px;
   background: transparent;
   color: var(--fg);
-  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.25;
   text-align: left;
   cursor: pointer;
 }
