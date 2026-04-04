@@ -1,22 +1,19 @@
-# MediaLens v1.1.7
+## MediaLens v1.1.8
 
-## Release Notes
+### ✨ Summary
 
-### Summary
+This release refines similar-image review and Image Comparison to feel more compact, consistent, and responsive across the app. It also fixes live light/dark theme switching so the interface updates correctly without restarting. These updates reduce friction during review, making it faster to compare, decide, and clean up similar images.
 
-This release sharpens the Image Comparison workflow so it is easier to judge mismatched files at a glance and review near-duplicates with clearer visual cues. It also refreshes the README to better highlight duplicate and similar-image cleanup.
+### 🔥 Highlights
 
-### Highlights
+- Similar Groups now uses a tighter sticky summary header and more compact image cards, so reviewing large groups takes less scrolling.
+- The Image Comparison panel now includes improved controls, cleaner slot styling, smoother slider behavior, and more polished preview framing for a more focused comparison experience
 
-- Smaller images in the comparison viewer now scale up to match the larger image for more useful side-by-side inspection.
-- The comparison panel now shows clearer status messages for upscaled images and aspect-ratio differences.
-- Comparison review labels were clarified so `Best Overall` stays tied to the full similar-image group while the panel can separately identify the best image in the current comparison.
+### 🛠 Notes
 
-### Notes
-
-- README copy and screenshots were updated to put duplicate finding, similar-image review, and Image Comparison front and center.
+- Light and dark mode changes now apply instantly across native UI elements and the comparison panel without requiring a restart
 
 ---
 
-Full Changelog:
+📄 Full Changelog:
 <https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md>

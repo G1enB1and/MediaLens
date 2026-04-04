@@ -1,6 +1,59 @@
 # Change Log
 
-## v1.1.7 (Current)
+## v1.1.8 (Current)
+
+### ✨ Summary
+
+This release refines similar-image review and Image Comparison to feel more compact, consistent, and responsive across the app. It also fixes live light/dark theme switching so the interface updates correctly without restarting. These updates reduce friction during review, making it faster to compare, decide, and clean up similar images.
+
+### 🔥 Highlights
+
+- Similar Groups now uses a tighter sticky summary header and more compact image cards, so reviewing large groups takes less scrolling.
+- The Image Comparison panel now includes improved controls, cleaner slot styling, smoother slider behavior, and more polished preview framing for a more focused comparison experience
+
+### Added
+
+#### Comparison Controls
+
+- Added remove (`X`) controls for each comparison slot and a close button for the Image Comparison panel
+- Added smart filename truncation in comparison slots so long names resize cleanly
+- Added on-screen guidance beneath the comparison viewer for mouse-wheel zoom behavior
+
+### Changed
+
+#### Comparison Panel Polish
+
+- Refined the Image Comparison panel layout, spacing, cursor feedback, and rounded preview framing for a more cohesive and responsive feel
+- Improved the center comparison slider so it stays stable while zooming and respects the rounded preview bounds
+- Updated comparison slot and center preview surfaces so light and dark themes now render consistently with the surrounding UI
+
+#### Similar Group Review
+
+- Converted the Similar Groups summary into a compact sticky header with tighter, more readable stats
+- Tightened similar-group cards by removing wasted inner thumbnail spacing and adding cleaner bordered image styling
+- Updated `Auto Resolve All` to visually match other similar-group actions for a more consistent workflow
+
+#### Packaging spec
+
+- Updated the Windows packaging spec to bundle scipy.special modules more explicitly and align hidden imports more closely with MediaLens’ actual SciPy usage.
+
+### Removed
+
+- Removed the extra outer border from the left and right comparison slot cards to simplify the panel chrome
+
+---
+
+## v1.1.7
+
+### Summary
+
+This release sharpens the Image Comparison workflow so it is easier to judge mismatched files at a glance and review near-duplicates with clearer visual cues. It also refreshes the README to better highlight duplicate and similar-image cleanup.
+
+### Highlights
+
+- Smaller images in the comparison viewer now scale up to match the larger image for more useful side-by-side inspection.
+- The comparison panel now shows clearer status messages for upscaled images and aspect-ratio differences.
+- Comparison review labels were clarified so Best Overall stays tied to the full similar-image group while the panel can separately identify the best image in the current comparison.
 
 ### Added
 
@@ -27,6 +80,17 @@
 ---
 
 ## v1.1.6
+
+### Summary
+
+This release introduces Image Comparison, a new workspace for evaluating two images in place without leaving the gallery. It integrates directly with duplicate and similarity review, making it faster to inspect differences, choose the better version, and clean up near-duplicates with confidence.
+
+### Highlights
+
+New Image Comparison panel with left and right image slots plus a central reveal slider for true in-place A/B review
+Load images using drag and drop, browse buttons, or gallery context menu actions such as Compare Images and Compare With Left/Right
+Synchronized zoom and pan keep both images aligned during close inspection, with hold-to-isolate preview on either side for quick single-image checks
+Comparison cards preserve keep/best actions and recalculate smart labels specifically for the current two-image decision instead of reusing broader group context
 
 ### Added
 
@@ -66,6 +130,16 @@
 ---
 
 ## v1.1.5
+
+### Summary
+
+This release improves duplicate cleanup workflows and media playback control while refining navigation and preview behavior for a smoother, more predictable experience. It also greatly improves text detection speed and accuracy.
+
+### Highlights
+
+- Flexible duplicate cleanup now supports both single “Best” selection and multi-file “Keep” workflows.
+- New player controls allow independent GIF autoplay, video looping, and default mute behavior.
+- Text detection is now significantly faster and more accurate.
 
 ### Added
 
@@ -125,6 +199,20 @@
 ---
 
 ## v1.1.4
+
+### Summary
+
+This was a stabilization-focused release that improved video previews and file deletion safety.
+
+After significant rework, video playback is now more stable, and file deletion has been redesigned to be safer, more predictable, and user-controlled.
+
+This update also introduces pinned folders and several UI refinements that improve clarity and consistency.
+
+### Highlights
+
+- Video preview system rebuilt for stable playback, consistent behavior, and reliable interaction.
+- File deletion is now safer and more predictable with recycle bin support and configurable behavior.
+- Pinned folders and UI refinements improve navigation clarity and overall usability.
 
 ### Added
 

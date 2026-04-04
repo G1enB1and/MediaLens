@@ -4,7 +4,13 @@ description: /version-bump - Bumps version in all files and updates CHANGELOG.md
 
 This workflow automates the version release process.
 
-Canonical human-facing copy: `docs/workflows/version-bump.md`
+Formatting rules for all generated changelog and release-note content:
+
+* Never use nested bullet lists.
+* Always add a blank line below every header.
+* Never use horizontal rules like `---` except between release versions in `CHANGELOG.md`, so version boundaries stay easy to skim.
+* Never use emojis or mojibake.
+* Never edit previous version sections. Only add or modify the current version being prepared; past versions are locked and must stay consistent with already published release history.
 
 1. **Calculate New Version**:
     * Read the current version from `VERSION`.
@@ -28,6 +34,24 @@ Canonical human-facing copy: `docs/workflows/version-bump.md`
 2. **Update CHANGELOG.md**:
     * Create a new section at the TOP of `native/mediamanagerx_app/CHANGELOG.md` for the new version.
     * Format: `## v<new_version> (Current)` (and change the old "Current" to just the version number).
+    * Add user-facing release messaging directly into the changelog section before the technical categories:
+
+        ```markdown
+        ## v<new_version> (Current)
+
+        ### Summary
+        <1-2 sentence plain-English overview of why this release matters>
+
+        ### Highlights
+        - <highest-value user-facing improvement>
+        - <second most noticeable improvement>
+        - <optional third user-facing improvement>
+
+        ### Added
+        ...
+        ```
+
+    * Keep `Summary` and `Highlights` concise and non-technical so users reading the in-app `What's New` view can quickly understand why they should care about the update.
     * Categorize all bullets into subheadings: `### Added`, `### Changed`, or `### Removed`.
     * **CRITICAL**: Do NOT change any existing version information below the new section.
 
@@ -39,7 +63,7 @@ Canonical human-facing copy: `docs/workflows/version-bump.md`
     * Use this general structure:
 
         ```markdown
-        ## MediaManagerX v<new_version>
+        ## MediaLens v<new_version>
 
         ### ✨ Summary
         <1-2 sentence plain-English overview of why this release matters>
@@ -65,6 +89,22 @@ Canonical human-facing copy: `docs/workflows/version-bump.md`
         * `🐛 Fixes`
     * Focus on benefits, polish, and user-facing outcomes rather than deep implementation detail.
 
-4. **Verify**:
+4. **Editorial Review Pass**:
+    * After drafting both the new changelog section and `ReleaseNotes.md`, run a separate second-pass review/edit step in a fresh prompt or submission.
+    * This review pass must be separate from the writing pass. Do not combine drafting and reviewing into one request.
+    * In the review pass, pay attention to:
+        * clear user-facing value, not just technical correctness
+        * whether the `Summary` explains why the update matters
+        * whether the `Highlights` are concise, non-repetitive, and focused on reasons to care
+        * avoiding wording that simply repeats the `Added` / `Changed` / `Removed` bullets below
+        * clarity, flow, grammar, and readability for casual users
+        * consistent branding and naming, always using `MediaLens`
+        * keeping tone polished and professional without sounding overhyped
+        * making sure release notes and changelog entries stay aligned with the actual changes in the repo
+        * preserving brevity, especially for in-app `What's New` display
+        * catching awkward phrasing, redundancy, or vague statements that could be made more concrete
+    * Apply worthwhile edits from that second-pass review before finalizing files.
+
+5. **Verify**:
     * Verify all version references in `VERSION`, `main.py`, `installer.iss`, and `pyproject.toml` are consistent.
     * Verify `ReleaseNotes.md` matches the newest changelog version and was written to the repo root.
