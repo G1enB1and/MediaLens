@@ -1440,6 +1440,7 @@ class CompareSlotCard(QFrame):
         self.setMinimumWidth(0)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
         self._entry: dict = {}
+        self._full_name_text: str = "Drop image here"
         self._drag_start_pos: QPoint | None = None
         self._thumb_source_pixmap: QPixmap | None = None
 
@@ -1457,6 +1458,8 @@ class CompareSlotCard(QFrame):
         self.name_label.setObjectName("compareSlotName")
         self.name_label.setContentsMargins(0, 0, 0, 0)
         self.name_label.setMinimumHeight(0)
+        self.name_label.setMinimumWidth(0)
+        self.name_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         header_layout.addWidget(self.name_label, 1)
 
         self.clear_btn = QPushButton("X")
@@ -1540,6 +1543,18 @@ class CompareSlotCard(QFrame):
 
         self._render_entry({})
 
+    def _update_name_elision(self) -> None:
+        metrics = QFontMetrics(self.name_label.font())
+        available_width = max(24, self.name_label.width())
+        elided = metrics.elidedText(self._full_name_text, Qt.TextElideMode.ElideRight, available_width)
+        if self.name_label.text() != elided:
+            self.name_label.setText(elided)
+        self.name_label.setToolTip(self._full_name_text if elided != self._full_name_text else "")
+
+    def _set_name_text(self, text: str) -> None:
+        self._full_name_text = str(text or "")
+        self._update_name_elision()
+
     def apply_theme_styles(self, text: str, text_muted: str, accent_hex: str, accent_raw: str, thumb_bg: str, border: str) -> None:
         accent_color = QColor(accent_raw)
         btn_base = Theme.get_input_bg(accent_color)
@@ -1552,6 +1567,7 @@ class CompareSlotCard(QFrame):
         name_font = QFont(self.name_label.font())
         name_font.setBold(True)
         self.name_label.setFont(name_font)
+        self._update_name_elision()
 
         reason_font = QFont(self.reasons_label.font())
         reason_font.setBold(True)
@@ -1694,7 +1710,7 @@ class CompareSlotCard(QFrame):
         self.style().unpolish(self)
         self.style().polish(self)
         if not has_entry:
-            self.name_label.setText("Drop image here")
+            self._set_name_text("Drop image here")
             self._thumb_source_pixmap = None
             self.thumb_label.setPixmap(QPixmap())
             self.thumb_label.setText("Left" if self.slot_name == "left" else "Right")
@@ -1710,7 +1726,7 @@ class CompareSlotCard(QFrame):
             self.delete_btn.setEnabled(False)
             return
 
-        self.name_label.setText(str(self._entry.get("name") or Path(path).name))
+        self._set_name_text(str(self._entry.get("name") or Path(path).name))
         self._thumb_source_pixmap = self._load_thumb(path)
         self.thumb_label.setText("")
         self._update_thumb_pixmap()
@@ -1814,6 +1830,7 @@ class CompareSlotCard(QFrame):
 
     def resizeEvent(self, event) -> None:
         self._update_thumb_pixmap()
+        self._update_name_elision()
         super().resizeEvent(event)
 
 
