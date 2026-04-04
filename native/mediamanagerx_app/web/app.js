@@ -4154,6 +4154,8 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
   const compareImageBtn = document.getElementById('ctxCompareImage');
   const compareLeftBtn = document.getElementById('ctxCompareLeft');
   const compareRightBtn = document.getElementById('ctxCompareRight');
+  const compareLeftOccupied = !!compareSlotPath('left');
+  const compareRightOccupied = !!compareSlotPath('right');
   const compareTargetPaths = (() => {
     if (item && item.path) {
       if (gSelectedPaths.has(item.path)) {
@@ -4170,9 +4172,9 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
     });
   })();
   if (compareImagesBtn) compareImagesBtn.style.display = compareTargetPaths.length === 2 ? 'block' : 'none';
-  if (compareImageBtn) compareImageBtn.style.display = compareTargetPaths.length === 1 && compareHasEmptySlot() ? 'block' : 'none';
-  if (compareLeftBtn) compareLeftBtn.style.display = compareTargetPaths.length === 1 && !!compareSlotPath('left') ? 'block' : 'none';
-  if (compareRightBtn) compareRightBtn.style.display = compareTargetPaths.length === 1 && !!compareSlotPath('right') ? 'block' : 'none';
+  if (compareImageBtn) compareImageBtn.style.display = compareTargetPaths.length === 1 && !compareLeftOccupied && !compareRightOccupied ? 'block' : 'none';
+  if (compareLeftBtn) compareLeftBtn.style.display = compareTargetPaths.length === 1 && compareRightOccupied ? 'block' : 'none';
+  if (compareRightBtn) compareRightBtn.style.display = compareTargetPaths.length === 1 && compareLeftOccupied ? 'block' : 'none';
   const collapseAllBtn = document.getElementById('ctxCollapseAll');
   const expandAllBtn = document.getElementById('ctxExpandAll');
   const showGroupActions = gGroupBy === 'date' || isDuplicateModeActive();
@@ -6425,6 +6427,8 @@ async function main() {
     // React to future changes
     if (bridge.selectionChanged) {
       bridge.selectionChanged.connect(function (folders) {
+        deselectAll();
+        syncMetadataToBridge();
         gSelectedFolders = folders || [];
         gPage = 0;
         refreshFromBridge(bridge);
