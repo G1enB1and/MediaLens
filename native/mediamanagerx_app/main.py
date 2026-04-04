@@ -6210,6 +6210,26 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("MediaLens")
         self.resize(1200, 800)
 
+        startup_settings = QSettings("G1enB1and", "MediaManagerX")
+        startup_theme = str(startup_settings.value("ui/theme_mode", "dark", type=str) or "dark")
+        startup_accent = str(startup_settings.value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT)
+        Theme.set_theme_mode(startup_theme)
+        startup_bg = QColor(Theme.get_bg(QColor(startup_accent)))
+        startup_fg = QColor(Theme.get_text_color())
+        startup_palette = self.palette()
+        startup_palette.setColor(QPalette.ColorRole.Window, startup_bg)
+        startup_palette.setColor(QPalette.ColorRole.Base, startup_bg)
+        startup_palette.setColor(QPalette.ColorRole.Button, startup_bg)
+        startup_palette.setColor(QPalette.ColorRole.WindowText, startup_fg)
+        self.setAutoFillBackground(True)
+        self.setPalette(startup_palette)
+        self.setStyleSheet(f"QMainWindow {{ background-color: {startup_bg.name()}; color: {startup_fg.name()}; }}")
+        startup_placeholder = QWidget(self)
+        startup_placeholder.setAutoFillBackground(True)
+        startup_placeholder.setPalette(startup_palette)
+        startup_placeholder.setStyleSheet(f"background-color: {startup_bg.name()};")
+        self.setCentralWidget(startup_placeholder)
+
         # Set window icon
         icon_path = Path(__file__).with_name("web") / "MediaLens-Logo.ico"
         if icon_path.exists():
@@ -6560,7 +6580,7 @@ class MainWindow(QMainWindow):
         self.splitter = splitter
 
         # Left: folder tree (native)
-        self.left_panel = QWidget()
+        self.left_panel = QWidget(splitter)
         left_layout = QVBoxLayout(self.left_panel)
         left_layout.setContentsMargins(10, 10, 10, 10)
         left_layout.setSpacing(0)
@@ -6647,7 +6667,7 @@ class MainWindow(QMainWindow):
         self.left_sections_splitter.setChildrenCollapsible(False)
         self.left_sections_splitter.setHandleWidth(5)
 
-        pinned_section = QWidget()
+        pinned_section = QWidget(self.left_sections_splitter)
         pinned_layout = QVBoxLayout(pinned_section)
         pinned_layout.setContentsMargins(0, 0, 0, 0)
         pinned_layout.setSpacing(6)
@@ -6663,12 +6683,12 @@ class MainWindow(QMainWindow):
         pinned_layout.addWidget(self.pinned_folders_list, 1)
         pinned_section.setMinimumHeight(self.pinned_header.sizeHint().height() + pinned_layout.contentsMargins().top())
 
-        folders_section = QWidget()
+        folders_section = QWidget(self.left_sections_splitter)
         folders_layout = QVBoxLayout(folders_section)
         folders_layout.setContentsMargins(0, 0, 0, 0)
         folders_layout.setSpacing(6)
 
-        folders_header_row = QWidget()
+        folders_header_row = QWidget(folders_section)
         folders_header_layout = QHBoxLayout(folders_header_row)
         folders_header_layout.setContentsMargins(0, 0, 0, 0)
         folders_header_layout.setSpacing(6)
@@ -6686,7 +6706,7 @@ class MainWindow(QMainWindow):
         folders_layout.addWidget(folders_header_row)
         folders_layout.addWidget(self.tree, 1)
 
-        collections_section = QWidget()
+        collections_section = QWidget(self.left_sections_splitter)
         collections_layout = QVBoxLayout(collections_section)
         collections_layout.setContentsMargins(0, 8, 0, 0)
         collections_layout.setSpacing(6)
@@ -6732,7 +6752,7 @@ class MainWindow(QMainWindow):
             pass
 
         # Center: embedded WebEngine UI scaffold + future bottom chat panel
-        center_container = QWidget()
+        center_container = QWidget(splitter)
         center_container_layout = QVBoxLayout(center_container)
         center_container_layout.setContentsMargins(0, 0, 0, 0)
 
@@ -6743,11 +6763,11 @@ class MainWindow(QMainWindow):
         center_splitter.setChildrenCollapsible(False)
         self.center_splitter = center_splitter
 
-        center = QWidget()
+        center = QWidget(center_splitter)
         center_layout = QVBoxLayout(center)
         center_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.web = GalleryView(self)
+        self.web = GalleryView(center)
         center_layout.addWidget(self.web)
 
         # Native loading overlay shown while the WebEngine page itself is loading.
@@ -6791,7 +6811,7 @@ class MainWindow(QMainWindow):
         wl_layout.addStretch(1)
 
         # Right: Metadata Panel
-        self.right_panel = QWidget()
+        self.right_panel = QWidget(splitter)
         self.right_panel.setObjectName("rightPanel")
         outer_right_layout = QVBoxLayout(self.right_panel)
         outer_right_layout.setContentsMargins(0, 0, 0, 0)
@@ -6804,7 +6824,7 @@ class MainWindow(QMainWindow):
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.scroll_area.setObjectName("metaScrollArea")
         
-        self.scroll_container = QWidget()
+        self.scroll_container = QWidget(self.scroll_area)
         self.scroll_container.setObjectName("rightPanelScrollContainer")
         right_layout = QVBoxLayout(self.scroll_container)
         right_layout.setContentsMargins(12, 12, 12, 12)
@@ -6812,7 +6832,7 @@ class MainWindow(QMainWindow):
         self.right_layout = right_layout
 
         # Preview Header Row (Always visible title + toggle buttons)
-        self.preview_header_row = QWidget()
+        self.preview_header_row = QWidget(self.scroll_container)
         self.preview_header_row.setObjectName("previewHeaderRow")
         preview_header_layout = QHBoxLayout(self.preview_header_row)
         preview_header_layout.setContentsMargins(0, 0, 0, 0)
@@ -7275,7 +7295,7 @@ class MainWindow(QMainWindow):
 
         self.web.setUrl(QUrl.fromLocalFile(str(index_path.resolve())))
 
-        self.bottom_panel = QWidget()
+        self.bottom_panel = QWidget(center_splitter)
         self.bottom_panel.setObjectName("bottomPanel")
         self.bottom_panel.setMinimumHeight(0)
         self.bottom_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
@@ -7283,7 +7303,7 @@ class MainWindow(QMainWindow):
         bottom_layout.setContentsMargins(14, 10, 14, 14)
         bottom_layout.setSpacing(6)
 
-        self.bottom_panel_header_row = QWidget()
+        self.bottom_panel_header_row = QWidget(self.bottom_panel)
         bottom_panel_header_layout = QHBoxLayout(self.bottom_panel_header_row)
         bottom_panel_header_layout.setContentsMargins(0, 0, 0, 0)
         bottom_panel_header_layout.setSpacing(8)
@@ -11189,8 +11209,11 @@ class MainWindow(QMainWindow):
         text_muted = Theme.get_text_muted()
         is_light = Theme.get_is_light()
         
-        # Windows Title Bar
-        self._set_window_title_bar_theme(not is_light, sb_bg)
+        # Only touch the native title bar after the top-level window is visible.
+        # Forcing winId() during construction can create an early transient HWND
+        # on Windows, which shows up as a blank startup window before the real UI.
+        if self.isVisible():
+            self._set_window_title_bar_theme(not is_light, sb_bg)
         
         # Native Tooltip Style
         if hasattr(self, "native_tooltip"):
@@ -11204,12 +11227,14 @@ class MainWindow(QMainWindow):
         # Loading Screen
         load_fg = "rgba(0,0,0,200)" if is_light else "rgba(255,255,255,200)"
         load_bg = "rgba(0,0,0,25)" if is_light else "rgba(255,255,255,25)"
-        self.web_loading_label.setStyleSheet(f"color: {load_fg}; font-size: 13px;")
-        self.web_loading_bar.setStyleSheet(
-            f"QProgressBar{{background: {load_bg}; border-radius:"
-            " 5px;}}"
-            f"QProgressBar::chunk{{background: {accent_str}; border-radius: 5px;}}"
-        )
+        if self.web_loading_label is not None:
+            self.web_loading_label.setStyleSheet(f"color: {load_fg}; font-size: 13px;")
+        if self.web_loading_bar is not None:
+            self.web_loading_bar.setStyleSheet(
+                f"QProgressBar{{background: {load_bg}; border-radius:"
+                " 5px;}}"
+                f"QProgressBar::chunk{{background: {accent_str}; border-radius: 5px;}}"
+            )
         
         # Left Panel (Folders)
         self.left_panel.setStyleSheet(f"""
@@ -11750,12 +11775,14 @@ class MainWindow(QMainWindow):
 
     def _set_web_loading(self, on: bool) -> None:
         try:
+            if self.web is None or self.web_loading is None:
+                return
             if on:
                 self._web_loading_shown_ms = int(__import__("time").time() * 1000)
                 self.web_loading.setGeometry(self.web.rect())
                 self.web_loading.setVisible(True)
                 self.web_loading.raise_()
-                if self.video_overlay.isVisible():
+                if self.video_overlay is not None and self.video_overlay.isVisible():
                     self.video_overlay.raise_()
                 return
 
@@ -11775,7 +11802,8 @@ class MainWindow(QMainWindow):
 
     def _on_web_load_progress(self, pct: int) -> None:
         try:
-            self.web_loading_bar.setValue(int(pct))
+            if self.web_loading_bar is not None:
+                self.web_loading_bar.setValue(int(pct))
         except Exception:
             pass
 
@@ -11905,12 +11933,12 @@ class MainWindow(QMainWindow):
         self._update_sidebar_action_buttons()
         self._update_sidebar_input_widths()
         # Keep overlays pinned to the web view.
-        if hasattr(self, "web_loading"):
+        if self.web is not None and self.web_loading is not None:
             self.web_loading.setGeometry(self.web.rect())
             if self.web_loading.isVisible():
                 self.web_loading.raise_()
 
-        if hasattr(self, "video_overlay") and self.video_overlay.isVisible():
+        if self.web is not None and self.video_overlay is not None and self.video_overlay.isVisible():
             # In inplace mode, the geometry is set by JS, so we don't want to reset it here.
             # Only reset if it's in full overlay mode.
             if not self.video_overlay.is_inplace_mode():
@@ -12125,13 +12153,27 @@ class MainWindow(QMainWindow):
 
 def main() -> None:
     app = QApplication(sys.argv)
-    
-    # Global styling is now handled dynamically in MainWindow
-    app.setStyleSheet("")
 
     # Ensure QStandardPaths.AppDataLocation resolves to a stable, app-specific dir.
     app.setOrganizationName("G1enB1and")
     app.setApplicationName("MediaLens")
+
+    startup_settings = QSettings("G1enB1and", "MediaManagerX")
+    startup_theme = str(startup_settings.value("ui/theme_mode", "dark", type=str) or "dark")
+    startup_accent = str(startup_settings.value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT)
+    Theme.set_theme_mode(startup_theme)
+    startup_bg = QColor(Theme.get_bg(QColor(startup_accent)))
+    startup_fg = QColor(Theme.get_text_color())
+    palette = app.palette()
+    palette.setColor(QPalette.ColorRole.Window, startup_bg)
+    palette.setColor(QPalette.ColorRole.Base, startup_bg)
+    palette.setColor(QPalette.ColorRole.Button, startup_bg)
+    palette.setColor(QPalette.ColorRole.WindowText, startup_fg)
+    palette.setColor(QPalette.ColorRole.Text, startup_fg)
+    app.setPalette(palette)
+    app.setStyleSheet(
+        f"QWidget {{ background-color: {startup_bg.name()}; color: {startup_fg.name()}; }}"
+    )
 
     win = MainWindow()
     win.show()
