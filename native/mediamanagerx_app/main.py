@@ -696,7 +696,7 @@ class CustomSplitterHandle(QSplitterHandle):
 
         painter.fillRect(self.rect(), track)
         pen = QPen(color)
-        pen.setWidth(2 if self.underMouse() else 1)
+        pen.setWidth(2)
         painter.setPen(pen)
         mid_x = self.rect().center().x()
         mid_y = self.rect().center().y()
@@ -884,6 +884,9 @@ class CollectionListWidget(QListWidget):
         self.setDragEnabled(False)
         self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        if self.viewport() is not None:
+            self.viewport().setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         item = self.itemAt(event.position().toPoint())
@@ -1147,10 +1150,36 @@ class AccentSelectionTreeDelegate(QStyledItemDelegate):
         self.bridge = bridge
 
     def paint(self, painter: QPainter, option, index) -> None:
-        opt = option
-        self.initStyleOption(opt, index)
+        from PySide6.QtWidgets import QStyleOptionViewItem
+        from app.mediamanager.utils.pathing import normalize_windows_path
 
-        if bool(opt.state & QStyle.StateFlag.State_Selected):
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        tree = self.parent()
+        is_active_index = bool(tree is not None and hasattr(tree, "currentIndex") and tree.currentIndex() == index)
+        is_selected = bool(opt.state & QStyle.StateFlag.State_Selected)
+        active_folder_path = ""
+        try:
+            selected_folders = getattr(self.bridge, "_selected_folders", []) or []
+            if selected_folders:
+                active_folder_path = normalize_windows_path(str(selected_folders[0] or "")).rstrip("/")
+        except Exception:
+            active_folder_path = ""
+        item_path = ""
+        try:
+            model = index.model()
+            if hasattr(model, "mapToSource") and hasattr(model, "sourceModel"):
+                source_idx = model.mapToSource(index)
+                source_model = model.sourceModel()
+                if hasattr(source_model, "filePath"):
+                    item_path = normalize_windows_path(str(source_model.filePath(source_idx) or "")).rstrip("/")
+            elif hasattr(model, "filePath"):
+                item_path = normalize_windows_path(str(model.filePath(index) or "")).rstrip("/")
+        except Exception:
+            item_path = ""
+        is_active_path = bool(active_folder_path and item_path and item_path == active_folder_path)
+
+        if is_selected or is_active_index or is_active_path:
             accent_str = str(self.bridge.settings.value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT)
             accent = QColor(accent_str)
             
@@ -1159,10 +1188,12 @@ class AccentSelectionTreeDelegate(QStyledItemDelegate):
             accent = QColor(Theme.mix(text_color, accent, 0.76))
 
             opt.font.setBold(True)
+            opt.palette.setColor(opt.palette.ColorRole.Highlight, Qt.GlobalColor.transparent)
             opt.palette.setColor(opt.palette.ColorRole.Text, accent)
             opt.palette.setColor(opt.palette.ColorRole.WindowText, accent)
             opt.palette.setColor(opt.palette.ColorRole.HighlightedText, accent)
-            opt.state &= ~QStyle.StateFlag.State_Selected
+            if is_active_index or is_active_path:
+                opt.state |= QStyle.StateFlag.State_Selected
             opt.state &= ~QStyle.StateFlag.State_HasFocus
 
         super().paint(painter, opt, index)
@@ -6045,7 +6076,7 @@ class NativeSeparator(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         pen = QPen(QColor(Theme.get_border(QColor(Theme.ACCENT_DEFAULT))))
-        pen.setWidth(1)
+        pen.setWidth(2)
         pen.setCosmetic(True)
         painter.setPen(pen)
         y = self.height() // 2
@@ -6589,6 +6620,38 @@ class MainWindow(QMainWindow):
         left_layout.setContentsMargins(10, 10, 10, 10)
         left_layout.setSpacing(0)
 
+        self.left_brand_row = QWidget(self.left_panel)
+        self.left_brand_row.setObjectName("leftBrandRow")
+        left_brand_layout = QHBoxLayout(self.left_brand_row)
+        left_brand_layout.setContentsMargins(0, 0, 0, 10)
+        left_brand_layout.setSpacing(10)
+
+        self.left_brand_logo = QLabel(self.left_brand_row)
+        self.left_brand_logo.setObjectName("leftBrandLogo")
+        self.left_brand_logo.setFixedSize(24, 24)
+        self.left_brand_logo.setScaledContents(True)
+        logo_path = Path(__file__).with_name("web") / "MediaLens-Logo-3-64.png"
+        if logo_path.exists():
+            logo_pixmap = QPixmap(str(logo_path))
+            if not logo_pixmap.isNull():
+                self.left_brand_logo.setPixmap(
+                    logo_pixmap.scaled(
+                        24,
+                        24,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                )
+        left_brand_layout.addWidget(self.left_brand_logo, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        self.left_brand_label = QLabel("MediaLens", self.left_brand_row)
+        self.left_brand_label.setObjectName("leftBrandLabel")
+        left_brand_layout.addWidget(self.left_brand_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        left_brand_layout.addStretch(1)
+        left_layout.addWidget(self.left_brand_row, 0)
+        self.left_brand_separator = self._add_sep("leftBrandSeparator")
+        left_layout.addWidget(self.left_brand_separator, 0)
+
         # Choose initial root based on settings.
         default_root = None
         if self.bridge._restore_last_enabled():
@@ -6689,7 +6752,7 @@ class MainWindow(QMainWindow):
 
         folders_section = QWidget(self.left_sections_splitter)
         folders_layout = QVBoxLayout(folders_section)
-        folders_layout.setContentsMargins(0, 0, 0, 0)
+        folders_layout.setContentsMargins(0, 8, 0, 0)
         folders_layout.setSpacing(6)
 
         folders_header_row = QWidget(folders_section)
@@ -7767,6 +7830,14 @@ class MainWindow(QMainWindow):
             if root_idx.isValid() and not self.tree.isExpanded(root_idx):
                 self.bridge._log(f"Tree: Expanding root index (normalized) for {norm_root}")
                 self.tree.expand(root_idx)
+
+        current_path = self.bridge._selected_folders[0] if self.bridge._selected_folders else ""
+        if current_path:
+            try:
+                self._sync_tree_to_folder(current_path)
+                self.tree.viewport().update()
+            except Exception as exc:
+                self.bridge._log(f"Tree current-folder sync failed after directory load: {exc}")
 
     def _on_tree_selection(self, *_args) -> None:
         if self._suppress_tree_selection_history:
@@ -11284,16 +11355,28 @@ class MainWindow(QMainWindow):
                 border: none;
                 border-radius: 0px;
                 padding: 0px;
+                outline: 0;
             }}
             QListWidget#pinnedFoldersList::item {{
                 padding: 0px;
                 border: none;
                 border-radius: 6px;
                 background-color: transparent;
+                outline: 0;
             }}
             QListWidget#pinnedFoldersList::item:selected {{
                 background-color: {Theme.get_accent_soft(accent)};
                 border: 1px solid {accent_str};
+            }}
+            QListWidget#pinnedFoldersList::item:selected:active {{
+                background-color: {Theme.get_accent_soft(accent)};
+                border: 1px solid {accent_str};
+                outline: none;
+            }}
+            QListWidget#pinnedFoldersList::item:selected:!active {{
+                background-color: {Theme.get_accent_soft(accent)};
+                border: 1px solid {accent_str};
+                outline: none;
             }}
             QListWidget#pinnedFoldersList::item:hover {{
                 background-color: {Theme.get_control_bg(accent)};
@@ -11312,6 +11395,16 @@ class MainWindow(QMainWindow):
             }}
             QLabel#pinnedFolderText[selected="true"] {{
                 font-weight: 700;
+            }}
+            QWidget#leftBrandRow, QLabel#leftBrandLogo, QLabel#leftBrandLabel {{
+                background: transparent;
+                border: none;
+            }}
+            QLabel#leftBrandLabel {{
+                color: {text};
+                font-size: 16px;
+                font-weight: 700;
+                padding-bottom: 1px;
             }}
             QPushButton#foldersMenuButton {{
                 background-color: {Theme.get_control_bg(accent)};
@@ -11544,6 +11637,11 @@ class MainWindow(QMainWindow):
         try:
             accent = getattr(self, "_current_accent", Theme.ACCENT_DEFAULT)
             self._update_native_styles(accent)
+        except Exception:
+            pass
+        try:
+            if self._pending_tree_sync_path:
+                QTimer.singleShot(0, self._apply_pending_tree_sync)
         except Exception:
             pass
 
