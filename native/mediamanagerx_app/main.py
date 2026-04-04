@@ -156,6 +156,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QHBoxLayout,
     QProgressBar,
+    QSplashScreen,
     QMenu,
     QInputDialog,
     QPlainTextEdit,
@@ -3942,6 +3943,7 @@ class Bridge(QObject):
                 "ui.show_right_panel": bool(self.settings.value("ui/show_right_panel", True, type=bool)),
                 "ui.show_bottom_panel": bool(self.settings.value("ui/show_bottom_panel", True, type=bool)),
                 "ui.show_dismissed_progress_toasts": bool(self.settings.value("ui/show_dismissed_progress_toasts", False, type=bool)),
+                "ui.show_splash_screen": bool(self.settings.value("ui/show_splash_screen", True, type=bool)),
                 "ui.preview_above_details": self._preview_above_details_enabled(),
                 "ui.theme_mode": str(self.settings.value("ui/theme_mode", "dark", type=str) or "dark"),
                 "metadata.display.res": bool(self.settings.value("metadata/display/res", True, type=bool)),
@@ -4012,6 +4014,7 @@ class Bridge(QObject):
                 "ui.show_right_panel": True,
                 "ui.show_bottom_panel": True,
                 "ui.show_dismissed_progress_toasts": False,
+                "ui.show_splash_screen": True,
                 "ui.preview_above_details": True,
                 "ui.theme_mode": "dark",
             }
@@ -4366,6 +4369,7 @@ class Bridge(QObject):
                 "ui.show_right_panel", 
                 "ui.show_bottom_panel",
                 "ui.show_dismissed_progress_toasts",
+                "ui.show_splash_screen",
                 "ui.preview_above_details",
                 "updates.check_on_launch"
             )
@@ -12151,6 +12155,43 @@ class MainWindow(QMainWindow):
         QMessageBox.warning(self, "Update Error", message)
 
 
+def _create_startup_splash(app: QApplication, startup_bg: QColor) -> QSplashScreen | None:
+    try:
+        splash_path = Path(__file__).with_name("web") / "MediaLens-Logo-1024.png"
+        if not splash_path.exists():
+            return None
+        source = QPixmap(str(splash_path))
+        if source.isNull():
+            return None
+
+        screen = app.primaryScreen()
+        target_w = 1024
+        target_h = 1024
+        if screen is not None:
+            available = screen.availableGeometry().size()
+            max_w = max(320, min(target_w, int(available.width() * 0.8)))
+            max_h = max(320, min(target_h, int(available.height() * 0.8)))
+        else:
+            max_w = target_w
+            max_h = target_h
+
+        scaled = source.scaled(max_w, max_h, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        splash_pixmap = QPixmap(scaled.size())
+        splash_pixmap.fill(Qt.GlobalColor.transparent)
+        splash_pixmap.setDevicePixelRatio(scaled.devicePixelRatio())
+        painter = QPainter(splash_pixmap)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+        painter.drawPixmap(0, 0, scaled)
+        painter.end()
+
+        splash = QSplashScreen(splash_pixmap)
+        splash.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        splash.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+        return splash
+    except Exception:
+        return None
+
+
 def main() -> None:
     app = QApplication(sys.argv)
 
@@ -12161,6 +12202,7 @@ def main() -> None:
     startup_settings = QSettings("G1enB1and", "MediaManagerX")
     startup_theme = str(startup_settings.value("ui/theme_mode", "dark", type=str) or "dark")
     startup_accent = str(startup_settings.value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT)
+    show_splash = bool(startup_settings.value("ui/show_splash_screen", True, type=bool))
     Theme.set_theme_mode(startup_theme)
     startup_bg = QColor(Theme.get_bg(QColor(startup_accent)))
     startup_fg = QColor(Theme.get_text_color())
@@ -12175,8 +12217,39 @@ def main() -> None:
         f"QWidget {{ background-color: {startup_bg.name()}; color: {startup_fg.name()}; }}"
     )
 
+    splash = _create_startup_splash(app, startup_bg) if show_splash else None
+    if splash is not None:
+        splash.show()
+        app.processEvents()
+
     win = MainWindow()
+
+    splash_closed = False
+
+    def _finish_splash() -> None:
+        nonlocal splash_closed
+        if splash is None or splash_closed:
+            return
+        splash_closed = True
+        if win.isVisible():
+            splash.finish(win)
+        else:
+            splash.close()
+
+    if splash is not None:
+        try:
+            win.web.loadFinished.connect(lambda _ok: _finish_splash())
+        except Exception:
+            pass
+        QTimer.singleShot(4000, _finish_splash)
+
     win.show()
+
+    if splash is None:
+        pass
+    elif win.web is None:
+        _finish_splash()
+
     sys.exit(app.exec())
 
 

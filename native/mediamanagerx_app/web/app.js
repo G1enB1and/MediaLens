@@ -5438,6 +5438,14 @@ function wireSettings() {
     });
   }
 
+  const splashToggle = document.getElementById('toggleShowSplashScreen');
+  if (splashToggle) {
+    splashToggle.addEventListener('change', () => {
+      if (!gBridge || !gBridge.set_setting_bool) return;
+      gBridge.set_setting_bool('ui.show_splash_screen', !!splashToggle.checked, function () { });
+    });
+  }
+
   const btnCheckUpdate = document.getElementById('btnCheckUpdate');
   if (btnCheckUpdate) {
     btnCheckUpdate.addEventListener('click', () => {
@@ -6372,6 +6380,8 @@ async function main() {
       updateThemeAwareIcons(theme);
       const radio = document.getElementById(theme === 'light' ? 'themeLight' : 'themeDark');
       if (radio) radio.checked = true;
+      const splashToggle = document.getElementById('toggleShowSplashScreen');
+      if (splashToggle) splashToggle.checked = (s && s['ui.show_splash_screen']) !== false;
 
       updateSidebarButtonIcons('left', !!(s && s['ui.show_left_panel']));
       updateSidebarButtonIcons('bottom', !!(s && s['ui.show_bottom_panel']));
