@@ -276,6 +276,8 @@ _install_crash_reporting()
 
 class Theme:
     """Centralized theme system with neutral surfaces and restrained accent usage."""
+    _theme_mode_override: str | None = None
+
     @staticmethod
     def mix(base_hex: str, accent_color: QColor | str, strength: float) -> str:
         """Mix a base hex color with an accent QColor (or hex string)."""
@@ -295,9 +297,19 @@ class Theme:
     BASE_SIDEBAR_BG_LIGHT = "#fbfbfc"
     BASE_CONTROL_BG_LIGHT = "#ffffff"
     BASE_BORDER_LIGHT = "#d9dde3"
+
+    @staticmethod
+    def set_theme_mode(mode: str | None) -> None:
+        clean = str(mode or "").strip().lower()
+        if clean not in {"light", "dark"}:
+            Theme._theme_mode_override = None
+            return
+        Theme._theme_mode_override = clean
     
     @staticmethod
     def get_is_light() -> bool:
+        if Theme._theme_mode_override in {"light", "dark"}:
+            return Theme._theme_mode_override == "light"
         settings = QSettings("G1enB1and", "MediaManagerX")
         val = settings.value("ui/theme_mode", "dark")
         # Ensure we handle both string and potential type-wrapped values cleanly
@@ -1307,7 +1319,8 @@ class CompareRevealViewer(QWidget):
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-        painter.fillRect(self.rect(), QColor("#121212"))
+        viewer_bg = "#ffffff" if Theme.get_is_light() else "#121212"
+        painter.fillRect(self.rect(), QColor(viewer_bg))
 
         available_left = self._left_image is not None and not self._left_image.isNull()
         available_right = self._right_image is not None and not self._right_image.isNull()
@@ -1557,11 +1570,18 @@ class CompareSlotCard(QFrame):
 
     def apply_theme_styles(self, text: str, text_muted: str, accent_hex: str, accent_raw: str, thumb_bg: str, border: str) -> None:
         accent_color = QColor(accent_raw)
+        is_light = Theme.get_is_light()
         btn_base = Theme.get_input_bg(accent_color)
         btn_hover = Theme.get_btn_save_hover(accent_color)
         btn_border = Theme.get_input_border(accent_color)
         btn_border_hover = Theme.mix(Theme.get_border(accent_color), accent_color, 0.28)
         btn_text = Theme.mix(text, QColor("#000000" if Theme.get_is_light() else "#ffffff"), 0.0)
+        close_btn_bg = "#eceef2" if is_light else "#2f2f2f"
+        close_btn_hover_bg = "#e4e8ee" if is_light else "#3a3a3a"
+        close_btn_disabled_bg = "#f1f3f6" if is_light else "#262626"
+        close_btn_text = text if is_light else "#f2f2f2"
+        close_btn_hover_text = text if is_light else "#ffffff"
+        close_btn_disabled_text = text_muted if is_light else "#9a9a9a"
         check_svg = (Path(__file__).with_name("web") / "scrollbar_arrows" / "check.svg").as_posix()
 
         name_font = QFont(self.name_label.font())
@@ -1581,21 +1601,21 @@ class CompareSlotCard(QFrame):
         self.clear_btn.setStyleSheet(
             f"""
             QPushButton#compareSlotClearButton {{
-                background-color: #2f2f2f;
-                color: #f2f2f2;
+                background-color: {close_btn_bg};
+                color: {close_btn_text};
                 border: 1px solid {btn_border};
                 border-radius: 4px;
                 font-weight: 700;
                 padding: 0px;
             }}
             QPushButton#compareSlotClearButton:hover {{
-                background-color: #3a3a3a;
-                color: #ffffff;
+                background-color: {close_btn_hover_bg};
+                color: {close_btn_hover_text};
                 border-color: {accent_raw};
             }}
             QPushButton#compareSlotClearButton:disabled {{
-                background-color: #262626;
-                color: #9a9a9a;
+                background-color: {close_btn_disabled_bg};
+                color: {close_btn_disabled_text};
                 border-color: {btn_border};
             }}
             """
@@ -1606,7 +1626,7 @@ class CompareSlotCard(QFrame):
         self.reasons_label.setStyleSheet(f"color: {accent_hex}; font-weight: 700;")
         self.best_label.setStyleSheet(f"color: {accent_hex}; font-weight: 700;")
         self.thumb_frame.setStyleSheet(
-            "background-color: #2d2d30; border: 1px solid #3b3b40; border-radius: 10px;"
+            f"background-color: {thumb_bg}; border: 1px solid {border}; border-radius: 10px;"
         )
         self.thumb_wrap.setStyleSheet("background: transparent; border: none;")
         self.thumb_label.setStyleSheet(
@@ -1834,6 +1854,48 @@ class CompareSlotCard(QFrame):
         super().resizeEvent(event)
 
 
+class ElidedInfoLabel(QLabel):
+    def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
+        super().__init__("", parent)
+        self._full_text: str = ""
+        self.setWordWrap(False)
+        self.setText(text)
+
+    def setText(self, text: str) -> None:  # type: ignore[override]
+        self._full_text = str(text or "")
+        self._apply_elision()
+        self.updateGeometry()
+
+    def minimumSizeHint(self) -> QSize:
+        metrics = QFontMetrics(self.font())
+        margins = self.contentsMargins()
+        line_count = max(1, len(self._full_text.splitlines()) or 1)
+        height = metrics.lineSpacing() * line_count + margins.top() + margins.bottom()
+        return QSize(0, height)
+
+    def sizeHint(self) -> QSize:
+        return self.minimumSizeHint()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._apply_elision()
+
+    def _apply_elision(self) -> None:
+        metrics = QFontMetrics(self.font())
+        available_width = self.contentsRect().width()
+        full_lines = self._full_text.splitlines() or [""]
+        if available_width <= 0:
+            display_text = "\n".join(full_lines)
+        else:
+            display_text = "\n".join(
+                metrics.elidedText(line, Qt.TextElideMode.ElideRight, available_width)
+                for line in full_lines
+            )
+        super().setText(display_text)
+        full_text = "\n".join(full_lines).strip()
+        self.setToolTip(full_text if full_text and display_text != "\n".join(full_lines) else "")
+
+
 class ComparePanel(QWidget):
     def __init__(self, bridge: "Bridge", parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1849,8 +1911,18 @@ class ComparePanel(QWidget):
         self.left_slot = CompareSlotCard("left")
         self.viewer = CompareRevealViewer()
         self.right_slot = CompareSlotCard("right")
-        self.viewer_warning = QLabel("")
+        self._viewer_hint_text = "Zoom to cursor location with mouse scroll wheel"
+        self._viewer_warning_lines: list[str] = []
+        self.viewer_hint = ElidedInfoLabel("Zoom to cursor location with mouse scroll wheel")
+        self.viewer_hint.setObjectName("compareViewerHint")
+        self.viewer_hint.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self.viewer_hint.setMinimumWidth(0)
+        self.viewer_hint.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.viewer_warning = ElidedInfoLabel("")
         self.viewer_warning.setObjectName("compareViewerWarning")
+        self.viewer_warning.setMinimumWidth(0)
+        self.viewer_warning.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self.viewer_warning.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.viewer_warning.setVisible(False)
         self.left_scroll = QScrollArea()
         self.right_scroll = QScrollArea()
@@ -1859,7 +1931,8 @@ class ComparePanel(QWidget):
         viewer_layout.setContentsMargins(0, 0, 0, 0)
         viewer_layout.setSpacing(8)
         viewer_layout.addWidget(self.viewer, 1)
-        viewer_layout.addWidget(self.viewer_warning, 0, Qt.AlignmentFlag.AlignHCenter)
+        viewer_layout.addWidget(self.viewer_hint, 0)
+        viewer_layout.addWidget(self.viewer_warning, 0)
         for scroll, slot in ((self.left_scroll, self.left_slot), (self.right_scroll, self.right_slot)):
             scroll.setWidget(slot)
             scroll.setWidgetResizable(True)
@@ -1893,6 +1966,10 @@ class ComparePanel(QWidget):
         self._apply_compare_state(self.bridge.get_compare_state())
         self._on_accent_changed(str(self.bridge.settings.value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT))
 
+    def _update_viewer_footer_labels(self) -> None:
+        self.viewer_hint.setText(self._viewer_hint_text)
+        self.viewer_warning.setText("\n".join(self._viewer_warning_lines))
+
     def apply_theme_styles(self, text: str, text_muted: str, accent_hex: str, accent_raw: str, thumb_bg: str, border: str) -> None:
         for slot in (self.left_slot, self.right_slot):
             slot.apply_theme_styles(text, text_muted, accent_hex, accent_raw, thumb_bg, border)
@@ -1907,9 +1984,13 @@ class ComparePanel(QWidget):
         self.viewer.setStyleSheet(
             f"background-color: {viewer_bg}; border: 1px solid {viewer_border}; border-radius: 10px;"
         )
+        self.viewer_hint.setStyleSheet(
+            f"color: {text_muted}; background: transparent; border: none;"
+        )
         self.viewer_warning.setStyleSheet(
             f"color: {accent_hex}; font-weight: 700; background: transparent; border: none;"
         )
+        self._update_viewer_footer_labels()
         try:
             self.style().unpolish(self)
             self.style().polish(self)
@@ -1923,8 +2004,8 @@ class ComparePanel(QWidget):
         text = Theme.get_text_color()
         text_muted = Theme.get_text_muted()
         accent_text = Theme.mix(text, accent, 0.76)
-        thumb_bg = Theme.mix(Theme.get_control_bg(accent), accent, 0.12 if Theme.get_is_light() else 0.10)
-        thumb_border = Theme.mix(Theme.get_border(accent), accent, 0.45)
+        thumb_bg = Theme.get_control_bg(accent)
+        thumb_border = Theme.get_border(accent)
         self.apply_theme_styles(text, text_muted, accent_text, accent.name(), thumb_bg, thumb_border)
         for widget in (self.left_slot, self.right_slot, self.viewer):
             try:
@@ -1990,8 +2071,13 @@ class ComparePanel(QWidget):
             status_lines.append(upscale_message)
         if self.viewer.has_different_aspect_ratios():
             status_lines.append("Different Aspect Ratios")
-        self.viewer_warning.setText("\n".join(status_lines))
+        self._viewer_warning_lines = status_lines
+        self._update_viewer_footer_labels()
         self.viewer_warning.setVisible(bool(status_lines))
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_viewer_footer_labels()
 
 
 class Bridge(QObject):
@@ -2122,6 +2208,7 @@ class Bridge(QObject):
             print(f"Migration Error: {e}")
 
         self.settings = QSettings("G1enB1and", "MediaManagerX")
+        Theme.set_theme_mode(str(self.settings.value("ui/theme_mode", "dark", type=str) or "dark"))
         self.nam = QNetworkAccessManager(self)
         self.nam.setRedirectPolicy(QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy)
         self._update_reply = None
@@ -4250,8 +4337,11 @@ class Bridge(QObject):
                 self.settings.sync()
                 self.accentColorChanged.emit(str(value or "#8ab4f8"))
             elif key == "ui.theme_mode":
+                Theme.set_theme_mode(value)
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, value == "light")
+                current_accent = str(self.settings.value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT)
+                self.accentColorChanged.emit(current_accent)
             elif key in ("gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "gallery.similarity_threshold"):
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, True)
@@ -8027,6 +8117,14 @@ class MainWindow(QMainWindow):
             elif key == "ui.theme_mode":
                 self._update_native_styles(self._current_accent)
                 self._update_splitter_style(self._current_accent)
+                self._apply_compare_panel_theme(self._current_accent)
+                if hasattr(self, "compare_panel"):
+                    self.compare_panel.update()
+                    self.compare_panel.repaint()
+                if hasattr(self, "native_tooltip"):
+                    self.native_tooltip.update_style(QColor(self._current_accent), Theme.get_is_light())
+                self._update_app_style(QColor(self._current_accent))
+                QTimer.singleShot(0, lambda: self._apply_compare_panel_theme(self._current_accent))
             elif key == "metadata.display.order" or key.startswith("metadata.layout."):
                 self._setup_metadata_layout()
                 if hasattr(self, "_current_paths") and self._current_paths:
@@ -10886,11 +10984,13 @@ class MainWindow(QMainWindow):
             h = self.splitter.handle(i)
             if h:
                 h.update()
+                h.repaint()
         if hasattr(self, "center_splitter"):
             for i in range(self.center_splitter.count()):
                 h = self.center_splitter.handle(i)
                 if h:
                     h.update()
+                    h.repaint()
 
     def _on_accent_changed(self, accent_color: str) -> None:
         """Called when the bridge emits accentColorChanged."""
@@ -10911,6 +11011,31 @@ class MainWindow(QMainWindow):
         js = f"document.documentElement.style.setProperty('--accent', '{accent_color}');"
         if hasattr(self, "webview") and self.webview.page():
             self.webview.page().runJavaScript(js)
+        try:
+            refresh_widgets: list[QWidget] = [
+                self,
+                self.left_panel,
+                self.right_panel,
+                self.scroll_area,
+                self.scroll_container,
+                self.bottom_panel,
+            ]
+            for widget in refresh_widgets:
+                if widget is None:
+                    continue
+                widget.style().unpolish(widget)
+                widget.style().polish(widget)
+                widget.update()
+                widget.repaint()
+            for sep in self.findChildren(NativeSeparator):
+                sep.update()
+                sep.repaint()
+            if hasattr(self, "splitter"):
+                self.splitter.update()
+            if hasattr(self, "center_splitter"):
+                self.center_splitter.update()
+        except Exception:
+            pass
 
     def _on_update_tooltip(self, count: int, is_copy: bool, target_folder: str) -> None:
         if not hasattr(self, "native_tooltip"):
@@ -11099,6 +11224,11 @@ class MainWindow(QMainWindow):
         
         # Right Panel (Metadata) - Mirroring Left Panel Background precisely
         self.right_panel.setStyleSheet(f"background-color: {sb_bg_str}; border-left: none;")
+        right_palette = self.right_panel.palette()
+        right_palette.setColor(QPalette.ColorRole.Window, QColor(sb_bg_str))
+        right_palette.setColor(QPalette.ColorRole.Base, QColor(sb_bg_str))
+        self.right_panel.setAutoFillBackground(True)
+        self.right_panel.setPalette(right_palette)
         if hasattr(self, "bottom_panel"):
             self.bottom_panel.setStyleSheet(f"""
                 QWidget#bottomPanel {{
@@ -11116,12 +11246,12 @@ class MainWindow(QMainWindow):
                     background: transparent;
                 }}
                 QFrame#compareSlotCard {{
-                    background-color: #2d2d30;
-                    border: 1px solid #3b3b40;
+                    background-color: transparent;
+                    border: none;
                     border-radius: 10px;
                 }}
                 QFrame#compareSlotCard[empty="true"] {{
-                    border-style: dashed;
+                    border: none;
                 }}
                 QLabel#compareSlotName {{
                     color: {text};
@@ -11140,11 +11270,11 @@ class MainWindow(QMainWindow):
                     color: {text_muted};
                 }}
                 QLabel#compareSlotReasons {{
-                    color: {Theme.mix(QColor(text), accent, 0.7).name()};
+                    color: {Theme.mix(QColor(text), accent, 0.7)};
                     font-weight: 700;
                 }}
                 QLabel#compareSlotBest {{
-                    color: {Theme.mix(QColor(text), accent, 0.78).name()};
+                    color: {Theme.mix(QColor(text), accent, 0.78)};
                     font-weight: 700;
                 }}
                 QWidget#compareRevealViewer {{
@@ -11183,6 +11313,18 @@ class MainWindow(QMainWindow):
             QWidget#rightPanelScrollContainer {{ background-color: {sb_bg_str}; }}
             {scrollbar_style}
         """)
+        try:
+            viewport = self.scroll_area.viewport()
+            viewport.setStyleSheet(f"background-color: {sb_bg_str};")
+            viewport_palette = viewport.palette()
+            viewport_palette.setColor(QPalette.ColorRole.Window, QColor(sb_bg_str))
+            viewport_palette.setColor(QPalette.ColorRole.Base, QColor(sb_bg_str))
+            viewport.setAutoFillBackground(True)
+            viewport.setPalette(viewport_palette)
+            viewport.update()
+            viewport.repaint()
+        except Exception:
+            pass
 
         self.scroll_container.setStyleSheet(f"""
             QWidget#rightPanelScrollContainer {{ background-color: {sb_bg_str}; color: {text}; }}
@@ -11301,10 +11443,8 @@ class MainWindow(QMainWindow):
         sb_bg = Theme.get_sidebar_bg(accent)
         border = Theme.get_border(accent)
         text = Theme.get_text_color()
-        is_light = Theme.get_is_light()
         highlight_bg = Theme.get_accent_soft(accent)
-        
-        QApplication.instance().setStyleSheet(f"""
+        menu_qss = f"""
             QMenuBar {{
                 background-color: {sb_bg};
                 color: {text};
@@ -11334,7 +11474,36 @@ class MainWindow(QMainWindow):
                 background: {border};
                 margin: 4px 0;
             }}
-        """)
+        """
+        QApplication.instance().setStyleSheet(menu_qss)
+        try:
+            menu_bar = self.menuBar()
+            if menu_bar is not None:
+                menu_bar.setStyleSheet(menu_qss)
+                menu_bar_palette = menu_bar.palette()
+                menu_bar_palette.setColor(QPalette.ColorRole.Window, QColor(sb_bg))
+                menu_bar_palette.setColor(QPalette.ColorRole.ButtonText, QColor(text))
+                menu_bar_palette.setColor(QPalette.ColorRole.WindowText, QColor(text))
+                menu_bar.setAutoFillBackground(True)
+                menu_bar.setPalette(menu_bar_palette)
+                menu_bar.style().unpolish(menu_bar)
+                menu_bar.style().polish(menu_bar)
+                menu_bar.update()
+                menu_bar.repaint()
+            for menu in self.findChildren(QMenu):
+                menu.setStyleSheet(menu_qss)
+                menu_palette = menu.palette()
+                menu_palette.setColor(QPalette.ColorRole.Window, QColor(sb_bg))
+                menu_palette.setColor(QPalette.ColorRole.Base, QColor(sb_bg))
+                menu_palette.setColor(QPalette.ColorRole.ButtonText, QColor(text))
+                menu_palette.setColor(QPalette.ColorRole.WindowText, QColor(text))
+                menu.setPalette(menu_palette)
+                menu.style().unpolish(menu)
+                menu.style().polish(menu)
+                menu.update()
+                menu.repaint()
+        except Exception:
+            pass
 
     def _get_native_scrollbar_style(self, accent: QColor) -> str:
         """Generate neutral native scrollbars with accent reserved for content states."""
@@ -11447,10 +11616,13 @@ class MainWindow(QMainWindow):
         text = Theme.get_text_color()
         text_muted = Theme.get_text_muted()
         compare_accent = Theme.mix(text, accent, 0.76)
-        thumb_bg = Theme.mix(Theme.get_control_bg(accent), accent, 0.12 if is_light else 0.10)
-        thumb_border = Theme.mix(Theme.get_border(accent), accent, 0.45)
+        thumb_bg = Theme.get_control_bg(accent)
+        thumb_border = Theme.get_border(accent)
         btn_border = Theme.get_input_border(accent)
-        btn_border_hover = Theme.mix(Theme.get_border(accent), accent, 0.28)
+        close_btn_bg = "#eceef2" if is_light else "#2f2f2f"
+        close_btn_hover_bg = "#e4e8ee" if is_light else "#3a3a3a"
+        close_btn_text = text if is_light else "#f2f2f2"
+        close_btn_hover_text = text if is_light else "#ffffff"
 
         header_font = QFont(self.bottom_panel_header.font())
         header_font.setBold(True)
@@ -11461,16 +11633,16 @@ class MainWindow(QMainWindow):
         self.bottom_panel_close_btn.setStyleSheet(
             f"""
             QPushButton#bottomPanelCloseButton {{
-                background-color: #2f2f2f;
-                color: #f2f2f2;
+                background-color: {close_btn_bg};
+                color: {close_btn_text};
                 border: 1px solid {btn_border};
                 border-radius: 4px;
                 font-weight: 700;
                 padding: 0px;
             }}
             QPushButton#bottomPanelCloseButton:hover {{
-                background-color: #3a3a3a;
-                color: #ffffff;
+                background-color: {close_btn_hover_bg};
+                color: {close_btn_hover_text};
                 border-color: {accent_color};
             }}
             """

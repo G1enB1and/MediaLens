@@ -5470,7 +5470,7 @@ function wireSettings() {
 
   document.querySelectorAll('input[name="theme_mode"]').forEach(radio => {
     radio.addEventListener('change', () => {
-      if (!gBridge || !gBridge.set_setting_str) return;
+      if (!radio.checked || !gBridge || !gBridge.set_setting_str) return;
       const theme = radio.value;
       document.documentElement.classList.toggle('light-mode', theme === 'light');
       updateThemeAwareIcons(theme);
