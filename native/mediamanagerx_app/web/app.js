@@ -1594,6 +1594,33 @@ function syncMetadataToBridge() {
   }
 }
 
+function reconcileSelectionWithVisibleItems(items) {
+  const visiblePaths = new Set(
+    (Array.isArray(items) ? items : [])
+      .map(item => String((item && item.path) || ''))
+      .filter(Boolean)
+  );
+  let changed = false;
+  Array.from(gSelectedPaths).forEach((path) => {
+    if (!visiblePaths.has(path)) {
+      gSelectedPaths.delete(path);
+      changed = true;
+    }
+  });
+  if (gSelectedPaths.size === 0) {
+    gLockedCard = null;
+    gLastSelectionIdx = -1;
+  } else if (gLockedCard) {
+    const lockedPath = gLockedCard.getAttribute('data-path') || '';
+    if (!lockedPath || !gSelectedPaths.has(lockedPath)) {
+      gLockedCard = null;
+    }
+  }
+  if (changed) {
+    syncMetadataToBridge();
+  }
+}
+
 function selectDuplicateGroupForKeep(groupKey) {
   deselectAll();
   const cards = Array.from(document.querySelectorAll(`.card[data-duplicate-group-key="${CSS.escape(groupKey)}"]`));
@@ -4603,6 +4630,7 @@ function renderMediaList(items, scrollToTop = true) {
   }
   gMedia = Array.isArray(items) ? items : [];
   gMedia.forEach((item, idx) => { item.__galleryIndex = idx; });
+  reconcileSelectionWithVisibleItems(gMedia);
   const viewItems = gMedia;
 
   resetMediaState();
