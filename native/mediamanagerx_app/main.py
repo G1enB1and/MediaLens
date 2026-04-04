@@ -1396,6 +1396,7 @@ class CompareSlotCard(QFrame):
     slotPathDropped = Signal(str, str)
     slotSwapRequested = Signal(str, str)
     browseRequested = Signal(str)
+    clearRequested = Signal(str)
     isolateRequested = Signal(str)
     isolateReleased = Signal()
     swapStarted = Signal()
@@ -1419,10 +1420,24 @@ class CompareSlotCard(QFrame):
         layout.setContentsMargins(10, 0, 10, 10)
         layout.setSpacing(8)
 
+        self.header_row = QWidget()
+        self.header_row.setObjectName("compareSlotHeader")
+        header_layout = QHBoxLayout(self.header_row)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(8)
+
         self.name_label = QLabel("Drop image here")
         self.name_label.setObjectName("compareSlotName")
         self.name_label.setContentsMargins(0, 0, 0, 0)
         self.name_label.setMinimumHeight(0)
+        header_layout.addWidget(self.name_label, 1)
+
+        self.clear_btn = QPushButton("X")
+        self.clear_btn.setObjectName("compareSlotClearButton")
+        self.clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.clear_btn.setFixedSize(22, 22)
+        self.clear_btn.clicked.connect(lambda: self.clearRequested.emit(self.slot_name))
+        header_layout.addWidget(self.clear_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         self.thumb_frame = QFrame()
         self.thumb_frame.setObjectName("compareSlotThumbCard")
@@ -1431,7 +1446,7 @@ class CompareSlotCard(QFrame):
         thumb_layout.setContentsMargins(6, 4, 6, 4)
         thumb_layout.setSpacing(0)
 
-        thumb_layout.addWidget(self.name_label)
+        thumb_layout.addWidget(self.header_row)
 
         self.thumb_wrap = QWidget()
         self.thumb_wrap.setMinimumHeight(0)
@@ -1492,6 +1507,14 @@ class CompareSlotCard(QFrame):
         self._render_entry({})
 
     def apply_theme_styles(self, text: str, text_muted: str, accent_hex: str, accent_raw: str, thumb_bg: str, border: str) -> None:
+        accent_color = QColor(accent_raw)
+        btn_base = Theme.get_input_bg(accent_color)
+        btn_hover = Theme.get_btn_save_hover(accent_color)
+        btn_border = Theme.get_input_border(accent_color)
+        btn_border_hover = Theme.mix(Theme.get_border(accent_color), accent_color, 0.28)
+        btn_text = Theme.mix(text, QColor("#000000" if Theme.get_is_light() else "#ffffff"), 0.0)
+        check_svg = (Path(__file__).with_name("web") / "scrollbar_arrows" / "check.svg").as_posix()
+
         name_font = QFont(self.name_label.font())
         name_font.setBold(True)
         self.name_label.setFont(name_font)
@@ -1503,6 +1526,29 @@ class CompareSlotCard(QFrame):
 
         self.name_label.setStyleSheet(
             f"color: {text}; font-weight: 600; margin: 0px; padding: 0px; border: none; background: transparent;"
+        )
+        self.header_row.setStyleSheet("background: transparent; border: none;")
+        self.clear_btn.setStyleSheet(
+            f"""
+            QPushButton#compareSlotClearButton {{
+                background-color: #2f2f2f;
+                color: #f2f2f2;
+                border: 1px solid {btn_border};
+                border-radius: 4px;
+                font-weight: 700;
+                padding: 0px;
+            }}
+            QPushButton#compareSlotClearButton:hover {{
+                background-color: #3a3a3a;
+                color: #ffffff;
+                border-color: {accent_raw};
+            }}
+            QPushButton#compareSlotClearButton:disabled {{
+                background-color: #262626;
+                color: #9a9a9a;
+                border-color: {btn_border};
+            }}
+            """
         )
         self.meta_label.setStyleSheet(
             f"color: {text_muted}; margin: 0px; padding: 0px; border: none; background: transparent;"
@@ -1516,13 +1562,6 @@ class CompareSlotCard(QFrame):
         self.thumb_label.setStyleSheet(
             f"background: transparent; color: {text_muted}; border: none; padding: 0px; margin: 0px;"
         )
-        accent_color = QColor(accent_raw)
-        btn_base = Theme.get_input_bg(accent_color)
-        btn_hover = Theme.get_btn_save_hover(accent_color)
-        btn_border = Theme.get_input_border(accent_color)
-        btn_border_hover = Theme.mix(Theme.get_border(accent_color), accent_color, 0.28)
-        btn_text = Theme.mix(text, QColor("#000000" if Theme.get_is_light() else "#ffffff"), 0.0)
-        check_svg = (Path(__file__).with_name("web") / "scrollbar_arrows" / "check.svg").as_posix()
         button_qss = (
             f"QPushButton {{ background-color: {btn_base}; color: {btn_text}; border: 1px solid {btn_border}; "
             f"border-radius: 8px; padding: 6px 10px; }}"
@@ -1549,6 +1588,7 @@ class CompareSlotCard(QFrame):
             self.meta_label,
             self.reasons_label,
             self.best_label,
+            self.clear_btn,
             self.thumb_frame,
             self.thumb_label,
             self.keep_toggle,
@@ -1611,6 +1651,8 @@ class CompareSlotCard(QFrame):
         path = str(self._entry.get("path") or "")
         has_entry = bool(path)
         self.setProperty("empty", not has_entry)
+        self.clear_btn.setEnabled(has_entry)
+        self.clear_btn.setVisible(has_entry)
         self.style().unpolish(self)
         self.style().polish(self)
         if not has_entry:
@@ -1783,6 +1825,7 @@ class ComparePanel(QWidget):
             slot.slotPathDropped.connect(self.bridge.set_compare_path)
             slot.slotSwapRequested.connect(self.bridge.swap_compare_slots)
             slot.browseRequested.connect(self._browse_for_slot)
+            slot.clearRequested.connect(self.bridge.clear_compare_slot)
             slot.isolateRequested.connect(self.viewer.set_isolated_slot)
             slot.isolateReleased.connect(lambda: self.viewer.set_isolated_slot(""))
             slot.swapStarted.connect(lambda: self.viewer.set_isolated_slot(""))
@@ -7015,10 +7058,25 @@ class MainWindow(QMainWindow):
         bottom_layout.setContentsMargins(14, 10, 14, 14)
         bottom_layout.setSpacing(6)
 
+        self.bottom_panel_header_row = QWidget()
+        bottom_panel_header_layout = QHBoxLayout(self.bottom_panel_header_row)
+        bottom_panel_header_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_panel_header_layout.setSpacing(8)
+        bottom_panel_header_layout.addStretch(1)
+
         self.bottom_panel_header = QLabel("Image Comparison")
         self.bottom_panel_header.setObjectName("bottomPanelHeader")
         self.bottom_panel_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        bottom_layout.addWidget(self.bottom_panel_header)
+        bottom_panel_header_layout.addWidget(self.bottom_panel_header, 0, Qt.AlignmentFlag.AlignCenter)
+        bottom_panel_header_layout.addStretch(1)
+
+        self.bottom_panel_close_btn = QPushButton("X")
+        self.bottom_panel_close_btn.setObjectName("bottomPanelCloseButton")
+        self.bottom_panel_close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.bottom_panel_close_btn.setFixedSize(22, 22)
+        self.bottom_panel_close_btn.clicked.connect(lambda: self.bridge.set_setting_bool("ui.show_bottom_panel", False))
+        bottom_panel_header_layout.addWidget(self.bottom_panel_close_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        bottom_layout.addWidget(self.bottom_panel_header_row)
 
         self.compare_panel = ComparePanel(self.bridge, self.bottom_panel)
         bottom_layout.addWidget(self.compare_panel, 1)
@@ -11336,6 +11394,8 @@ class MainWindow(QMainWindow):
         compare_accent = Theme.mix(text, accent, 0.76)
         thumb_bg = Theme.mix(Theme.get_control_bg(accent), accent, 0.12 if is_light else 0.10)
         thumb_border = Theme.mix(Theme.get_border(accent), accent, 0.45)
+        btn_border = Theme.get_input_border(accent)
+        btn_border_hover = Theme.mix(Theme.get_border(accent), accent, 0.28)
 
         header_font = QFont(self.bottom_panel_header.font())
         header_font.setBold(True)
@@ -11343,12 +11403,32 @@ class MainWindow(QMainWindow):
         header_palette = QPalette(self.bottom_panel_header.palette())
         header_palette.setColor(QPalette.ColorRole.WindowText, QColor(text))
         self.bottom_panel_header.setPalette(header_palette)
+        self.bottom_panel_close_btn.setStyleSheet(
+            f"""
+            QPushButton#bottomPanelCloseButton {{
+                background-color: #2f2f2f;
+                color: #f2f2f2;
+                border: 1px solid {btn_border};
+                border-radius: 4px;
+                font-weight: 700;
+                padding: 0px;
+            }}
+            QPushButton#bottomPanelCloseButton:hover {{
+                background-color: #3a3a3a;
+                color: #ffffff;
+                border-color: {accent_color};
+            }}
+            """
+        )
 
         self.compare_panel.apply_theme_styles(text, text_muted, compare_accent, accent_color, thumb_bg, thumb_border)
         try:
             self.bottom_panel.style().unpolish(self.bottom_panel)
             self.bottom_panel.style().polish(self.bottom_panel)
             self.bottom_panel.update()
+            self.bottom_panel_close_btn.style().unpolish(self.bottom_panel_close_btn)
+            self.bottom_panel_close_btn.style().polish(self.bottom_panel_close_btn)
+            self.bottom_panel_close_btn.update()
             self.compare_panel.style().unpolish(self.compare_panel)
             self.compare_panel.style().polish(self.compare_panel)
             self.compare_panel.update()
