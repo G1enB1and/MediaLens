@@ -13,20 +13,27 @@
   <div id="app">
     <header>
       <div class="header-top">
-        <div class="search">
-          <input id="searchInput" class="search-input" placeholder="Search…" />
-          <div class="search-actions">
-            <button class="icon-btn" id="toggleLeftPanel" title="Toggle Left Sidebar">
-              <img src="left-sidebar-opened.png" alt="" id="iconLeftPanel" />
-            </button>
-            <button class="icon-btn" id="toggleBottomPanel" title="Toggle Bottom Panel">
-              <img src="bottom-opened.png" alt="" id="iconBottomPanel" />
-            </button>
-            <button class="icon-btn" id="toggleRightPanel" title="Toggle Right Sidebar">
-              <img src="right-sidebar-opened.png" alt="" id="iconRightPanel" />
-            </button>
-            <button class="icon-btn" id="openSettings" title="Settings">⚙</button>
+        <div class="kv">
+          <div class="folder-nav" aria-label="Folder navigation">
+            <button class="tb-btn tb-icon-btn" id="navBack" title="Back" aria-label="Back">&#8592;</button>
+            <button class="tb-btn tb-icon-btn" id="navUp" title="Up" aria-label="Up">&#8593;</button>
+            <button class="tb-btn tb-icon-btn" id="navForward" title="Forward" aria-label="Forward">&#8594;</button>
+            <button class="tb-btn tb-icon-btn" id="navRefresh" title="Refresh" aria-label="Refresh">&#8635;</button>
           </div>
+          <div class="k" id="selectedFolderLabel">Selected folder</div>
+          <div class="v folder-address" id="selectedFolder" title="Current folder" tabindex="0">(none)</div>
+        </div>
+        <div class="search-actions">
+          <button class="icon-btn" id="toggleLeftPanel" title="Toggle Left Sidebar">
+            <img src="left-sidebar-opened.png" alt="" id="iconLeftPanel" />
+          </button>
+          <button class="icon-btn" id="toggleBottomPanel" title="Toggle Bottom Panel">
+            <img src="bottom-opened.png" alt="" id="iconBottomPanel" />
+          </button>
+          <button class="icon-btn" id="toggleRightPanel" title="Toggle Right Sidebar">
+            <img src="right-sidebar-opened.png" alt="" id="iconRightPanel" />
+          </button>
+          <button class="icon-btn" id="openSettings" title="Settings">⚙</button>
         </div>
         <div class="controls">
           <div class="custom-select" id="sortSelect" tabindex="0">
@@ -85,15 +92,8 @@
       </div>
 
       <div class="toolbar" data-pager>
-        <div class="kv">
-          <div class="folder-nav" aria-label="Folder navigation">
-            <button class="tb-btn tb-icon-btn" id="navBack" title="Back" aria-label="Back">&#8592;</button>
-            <button class="tb-btn tb-icon-btn" id="navUp" title="Up" aria-label="Up">&#8593;</button>
-            <button class="tb-btn tb-icon-btn" id="navForward" title="Forward" aria-label="Forward">&#8594;</button>
-            <button class="tb-btn tb-icon-btn" id="navRefresh" title="Refresh" aria-label="Refresh">&#8635;</button>
-          </div>
-          <div class="k" id="selectedFolderLabel">Selected folder</div>
-          <div class="v folder-address" id="selectedFolder" title="Current folder" tabindex="0">(none)</div>
+        <div class="search">
+          <input id="searchInput" class="search-input" placeholder="Search…" />
         </div>
         <div class="pager">
           <button class="tb-btn" data-prev>Prev</button>
