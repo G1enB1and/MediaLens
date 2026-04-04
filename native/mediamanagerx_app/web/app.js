@@ -283,7 +283,8 @@ function normalizeTextFilter(filterValue) {
 }
 
 function isTextFilterActive() {
-  return normalizeTextFilter(gFilter) === 'text_detected';
+  const normalized = normalizeTextFilter(gFilter);
+  return normalized === 'text_detected' || normalized === 'no_text_detected';
 }
 
 const METADATA_SETTINGS_CONFIG = {

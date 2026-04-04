@@ -921,6 +921,18 @@ body.lightbox-open .toolbar {
   font-size: 15px;
 }
 
+.tb-icon-btn img {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+  flex-shrink: 0;
+  filter: brightness(0) invert(1);
+}
+
+.light-mode .tb-icon-btn img {
+  filter: none;
+}
+
 .tb-page {
   height: 30px;
   min-width: 30px;

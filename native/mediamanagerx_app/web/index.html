@@ -47,7 +47,8 @@
               <div data-value="image">Images</div>
               <div data-value="video">Videos</div>
               <div data-value="animated">Animated</div>
-                <div data-value="text_detected">Text Detected</div>
+              <div data-value="text_detected">Text Detected</div>
+              <div data-value="no_text_detected">No Text Detected</div>
               </div>
             </div>
           <div class="custom-select" id="groupBySelect" tabindex="0">
@@ -98,8 +99,12 @@
           <button class="tb-btn" data-prev>Prev</button>
           <div class="tb-links" data-links></div>
           <button class="tb-btn" data-next>Next</button>
-          <button class="tb-btn" id="scrollBottom" title="Scroll to bottom">↓</button>
-          <button class="tb-btn" id="scrollTop" title="Scroll to top">↑</button>
+          <button class="tb-btn tb-icon-btn" id="scrollBottom" title="Scroll to bottom" aria-label="Scroll to bottom">
+            <img src="icons/to_bottom.svg" alt="" />
+          </button>
+          <button class="tb-btn tb-icon-btn" id="scrollTop" title="Scroll to top" aria-label="Scroll to top">
+            <img src="icons/to_top.svg" alt="" />
+          </button>
         </div>
       </div>
     </header>

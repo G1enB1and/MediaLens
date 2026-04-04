@@ -5843,9 +5843,12 @@ class Bridge(QObject):
             entries = self._get_collection_candidates(self._active_collection_id, filter_type, search_query)
         else:
             entries = []
-        if filter_type in {"text_detected", "text_more_likely", "text_verified"}:
+        if filter_type in {"text_detected", "text_more_likely", "text_verified", "no_text_detected"}:
             self._ensure_background_text_processing(folders if folders else None, self._active_collection_id if not folders else None)
-            entries = [entry for entry in entries if bool(entry.get("text_detected"))]
+            if filter_type == "no_text_detected":
+                entries = [entry for entry in entries if not bool(entry.get("text_detected"))]
+            else:
+                entries = [entry for entry in entries if bool(entry.get("text_detected"))]
         review_mode = self._review_group_mode()
         if review_mode in {"similar", "similar_only"}:
             self._backfill_scope_content_hashes(entries)
