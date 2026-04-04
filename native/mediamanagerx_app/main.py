@@ -1215,6 +1215,7 @@ class CompareRevealViewer(QWidget):
         self._zoom = 1.0
         self._pan = QPoint(0, 0)
         self._slider_ratio = 0.5
+        self._slider_drag_offset_x = 0
         self._drag_mode = ""
         self._drag_start_pos = QPoint()
         self._pan_start = QPoint()
@@ -1500,6 +1501,9 @@ class CompareRevealViewer(QWidget):
             return
         if self._slider_hit_test(event.position().toPoint()):
             self._drag_mode = "slider"
+            content_rect = self._content_rect()
+            slider_x = content_rect.left() + round(content_rect.width() * self._slider_ratio)
+            self._slider_drag_offset_x = int(round(event.position().x() - slider_x))
             self.setCursor(Qt.CursorShape.PointingHandCursor)
         elif self._zoom > 1.0:
             self._drag_mode = "pan"
@@ -1511,10 +1515,10 @@ class CompareRevealViewer(QWidget):
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if self._drag_mode == "slider":
-            scale = self._fit_scale() * self._zoom
-            canvas_rect = self._scaled_canvas_rect(scale)
-            if canvas_rect.width() > 0:
-                self._slider_ratio = max(0.0, min(1.0, (event.position().x() - canvas_rect.left()) / canvas_rect.width()))
+            content_rect = self._content_rect()
+            if content_rect.width() > 0:
+                drag_x = event.position().x() - float(self._slider_drag_offset_x)
+                self._slider_ratio = max(0.0, min(1.0, (drag_x - content_rect.left()) / content_rect.width()))
                 self.update()
             self.setCursor(Qt.CursorShape.PointingHandCursor)
             event.accept()
@@ -1532,6 +1536,7 @@ class CompareRevealViewer(QWidget):
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         self._drag_mode = ""
+        self._slider_drag_offset_x = 0
         self._sync_hover_cursor(event.position().toPoint())
         super().mouseReleaseEvent(event)
 
@@ -2047,13 +2052,20 @@ class ComparePanel(QWidget):
         self.left_scroll = QScrollArea()
         self.right_scroll = QScrollArea()
         self.viewer_wrap = QWidget()
+        self.viewer_footer = QWidget()
+        self.viewer_footer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.viewer_footer.setMinimumHeight(54)
+        footer_layout = QVBoxLayout(self.viewer_footer)
+        footer_layout.setContentsMargins(0, 0, 0, 0)
+        footer_layout.setSpacing(4)
+        footer_layout.addWidget(self.viewer_hint, 0)
+        footer_layout.addWidget(self.viewer_upscale_warning, 0)
+        footer_layout.addWidget(self.viewer_aspect_warning, 0)
         viewer_layout = QVBoxLayout(self.viewer_wrap)
         viewer_layout.setContentsMargins(0, 0, 0, 0)
         viewer_layout.setSpacing(8)
         viewer_layout.addWidget(self.viewer, 1)
-        viewer_layout.addWidget(self.viewer_hint, 0)
-        viewer_layout.addWidget(self.viewer_upscale_warning, 0)
-        viewer_layout.addWidget(self.viewer_aspect_warning, 0)
+        viewer_layout.addWidget(self.viewer_footer, 0)
         for scroll, slot in ((self.left_scroll, self.left_slot), (self.right_scroll, self.right_slot)):
             scroll.setWidget(slot)
             scroll.setWidgetResizable(True)
@@ -2063,7 +2075,7 @@ class ComparePanel(QWidget):
             scroll.setMinimumHeight(0)
             scroll.setMinimumWidth(0)
             scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.viewer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.viewer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         self.viewer_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         layout.addWidget(self.left_scroll, 0)
@@ -2087,10 +2099,49 @@ class ComparePanel(QWidget):
         self._apply_compare_state(self.bridge.get_compare_state())
         self._on_accent_changed(str(self.bridge.settings.value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT))
 
+    @staticmethod
+    def _entry_dims(entry: dict) -> tuple[int, int]:
+        width = int(entry.get("width") or 0)
+        height = int(entry.get("height") or 0)
+        return width, height
+
+    def _compare_upscale_message_from_entries(self, left_entry: dict, right_entry: dict) -> str:
+        left_w, left_h = self._entry_dims(left_entry)
+        right_w, right_h = self._entry_dims(right_entry)
+        if left_w <= 0 or left_h <= 0 or right_w <= 0 or right_h <= 0:
+            return self.viewer.upscale_match_message()
+        left_area = left_w * left_h
+        right_area = right_w * right_h
+        if left_area <= 0 or right_area <= 0 or left_area == right_area:
+            return ""
+        return "Upscaled Left to match" if left_area < right_area else "Upscaled Right to match"
+
+    def _has_different_aspect_ratios_from_entries(self, left_entry: dict, right_entry: dict) -> bool:
+        left_w, left_h = self._entry_dims(left_entry)
+        right_w, right_h = self._entry_dims(right_entry)
+        if left_w <= 0 or left_h <= 0 or right_w <= 0 or right_h <= 0:
+            return self.viewer.has_different_aspect_ratios()
+        tolerance_px = 2.0
+        scaled_right_height = right_h * (left_w / max(1, right_w))
+        scaled_right_width = right_w * (left_h / max(1, right_h))
+        scaled_left_height = left_h * (right_w / max(1, left_w))
+        scaled_left_width = left_w * (right_h / max(1, left_h))
+        return not (
+            abs(left_h - scaled_right_height) <= tolerance_px
+            or abs(left_w - scaled_right_width) <= tolerance_px
+            or abs(right_h - scaled_left_height) <= tolerance_px
+            or abs(right_w - scaled_left_width) <= tolerance_px
+        )
+
     def _update_viewer_footer_labels(self) -> None:
         self.viewer_hint.setText(self._viewer_hint_text)
         self.viewer_upscale_warning.setText(self._viewer_upscale_text)
         self.viewer_aspect_warning.setText(self._viewer_aspect_text)
+        try:
+            self.viewer_footer.updateGeometry()
+            self.viewer_footer.adjustSize()
+        except Exception:
+            pass
 
     def apply_theme_styles(self, text: str, text_muted: str, accent_hex: str, accent_raw: str, thumb_bg: str, border: str) -> None:
         for slot in (self.left_slot, self.right_slot):
@@ -2185,12 +2236,40 @@ class ComparePanel(QWidget):
         self.left_slot.set_entry(left_entry)
         self.right_slot.set_entry(right_entry)
         self.viewer.set_images(str(left_entry.get("path") or ""), str(right_entry.get("path") or ""))
-        self._viewer_upscale_text = self.viewer.upscale_match_message()
-        self._viewer_aspect_text = "Different Aspect Ratios" if self.viewer.has_different_aspect_ratios() else ""
+        self._viewer_upscale_text = self._compare_upscale_message_from_entries(left_entry, right_entry)
+        self._viewer_aspect_text = "Different Aspect Ratios" if self._has_different_aspect_ratios_from_entries(left_entry, right_entry) else ""
+        try:
+            self.bridge._log(
+                "Compare warnings: "
+                f"left_path='{left_entry.get('path')}' "
+                f"right_path='{right_entry.get('path')}' "
+                f"left={left_entry.get('width')}x{left_entry.get('height')} "
+                f"right={right_entry.get('width')}x{right_entry.get('height')} "
+                f"upscale='{self._viewer_upscale_text}' "
+                f"aspect='{self._viewer_aspect_text}' "
+                f"has_viewer_image={has_viewer_image}"
+            )
+        except Exception:
+            pass
         self._update_viewer_footer_labels()
         self.viewer_hint.setVisible(has_viewer_image)
         self.viewer_upscale_warning.setVisible(bool(self._viewer_upscale_text))
         self.viewer_aspect_warning.setVisible(bool(self._viewer_aspect_text))
+        self.viewer_footer.setVisible(
+            bool(has_viewer_image)
+            or bool(self._viewer_upscale_text)
+            or bool(self._viewer_aspect_text)
+        )
+        try:
+            self.bridge._log(
+                "Compare warning widgets: "
+                f"hint={self.viewer_hint.isVisible()} "
+                f"upscale={self.viewer_upscale_warning.isVisible()} "
+                f"aspect={self.viewer_aspect_warning.isVisible()} "
+                f"footer={self.viewer_footer.isVisible()}"
+            )
+        except Exception:
+            pass
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
