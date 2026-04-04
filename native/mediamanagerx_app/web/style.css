@@ -24,6 +24,8 @@
   --hover-bg: color-mix(in srgb, var(--surface-neutral), white 7%);
   --accent-soft: color-mix(in srgb, var(--accent), transparent 86%);
   --accent-soft-strong: color-mix(in srgb, var(--accent), transparent 80%);
+  --compare-btn-hover-bg: color-mix(in srgb, var(--input-bg), var(--accent) 16%);
+  --compare-btn-hover-border: color-mix(in srgb, var(--border), var(--accent) 28%);
   --modal-bg: color-mix(in srgb, var(--panel-neutral), black 2%);
   --shadow: var(--shadow-color);
   --thumb-bg: var(--thumb-neutral);
@@ -53,6 +55,8 @@
   --hover-bg: color-mix(in srgb, var(--surface-neutral), black 4%);
   --accent-soft: color-mix(in srgb, var(--accent), white 82%);
   --accent-soft-strong: color-mix(in srgb, var(--accent), white 74%);
+  --compare-btn-hover-bg: color-mix(in srgb, var(--input-bg), var(--accent) 18%);
+  --compare-btn-hover-border: color-mix(in srgb, var(--border), var(--accent) 28%);
   --modal-bg: #ffffff;
   --thumb-bg: var(--thumb-neutral);
   --scrollbar-track: #f1f2f4;
@@ -1299,6 +1303,11 @@ p {
   display: flex;
   gap: 10px;
   padding-top: 10px;
+}
+
+.duplicate-group-actions .tb-btn:not(:disabled):hover {
+  background: var(--compare-btn-hover-bg);
+  border-color: var(--compare-btn-hover-border);
 }
 
 .gallery-group-body[hidden] {

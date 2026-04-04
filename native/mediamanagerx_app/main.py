@@ -1129,6 +1129,7 @@ class CompareRevealViewer(QWidget):
         super().__init__(parent)
         self.setObjectName("compareRevealViewer")
         self.setMouseTracking(True)
+        self.setCursor(Qt.CursorShape.ArrowCursor)
         self.setMinimumHeight(0)
         self._left_path = ""
         self._right_path = ""
@@ -1284,6 +1285,25 @@ class CompareRevealViewer(QWidget):
         else:
             self._pan.setY(max(-max_y, min(max_y, self._pan.y())))
 
+    def _slider_hit_test(self, point: QPoint) -> bool:
+        available_left = self._left_image is not None and not self._left_image.isNull()
+        available_right = self._right_image is not None and not self._right_image.isNull()
+        if not available_left or not available_right or self._isolate_slot in {"left", "right"}:
+            return False
+        scale = self._fit_scale() * self._zoom
+        canvas_rect = self._scaled_canvas_rect(scale)
+        if canvas_rect.width() <= 0 or canvas_rect.height() <= 0:
+            return False
+        slider_x = canvas_rect.left() + round(canvas_rect.width() * self._slider_ratio)
+        return abs(point.x() - slider_x) <= 16 and canvas_rect.adjusted(-10, -10, 10, 10).contains(point)
+
+    def _sync_hover_cursor(self, point: QPoint | None = None) -> None:
+        if self._drag_mode == "slider":
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            return
+        target_point = point if point is not None else self.mapFromGlobal(QCursor.pos())
+        self.setCursor(Qt.CursorShape.PointingHandCursor if self._slider_hit_test(target_point) else Qt.CursorShape.ArrowCursor)
+
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
@@ -1352,11 +1372,9 @@ class CompareRevealViewer(QWidget):
         if event.button() != Qt.MouseButton.LeftButton:
             super().mousePressEvent(event)
             return
-        scale = self._fit_scale() * self._zoom
-        canvas_rect = self._scaled_canvas_rect(scale)
-        slider_x = canvas_rect.left() + round(canvas_rect.width() * self._slider_ratio)
-        if abs(event.position().x() - slider_x) <= 16 and canvas_rect.adjusted(-10, -10, 10, 10).contains(event.position().toPoint()):
+        if self._slider_hit_test(event.position().toPoint()):
             self._drag_mode = "slider"
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
         elif self._zoom > 1.0:
             self._drag_mode = "pan"
             self._drag_start_pos = event.position().toPoint()
@@ -1372,6 +1390,7 @@ class CompareRevealViewer(QWidget):
             if canvas_rect.width() > 0:
                 self._slider_ratio = max(0.0, min(1.0, (event.position().x() - canvas_rect.left()) / canvas_rect.width()))
                 self.update()
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
             event.accept()
             return
         if self._drag_mode == "pan":
@@ -1379,17 +1398,25 @@ class CompareRevealViewer(QWidget):
             self._pan = self._pan_start + delta
             self._clamp_pan()
             self.update()
+            self.setCursor(Qt.CursorShape.ArrowCursor)
             event.accept()
             return
+        self._sync_hover_cursor(event.position().toPoint())
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         self._drag_mode = ""
+        self._sync_hover_cursor(event.position().toPoint())
         super().mouseReleaseEvent(event)
 
     def resizeEvent(self, event) -> None:
         self._clamp_pan()
+        self._sync_hover_cursor()
         super().resizeEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        super().leaveEvent(event)
 
 
 class CompareSlotCard(QFrame):
@@ -1442,6 +1469,7 @@ class CompareSlotCard(QFrame):
         self.thumb_frame = QFrame()
         self.thumb_frame.setObjectName("compareSlotThumbCard")
         self.thumb_frame.setMinimumHeight(0)
+        self.thumb_frame.setCursor(Qt.CursorShape.ArrowCursor)
         thumb_layout = QVBoxLayout(self.thumb_frame)
         thumb_layout.setContentsMargins(6, 4, 6, 4)
         thumb_layout.setSpacing(0)
@@ -1450,6 +1478,7 @@ class CompareSlotCard(QFrame):
 
         self.thumb_wrap = QWidget()
         self.thumb_wrap.setMinimumHeight(0)
+        self.thumb_wrap.setCursor(Qt.CursorShape.ArrowCursor)
         thumb_wrap_layout = QVBoxLayout(self.thumb_wrap)
         thumb_wrap_layout.setContentsMargins(0, 5, 0, 5)
         thumb_wrap_layout.setSpacing(0)
@@ -1459,6 +1488,7 @@ class CompareSlotCard(QFrame):
         self.thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.thumb_label.setMinimumSize(0, 50)
         self.thumb_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        self.thumb_label.setCursor(Qt.CursorShape.ArrowCursor)
         thumb_wrap_layout.addWidget(self.thumb_label, 1)
         thumb_layout.addWidget(self.thumb_wrap, 1)
 
@@ -1485,14 +1515,17 @@ class CompareSlotCard(QFrame):
         controls.setSpacing(10)
 
         self.keep_toggle = QCheckBox("Keep")
+        self.keep_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
         self.keep_toggle.clicked.connect(self._emit_keep_changed)
         controls.addWidget(self.keep_toggle)
 
         self.best_toggle = QCheckBox("Best Overall")
+        self.best_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
         self.best_toggle.clicked.connect(self._emit_best_changed)
         controls.addWidget(self.best_toggle)
 
         self.delete_btn = QPushButton("Delete")
+        self.delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.delete_btn.clicked.connect(self._emit_delete_clicked)
         self.delete_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         controls.addWidget(self.delete_btn, 1)
@@ -1500,6 +1533,7 @@ class CompareSlotCard(QFrame):
         layout.addLayout(controls)
 
         self.browse_btn = QPushButton("Browse…")
+        self.browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.browse_btn.clicked.connect(lambda: self.browseRequested.emit(self.slot_name))
         self.browse_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout.addWidget(self.browse_btn)
@@ -1556,7 +1590,7 @@ class CompareSlotCard(QFrame):
         self.reasons_label.setStyleSheet(f"color: {accent_hex}; font-weight: 700;")
         self.best_label.setStyleSheet(f"color: {accent_hex}; font-weight: 700;")
         self.thumb_frame.setStyleSheet(
-            f"background-color: {thumb_bg}; border: 1px solid {border}; border-radius: 10px;"
+            "background-color: #2d2d30; border: 1px solid #3b3b40; border-radius: 10px;"
         )
         self.thumb_wrap.setStyleSheet("background: transparent; border: none;")
         self.thumb_label.setStyleSheet(
@@ -1653,6 +1687,10 @@ class CompareSlotCard(QFrame):
         self.setProperty("empty", not has_entry)
         self.clear_btn.setEnabled(has_entry)
         self.clear_btn.setVisible(has_entry)
+        thumb_cursor = Qt.CursorShape.PointingHandCursor if has_entry else Qt.CursorShape.ArrowCursor
+        self.thumb_frame.setCursor(thumb_cursor)
+        self.thumb_wrap.setCursor(thumb_cursor)
+        self.thumb_label.setCursor(thumb_cursor)
         self.style().unpolish(self)
         self.style().polish(self)
         if not has_entry:
@@ -11061,8 +11099,8 @@ class MainWindow(QMainWindow):
                     background: transparent;
                 }}
                 QFrame#compareSlotCard {{
-                    background-color: {Theme.get_control_bg(accent)};
-                    border: 1px solid {Theme.get_border(accent)};
+                    background-color: #2d2d30;
+                    border: 1px solid #3b3b40;
                     border-radius: 10px;
                 }}
                 QFrame#compareSlotCard[empty="true"] {{
