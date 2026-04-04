@@ -209,18 +209,18 @@
           <div class="modal-title">Settings</div>
           <div class="settings-nav">
             <button class="settings-nav-item active" data-pane="general">General</button>
-            <button class="settings-nav-item" data-pane="player">Player</button>
             <button class="settings-nav-item" data-pane="appearance">Appearance</button>
+            <button class="settings-nav-item" data-pane="player">Player</button>
             <button class="settings-nav-item" data-pane="metadata">Metadata</button>
-            <button class="settings-nav-item" data-pane="duplicates">Duplicate and Similarity Auto Resolve Rules</button>
+            <button class="settings-nav-item" data-pane="duplicates">Similar File Rules</button>
             <button class="settings-nav-item" data-pane="ai">AI</button>
-          </div>
-          <div class="modal-actions-sidebar">
-            <button class="tb-btn" id="closeSettings">Close</button>
           </div>
         </div>
 
         <div class="settings-content">
+          <div class="settings-content-header">
+            <button class="tb-btn settings-close-btn" id="closeSettings" title="Close Settings">X</button>
+          </div>
           <!-- General Pane -->
           <div class="settings-pane" id="pane-general">
             <div class="pane-title">General</div>
@@ -340,7 +340,7 @@
           </div>
 
           <div class="settings-pane" id="pane-duplicates" hidden>
-            <div class="pane-title">Duplicate and Similarity Auto Resolve Rules</div>
+            <div class="pane-title">Similar File Rules</div>
             <div class="pane-subtitle">Configure how MediaLens keeps, merges, and ranks duplicate and similar files.</div>
             <div class="segmented-control duplicate-settings-tabs" id="duplicateSettingsTabs">
               <input type="radio" name="duplicate_settings_mode" value="rules" id="duplicateSettingsRules" checked />

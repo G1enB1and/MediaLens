@@ -386,17 +386,25 @@ header {
   background: var(--accent-soft-strong);
 }
 
-.modal-actions-sidebar {
-  padding: 16px;
-  border-top: 1px solid var(--border);
-}
-
 .settings-content {
   flex: 1;
-  padding: 24px;
+  padding: 16px 24px 24px;
   overflow-y: auto;
   overflow-x: hidden;
   background: var(--modal-bg);
+}
+
+.settings-content-header {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.settings-close-btn {
+  min-width: 32px;
+  padding: 4px 10px;
+  font-weight: 700;
 }
 
 .settings-pane {
