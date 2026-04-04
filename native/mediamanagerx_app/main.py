@@ -4,7 +4,7 @@ try:
     with open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "VERSION"), "r") as f:
         __version__ = f.read().strip()
 except Exception:
-    __version__ = "v1.1.8"
+    __version__ = "v1.1.9"
 
 
 import sys
@@ -2025,18 +2025,25 @@ class ComparePanel(QWidget):
         self.viewer = CompareRevealViewer()
         self.right_slot = CompareSlotCard("right")
         self._viewer_hint_text = "Zoom to cursor location with mouse scroll wheel"
-        self._viewer_warning_lines: list[str] = []
+        self._viewer_upscale_text = ""
+        self._viewer_aspect_text = ""
         self.viewer_hint = ElidedInfoLabel("Zoom to cursor location with mouse scroll wheel")
         self.viewer_hint.setObjectName("compareViewerHint")
         self.viewer_hint.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.viewer_hint.setMinimumWidth(0)
         self.viewer_hint.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.viewer_warning = ElidedInfoLabel("")
-        self.viewer_warning.setObjectName("compareViewerWarning")
-        self.viewer_warning.setMinimumWidth(0)
-        self.viewer_warning.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        self.viewer_warning.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.viewer_warning.setVisible(False)
+        self.viewer_upscale_warning = ElidedInfoLabel("")
+        self.viewer_upscale_warning.setObjectName("compareViewerUpscaleWarning")
+        self.viewer_upscale_warning.setMinimumWidth(0)
+        self.viewer_upscale_warning.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self.viewer_upscale_warning.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.viewer_upscale_warning.setVisible(False)
+        self.viewer_aspect_warning = ElidedInfoLabel("")
+        self.viewer_aspect_warning.setObjectName("compareViewerAspectWarning")
+        self.viewer_aspect_warning.setMinimumWidth(0)
+        self.viewer_aspect_warning.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self.viewer_aspect_warning.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.viewer_aspect_warning.setVisible(False)
         self.left_scroll = QScrollArea()
         self.right_scroll = QScrollArea()
         self.viewer_wrap = QWidget()
@@ -2045,7 +2052,8 @@ class ComparePanel(QWidget):
         viewer_layout.setSpacing(8)
         viewer_layout.addWidget(self.viewer, 1)
         viewer_layout.addWidget(self.viewer_hint, 0)
-        viewer_layout.addWidget(self.viewer_warning, 0)
+        viewer_layout.addWidget(self.viewer_upscale_warning, 0)
+        viewer_layout.addWidget(self.viewer_aspect_warning, 0)
         for scroll, slot in ((self.left_scroll, self.left_slot), (self.right_scroll, self.right_slot)):
             scroll.setWidget(slot)
             scroll.setWidgetResizable(True)
@@ -2081,7 +2089,8 @@ class ComparePanel(QWidget):
 
     def _update_viewer_footer_labels(self) -> None:
         self.viewer_hint.setText(self._viewer_hint_text)
-        self.viewer_warning.setText("\n".join(self._viewer_warning_lines))
+        self.viewer_upscale_warning.setText(self._viewer_upscale_text)
+        self.viewer_aspect_warning.setText(self._viewer_aspect_text)
 
     def apply_theme_styles(self, text: str, text_muted: str, accent_hex: str, accent_raw: str, thumb_bg: str, border: str) -> None:
         for slot in (self.left_slot, self.right_slot):
@@ -2097,9 +2106,9 @@ class ComparePanel(QWidget):
         self.viewer_hint.setStyleSheet(
             f"color: {text_muted}; background: transparent; border: none;"
         )
-        self.viewer_warning.setStyleSheet(
-            f"color: {accent_hex}; font-weight: 700; background: transparent; border: none;"
-        )
+        warning_style = f"color: {accent_hex}; font-weight: 700; background: transparent; border: none;"
+        self.viewer_upscale_warning.setStyleSheet(warning_style)
+        self.viewer_aspect_warning.setStyleSheet(warning_style)
         self._update_viewer_footer_labels()
         try:
             self.style().unpolish(self)
@@ -2176,16 +2185,12 @@ class ComparePanel(QWidget):
         self.left_slot.set_entry(left_entry)
         self.right_slot.set_entry(right_entry)
         self.viewer.set_images(str(left_entry.get("path") or ""), str(right_entry.get("path") or ""))
-        status_lines: list[str] = []
-        upscale_message = self.viewer.upscale_match_message()
-        if upscale_message:
-            status_lines.append(upscale_message)
-        if self.viewer.has_different_aspect_ratios():
-            status_lines.append("Different Aspect Ratios")
-        self._viewer_warning_lines = status_lines
+        self._viewer_upscale_text = self.viewer.upscale_match_message()
+        self._viewer_aspect_text = "Different Aspect Ratios" if self.viewer.has_different_aspect_ratios() else ""
         self._update_viewer_footer_labels()
         self.viewer_hint.setVisible(has_viewer_image)
-        self.viewer_warning.setVisible(bool(status_lines))
+        self.viewer_upscale_warning.setVisible(bool(self._viewer_upscale_text))
+        self.viewer_aspect_warning.setVisible(bool(self._viewer_aspect_text))
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
