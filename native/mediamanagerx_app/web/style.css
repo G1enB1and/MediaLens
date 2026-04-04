@@ -1727,8 +1727,19 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 }
 
 .gallery-duplicates .structured-thumb {
-  aspect-ratio: 1 / 1;
-  min-height: 180px;
+  aspect-ratio: auto;
+  min-height: 0;
+  background: transparent;
+  border-radius: 0;
+  overflow: visible;
+}
+
+.gallery-duplicates .structured-thumb .thumb {
+  height: auto;
+  max-height: none;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 10px;
 }
 
 .structured-content {

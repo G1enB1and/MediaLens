@@ -111,6 +111,7 @@ from PySide6.QtCore import (
     QTimer,
     QMetaObject,
     QRect,
+    QRectF,
 )
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 from PySide6.QtGui import (
@@ -125,6 +126,7 @@ from PySide6.QtGui import (
     QIcon,
     QMovie,
     QPainter,
+    QPainterPath,
     QPalette,
     QCursor,
     QPixmap,
@@ -379,6 +381,35 @@ class Theme:
         return Theme.get_border(accent)
 
     ACCENT_DEFAULT = "#8ab4f8"
+
+
+def _rounded_preview_pixmap(source: QPixmap, target: QSize, border_color: str, radius: float = 10.0) -> QPixmap:
+    scaled = source.scaled(
+        target,
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    )
+    if scaled.isNull():
+        return scaled
+    result = QPixmap(scaled.size())
+    result.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(result)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+    draw_rect = QRectF(0.5, 0.5, max(0.0, result.width() - 1.0), max(0.0, result.height() - 1.0))
+    path = QPainterPath()
+    path.addRoundedRect(draw_rect, radius, radius)
+    painter.setClipPath(path)
+    painter.drawPixmap(0, 0, scaled)
+    painter.setClipping(False)
+    pen = QPen(QColor(border_color))
+    pen.setWidth(1)
+    pen.setCosmetic(True)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(draw_rect, radius, radius)
+    painter.end()
+    return result
 
 
 class FileConflictDialog(QDialog):
@@ -1137,6 +1168,8 @@ class AccentSelectionTreeDelegate(QStyledItemDelegate):
 
 
 class CompareRevealViewer(QWidget):
+    _CONTENT_PADDING = 7
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("compareRevealViewer")
@@ -1155,6 +1188,13 @@ class CompareRevealViewer(QWidget):
         self._pan_start = QPoint()
         self._isolate_slot = ""
         self._auto_center_on_pair = True
+        self._frame_bg = QColor("#121212")
+        self._frame_border = QColor(Theme.get_border(QColor(Theme.ACCENT_DEFAULT)))
+
+    def set_frame_style(self, bg_color: str, border_color: str) -> None:
+        self._frame_bg = QColor(str(bg_color or "#121212"))
+        self._frame_border = QColor(str(border_color or Theme.get_border(QColor(Theme.ACCENT_DEFAULT))))
+        self.update()
 
     def _load_image(self, path: str) -> QImage | None:
         clean = str(path or "").strip()
@@ -1213,6 +1253,10 @@ class CompareRevealViewer(QWidget):
         ]
         return QSize(max(widths, default=1), max(heights, default=1))
 
+    def _content_rect(self) -> QRect:
+        padding = max(0, int(self._CONTENT_PADDING))
+        return self.rect().adjusted(padding, padding, -padding, -padding)
+
     def has_different_aspect_ratios(self) -> bool:
         left_image = self._left_image
         right_image = self._right_image
@@ -1253,16 +1297,18 @@ class CompareRevealViewer(QWidget):
 
     def _fit_scale(self) -> float:
         canvas = self._canvas_size()
-        if canvas.width() <= 0 or canvas.height() <= 0 or self.width() <= 0 or self.height() <= 0:
+        content_rect = self._content_rect()
+        if canvas.width() <= 0 or canvas.height() <= 0 or content_rect.width() <= 0 or content_rect.height() <= 0:
             return 1.0
-        return min(self.width() / canvas.width(), self.height() / canvas.height())
+        return min(content_rect.width() / canvas.width(), content_rect.height() / canvas.height())
 
     def _scaled_canvas_rect(self, scale: float) -> QRect:
         canvas = self._canvas_size()
+        content_rect = self._content_rect()
         scaled_w = max(1, round(canvas.width() * scale))
         scaled_h = max(1, round(canvas.height() * scale))
-        left = round((self.width() - scaled_w) / 2 + self._pan.x())
-        top = round((self.height() - scaled_h) / 2 + self._pan.y())
+        left = round(content_rect.x() + (content_rect.width() - scaled_w) / 2 + self._pan.x())
+        top = round(content_rect.y() + (content_rect.height() - scaled_h) / 2 + self._pan.y())
         return QRect(left, top, scaled_w, scaled_h)
 
     def _draw_image(self, painter: QPainter, image: QImage | None, canvas_rect: QRect, clip_rect: QRect | None) -> None:
@@ -1279,20 +1325,21 @@ class CompareRevealViewer(QWidget):
         target_rect = QRect(draw_x, draw_y, draw_w, draw_h)
         painter.save()
         if clip_rect is not None:
-            painter.setClipRect(clip_rect)
+            painter.setClipRect(clip_rect, Qt.ClipOperation.IntersectClip)
         painter.drawImage(target_rect, image)
         painter.restore()
 
     def _clamp_pan(self) -> None:
         scale = self._fit_scale() * self._zoom
         canvas_rect = self._scaled_canvas_rect(scale)
-        max_x = max(0, round((canvas_rect.width() - self.width()) / 2))
-        max_y = max(0, round((canvas_rect.height() - self.height()) / 2))
-        if canvas_rect.width() <= self.width():
+        content_rect = self._content_rect()
+        max_x = max(0, round((canvas_rect.width() - content_rect.width()) / 2))
+        max_y = max(0, round((canvas_rect.height() - content_rect.height()) / 2))
+        if canvas_rect.width() <= content_rect.width():
             self._pan.setX(0)
         else:
             self._pan.setX(max(-max_x, min(max_x, self._pan.x())))
-        if canvas_rect.height() <= self.height():
+        if canvas_rect.height() <= content_rect.height():
             self._pan.setY(0)
         else:
             self._pan.setY(max(-max_y, min(max_y, self._pan.y())))
@@ -1302,12 +1349,11 @@ class CompareRevealViewer(QWidget):
         available_right = self._right_image is not None and not self._right_image.isNull()
         if not available_left or not available_right or self._isolate_slot in {"left", "right"}:
             return False
-        scale = self._fit_scale() * self._zoom
-        canvas_rect = self._scaled_canvas_rect(scale)
-        if canvas_rect.width() <= 0 or canvas_rect.height() <= 0:
+        content_rect = self._content_rect()
+        if content_rect.width() <= 0 or content_rect.height() <= 0:
             return False
-        slider_x = canvas_rect.left() + round(canvas_rect.width() * self._slider_ratio)
-        return abs(point.x() - slider_x) <= 16 and canvas_rect.adjusted(-10, -10, 10, 10).contains(point)
+        slider_x = content_rect.left() + round(content_rect.width() * self._slider_ratio)
+        return abs(point.x() - slider_x) <= 16 and content_rect.adjusted(-10, -10, 10, 10).contains(point)
 
     def _sync_hover_cursor(self, point: QPoint | None = None) -> None:
         if self._drag_mode == "slider":
@@ -1318,25 +1364,50 @@ class CompareRevealViewer(QWidget):
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-        viewer_bg = "#ffffff" if Theme.get_is_light() else "#121212"
-        painter.fillRect(self.rect(), QColor(viewer_bg))
+        frame_rect = QRectF(0.5, 0.5, max(0.0, self.width() - 1.0), max(0.0, self.height() - 1.0))
+        frame_radius = 10.0
+        frame_path = QPainterPath()
+        frame_path.addRoundedRect(frame_rect, frame_radius, frame_radius)
+        painter.fillPath(frame_path, self._frame_bg)
+        content_rect = self._content_rect()
+        content_rect_f = QRectF(
+            content_rect.x() + 0.5,
+            content_rect.y() + 0.5,
+            max(0.0, content_rect.width() - 1.0),
+            max(0.0, content_rect.height() - 1.0),
+        )
+        content_radius = 8.0
+        content_path = QPainterPath()
+        content_path.addRoundedRect(content_rect_f, content_radius, content_radius)
+        painter.save()
+        painter.setClipPath(content_path)
 
         available_left = self._left_image is not None and not self._left_image.isNull()
         available_right = self._right_image is not None and not self._right_image.isNull()
         if not available_left and not available_right:
             painter.setPen(QColor("#8a8a8a"))
-            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Drop or browse two images to compare")
+            painter.drawText(self._content_rect(), Qt.AlignmentFlag.AlignCenter, "Drop or browse two images to compare")
+            painter.restore()
+            border_pen = QPen(self._frame_border)
+            border_pen.setWidth(1)
+            border_pen.setCosmetic(True)
+            painter.setPen(border_pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(frame_rect, frame_radius, frame_radius)
             return
 
         scale = self._fit_scale() * self._zoom
         canvas_rect = self._scaled_canvas_rect(scale)
-        slider_x = canvas_rect.left() + round(canvas_rect.width() * self._slider_ratio)
+        slider_x = content_rect.left() + round(content_rect.width() * self._slider_ratio)
         left_clip = QRect(self.rect().left(), self.rect().top(), max(0, slider_x - self.rect().left()), self.rect().height())
         right_clip = QRect(slider_x, self.rect().top(), max(0, self.rect().right() - slider_x + 1), self.rect().height())
 
         isolate_left = self._isolate_slot == "left" and available_left
         isolate_right = self._isolate_slot == "right" and available_right
+        painter.save()
+        painter.setClipRect(canvas_rect, Qt.ClipOperation.IntersectClip)
         if isolate_left:
             self._draw_image(painter, self._left_image, canvas_rect, None)
         elif isolate_right:
@@ -1344,16 +1415,25 @@ class CompareRevealViewer(QWidget):
         else:
             self._draw_image(painter, self._left_image, canvas_rect, left_clip)
             self._draw_image(painter, self._right_image, canvas_rect, right_clip)
+        painter.restore()
+        painter.restore()
 
         if not isolate_left and not isolate_right and available_left and available_right:
             painter.save()
             painter.setPen(QPen(QColor("#ffffff"), 2))
-            painter.drawLine(slider_x, canvas_rect.top(), slider_x, canvas_rect.bottom())
-            handle_rect = QRect(slider_x - 8, round(canvas_rect.center().y() - 28), 16, 56)
+            painter.drawLine(slider_x, content_rect.top(), slider_x, content_rect.bottom())
+            handle_rect = QRect(slider_x - 8, round(content_rect.center().y() - 28), 16, 56)
             painter.setBrush(QColor("#ffffff"))
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawRoundedRect(handle_rect, 8, 8)
             painter.restore()
+
+        border_pen = QPen(self._frame_border)
+        border_pen.setWidth(1)
+        border_pen.setCosmetic(True)
+        painter.setPen(border_pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(frame_rect, frame_radius, frame_radius)
 
     def wheelEvent(self, event) -> None:
         delta = event.angleDelta().y()
@@ -1371,8 +1451,9 @@ class CompareRevealViewer(QWidget):
             self._pan = QPoint(0, 0)
         else:
             new_scale = self._fit_scale() * self._zoom
-            base_left = (self.width() - self._canvas_size().width() * new_scale) / 2
-            base_top = (self.height() - self._canvas_size().height() * new_scale) / 2
+            content_rect = self._content_rect()
+            base_left = content_rect.x() + (content_rect.width() - self._canvas_size().width() * new_scale) / 2
+            base_top = content_rect.y() + (content_rect.height() - self._canvas_size().height() * new_scale) / 2
             self._pan = QPoint(
                 round(event.position().x() - base_left - scene_x * new_scale),
                 round(event.position().y() - base_top - scene_y * new_scale),
@@ -1456,6 +1537,7 @@ class CompareSlotCard(QFrame):
         self._full_name_text: str = "Drop image here"
         self._drag_start_pos: QPoint | None = None
         self._thumb_source_pixmap: QPixmap | None = None
+        self._thumb_border_color: str = Theme.get_border(QColor(Theme.ACCENT_DEFAULT))
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 0, 10, 10)
@@ -1625,6 +1707,7 @@ class CompareSlotCard(QFrame):
         )
         self.reasons_label.setStyleSheet(f"color: {accent_hex}; font-weight: 700;")
         self.best_label.setStyleSheet(f"color: {accent_hex}; font-weight: 700;")
+        self._thumb_border_color = border
         self.thumb_frame.setStyleSheet(
             f"background-color: {thumb_bg}; border: 1px solid {border}; border-radius: 10px;"
         )
@@ -1639,6 +1722,7 @@ class CompareSlotCard(QFrame):
         )
         for button in (self.browse_btn, self.delete_btn):
             button.setStyleSheet(button_qss)
+        self._update_thumb_pixmap()
         self.browse_btn.setMinimumWidth(0)
         self.browse_btn.setMaximumWidth(16777215)
         self.delete_btn.setMinimumWidth(0)
@@ -1709,12 +1793,9 @@ class CompareSlotCard(QFrame):
         if available.width() <= 0 or available.height() <= 0:
             self.thumb_label.setPixmap(self._thumb_source_pixmap)
             return
-        scaled = self._thumb_source_pixmap.scaled(
-            available,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
+        self.thumb_label.setPixmap(
+            _rounded_preview_pixmap(self._thumb_source_pixmap, available, self._thumb_border_color)
         )
-        self.thumb_label.setPixmap(scaled)
 
     def _render_entry(self, entry: dict) -> None:
         self._entry = dict(entry or {})
@@ -1979,11 +2060,8 @@ class ComparePanel(QWidget):
         )
         self.left_scroll.setStyleSheet(scrollbar_style)
         self.right_scroll.setStyleSheet(scrollbar_style)
-        viewer_border = Theme.mix(Theme.get_border(QColor(accent_raw)), QColor(accent_raw), 0.45)
-        viewer_bg = Theme.mix(Theme.get_control_bg(QColor(accent_raw)), QColor(accent_raw), 0.08 if Theme.get_is_light() else 0.06)
-        self.viewer.setStyleSheet(
-            f"background-color: {viewer_bg}; border: 1px solid {viewer_border}; border-radius: 10px;"
-        )
+        self.viewer.set_frame_style(thumb_bg, border)
+        self.viewer.setStyleSheet("background: transparent; border: none;")
         self.viewer_hint.setStyleSheet(
             f"color: {text_muted}; background: transparent; border: none;"
         )
