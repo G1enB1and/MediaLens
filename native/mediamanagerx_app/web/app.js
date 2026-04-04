@@ -461,8 +461,6 @@ let gGalleryRequestSeq = 0;
 let gPendingMediaCountRequests = new Map();
 let gPendingMediaListRequests = new Map();
 let gRefreshGeneration = 0;
-let gSelectedFolderLabelHidden = false;
-let gSelectedFolderLabelWidth = 0;
 
 function buildDragPreviewCanvas(img, item = null) {
   if (!img) return null;
@@ -634,15 +632,6 @@ function fetchMediaCount(folders, filterType, searchQuery) {
   });
 }
 
-function getSelectedFolderLabelWidth() {
-  const label = document.getElementById('selectedFolderLabel');
-  if (!label) return gSelectedFolderLabelWidth || 0;
-  if (!gSelectedFolderLabelWidth) {
-    gSelectedFolderLabelWidth = Math.ceil(label.getBoundingClientRect().width || label.scrollWidth || 0);
-  }
-  return gSelectedFolderLabelWidth;
-}
-
 function getFolderAddressContentWidth(address) {
   if (!address) return 0;
   const children = Array.from(address.children || []);
@@ -668,18 +657,13 @@ function updateSelectedFolderLabelVisibility() {
   const address = document.getElementById('selectedFolder');
   const row = address ? address.closest('.kv') : null;
   if (!address || !row) return;
+  const folderNav = row.querySelector('.folder-nav');
+  const rowStyles = window.getComputedStyle(row);
+  const gap = parseFloat(rowStyles.columnGap || rowStyles.gap || '0') || 0;
+  const navWidth = folderNav ? Math.ceil(folderNav.getBoundingClientRect().width || folderNav.scrollWidth || 0) : 0;
   const contentWidth = getFolderAddressContentWidth(address);
-  const overflowPx = Math.ceil(contentWidth - address.clientWidth);
-  const labelWidth = getSelectedFolderLabelWidth();
-  const spareRoomPx = Math.floor(address.clientWidth - contentWidth);
-  const hideThreshold = 1;
-  const showThreshold = 100;
-  if (!gSelectedFolderLabelHidden && overflowPx > hideThreshold) {
-    gSelectedFolderLabelHidden = true;
-  } else if (gSelectedFolderLabelHidden && spareRoomPx >= labelWidth + showThreshold) {
-    gSelectedFolderLabelHidden = false;
-  }
-  row.classList.toggle('hide-selected-folder-label', gSelectedFolderLabelHidden);
+  const nextBasis = Math.max(0, navWidth + gap + contentWidth);
+  row.style.flexBasis = `${nextBasis}px`;
 }
 
 function fetchMediaList(folders, limit, offset, sortBy, filterType, searchQuery) {
@@ -6200,15 +6184,6 @@ async function main() {
         if (toast.classList.contains('info-only')) {
            toast.hidden = true;
            if (gUpdateToastTimer) clearTimeout(gUpdateToastTimer);
-        }
-      });
-    }
-
-    const compareBtn = document.getElementById('openComparePanel');
-    if (compareBtn) {
-      compareBtn.addEventListener('click', () => {
-        if (gBridge && gBridge.open_compare_panel) {
-          gBridge.open_compare_panel();
         }
       });
     }

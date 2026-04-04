@@ -196,12 +196,23 @@ header {
   padding: 12px 16px;
 }
 
+.header-top .kv {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.header-top .folder-address {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 0;
+}
+
 .search {
   flex: 1 1 360px;
   display: flex;
   align-items: center;
   gap: 10px;
-  min-width: 0;
+  min-width: 200px;
 }
 
 .search-input {
@@ -832,6 +843,15 @@ main {
   border-top: 1px solid var(--border);
   background: transparent;
   transform: translateZ(0);
+}
+
+.toolbar .search {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.toolbar .search-input {
+  min-width: 0;
 }
 
 body.lightbox-open .toolbar {
@@ -2329,10 +2349,6 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   word-break: normal;
   border: 1px solid transparent;
   cursor: text;
-}
-
-.kv.hide-selected-folder-label #selectedFolderLabel {
-  display: none;
 }
 
 .folder-address:focus-visible {

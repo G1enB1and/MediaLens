@@ -20,7 +20,6 @@
             <button class="tb-btn tb-icon-btn" id="navForward" title="Forward" aria-label="Forward">&#8594;</button>
             <button class="tb-btn tb-icon-btn" id="navRefresh" title="Refresh" aria-label="Refresh">&#8635;</button>
           </div>
-          <div class="k" id="selectedFolderLabel">Selected folder</div>
           <div class="v folder-address" id="selectedFolder" title="Current folder" tabindex="0">(none)</div>
         </div>
         <div class="search-actions">
@@ -68,8 +67,6 @@
               <div data-value="similar_only">Group By: Similar</div>
             </div>
           </div>
-          <button class="tb-btn" id="openComparePanel" title="Open comparison panel">Compare</button>
-          <div class="files-count-chip" id="galleryCountChip">0 Files</div>
           <div class="custom-select" id="similarityThresholdSelect" tabindex="0" hidden>
             <div class="select-trigger">Similarity Threshold: Low</div>
             <div class="select-options">
@@ -95,6 +92,7 @@
         <div class="search">
           <input id="searchInput" class="search-input" placeholder="Search…" />
         </div>
+        <div class="files-count-chip" id="galleryCountChip">0 Files</div>
         <div class="pager">
           <button class="tb-btn" data-prev>Prev</button>
           <div class="tb-links" data-links></div>
