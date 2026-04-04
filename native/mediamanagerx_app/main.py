@@ -2062,6 +2062,7 @@ class ComparePanel(QWidget):
         payload = dict(state or {})
         left_entry = dict(payload.get("left") or {})
         right_entry = dict(payload.get("right") or {})
+        has_viewer_image = bool(str(left_entry.get("path") or "").strip() or str(right_entry.get("path") or "").strip())
         self.left_slot.set_entry(left_entry)
         self.right_slot.set_entry(right_entry)
         self.viewer.set_images(str(left_entry.get("path") or ""), str(right_entry.get("path") or ""))
@@ -2073,6 +2074,7 @@ class ComparePanel(QWidget):
             status_lines.append("Different Aspect Ratios")
         self._viewer_warning_lines = status_lines
         self._update_viewer_footer_labels()
+        self.viewer_hint.setVisible(has_viewer_image)
         self.viewer_warning.setVisible(bool(status_lines))
 
     def resizeEvent(self, event) -> None:
