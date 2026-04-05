@@ -1,6 +1,40 @@
 # Change Log
 
-## v1.1.9 (Current)
+## v1.1.10 (Current)
+
+### Summary
+
+This release makes MediaLens feel steadier and more polished during everyday browsing. It reduces screen flicker for many Windows setups, replaces the old web settings overlay with a cleaner native settings window, and gives you more control over header space when you want a roomier gallery view.
+
+### Highlights
+
+- Settings now open in a native Qt window with a standard title bar, improved layout, and more consistent controls.
+- Panel toggles have moved into the File menu, and a new header toggle lets you hide the top header to free up screen space when needed.
+- Accent color contrast has been improved across settings and the header address bar so selected text and toggles stay easier to read.
+- Windows builds now use a more stable DPI awareness mode to reduce flicker on some displays.
+
+### Added
+
+- Added a native Qt settings dialog with dedicated pages for General, Appearance, Player, Metadata, Similar File Rules, and AI.
+- Added drag-and-drop reordering for metadata groups, metadata fields, preferred duplicate formats, and duplicate scoring priorities in native settings.
+- Added an editable accent hex input alongside the accent color picker in Appearance settings.
+- Added DPI diagnostics to startup logs and crash reports to make packaging and display issues easier to investigate.
+
+### Changed
+
+- Changed Windows packaging to force system DPI awareness in the installed app to help reduce flicker on some screens.
+- Moved the left, right, bottom, and top panel toggles into the File menu and added a dedicated option to hide the header so the gallery can use more vertical space.
+- Updated the native settings window to follow light and dark theme changes, use the chosen accent color more consistently, and improve checkbox and selected-text contrast automatically.
+- Refined the native settings layout with better category spacing, cleaner metadata file-type controls, stronger Similar File Rules dropdown styling, and more consistent native dialog behavior.
+- Updated the web header address-bar editor so selected text now chooses black or white automatically based on accent contrast instead of always using white.
+
+### Removed
+
+- Removed the old web-based settings overlay from the main settings flow.
+
+---
+
+## v1.1.9
 
 ### Summary
 
