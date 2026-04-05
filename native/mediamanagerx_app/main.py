@@ -178,6 +178,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage
 from PySide6.QtSvg import QSvgRenderer
 from native.mediamanagerx_app.video_overlay import LightboxVideoOverlay, VideoRequest
+from native.mediamanagerx_app.settings_dialog import SettingsDialog
 from PySide6.QtCore import QSortFilterProxyModel, QModelIndex
 
 
@@ -2407,6 +2408,7 @@ class Bridge(QObject):
     navigateForwardRequested = Signal()
     navigateUpRequested = Signal()
     refreshFolderRequested = Signal()
+    openSettingsDialogRequested = Signal()
 
     accentColorChanged = Signal(str)
     # Async file ops (so WebEngine UI doesn't freeze during rename)
@@ -4155,6 +4157,7 @@ class Bridge(QObject):
                 "gallery.randomize": self._randomize_enabled(),
                 "gallery.restore_last": self._restore_last_enabled(),
                 "gallery.show_hidden": self._show_hidden_enabled(),
+                "gallery.use_recycle_bin": bool(self.settings.value("gallery/use_recycle_bin", True, type=bool)),
                 "gallery.mute_video_by_default": self._mute_video_by_default_enabled(),
                 "player.autoplay_gallery_animated_gifs": self._autoplay_gallery_animated_gifs_enabled(),
                 "player.autoplay_preview_animated_gifs": self._autoplay_preview_animated_gifs_enabled(),
@@ -4228,6 +4231,7 @@ class Bridge(QObject):
                 "gallery.randomize": False,
                 "gallery.restore_last": False,
                 "gallery.show_hidden": False,
+                "gallery.use_recycle_bin": True,
                 "gallery.mute_video_by_default": True,
                 "player.autoplay_gallery_animated_gifs": True,
                 "player.autoplay_preview_animated_gifs": True,
@@ -4597,6 +4601,7 @@ class Bridge(QObject):
                 "gallery.randomize", 
                 "gallery.restore_last", 
                 "gallery.show_hidden",
+                "gallery.use_recycle_bin",
                 "gallery.mute_video_by_default",
                 "player.autoplay_gallery_animated_gifs",
                 "player.autoplay_preview_animated_gifs",
@@ -4609,7 +4614,7 @@ class Bridge(QObject):
                 "ui.preview_above_details",
                 "updates.check_on_launch"
             )
-            if key not in allowed and not key.startswith("metadata.display.") and not key.startswith("duplicate.rules.merge"):
+            if key not in allowed and key != "duplicate.rules.merge_before_delete" and not key.startswith("metadata.display.") and not key.startswith("duplicate.rules.merge"):
                 return False
             qkey = key.replace(".", "/")
             self.settings.setValue(qkey, bool(value))
@@ -4703,6 +4708,10 @@ class Bridge(QObject):
     @Slot()
     def refresh_current_folder(self) -> None:
         self.refreshFolderRequested.emit()
+
+    @Slot()
+    def open_settings_dialog(self) -> None:
+        self.openSettingsDialogRequested.emit()
 
     @Slot(result=str)
     def pick_folder(self) -> str:
@@ -6575,10 +6584,12 @@ class MainWindow(QMainWindow):
         self.bridge.navigateForwardRequested.connect(self._navigate_forward)
         self.bridge.navigateUpRequested.connect(self._navigate_up)
         self.bridge.refreshFolderRequested.connect(self._refresh_current_folder)
+        self.bridge.openSettingsDialogRequested.connect(self.open_settings)
         self.bridge.accentColorChanged.connect(self._on_accent_changed)
         self._current_accent = Theme.ACCENT_DEFAULT
         self._folder_history: list[str] = []
         self._folder_history_index: int = -1
+        self._settings_dialog: SettingsDialog | None = None
         self._suppress_tree_selection_history = False
         self._tree_root_path: str = ""
         self._pending_tree_sync_path: str = ""
@@ -12398,9 +12409,9 @@ class MainWindow(QMainWindow):
 
     def open_settings(self) -> None:
         try:
-            self.web.page().runJavaScript(
-                "try{ window.__mmx_openSettings && window.__mmx_openSettings(); }catch(e){}"
-            )
+            if self._settings_dialog is None:
+                self._settings_dialog = SettingsDialog(self)
+            self._settings_dialog.open_dialog()
         except Exception:
             pass
 

@@ -12,6 +12,7 @@
 
   /* User Accent (Default) */
   --accent: #3a257d;
+  --accent-contrast: #ffffff;
 
   /* Neutral surfaces with accent reserved for interaction */
   --bg: var(--bg-neutral);
@@ -2389,12 +2390,12 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 
 .folder-address-input::selection {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 .folder-address-input::-moz-selection {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 .folder-address-segment {

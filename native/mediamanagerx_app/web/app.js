@@ -133,6 +133,30 @@ function normalizeMediaPath(path) {
   return String(path || '').replace(/\//g, '\\').trim().toLowerCase();
 }
 
+function getAccentContrastColor(color) {
+  const value = String(color || '').trim();
+  const match = value.match(/^#?([0-9a-f]{6})$/i);
+  if (!match) return '#ffffff';
+  const hex = match[1];
+  const toLinear = (component) => {
+    const srgb = component / 255;
+    return srgb <= 0.03928 ? srgb / 12.92 : Math.pow((srgb + 0.055) / 1.055, 2.4);
+  };
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  const luminance = 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+  const contrastBlack = (luminance + 0.05) / 0.05;
+  const contrastWhite = 1.05 / (luminance + 0.05);
+  return contrastBlack >= contrastWhite ? '#000000' : '#ffffff';
+}
+
+function applyAccentCssVars(color) {
+  const value = color || '#8ab4f8';
+  document.documentElement.style.setProperty('--accent', value);
+  document.documentElement.style.setProperty('--accent-contrast', getAccentContrastColor(value));
+}
+
 function compareHasEmptySlot() {
   return !compareSlotPath('left') || !compareSlotPath('right');
 }
@@ -5367,6 +5391,10 @@ function wirePager() {
 }
 
 function openSettings() {
+  if (gBridge && gBridge.open_settings_dialog) {
+    gBridge.open_settings_dialog();
+    return;
+  }
   const m = document.getElementById('settingsModal');
   if (m) m.hidden = false;
   if (gBridge && gBridge.settings_modal_opened) {
@@ -5569,7 +5597,7 @@ function wireSettings() {
   if (accentInput) {
     accentInput.addEventListener('input', () => {
       const v = accentInput.value || '#8ab4f8';
-      document.documentElement.style.setProperty('--accent', v);
+      applyAccentCssVars(v);
       if (gBridge && gBridge.set_setting_str) {
         gBridge.set_setting_str('ui.accent_color', v, function () { });
       }
@@ -6478,7 +6506,7 @@ async function main() {
 
       const ac = document.getElementById('accentColor');
       const v = (s && s['ui.accent_color']) || '#8ab4f8';
-      document.documentElement.style.setProperty('--accent', v);
+      applyAccentCssVars(v);
       if (ac) ac.value = v;
 
       const theme = (s && s['ui.theme_mode']) || 'dark';
@@ -6621,7 +6649,7 @@ async function main() {
 
     if (bridge.accentColorChanged) {
       bridge.accentColorChanged.connect(function (v) {
-        document.documentElement.style.setProperty('--accent', v);
+        applyAccentCssVars(v);
         const ac = document.getElementById('accentColor');
         if (ac) ac.value = v;
       });
