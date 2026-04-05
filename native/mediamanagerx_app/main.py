@@ -192,6 +192,131 @@ if os.name == "nt":
         _WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS["creationflags"] = subprocess.CREATE_NO_WINDOW
     except AttributeError:
         pass
+
+
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif", ".svg"}
+RASTER_IMAGE_EXTS = IMAGE_EXTS - {".svg"}
+VIDEO_EXTS = {".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}
+_SVG_THUMBNAIL_BG_HINT_CACHE: dict[tuple[str, int, int], str] = {}
+
+
+def _render_svg_image(path: str | Path) -> QImage | None:
+    clean = str(path or "").strip()
+    if not clean:
+        return None
+    renderer = QSvgRenderer(clean)
+    if not renderer.isValid():
+        return None
+    size = renderer.defaultSize()
+    if not size.isValid() or size.width() <= 0 or size.height() <= 0:
+        size = QSize(512, 512)
+    max_dim = max(size.width(), size.height())
+    if max_dim > 4096:
+        scale = 4096.0 / max_dim
+        size = QSize(max(1, int(size.width() * scale)), max(1, int(size.height() * scale)))
+    image = QImage(size, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(image)
+    renderer.render(painter)
+    painter.end()
+    return image if not image.isNull() else None
+
+
+def _read_image_with_svg_support(path: str | Path, *, auto_transform: bool = True) -> QImage | None:
+    clean = str(path or "").strip()
+    if not clean:
+        return None
+    reader = QImageReader(clean)
+    reader.setAutoTransform(auto_transform)
+    image = reader.read()
+    if not image.isNull():
+        return image
+    if Path(clean).suffix.lower() == ".svg":
+        return _render_svg_image(clean)
+    return None
+
+
+def _image_size_with_svg_support(path: str | Path) -> QSize:
+    clean = str(path or "").strip()
+    if not clean:
+        return QSize()
+    reader = QImageReader(clean)
+    size = reader.size()
+    if size.isValid():
+        return size
+    if Path(clean).suffix.lower() == ".svg":
+        renderer = QSvgRenderer(clean)
+        if renderer.isValid():
+            return renderer.defaultSize()
+    return QSize()
+
+
+def _srgb_channel_to_linear(channel: int) -> float:
+    value = max(0.0, min(255.0, float(channel))) / 255.0
+    if value <= 0.04045:
+        return value / 12.92
+    return ((value + 0.055) / 1.055) ** 2.4
+
+
+def _image_visible_luminance(image: QImage | None) -> float | None:
+    if image is None or image.isNull():
+        return None
+    sample = image
+    if sample.width() > 96 or sample.height() > 96:
+        sample = sample.scaled(
+            96,
+            96,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+    if sample.isNull():
+        return None
+    weighted_luminance = 0.0
+    total_alpha = 0.0
+    for y in range(sample.height()):
+        for x in range(sample.width()):
+            color = sample.pixelColor(x, y)
+            alpha = color.alphaF()
+            if alpha <= 0.01:
+                continue
+            luminance = (
+                0.2126 * _srgb_channel_to_linear(color.red())
+                + 0.7152 * _srgb_channel_to_linear(color.green())
+                + 0.0722 * _srgb_channel_to_linear(color.blue())
+            )
+            weighted_luminance += luminance * alpha
+            total_alpha += alpha
+    if total_alpha <= 0.0:
+        return None
+    return weighted_luminance / total_alpha
+
+
+def _svg_thumbnail_bg_hint(path: str | Path) -> str:
+    clean = str(path or "").strip()
+    if not clean or Path(clean).suffix.lower() != ".svg":
+        return ""
+    try:
+        stat = Path(clean).stat()
+        cache_key = (clean, int(stat.st_mtime_ns), int(stat.st_size))
+    except Exception:
+        cache_key = (clean, 0, 0)
+    cached = _SVG_THUMBNAIL_BG_HINT_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    luminance = _image_visible_luminance(_render_svg_image(clean))
+    # Only force contrast backgrounds for mostly dark or mostly light SVG art.
+    if luminance is None:
+        hint = ""
+    elif luminance <= 0.35:
+        hint = "light"
+    elif luminance >= 0.75:
+        hint = "dark"
+    else:
+        hint = ""
+    if len(_SVG_THUMBNAIL_BG_HINT_CACHE) > 512:
+        _SVG_THUMBNAIL_BG_HINT_CACHE.clear()
+    _SVG_THUMBNAIL_BG_HINT_CACHE[cache_key] = hint
+    return hint
     try:
         startupinfo = subprocess.STARTUPINFO()
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -741,18 +866,16 @@ class FileConflictDialog(QDialog):
 
     def _set_thumb(self, label, path: Path):
         ext = path.suffix.lower()
-        if ext in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"}:
-            reader = QImageReader(str(path))
-            reader.setAutoTransform(True)
-            img = reader.read()
+        if ext in IMAGE_EXTS:
+            img = _read_image_with_svg_support(path)
             
             # Fallback for AVIF or other formats Qt can't read natively
-            if img.isNull() and ext == ".avif":
+            if (img is None or img.isNull()) and ext == ".avif":
                 poster = self.bridge._ensure_video_poster(path)
                 if poster and poster.exists():
                     img = QImageReader(str(poster)).read()
 
-            if not img.isNull():
+            if img is not None and not img.isNull():
                 pix = QPixmap.fromImage(img).scaled(240, 180, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
                 label.setPixmap(pix)
             else:
@@ -768,7 +891,7 @@ class FileConflictDialog(QDialog):
                 else:
                     label.setText("Thumb Fail")
             else:
-                is_vid = path.suffix.lower() in {".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}
+                is_vid = path.suffix.lower() in VIDEO_EXTS
                 label.setText("Video" if is_vid else "File")
 
     @property
@@ -1337,13 +1460,8 @@ class CompareRevealViewer(QWidget):
         self.update()
 
     def _load_image(self, path: str) -> QImage | None:
-        clean = str(path or "").strip()
-        if not clean:
-            return None
-        reader = QImageReader(clean)
-        reader.setAutoTransform(True)
-        image = reader.read()
-        if image.isNull():
+        image = _read_image_with_svg_support(path)
+        if image is None or image.isNull():
             return None
         return image
 
@@ -2298,7 +2416,7 @@ class ComparePanel(QWidget):
             self,
             "Choose image to compare",
             "",
-            "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff *.avif *.heic *.heif)",
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.svg *.tif *.tiff *.avif *.heic *.heif)",
         )
         if path:
             self.bridge.set_compare_path(slot_name, path)
@@ -2494,6 +2612,15 @@ class Bridge(QObject):
                 cursor.execute("ALTER TABLE media_metadata RENAME COLUMN exif_comments TO embedded_comments")
             elif "embedded_comments" not in cols:
                 cursor.execute("ALTER TABLE media_metadata ADD COLUMN embedded_comments TEXT")
+
+            if "embedded_metadata_parser_version" not in cols:
+                cursor.execute("ALTER TABLE media_metadata ADD COLUMN embedded_metadata_parser_version TEXT")
+
+            if "embedded_metadata_json" not in cols:
+                cursor.execute("ALTER TABLE media_metadata ADD COLUMN embedded_metadata_json TEXT NOT NULL DEFAULT '{}'")
+
+            if "embedded_metadata_summary" not in cols:
+                cursor.execute("ALTER TABLE media_metadata ADD COLUMN embedded_metadata_summary TEXT")
 
             if "embedded_ai_prompt" in cols:
                 cursor.execute("ALTER TABLE media_metadata RENAME COLUMN embedded_ai_prompt TO ai_prompt")
@@ -4198,6 +4325,7 @@ class Bridge(QObject):
                 "metadata.display.dpi": bool(self.settings.value("metadata/display/dpi", False, type=bool)),
                 "metadata.display.embeddedtags": bool(self.settings.value("metadata/display/embeddedtags", True, type=bool)),
                 "metadata.display.embeddedcomments": bool(self.settings.value("metadata/display/embeddedcomments", True, type=bool)),
+                "metadata.display.embeddedmetadata": bool(self.settings.value("metadata/display/embeddedmetadata", True, type=bool)),
                 "metadata.display.aistatus": bool(self.settings.value("metadata/display/aistatus", True, type=bool)),
                 "metadata.display.aisource": bool(self.settings.value("metadata/display/aisource", True, type=bool)),
                 "metadata.display.aifamilies": bool(self.settings.value("metadata/display/aifamilies", True, type=bool)),
@@ -4269,7 +4397,7 @@ class Bridge(QObject):
         p = Path(clean)
         if not p.exists() or not p.is_file():
             return {}
-        media_type = "image" if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif", ".tif", ".tiff", ".heic", ".heif"} else "video"
+        media_type = "image" if p.suffix.lower() in (IMAGE_EXTS | {".tif", ".tiff", ".heic", ".heif"}) else "video"
         add_media_item(self.conn, clean, media_type)
         return get_media_by_path(self.conn, clean) or {}
 
@@ -5093,7 +5221,7 @@ class Bridge(QObject):
                             else: shutil.copy2(src, final_dst)
                             
                             ext = final_dst.suffix.lower()
-                            mtype = "image" if ext in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"} else "video"
+                            mtype = "image" if ext in IMAGE_EXTS else "video"
                             add_media_item(self.conn, str(final_dst), mtype)
                         
                         any_ok = True
@@ -5432,9 +5560,11 @@ class Bridge(QObject):
 
     @Slot(str, result=dict)
     def get_media_metadata(self, path: str) -> dict:
-        image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"}
+        image_exts = IMAGE_EXTS
         from app.mediamanager.db.media_repo import get_media_by_path
         from app.mediamanager.db.ai_metadata_repo import (
+            NORMALIZED_SCHEMA_VERSION,
+            PARSER_VERSION,
             build_media_ai_ui_fields,
             get_media_ai_metadata,
             summarize_media_ai_metadata,
@@ -5470,8 +5600,17 @@ class Bridge(QObject):
                     pass
             meta = get_media_metadata(self.conn, m["id"]) or {}
             ai_meta = get_media_ai_metadata(self.conn, m["id"]) or {}
-            if not ai_meta:
+            needs_reinspect = (
+                (ai_meta and (
+                    ai_meta.get("parser_version") != PARSER_VERSION
+                    or ai_meta.get("normalized_schema_version") != NORMALIZED_SCHEMA_VERSION
+                ))
+                or meta.get("embedded_metadata_parser_version") != PARSER_VERSION
+                or (not ai_meta and not meta)
+            )
+            if needs_reinspect:
                 inspect_and_persist_if_supported(self.conn, m["id"], path, m.get("media_type"))
+                meta = get_media_metadata(self.conn, m["id"]) or {}
                 ai_meta = get_media_ai_metadata(self.conn, m["id"]) or {}
             ai_ui = build_media_ai_ui_fields(ai_meta)
 
@@ -5483,6 +5622,7 @@ class Bridge(QObject):
             payload = {
                 "title": meta.get("title") or "", "description": description, "notes": meta.get("notes") or "",
                 "embedded_tags": meta.get("embedded_tags") or "", "embedded_comments": meta.get("embedded_comments") or "",
+                "embedded_metadata_summary": meta.get("embedded_metadata_summary") or "",
                 "ai_prompt": ai_prompt, "ai_negative_prompt": ai_negative_prompt,
                 "ai_params": ai_params, "ai_tool_summary": ai_tool_summary,
                 "tags": list_media_tags(self.conn, m["id"]), "has_metadata": bool(meta or ai_meta),
@@ -5722,6 +5862,7 @@ class Bridge(QObject):
                             "url": "",
                             "media_type": "folder",
                             "is_folder": True,
+                            "svg_bg_hint": "",
                             "is_hidden": bool(r.get("is_hidden")),
                             "is_animated": False,
                             "width": None,
@@ -5777,6 +5918,7 @@ class Bridge(QObject):
                     "url": f"{QUrl.fromLocalFile(str(p)).toString()}?t={mtime}", 
                     "media_type": r["media_type"], 
                     "is_folder": False,
+                    "svg_bg_hint": _svg_thumbnail_bg_hint(p),
                     "is_hidden": bool(r.get("is_hidden")),
                     "is_animated": self._is_animated(p),
                     "width": r.get("width"),
@@ -5859,8 +6001,8 @@ class Bridge(QObject):
     def _get_reconciled_candidates(self, folders: list, filter_type: str = "all", search_query: str = "") -> list[dict]:
         from app.mediamanager.db.media_repo import list_media_in_scope
         from app.mediamanager.utils.pathing import normalize_windows_path
-        ALL_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif", ".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}
-        image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"}
+        ALL_EXTS = IMAGE_EXTS | VIDEO_EXTS
+        image_exts = IMAGE_EXTS
         media_filter, _ = self._parse_filter_groups(filter_type)
         if not folders: return []
         current_key = hashlib.sha1(",".join(sorted(folders)).encode()).hexdigest()
@@ -5902,9 +6044,19 @@ class Bridge(QObject):
                 surviving.append({"id": -1, "path": norm, "media_type": ("image" if p_obj.suffix.lower() in image_exts else "video"), "file_size": None, "modified_time": None, "duration": None, "_real_path": p_obj})
         
         candidates = surviving
-        if media_filter == "image": candidates = [r for r in candidates if r["path"].lower().endswith(tuple(image_exts)) and not self._is_animated(Path(r["path"]))]
-        elif media_filter == "video": candidates = [r for r in candidates if not r["path"].lower().endswith(tuple(image_exts))]
-        elif media_filter == "animated": candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
+        if media_filter == "image":
+            candidates = [
+                r for r in candidates
+                if Path(r["path"]).suffix.lower() in image_exts
+                and Path(r["path"]).suffix.lower() != ".svg"
+                and not self._is_animated(Path(r["path"]))
+            ]
+        elif media_filter == "svg":
+            candidates = [r for r in candidates if Path(r["path"]).suffix.lower() == ".svg"]
+        elif media_filter == "video":
+            candidates = [r for r in candidates if Path(r["path"]).suffix.lower() not in image_exts]
+        elif media_filter == "animated":
+            candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
         
         if search_query.strip():
             candidates = [r for r in candidates if self._matches_media_search(r, search_query)]
@@ -5912,7 +6064,7 @@ class Bridge(QObject):
 
     def _get_collection_candidates(self, collection_id: int, filter_type: str = "all", search_query: str = "") -> list[dict]:
         from app.mediamanager.db.media_repo import list_media_in_collection
-        image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"}
+        image_exts = IMAGE_EXTS
         show_hidden = self._show_hidden_enabled()
         media_filter, _ = self._parse_filter_groups(filter_type)
         
@@ -5926,9 +6078,16 @@ class Bridge(QObject):
                 candidates.append(r)
                 
         if media_filter == "image":
-            candidates = [r for r in candidates if r["path"].lower().endswith(tuple(image_exts)) and not self._is_animated(Path(r["path"]))]
+            candidates = [
+                r for r in candidates
+                if Path(r["path"]).suffix.lower() in image_exts
+                and Path(r["path"]).suffix.lower() != ".svg"
+                and not self._is_animated(Path(r["path"]))
+            ]
+        elif media_filter == "svg":
+            candidates = [r for r in candidates if Path(r["path"]).suffix.lower() == ".svg"]
         elif media_filter == "video":
-            candidates = [r for r in candidates if not r["path"].lower().endswith(tuple(image_exts))]
+            candidates = [r for r in candidates if Path(r["path"]).suffix.lower() not in image_exts]
         elif media_filter == "animated":
             candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
             
@@ -5952,14 +6111,14 @@ class Bridge(QObject):
                 return media_filter, "text_detected"
             if raw == "no_text_detected":
                 return media_filter, "no_text_detected"
-            if raw in {"image", "video", "animated"}:
+            if raw in {"image", "svg", "video", "animated"}:
                 return raw, text_filter
             return media_filter, text_filter
         for part in raw.split(";"):
             group, _, value = str(part or "").partition(":")
             group = group.strip().lower()
             value = value.strip().lower()
-            if group == "media" and value in {"image", "video", "animated"}:
+            if group == "media" and value in {"image", "svg", "video", "animated"}:
                 media_filter = value
             elif group == "text":
                 if value in {"text_detected", "text_more_likely", "text_verified"}:
@@ -6210,7 +6369,6 @@ class Bridge(QObject):
         from app.mediamanager.metadata.persistence import inspect_and_persist_if_supported
         from app.mediamanager.utils.hashing import calculate_file_hash, calculate_image_phash
         from datetime import datetime, timezone
-        image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"}
         total, count = len(paths), 0
         for i, p in enumerate(paths):
             if self._scan_abort: break
@@ -6225,22 +6383,20 @@ class Bridge(QObject):
                     if existing["file_size"] == stat.st_size and existing.get("modified_time") == curr_mtime:
                         has_required_content_hash = bool(str(existing.get("content_hash") or "").strip())
                         has_required_visual_data = bool(existing.get("width") and existing.get("height"))
-                        if p.suffix.lower() in image_exts:
+                        if p.suffix.lower() in IMAGE_EXTS and p.suffix.lower() != ".svg":
                             has_required_visual_data = has_required_visual_data and bool(str(existing.get("phash") or "").strip())
                         if has_required_content_hash and has_required_visual_data:
                             skip = True
                 
                 if not skip:
                     width, height, d_ms = None, None, None
-                    mtype = "image" if p.suffix.lower() in image_exts else "video"
+                    mtype = "image" if p.suffix.lower() in IMAGE_EXTS else "video"
                     
                     phash = None
                     if mtype == "image":
-                        reader = QImageReader(str(p))
-                        if reader.canRead():
-                            sz = reader.size()
-                            if sz.isValid():
-                                width, height = sz.width(), sz.height()
+                        sz = _image_size_with_svg_support(p)
+                        if sz.isValid():
+                            width, height = sz.width(), sz.height()
                         
                         # Fallback for formats like AVIF that Qt can't read natively
                         if width is None or height is None:
@@ -6268,7 +6424,7 @@ class Bridge(QObject):
                         duration_ms=d_ms,
                     )
                 if media_id is not None:
-                    inspect_and_persist_if_supported(conn, media_id, str(p), "image" if p.suffix.lower() in image_exts else "video")
+                    inspect_and_persist_if_supported(conn, media_id, str(p), "image" if p.suffix.lower() in IMAGE_EXTS else "video")
                 count += 1
             except Exception as exc:
                 try:
@@ -7314,6 +7470,7 @@ class MainWindow(QMainWindow):
         self.preview_image_lbl.setText("No preview")
         self.preview_image_lbl.setWordWrap(True)
         self.preview_image_lbl.setCursor(Qt.CursorShape.ArrowCursor)
+        self._preview_bg_hint = ""
         self._preview_source_pixmap: QPixmap | None = None
         self._preview_movie: QMovie | None = None
         self._preview_aspect_ratio = 1.0
@@ -7461,6 +7618,14 @@ class MainWindow(QMainWindow):
         self.meta_embedded_comments_edit.setObjectName("metaEmbeddedCommentsEdit")
         self.meta_embedded_comments_edit.setPlaceholderText("Embedded comments...")
         self.meta_embedded_comments_edit.setMaximumHeight(70)
+
+        self.lbl_embedded_metadata_cap = QLabel("Embedded Metadata:")
+        self.lbl_embedded_metadata_cap.setObjectName("metaEmbeddedMetadataCaption")
+        self.meta_embedded_metadata_edit = QTextEdit()
+        self.meta_embedded_metadata_edit.setObjectName("metaEmbeddedMetadataEdit")
+        self.meta_embedded_metadata_edit.setReadOnly(True)
+        self.meta_embedded_metadata_edit.setPlaceholderText("Embedded XMP/RDF and custom metadata...")
+        self.meta_embedded_metadata_edit.setMaximumHeight(110)
 
         self.lbl_ai_status_cap = QLabel("AI Detection:")
         self.lbl_ai_status_cap.setObjectName("metaAIStatusCaption")
@@ -9015,7 +9180,27 @@ class MainWindow(QMainWindow):
 
         self.btn_preview_overlay_play.setIcon(QIcon(QPixmap.fromImage(image)))
 
+    def _apply_preview_image_label_style(self) -> None:
+        if not hasattr(self, "preview_image_lbl"):
+            return
+        accent = QColor(getattr(self, "_current_accent", Theme.ACCENT_DEFAULT))
+        border = Theme.get_border(accent)
+        text = Theme.get_text_color()
+        hint = str(getattr(self, "_preview_bg_hint", "") or "")
+        if hint == "light":
+            bg = "#ffffff" if Theme.get_is_light() else "#f7f8fa"
+        elif hint == "dark":
+            bg = "#101114"
+        else:
+            bg = Theme.get_control_bg(accent)
+        self.preview_image_lbl.setStyleSheet(
+            "QLabel#previewImageLabel {"
+            f"background-color: {bg}; border: 1px solid {border}; border-radius: 8px; padding: 6px; color: {text};"
+            "}"
+        )
+
     def _update_preview_display(self, placeholder: str = "No preview") -> None:
+        self._apply_preview_image_label_style()
         available_w = max(120, self._right_panel_content_width() - 8)
         self.preview_image_lbl.setFixedWidth(self._right_panel_content_width())
         target_h = max(96, min(320, int(available_w / max(0.2, self._preview_aspect_ratio))))
@@ -9065,8 +9250,9 @@ class MainWindow(QMainWindow):
             overlay.setGeometry(self.preview_image_lbl.rect())
         self._sync_sidebar_video_preview_controls()
 
-    def _set_preview_pixmap(self, pixmap: QPixmap | None, placeholder: str = "No preview") -> None:
+    def _set_preview_pixmap(self, pixmap: QPixmap | None, placeholder: str = "No preview", bg_hint: str = "") -> None:
         self._clear_preview_media()
+        self._preview_bg_hint = str(bg_hint or "")
         self._preview_source_pixmap = pixmap if pixmap and not pixmap.isNull() else None
         if self._preview_source_pixmap is not None:
             self._preview_aspect_ratio = max(
@@ -9077,6 +9263,7 @@ class MainWindow(QMainWindow):
 
     def _set_preview_movie(self, path: Path, aspect_ratio: float) -> None:
         self._clear_preview_media()
+        self._preview_bg_hint = ""
         movie = QMovie(str(path))
         if not movie.isValid():
             self._set_preview_pixmap(None)
@@ -9191,7 +9378,7 @@ class MainWindow(QMainWindow):
             return
         suffix = p.suffix.lower()
         preview_path = p
-        if suffix in {".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}:
+        if suffix in VIDEO_EXTS:
             poster = self.bridge._video_poster_path(p)
             if not poster.exists():
                 self._set_preview_pixmap(None, "Loading video preview...")
@@ -9201,9 +9388,7 @@ class MainWindow(QMainWindow):
                 self._load_video_preview_async(str(p))
                 return
             preview_path = poster
-        reader = QImageReader(str(preview_path))
-        reader.setAutoTransform(True)
-        size = reader.size()
+        size = _image_size_with_svg_support(preview_path)
         
         # Fallback for AVIF/unsupported formats
         if suffix == ".avif":
@@ -9211,19 +9396,18 @@ class MainWindow(QMainWindow):
             poster = self.bridge._ensure_video_poster(p)
             if poster and poster.exists():
                 preview_path = poster
-                reader = QImageReader(str(preview_path))
-                size = reader.size()
+                size = _image_size_with_svg_support(preview_path)
 
         aspect_ratio = max(0.2, size.width() / max(1, size.height())) if size.isValid() else 1.0
         if suffix == ".gif" and self.bridge._autoplay_preview_animated_gifs_enabled():
             self._set_preview_movie(p, aspect_ratio)
             return
-        img = reader.read()
-        if img.isNull():
+        img = _read_image_with_svg_support(preview_path)
+        if img is None or img.isNull():
             self._set_preview_pixmap(None)
             return
-        self._set_preview_pixmap(QPixmap.fromImage(img))
-        if suffix in {".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}:
+        self._set_preview_pixmap(QPixmap.fromImage(img), bg_hint=_svg_thumbnail_bg_hint(preview_path))
+        if suffix in VIDEO_EXTS:
             overlay = getattr(self, "sidebar_video_overlay", None)
             if overlay is not None:
                 overlay.close_overlay(notify_web=False)
@@ -9629,25 +9813,31 @@ class MainWindow(QMainWindow):
                 summarize_media_ai_tool_metadata,
             )
             from app.mediamanager.db.media_repo import add_media_item, get_media_by_path
+            from app.mediamanager.db.metadata_repo import get_media_metadata
             from app.mediamanager.metadata.persistence import inspect_and_persist_if_supported
-            from PIL import Image
-            with Image.open(str(p)) as img:
-                try:
-                    img.load()
-                except Exception:
-                    pass
-                visible = self._harvest_windows_visible_metadata(img)
-                res = self._harvest_universal_metadata(img)
+            visible = {"comment": "", "tags": []}
+            res = {"tool_metadata": ""}
+            if p.suffix.lower() != ".svg":
+                from PIL import Image
+                with Image.open(str(p)) as img:
+                    try:
+                        img.load()
+                    except Exception:
+                        pass
+                    visible = self._harvest_windows_visible_metadata(img)
+                    res = self._harvest_universal_metadata(img)
             media = get_media_by_path(self.bridge.conn, path)
             if not media:
-                media_type = "image" if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"} else "video"
+                media_type = "image" if p.suffix.lower() in IMAGE_EXTS else "video"
                 add_media_item(self.bridge.conn, path, media_type)
                 media = get_media_by_path(self.bridge.conn, path)
             ai_ui = {}
             ai_tool_summary = ""
+            meta = {}
             if media:
                 inspect_and_persist_if_supported(self.bridge.conn, media["id"], path, media.get("media_type"))
                 media = get_media_by_path(self.bridge.conn, path) or media
+                meta = get_media_metadata(self.bridge.conn, media["id"]) or {}
                 ai_meta = get_media_ai_metadata(self.bridge.conn, media["id"]) or {}
                 ai_ui = build_media_ai_ui_fields(ai_meta)
                 ai_tool_summary = summarize_media_ai_tool_metadata(ai_meta) or ""
@@ -9662,6 +9852,7 @@ class MainWindow(QMainWindow):
                     ai_ui.get("ai_provenance_summary"),
                     ai_ui.get("ai_character_cards_summary"),
                     ai_ui.get("ai_raw_paths_summary"),
+                    meta.get("embedded_metadata_summary"),
                 ]
             )
             has_date_data = bool((media or {}).get("exif_date_taken") or (media or {}).get("metadata_date"))
@@ -9681,6 +9872,7 @@ class MainWindow(QMainWindow):
             self.meta_ai_provenance_edit.setPlainText(ai_ui.get("ai_provenance_summary", ""))
             self.meta_ai_character_cards_edit.setPlainText(ai_ui.get("ai_character_cards_summary", ""))
             self.meta_ai_raw_paths_edit.setPlainText(ai_ui.get("ai_raw_paths_summary", ""))
+            self.meta_embedded_metadata_edit.setPlainText(meta.get("embedded_metadata_summary", ""))
             self.meta_exif_date_taken_edit.setText(self._format_editable_datetime((media or {}).get("exif_date_taken")))
             self.meta_metadata_date_edit.setText(self._format_editable_datetime((media or {}).get("metadata_date")))
             original_file_text = self._format_sidebar_datetime((media or {}).get("original_file_date"))
@@ -10333,6 +10525,12 @@ class MainWindow(QMainWindow):
         self.btn_merge_hidden_meta.setVisible(not is_bulk)
         self.btn_save_to_exif.setVisible(not is_bulk)
         self.meta_status_lbl.setVisible(True)
+        embed_supported = bool(primary_path and Path(primary_path).suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".avif"})
+        self.btn_save_to_exif.setEnabled(not is_bulk and embed_supported)
+        if not is_bulk and not embed_supported:
+            self.btn_save_to_exif.setToolTip("Embedding file metadata is not supported for this file type.")
+        else:
+            self.btn_save_to_exif.setToolTip("Write tags and comments from these fields into the file's embedded metadata")
 
         # Toggle UI for bulk mode
         self.lbl_fn_cap.setVisible(not is_bulk)
@@ -10368,6 +10566,7 @@ class MainWindow(QMainWindow):
         show_dpi = "dpi" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "dpi", False)
         show_embedded_tags = "embeddedtags" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "embeddedtags", True)
         show_embedded_comments = "embeddedcomments" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "embeddedcomments", True)
+        show_embedded_metadata = "embeddedmetadata" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "embeddedmetadata", True)
         show_ai_status = "aistatus" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aistatus", True)
         show_ai_source = "aisource" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aisource", True)
         show_ai_families = "aifamilies" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aifamilies", True)
@@ -10419,6 +10618,8 @@ class MainWindow(QMainWindow):
         self.lbl_embedded_tags_cap.setVisible(not is_bulk and show_embedded_tags)
         self.meta_embedded_comments_edit.setVisible(not is_bulk and show_embedded_comments)
         self.lbl_embedded_comments_cap.setVisible(not is_bulk and show_embedded_comments)
+        self.meta_embedded_metadata_edit.setVisible(not is_bulk and show_embedded_metadata)
+        self.lbl_embedded_metadata_cap.setVisible(not is_bulk and show_embedded_metadata)
         self.meta_ai_status_edit.setVisible(not is_bulk and show_ai_status)
         self.lbl_ai_status_cap.setVisible(not is_bulk and show_ai_status)
         self.meta_ai_source_edit.setVisible(not is_bulk and show_ai_source)
@@ -10487,6 +10688,7 @@ class MainWindow(QMainWindow):
         self.meta_lens_lbl.setText("Lens: ")
         self.meta_dpi_lbl.setText("DPI: ")
         self.meta_embedded_tags_edit.setText("")
+        self.meta_embedded_metadata_edit.setPlainText("")
         # Clear the text edits
         self.meta_embedded_comments_edit.setPlainText("")
         self.meta_ai_status_edit.setText("")
@@ -10570,6 +10772,7 @@ class MainWindow(QMainWindow):
                 self.meta_ai_provenance_edit.setPlainText(data.get("ai_provenance_summary", ""))
                 self.meta_ai_character_cards_edit.setPlainText(data.get("ai_character_cards_summary", ""))
                 self.meta_ai_raw_paths_edit.setPlainText(data.get("ai_raw_paths_summary", ""))
+                self.meta_embedded_metadata_edit.setPlainText(data.get("embedded_metadata_summary", ""))
                 
                 self.meta_tags.setText(", ".join(data.get("tags", [])))
                 exif_date_taken = self._format_editable_datetime(data.get("exif_date_taken"))
@@ -10632,91 +10835,89 @@ class MainWindow(QMainWindow):
 
                 # 3. Real-time Harvest (Update/Enrich Labels)
                 ext = p.suffix.lower()
-                if ext in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}:
+                if ext in IMAGE_EXTS:
                     try:
-                        reader = QImageReader(str(p))
-                        sz = reader.size()
+                        sz = _image_size_with_svg_support(p)
                         if sz.isValid():
                             self.meta_res_lbl.setText(f"Resolution: {sz.width()} x {sz.height()} px")
                         else:
                             self.meta_res_lbl.setText("Resolution: ")
                     except Exception:
                         self.meta_res_lbl.setText("Resolution: ")
-
                 # Additional info via Pillow
-                try:
-                    from PIL import Image
-                    with Image.open(str(p)) as img:
-                        # DPI
-                        if hasattr(img, "info"):
-                            dpi = img.info.get("dpi")
-                            if dpi:
-                                self.meta_dpi_lbl.setText(f"DPI: {dpi[0]} × {dpi[1]}")
-                            if metadata_kind == "gif":
-                                animated = self._probe_animated_image_details(str(p))
-                                if animated.get("duration"):
-                                    self.meta_duration_lbl.setText(f"Duration: {animated['duration']}")
-                                if animated.get("fps"):
-                                    self.meta_fps_lbl.setText(f"FPS: {animated['fps']}")
-                                if animated.get("codec"):
-                                    self.meta_codec_lbl.setText(f"Codec: {animated['codec']}")
-                                if animated.get("audio"):
-                                    self.meta_audio_lbl.setText(f"Audio: {animated['audio']}")
+                if ext != ".svg":
+                    try:
+                        from PIL import Image
+                        with Image.open(str(p)) as img:
+                            if hasattr(img, "info"):
+                                dpi = img.info.get("dpi")
+                                if dpi:
+                                    self.meta_dpi_lbl.setText(f"DPI: {dpi[0]} x {dpi[1]}")
+                                if metadata_kind == "gif":
+                                    animated = self._probe_animated_image_details(str(p))
+                                    if animated.get("duration"):
+                                        self.meta_duration_lbl.setText(f"Duration: {animated['duration']}")
+                                    if animated.get("fps"):
+                                        self.meta_fps_lbl.setText(f"FPS: {animated['fps']}")
+                                    if animated.get("codec"):
+                                        self.meta_codec_lbl.setText(f"Codec: {animated['codec']}")
+                                    if animated.get("audio"):
+                                        self.meta_audio_lbl.setText(f"Audio: {animated['audio']}")
 
-                        # Embedded fields should mirror the file (Windows-visible subset), never the DB.
-                        try:
-                            img.load()
-                        except Exception:
-                            pass
-                        visible = self._harvest_windows_visible_metadata(img)
-                        harvested = self._harvest_universal_metadata(img)
-                        self.meta_embedded_tags_edit.setText("; ".join(visible.get("tags", [])))
-                        self.meta_embedded_comments_edit.setPlainText(visible.get("comment", "") or "")
-                        # Also check for separately-stored AI fields from the harvester
-                        # (We do NOT overwrite the DB editable fields here, they are populated from DB earlier)
-                        
-                        # Technical EXIF
-                        exif = img.getexif()
-                        if exif:
-                            from PIL import ExifTags
-                            # Root IFD
-                            model = exif.get(ExifTags.Base.Model)
-                            if model: self.meta_camera_lbl.setText(f"Camera: {model}")
-                            soft = exif.get(ExifTags.Base.Software)
-                            if soft: self.meta_software_lbl.setText(f"Software: {soft}")
-                            
-                            # Sub-IFDs
                             try:
-                                sub = exif.get_ifd(ExifTags.IFD.Exif)
-                                if sub:
-                                    iso = sub.get(ExifTags.Base.ISOSpeedRatings)
-                                    if iso: self.meta_iso_lbl.setText(f"ISO: {iso}")
-                                    
-                                    shutter = sub.get(ExifTags.Base.ExposureTime)
-                                    if shutter:
-                                        if shutter < 1:
-                                            self.meta_shutter_lbl.setText(f"Shutter: 1/{int(1/shutter)}s")
-                                        else:
-                                            self.meta_shutter_lbl.setText(f"Shutter: {shutter}s")
-                                            
-                                    aperture = sub.get(ExifTags.Base.FNumber)
-                                    if aperture: self.meta_aperture_lbl.setText(f"Aperture: ƒ/{aperture}")
-                                    
-                                    lens = sub.get(0xA434) # LensModel
-                                    if lens: self.meta_lens_lbl.setText(f"Lens: {lens}")
-                            except: pass
-                            
-                            try:
-                                gps = exif.get_ifd(ExifTags.IFD.GPSInfo)
-                                if gps:
-                                    lat = gps.get(2) # Latitude
-                                    lon = gps.get(4) # Longitude
-                                    if lat and lon:
-                                        self.meta_location_lbl.setText(f"Location: {lat}, {lon}")
-                            except: pass
+                                img.load()
+                            except Exception:
+                                pass
+                            visible = self._harvest_windows_visible_metadata(img)
+                            self.meta_embedded_tags_edit.setText("; ".join(visible.get("tags", [])))
+                            self.meta_embedded_comments_edit.setPlainText(visible.get("comment", "") or "")
+                            self.meta_embedded_metadata_edit.setPlainText(data.get("embedded_metadata_summary", ""))
 
-                except Exception as e:
-                    print(f"Metadata Read Error for {p.name}: {e}")
+                            exif = img.getexif()
+                            if exif:
+                                from PIL import ExifTags
+                                model = exif.get(ExifTags.Base.Model)
+                                if model:
+                                    self.meta_camera_lbl.setText(f"Camera: {model}")
+                                soft = exif.get(ExifTags.Base.Software)
+                                if soft:
+                                    self.meta_software_lbl.setText(f"Software: {soft}")
+
+                                try:
+                                    sub = exif.get_ifd(ExifTags.IFD.Exif)
+                                    if sub:
+                                        iso = sub.get(ExifTags.Base.ISOSpeedRatings)
+                                        if iso:
+                                            self.meta_iso_lbl.setText(f"ISO: {iso}")
+
+                                        shutter = sub.get(ExifTags.Base.ExposureTime)
+                                        if shutter:
+                                            if shutter < 1:
+                                                self.meta_shutter_lbl.setText(f"Shutter: 1/{int(1 / shutter)}s")
+                                            else:
+                                                self.meta_shutter_lbl.setText(f"Shutter: {shutter}s")
+
+                                        aperture = sub.get(ExifTags.Base.FNumber)
+                                        if aperture:
+                                            self.meta_aperture_lbl.setText(f"Aperture: f/{aperture}")
+
+                                        lens = sub.get(0xA434)
+                                        if lens:
+                                            self.meta_lens_lbl.setText(f"Lens: {lens}")
+                                except Exception:
+                                    pass
+
+                                try:
+                                    gps = exif.get_ifd(ExifTags.IFD.GPSInfo)
+                                    if gps:
+                                        lat = gps.get(2)
+                                        lon = gps.get(4)
+                                        if lat and lon:
+                                            self.meta_location_lbl.setText(f"Location: {lat}, {lon}")
+                                except Exception:
+                                    pass
+                    except Exception as e:
+                        print(f"Metadata Read Error for {p.name}: {e}")
                 # video metadata probing disabled for stability during selection
                 # video metadata probing disabled for stability during selection
                 # video metadata probing disabled for stability during selection
@@ -10728,7 +10929,6 @@ class MainWindow(QMainWindow):
             self.btn_save_meta.setProperty("baseText", "Save Changes to Database")
             self.btn_clear_bulk_tags.setProperty("baseText", "Clear All Tags")
             self.btn_save_to_exif.setProperty("baseText", "Embed Data in File")
-            self.btn_save_to_exif.setToolTip("Write tags and comments from these fields into the file's embedded metadata")
             self._update_sidebar_action_buttons()
         else:
             # Bulk mode
@@ -10804,12 +11004,14 @@ class MainWindow(QMainWindow):
         p = Path(path)
         if self.bridge._is_animated(p):
             return "gif"
-        if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".avif"}:
+        if p.suffix.lower() == ".svg":
+            return "svg"
+        if p.suffix.lower() in IMAGE_EXTS - {".gif"}:
             return "image"
         return "video"
 
     def _metadata_group_fields(self, kind: str) -> dict[str, list[str]]:
-        image_general = ["res", "size", "exifdatetaken", "metadatadate", "originalfiledate", "filecreateddate", "filemodifieddate", "description", "tags", "notes", "embeddedtags", "embeddedcomments"]
+        image_general = ["res", "size", "exifdatetaken", "metadatadate", "originalfiledate", "filecreateddate", "filemodifieddate", "description", "tags", "notes", "embeddedtags", "embeddedcomments", "embeddedmetadata"]
         image_camera = ["camera", "location", "iso", "shutter", "aperture", "software", "lens", "dpi"]
         image_ai = [
             "aistatus", "aisource", "aifamilies", "aidetectionreasons", "ailoras", "aimodel", "aicheckpoint",
@@ -10818,13 +11020,17 @@ class MainWindow(QMainWindow):
         ]
         if kind == "video":
             return {
-                "general": ["res", "size", "exifdatetaken", "metadatadate", "originalfiledate", "filecreateddate", "filemodifieddate", "duration", "fps", "codec", "audio", "description", "tags", "notes"],
+                "general": ["res", "size", "exifdatetaken", "metadatadate", "originalfiledate", "filecreateddate", "filemodifieddate", "duration", "fps", "codec", "audio", "description", "tags", "notes", "embeddedmetadata"],
                 "ai": image_ai,
             }
         if kind == "gif":
             return {
-                "general": ["res", "size", "exifdatetaken", "metadatadate", "originalfiledate", "filecreateddate", "filemodifieddate", "duration", "fps", "description", "tags", "notes", "embeddedtags", "embeddedcomments"],
+                "general": ["res", "size", "exifdatetaken", "metadatadate", "originalfiledate", "filecreateddate", "filemodifieddate", "duration", "fps", "description", "tags", "notes", "embeddedtags", "embeddedcomments", "embeddedmetadata"],
                 "ai": image_ai,
+            }
+        if kind == "svg":
+            return {
+                "general": ["res", "size", "metadatadate", "originalfiledate", "filecreateddate", "filemodifieddate", "description", "tags", "notes", "embeddedmetadata"],
             }
         return {"general": image_general, "camera": image_camera, "ai": image_ai}
 
@@ -11089,6 +11295,7 @@ class MainWindow(QMainWindow):
             "dpi": [self.meta_dpi_lbl],
             "embeddedtags": [self.lbl_embedded_tags_cap, self.meta_embedded_tags_edit],
             "embeddedcomments": [self.lbl_embedded_comments_cap, self.meta_embedded_comments_edit],
+            "embeddedmetadata": [self.lbl_embedded_metadata_cap, self.meta_embedded_metadata_edit],
             "aistatus": [self.lbl_ai_status_cap, self.meta_ai_status_edit],
             "aisource": [self.lbl_ai_source_cap, self.meta_ai_source_edit],
             "aifamilies": [self.lbl_ai_families_cap, self.meta_ai_families_edit],
@@ -11201,6 +11408,8 @@ class MainWindow(QMainWindow):
         self.lbl_embedded_tags_cap.setVisible("embeddedtags" in active_fields and self._is_metadata_enabled_for_kind(kind, "embeddedtags", True))
         self.meta_embedded_comments_edit.setVisible("embeddedcomments" in active_fields and self._is_metadata_enabled_for_kind(kind, "embeddedcomments", True))
         self.lbl_embedded_comments_cap.setVisible("embeddedcomments" in active_fields and self._is_metadata_enabled_for_kind(kind, "embeddedcomments", True))
+        self.meta_embedded_metadata_edit.setVisible("embeddedmetadata" in active_fields and self._is_metadata_enabled_for_kind(kind, "embeddedmetadata", True))
+        self.lbl_embedded_metadata_cap.setVisible("embeddedmetadata" in active_fields and self._is_metadata_enabled_for_kind(kind, "embeddedmetadata", True))
         self.meta_ai_status_edit.setVisible("aistatus" in active_fields and self._is_metadata_enabled_for_kind(kind, "aistatus", True))
         self.lbl_ai_status_cap.setVisible("aistatus" in active_fields and self._is_metadata_enabled_for_kind(kind, "aistatus", True))
         self.meta_ai_source_edit.setVisible("aisource" in active_fields and self._is_metadata_enabled_for_kind(kind, "aisource", True))
@@ -12134,6 +12343,7 @@ class MainWindow(QMainWindow):
                 menu.repaint()
         except Exception:
             pass
+        self._apply_preview_image_label_style()
         self._sync_menu_bar_controls()
 
     def _web_header_height(self) -> int:
@@ -12784,3 +12994,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

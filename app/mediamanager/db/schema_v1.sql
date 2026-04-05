@@ -52,6 +52,14 @@ CREATE TABLE IF NOT EXISTS media_metadata (
   title TEXT,
   description TEXT,
   notes TEXT,
+  embedded_tags TEXT,
+  embedded_comments TEXT,
+  embedded_metadata_parser_version TEXT,
+  embedded_metadata_json TEXT NOT NULL DEFAULT '{}',
+  embedded_metadata_summary TEXT,
+  ai_prompt TEXT,
+  ai_negative_prompt TEXT,
+  ai_params TEXT,
   updated_at_utc TEXT NOT NULL,
   FOREIGN KEY(media_id) REFERENCES media_items(id) ON DELETE CASCADE
 );

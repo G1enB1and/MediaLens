@@ -53,6 +53,7 @@ METADATA_SETTINGS_CONFIG: dict[str, dict] = {
                     ("notes", "Notes", True),
                     ("embeddedtags", "Embedded Tags", True),
                     ("embeddedcomments", "Embedded Comments", True),
+                    ("embeddedmetadata", "Embedded Metadata", True),
                 ],
             },
             "camera": {
@@ -97,6 +98,26 @@ METADATA_SETTINGS_CONFIG: dict[str, dict] = {
         },
         "group_order": ["general", "camera", "ai"],
     },
+    "svg": {
+        "groups": {
+            "general": {
+                "label": "General",
+                "fields": [
+                    ("res", "Resolution", True),
+                    ("size", "File Size", True),
+                    ("metadatadate", "Date Acquired", False),
+                    ("originalfiledate", "Original File Date", False),
+                    ("filecreateddate", "Windows ctime", False),
+                    ("filemodifieddate", "Date Modified", False),
+                    ("description", "Description", True),
+                    ("tags", "Tags", True),
+                    ("notes", "Notes", True),
+                    ("embeddedmetadata", "Embedded Metadata", True),
+                ],
+            },
+        },
+        "group_order": ["general"],
+    },
     "video": {
         "groups": {
             "general": {
@@ -116,6 +137,7 @@ METADATA_SETTINGS_CONFIG: dict[str, dict] = {
                     ("description", "Description", True),
                     ("tags", "Tags", True),
                     ("notes", "Notes", True),
+                    ("embeddedmetadata", "Embedded Metadata", True),
                 ],
             },
             "ai": {
@@ -161,6 +183,7 @@ METADATA_SETTINGS_CONFIG: dict[str, dict] = {
                     ("notes", "Notes", True),
                     ("embeddedtags", "Embedded Tags", True),
                     ("embeddedcomments", "Embedded Comments", True),
+                    ("embeddedmetadata", "Embedded Metadata", True),
                 ],
             },
             "ai": {
@@ -712,7 +735,7 @@ class PlayerSettingsPage(SettingsPage):
 
 
 class MetadataSettingsPage(SettingsPage):
-    MODE_TITLES = [("image", "Images"), ("gif", "Animated GIFs"), ("video", "Videos")]
+    MODE_TITLES = [("image", "Images"), ("gif", "Animated GIFs"), ("video", "Videos"), ("svg", "SVGs")]
 
     def __init__(self, dialog: "SettingsDialog") -> None:
         super().__init__(dialog)
@@ -853,7 +876,12 @@ class MetadataSettingsPage(SettingsPage):
             if not group_key:
                 self.group_name_label.setText("Select a group")
                 return
-            group_cfg = self._config()["groups"][group_key]
+            group_cfg = self._config()["groups"].get(group_key)
+            if not group_cfg:
+                self.group_name_label.setText("Select a group")
+                self.group_enabled_toggle.setChecked(False)
+                self.group_collapsed_toggle.setChecked(False)
+                return
             self.group_name_label.setText(group_cfg["label"])
             self.group_enabled_toggle.setChecked(bool(self.settings.value(self._group_enabled_key(group_key).replace(".", "/"), True, type=bool)))
             self.group_collapsed_toggle.setChecked(bool(self.settings.value(self._group_collapsed_key(group_key).replace(".", "/"), False, type=bool)))

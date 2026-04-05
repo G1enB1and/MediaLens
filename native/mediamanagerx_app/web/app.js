@@ -308,7 +308,7 @@ function normalizeTextFilter(filterValue) {
 }
 
 function normalizeMediaFilter(filterValue) {
-  return ['image', 'video', 'animated'].includes(filterValue) ? filterValue : 'all';
+  return ['image', 'svg', 'video', 'animated'].includes(filterValue) ? filterValue : 'all';
 }
 
 function normalizeFilterValue(filterValue) {
@@ -345,6 +345,7 @@ function serializeFilterValue(groups) {
 function getFilterTriggerText(groups) {
   const labels = [];
   if (groups.media === 'image') labels.push('Images');
+  else if (groups.media === 'svg') labels.push('SVGs');
   else if (groups.media === 'video') labels.push('Videos');
   else if (groups.media === 'animated') labels.push('Animated GIFs');
   if (groups.text === 'text_detected') labels.push('Text Detected');
@@ -404,6 +405,32 @@ const METADATA_SETTINGS_CONFIG = {
       },
     },
     groupOrder: ['general', 'camera', 'ai'],
+  },
+  svg: {
+    groups: {
+      general: {
+        label: 'General',
+        fields: [
+          ['res', 'Resolution', true], ['size', 'File Size', true],
+          ['metadatadate', 'Date Acquired', false],
+          ['originalfiledate', 'Original File Date', false], ['filecreateddate', 'Windows ctime', false], ['filemodifieddate', 'Date Modified', false],
+          ['description', 'Description', true], ['tags', 'Tags', true], ['notes', 'Notes', true],
+        ],
+      },
+      ai: {
+        label: 'AI',
+        fields: [
+          ['aistatus', 'AI Detection', true], ['aisource', 'AI Tool / Source', true], ['aifamilies', 'AI Metadata Families', true],
+          ['aidetectionreasons', 'AI Detection Reasons', false], ['ailoras', 'AI LoRAs', true], ['aimodel', 'AI Model', true],
+          ['aicheckpoint', 'AI Checkpoint', false], ['aisampler', 'AI Sampler', true], ['aischeduler', 'AI Scheduler', true],
+          ['aicfg', 'AI CFG', true], ['aisteps', 'AI Steps', true], ['aiseed', 'AI Seed', true], ['aiupscaler', 'AI Upscaler', false],
+          ['aidenoise', 'AI Denoise', false], ['aiprompt', 'AI Prompt', true], ['ainegprompt', 'AI Negative Prompt', true],
+          ['aiparams', 'AI Parameters', true], ['aiworkflows', 'AI Workflows', false], ['aiprovenance', 'AI Provenance', false],
+          ['aicharcards', 'AI Character Cards', false], ['airawpaths', 'AI Metadata Paths', false],
+        ],
+      },
+    },
+    groupOrder: ['general', 'ai'],
   },
   video: {
     groups: {
@@ -3402,6 +3429,7 @@ function createStructuredCard(item, idx) {
 
   const thumbWrap = document.createElement('div');
   thumbWrap.className = 'structured-thumb';
+  if (item.svg_bg_hint) thumbWrap.setAttribute('data-svg-bg-hint', item.svg_bg_hint);
   card.appendChild(thumbWrap);
 
   if (isFolder) {
@@ -3728,6 +3756,7 @@ function createMasonryCard(item, idx) {
   const card = document.createElement('div');
   card.className = 'card loading';
   card.tabIndex = 0;
+  if (item.svg_bg_hint) card.setAttribute('data-svg-bg-hint', item.svg_bg_hint);
   if (item.width && item.height) {
     card.style.aspectRatio = `${item.width} / ${item.height}`;
   }

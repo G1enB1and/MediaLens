@@ -10,8 +10,8 @@ from typing import Any
 from app.mediamanager.metadata.models import InspectionResult
 
 
-PARSER_VERSION = "ai-metadata-pipeline-v1"
-NORMALIZED_SCHEMA_VERSION = "ai-metadata-schema-v1"
+PARSER_VERSION = "ai-metadata-pipeline-v3"
+NORMALIZED_SCHEMA_VERSION = "ai-metadata-schema-v3"
 
 
 def _utc_now_iso() -> str:
@@ -55,6 +55,48 @@ def _preview_text(value: Any, limit: int = 240) -> str:
     if len(compact) <= limit:
         return compact
     return compact[: limit - 3].rstrip() + "..."
+
+
+def _append_embedded_metadata_lines(lines: list[str], key: str, value: Any, *, depth: int = 0, max_lines: int = 120) -> None:
+    if len(lines) >= max_lines or depth > 6 or value in (None, "", [], {}):
+        return
+    label = str(key or "").strip()
+    if isinstance(value, dict):
+        for child_key, child_value in value.items():
+            next_key = f"{label}.{child_key}" if label else str(child_key)
+            _append_embedded_metadata_lines(lines, next_key, child_value, depth=depth + 1, max_lines=max_lines)
+            if len(lines) >= max_lines:
+                return
+        return
+    if isinstance(value, list):
+        if value and all(not isinstance(item, (dict, list, tuple, set)) for item in value):
+            rendered = " | ".join(_preview_text(item, 500) for item in value if _preview_text(item, 500))
+            if rendered:
+                lines.append(f"{label}: {rendered}" if label else rendered)
+            return
+        for index, item in enumerate(value, start=1):
+            next_key = f"{label}[{index}]" if label else f"[{index}]"
+            _append_embedded_metadata_lines(lines, next_key, item, depth=depth + 1, max_lines=max_lines)
+            if len(lines) >= max_lines:
+                return
+        return
+    rendered = _preview_text(value, 700)
+    if rendered:
+        lines.append(f"{label}: {rendered}" if label else rendered)
+
+
+def _build_embedded_metadata_summary(ai_meta: dict[str, Any] | None) -> str:
+    if not ai_meta:
+        return ""
+    lines: list[str] = []
+    _append_embedded_metadata_lines(lines, "", ai_meta.get("unknown_fields") or {})
+    if not lines:
+        for entry in ai_meta.get("raw_entries") or []:
+            path = str(entry.get("path_descriptor") or entry.get("family") or "embedded").strip()
+            raw_text = _preview_text(entry.get("raw_text"), 900)
+            if raw_text:
+                lines.append(f"{path}: {raw_text}")
+    return "\n".join(lines[:120])
 
 
 def _normalize_character_card(item: dict[str, Any]) -> dict[str, Any]:
@@ -250,6 +292,16 @@ def replace_media_ai_metadata(
             (media_id, None if not card.get("name") else str(card.get("name")), _json_dumps(card), now),
         )
 
+    conn.commit()
+
+
+def delete_media_ai_metadata(conn: sqlite3.Connection, media_id: int) -> None:
+    conn.execute("DELETE FROM media_ai_metadata_raw WHERE media_id = ?", (media_id,))
+    conn.execute("DELETE FROM media_ai_loras WHERE media_id = ?", (media_id,))
+    conn.execute("DELETE FROM media_ai_workflows WHERE media_id = ?", (media_id,))
+    conn.execute("DELETE FROM media_ai_provenance WHERE media_id = ?", (media_id,))
+    conn.execute("DELETE FROM media_character_cards WHERE media_id = ?", (media_id,))
+    conn.execute("DELETE FROM media_ai_metadata WHERE media_id = ?", (media_id,))
     conn.commit()
 
 
@@ -517,6 +569,7 @@ def build_media_ai_ui_fields(ai_meta: dict[str, Any] | None) -> dict[str, Any]:
             "provenance": [],
             "character_cards": [],
             "raw_paths": [],
+            "unknown_fields": {},
             "ai_status_summary": "",
             "ai_source_summary": "",
             "ai_families_summary": "",
@@ -551,6 +604,7 @@ def build_media_ai_ui_fields(ai_meta: dict[str, Any] | None) -> dict[str, Any]:
         "provenance": list(ai_meta.get("provenance") or []),
         "character_cards": list(ai_meta.get("character_cards") or []),
         "raw_paths": list(ai_meta.get("raw_paths") or []),
+        "unknown_fields": dict(ai_meta.get("unknown_fields") or {}),
         "model_name": ai_meta.get("model_name") or "",
         "checkpoint_name": ai_meta.get("checkpoint_name") or "",
         "sampler": ai_meta.get("sampler") or "",

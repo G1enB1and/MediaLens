@@ -5,6 +5,29 @@ import re
 from app.mediamanager.metadata.models import DetectionHit, RawMetadataEnvelope
 
 
+def _is_interesting_info_key(key: str) -> bool:
+    text = str(key or "").strip().lower()
+    if not text:
+        return False
+    return any(
+        token in text
+        for token in (
+            "comment",
+            "description",
+            "subject",
+            "title",
+            "keyword",
+            "tag",
+            "svg:",
+            "creation time",
+            "date",
+            "xmp",
+            "rdf",
+            "metadata",
+        )
+    )
+
+
 def detect_families(raw: RawMetadataEnvelope) -> list[DetectionHit]:
     hits: list[DetectionHit] = []
     keywords = {entry.keyword.lower(): entry for entry in raw.png_text_entries}
@@ -26,6 +49,10 @@ def detect_families(raw: RawMetadataEnvelope) -> list[DetectionHit]:
         generic_reasons.append("XMP metadata present")
     if raw.iptc:
         generic_reasons.append("IPTC metadata present")
+    if raw.png_text_entries:
+        generic_reasons.append("Embedded text metadata present")
+    if any(_is_interesting_info_key(key) for key in raw.pillow_info):
+        generic_reasons.append("Container metadata fields present")
     if generic_reasons:
         hits.append(DetectionHit("generic_embedded", 0.55, generic_reasons))
 

@@ -5,8 +5,9 @@ from app.mediamanager.metadata.models import CanonicalMetadata, DetectionHit, Pa
 
 def merge_results(detections: list[DetectionHit], parsed_results: list[ParsedMetadataResult]) -> CanonicalMetadata:
     canonical = CanonicalMetadata()
-    canonical.metadata_families_detected = [hit.family for hit in detections]
-    canonical.ai_detection_reasons = [reason for hit in detections for reason in hit.reasons]
+    ai_detection_families = {"a1111_like", "comfyui", "c2pa", "sillytavern", "ai_likely"}
+    canonical.metadata_families_detected = [hit.family for hit in detections if hit.family in ai_detection_families]
+    canonical.ai_detection_reasons = [reason for hit in detections if hit.family in ai_detection_families for reason in hit.reasons]
     canonical.is_ai_confidence = max(
         (hit.confidence for hit in detections if hit.family in {"a1111_like", "comfyui", "c2pa", "ai_likely"}),
         default=0.0,
@@ -17,9 +18,10 @@ def merge_results(detections: list[DetectionHit], parsed_results: list[ParsedMet
         source_format = result.normalized.get("source_format")
         if source_format and source_format not in canonical.source_formats:
             canonical.source_formats.append(str(source_format))
-        for path in result.extracted_paths:
-            if path not in canonical.raw_paths:
-                canonical.raw_paths.append(path)
+        if result.family != "generic_embedded":
+            for path in result.extracted_paths:
+                if path not in canonical.raw_paths:
+                    canonical.raw_paths.append(path)
 
         if result.family == "a1111_like":
             canonical.ai_prompt = canonical.ai_prompt or result.normalized.get("ai_prompt", "")
@@ -82,7 +84,5 @@ def merge_results(detections: list[DetectionHit], parsed_results: list[ParsedMet
             canonical.description = canonical.description or result.normalized.get("description", "")
         elif result.family == "generic_embedded":
             canonical.description = canonical.description or result.normalized.get("description", "")
-            for key, value in result.normalized.get("unknown_fields", {}).items():
-                canonical.unknown_fields.setdefault(key, value)
 
     return canonical

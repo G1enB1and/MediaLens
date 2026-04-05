@@ -30,6 +30,8 @@
   --modal-bg: color-mix(in srgb, var(--panel-neutral), black 2%);
   --shadow: var(--shadow-color);
   --thumb-bg: var(--thumb-neutral);
+  --svg-bg-for-dark-art: #f7f8fa;
+  --svg-bg-for-light-art: #0f1012;
   --scrollbar-track: #181818;
   --scrollbar-thumb: #4a4a50;
   --scrollbar-thumb-hover: #5a5a61;
@@ -60,6 +62,8 @@
   --compare-btn-hover-border: color-mix(in srgb, var(--border), var(--accent) 28%);
   --modal-bg: #ffffff;
   --thumb-bg: var(--thumb-neutral);
+  --svg-bg-for-dark-art: #ffffff;
+  --svg-bg-for-light-art: #101114;
   --scrollbar-track: #f1f2f4;
   --scrollbar-thumb: #c3c8d1;
   --scrollbar-thumb-hover: #aeb5bf;
@@ -1788,6 +1792,26 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   height: 72px;
 }
 
+.gallery-grid .structured-thumb[data-svg-bg-hint="light"],
+.gallery-content .structured-thumb[data-svg-bg-hint="light"],
+.gallery-details .structured-thumb[data-svg-bg-hint="light"] {
+  background: var(--svg-bg-for-dark-art);
+}
+
+.gallery-grid .structured-thumb[data-svg-bg-hint="dark"],
+.gallery-content .structured-thumb[data-svg-bg-hint="dark"],
+.gallery-details .structured-thumb[data-svg-bg-hint="dark"] {
+  background: var(--svg-bg-for-light-art);
+}
+
+.card[data-svg-bg-hint="light"] {
+  background: var(--svg-bg-for-dark-art);
+}
+
+.card[data-svg-bg-hint="dark"] {
+  background: var(--svg-bg-for-light-art);
+}
+
 .gallery-duplicates .structured-thumb {
   aspect-ratio: auto;
   min-height: 0;
@@ -2107,6 +2131,14 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   display: block;
   background: var(--thumb-bg);
   transition: opacity 0.25s ease;
+}
+
+.structured-thumb[data-svg-bg-hint] .thumb {
+  background: transparent;
+}
+
+.card[data-svg-bg-hint] > .thumb {
+  background: transparent;
 }
 
 .skel {

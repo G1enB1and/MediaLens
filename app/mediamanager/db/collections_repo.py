@@ -120,7 +120,7 @@ def add_media_paths_to_collection(conn: sqlite3.Connection, collection_id: int, 
         return 0
 
     media_ids: list[int] = []
-    image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"}
+    image_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif", ".svg"}
 
     for raw_path in paths:
         path = str(raw_path or "").strip()
