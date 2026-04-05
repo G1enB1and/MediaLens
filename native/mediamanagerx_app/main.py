@@ -4062,6 +4062,7 @@ class Bridge(QObject):
                 "gallery.similarity_threshold": self._gallery_similarity_threshold(),
                 "duplicate.settings.active_tab": str(self.settings.value("duplicate/settings/active_tab", "rules", type=str) or "rules"),
                 "ui.accent_color": str(self.settings.value("ui/accent_color", "#8ab4f8", type=str) or "#8ab4f8"),
+                "ui.show_top_panel": bool(self.settings.value("ui/show_top_panel", True, type=bool)),
                 "ui.show_left_panel": bool(self.settings.value("ui/show_left_panel", True, type=bool)),
                 "ui.show_right_panel": bool(self.settings.value("ui/show_right_panel", True, type=bool)),
                 "ui.show_bottom_panel": bool(self.settings.value("ui/show_bottom_panel", True, type=bool)),
@@ -4134,6 +4135,7 @@ class Bridge(QObject):
                 "gallery.similarity_threshold": "low",
                 "duplicate.settings.active_tab": "rules",
                 "ui.accent_color": "#8ab4f8",
+                "ui.show_top_panel": True,
                 "ui.show_left_panel": True,
                 "ui.show_right_panel": True,
                 "ui.show_bottom_panel": True,
@@ -4493,6 +4495,7 @@ class Bridge(QObject):
                 "gallery.mute_video_by_default",
                 "player.autoplay_gallery_animated_gifs",
                 "player.autoplay_preview_animated_gifs",
+                "ui.show_top_panel",
                 "ui.show_left_panel", 
                 "ui.show_right_panel", 
                 "ui.show_bottom_panel",
@@ -6590,6 +6593,12 @@ class MainWindow(QMainWindow):
 
         view_menu.addSeparator()
 
+        self.act_toggle_top_panel = QAction("Show Top Panel", self)
+        self.act_toggle_top_panel.setCheckable(True)
+        self.act_toggle_top_panel.setChecked(bool(self.bridge.settings.value("ui/show_top_panel", True, type=bool)))
+        self.act_toggle_top_panel.triggered.connect(lambda checked=False: self._toggle_panel_setting("ui/show_top_panel"))
+        view_menu.addAction(self.act_toggle_top_panel)
+
         self.act_toggle_left_panel = QAction("Show Left Panel", self)
         self.act_toggle_left_panel.setCheckable(True)
         self.act_toggle_left_panel.setChecked(bool(self.bridge.settings.value("ui/show_left_panel", True, type=bool)))
@@ -6666,6 +6675,104 @@ class MainWindow(QMainWindow):
 
         for m in (file_menu, edit_menu, view_menu, help_menu):
             m.aboutToShow.connect(self._dismiss_web_menus)
+
+        self._build_menu_bar_controls()
+
+    def _menu_bar_icon_path(self, base_name: str) -> str:
+        suffix = "-black" if Theme.get_is_light() else ""
+        return str(Path(__file__).with_name("web") / f"{base_name}{suffix}.png")
+
+    def _build_menu_bar_controls(self) -> None:
+        menubar = self.menuBar()
+        if menubar is None:
+            return
+
+        container = QWidget(self)
+        container.setObjectName("menuBarControls")
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(6, 0, 8, 0)
+        layout.setSpacing(6)
+
+        self.menu_btn_toggle_left = QPushButton(container)
+        self.menu_btn_toggle_left.setObjectName("menuBarIconButton")
+        self.menu_btn_toggle_left.setToolTip("Toggle Left Sidebar")
+        self.menu_btn_toggle_left.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.menu_btn_toggle_left.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.menu_btn_toggle_left.clicked.connect(lambda: self._toggle_panel_setting("ui/show_left_panel"))
+        layout.addWidget(self.menu_btn_toggle_left)
+
+        self.menu_btn_toggle_top = QPushButton(container)
+        self.menu_btn_toggle_top.setObjectName("menuBarIconButton")
+        self.menu_btn_toggle_top.setToolTip("Toggle Top Panel")
+        self.menu_btn_toggle_top.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.menu_btn_toggle_top.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.menu_btn_toggle_top.clicked.connect(lambda: self._toggle_panel_setting("ui/show_top_panel"))
+        layout.addWidget(self.menu_btn_toggle_top)
+
+        self.menu_btn_toggle_bottom = QPushButton(container)
+        self.menu_btn_toggle_bottom.setObjectName("menuBarIconButton")
+        self.menu_btn_toggle_bottom.setToolTip("Toggle Bottom Panel")
+        self.menu_btn_toggle_bottom.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.menu_btn_toggle_bottom.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.menu_btn_toggle_bottom.clicked.connect(lambda: self._toggle_panel_setting("ui/show_bottom_panel"))
+        layout.addWidget(self.menu_btn_toggle_bottom)
+
+        self.menu_btn_toggle_right = QPushButton(container)
+        self.menu_btn_toggle_right.setObjectName("menuBarIconButton")
+        self.menu_btn_toggle_right.setToolTip("Toggle Right Sidebar")
+        self.menu_btn_toggle_right.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.menu_btn_toggle_right.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.menu_btn_toggle_right.clicked.connect(lambda: self._toggle_panel_setting("ui/show_right_panel"))
+        layout.addWidget(self.menu_btn_toggle_right)
+
+        self.menu_btn_settings = QPushButton("⚙", container)
+        self.menu_btn_settings.setObjectName("menuBarSettingsButton")
+        self.menu_btn_settings.setToolTip("Settings")
+        self.menu_btn_settings.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.menu_btn_settings.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.menu_btn_settings.clicked.connect(self.open_settings)
+        layout.addWidget(self.menu_btn_settings)
+
+        menubar.setCornerWidget(container, Qt.Corner.TopRightCorner)
+        self._sync_menu_bar_controls()
+
+    def _set_menu_bar_button_icon(self, button: QPushButton | None, visible: bool, prefix: str) -> None:
+        if button is None:
+            return
+        state = "opened" if visible else "closed"
+        path = self._menu_bar_icon_path(f"{prefix}-{state}")
+        if Path(path).exists():
+            button.setIcon(QIcon(path))
+            button.setText("")
+        else:
+            button.setIcon(QIcon())
+            button.setText("•")
+        button.setIconSize(QSize(18, 18))
+
+    def _sync_menu_bar_controls(self) -> None:
+        try:
+            self._set_menu_bar_button_icon(
+                getattr(self, "menu_btn_toggle_left", None),
+                bool(self.bridge.settings.value("ui/show_left_panel", True, type=bool)),
+                "left-sidebar",
+            )
+            self._set_menu_bar_button_icon(
+                getattr(self, "menu_btn_toggle_top", None),
+                bool(self.bridge.settings.value("ui/show_top_panel", True, type=bool)),
+                "top",
+            )
+            self._set_menu_bar_button_icon(
+                getattr(self, "menu_btn_toggle_bottom", None),
+                bool(self.bridge.settings.value("ui/show_bottom_panel", True, type=bool)),
+                "bottom",
+            )
+            self._set_menu_bar_button_icon(
+                getattr(self, "menu_btn_toggle_right", None),
+                bool(self.bridge.settings.value("ui/show_right_panel", True, type=bool)),
+                "right-sidebar",
+            )
+        except Exception:
+            pass
 
     def _set_gallery_view_mode(self, mode: str) -> None:
         self.bridge.set_setting_str("gallery.view_mode", mode)
@@ -8406,6 +8513,10 @@ class MainWindow(QMainWindow):
         try:
             if key == "gallery.view_mode":
                 self._sync_gallery_view_actions()
+            elif key == "ui.show_top_panel":
+                if hasattr(self, "act_toggle_top_panel"):
+                    self.act_toggle_top_panel.setChecked(bool(value))
+                self._sync_menu_bar_controls()
             elif key == "ui.show_left_panel":
                 if not bool(value):
                     self._save_main_panel_widths()
@@ -8415,6 +8526,7 @@ class MainWindow(QMainWindow):
                     current_path = self.bridge._selected_folders[0] if self.bridge._selected_folders else ""
                     if current_path:
                         self._queue_tree_sync(current_path)
+                self._sync_menu_bar_controls()
             elif key == "ui.show_right_panel":
                 if not bool(value):
                     self._save_main_panel_widths()
@@ -8422,6 +8534,7 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(0, self._restore_main_splitter_sizes)
                 if hasattr(self, "act_toggle_right_panel"):
                     self.act_toggle_right_panel.setChecked(bool(value))
+                self._sync_menu_bar_controls()
             elif key == "ui.show_bottom_panel":
                 if not bool(value):
                     self._save_bottom_panel_height()
@@ -8429,6 +8542,7 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(0, self._restore_center_splitter_sizes)
                 if hasattr(self, "act_toggle_bottom_panel"):
                     self.act_toggle_bottom_panel.setChecked(bool(value))
+                self._sync_menu_bar_controls()
             elif key == "ui.preview_above_details":
                 if hasattr(self, "preview_header_row"):
                     visible = bool(value)
@@ -11264,7 +11378,7 @@ class MainWindow(QMainWindow):
         target_rect = QRect(x, y, w, h)
         
         # Define header height to avoid covering search bars/toolbar
-        header_height = 112 # Total height of header + toolbar in JS
+        header_height = self._web_header_height()
         
         self.video_overlay.set_mode(is_inplace=True) # In-place mode
         self.video_overlay.setGeometry(target_rect)
@@ -11291,7 +11405,7 @@ class MainWindow(QMainWindow):
             return
             
         # Define header height for clipping
-        header_height = 112
+        header_height = self._web_header_height()
         
         # Relative coordinates for child widget
         target_rect = QRect(x, y, w, h)
@@ -11892,6 +12006,26 @@ class MainWindow(QMainWindow):
                 background: {border};
                 margin: 4px 0;
             }}
+            QWidget#menuBarControls {{
+                background: transparent;
+            }}
+            QPushButton#menuBarIconButton, QPushButton#menuBarSettingsButton {{
+                min-width: 26px;
+                max-width: 26px;
+                min-height: 24px;
+                max-height: 24px;
+                padding: 0;
+                border: 1px solid {border};
+                border-radius: 6px;
+                background-color: {Theme.get_control_bg(accent)};
+                color: {text};
+                font-size: 14px;
+                font-weight: 600;
+            }}
+            QPushButton#menuBarIconButton:hover, QPushButton#menuBarSettingsButton:hover {{
+                background-color: {highlight_bg};
+                border-color: {accent.name()};
+            }}
         """
         QApplication.instance().setStyleSheet(menu_qss)
         try:
@@ -11908,6 +12042,10 @@ class MainWindow(QMainWindow):
                 menu_bar.style().polish(menu_bar)
                 menu_bar.update()
                 menu_bar.repaint()
+                corner = menu_bar.cornerWidget(Qt.Corner.TopRightCorner)
+                if corner is not None:
+                    corner.setStyleSheet(menu_qss)
+                    corner.update()
             for menu in self.findChildren(QMenu):
                 menu.setStyleSheet(menu_qss)
                 menu_palette = menu.palette()
@@ -11922,6 +12060,10 @@ class MainWindow(QMainWindow):
                 menu.repaint()
         except Exception:
             pass
+        self._sync_menu_bar_controls()
+
+    def _web_header_height(self) -> int:
+        return 112 if bool(self.bridge.settings.value("ui/show_top_panel", True, type=bool)) else 0
 
     def _get_native_scrollbar_style(self, accent: QColor) -> str:
         """Generate neutral native scrollbars with accent reserved for content states."""

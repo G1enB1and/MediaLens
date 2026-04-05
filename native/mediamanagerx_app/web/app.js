@@ -6067,6 +6067,7 @@ function updateThemeAwareIcons(theme) {
 function updateSidebarButtonIcons(side, visible) {
   const iconIdMap = {
     left: 'iconLeftPanel',
+    top: 'iconTopPanel',
     bottom: 'iconBottomPanel',
     right: 'iconRightPanel',
   };
@@ -6075,8 +6076,12 @@ function updateSidebarButtonIcons(side, visible) {
   const isLight = document.documentElement.classList.contains('light-mode');
   const suffix = isLight ? '-black' : '';
   const state = visible ? 'opened' : 'closed';
-  const prefix = side === 'bottom' ? 'bottom' : `${side}-sidebar`;
+  const prefix = side === 'bottom' || side === 'top' ? side : `${side}-sidebar`;
   icon.src = `${prefix}-${state}${suffix}.png`;
+}
+
+function applyTopPanelVisibility(visible) {
+  document.body.classList.toggle('top-panel-hidden', !visible);
 }
 
 function wireSidebarToggles() {
@@ -6484,6 +6489,8 @@ async function main() {
       const splashToggle = document.getElementById('toggleShowSplashScreen');
       if (splashToggle) splashToggle.checked = (s && s['ui.show_splash_screen']) !== false;
 
+      applyTopPanelVisibility((s && s['ui.show_top_panel']) !== false);
+      updateSidebarButtonIcons('top', (s && s['ui.show_top_panel']) !== false);
       updateSidebarButtonIcons('left', !!(s && s['ui.show_left_panel']));
       updateSidebarButtonIcons('bottom', !!(s && s['ui.show_bottom_panel']));
       updateSidebarButtonIcons('right', !!(s && s['ui.show_right_panel']));
@@ -6641,6 +6648,11 @@ async function main() {
       bridge.uiFlagChanged.connect(function (key, value) {
         if (key === 'ui.show_left_panel') {
           updateSidebarButtonIcons('left', !!value);
+          return;
+        }
+        if (key === 'ui.show_top_panel') {
+          applyTopPanelVisibility(!!value);
+          updateSidebarButtonIcons('top', !!value);
           return;
         }
         if (key === 'ui.show_bottom_panel') {
