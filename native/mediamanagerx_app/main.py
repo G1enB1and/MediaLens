@@ -3694,6 +3694,10 @@ class Bridge(QObject):
             name = Path(str(best.get("path", ""))).name.lower()
             if sort_by == "name_desc":
                 order_key = (name, len(sorted_group), savings)
+            elif sort_by == "type_asc":
+                order_key = (self._file_type_sort_key(best), -len(sorted_group), -savings, name)
+            elif sort_by == "type_desc":
+                order_key = (self._file_type_sort_key(best), len(sorted_group), savings, name)
             elif sort_by == "date_asc":
                 order_key = (best.get("preferred_date") or self._preferred_date_ns(best) or 0, -len(sorted_group), -savings, name)
             elif sort_by == "date_desc":
@@ -3704,7 +3708,7 @@ class Bridge(QObject):
                 order_key = (-savings, -len(sorted_group), name)
             group_rows.append((order_key, sorted_group))
 
-        reverse = sort_by == "name_desc"
+        reverse = sort_by in {"name_desc", "type_desc"}
         group_rows.sort(key=lambda row: row[0], reverse=reverse)
 
         flattened: list[dict] = []
@@ -3829,9 +3833,13 @@ class Bridge(QObject):
             order_key = (-area_score, -len(sorted_group), name)
             if sort_by == "name_desc":
                 order_key = (name, -area_score, -len(sorted_group))
+            elif sort_by == "type_asc":
+                order_key = (self._file_type_sort_key(best), -area_score, -len(sorted_group), name)
+            elif sort_by == "type_desc":
+                order_key = (self._file_type_sort_key(best), area_score, len(sorted_group), name)
             group_rows.append((order_key, sorted_group))
 
-        group_rows.sort(key=lambda row: row[0], reverse=(sort_by == "name_desc"))
+        group_rows.sort(key=lambda row: row[0], reverse=(sort_by in {"name_desc", "type_desc"}))
         flattened: list[dict] = []
         for _, group in group_rows:
             flattened.extend(group)
@@ -6309,6 +6317,14 @@ class Bridge(QObject):
             folders.sort(key=lambda row: (date_key(row), name_key(row)))
             media.sort(key=lambda row: (date_key(row), name_key(row)))
             return folders + media
+        if sort_by == "type_asc":
+            folders.sort(key=name_key)
+            media.sort(key=lambda row: (self._file_type_sort_key(row), name_key(row)))
+            return folders + media
+        if sort_by == "type_desc":
+            folders.sort(key=name_key)
+            media.sort(key=lambda row: (self._file_type_sort_key(row), name_key(row)), reverse=True)
+            return folders + media
         if sort_by == "size_desc":
             folders.sort(key=lambda row: (size_key(row), name_key(row)), reverse=True)
             media.sort(key=lambda row: (size_key(row), name_key(row)), reverse=True)
@@ -6320,6 +6336,15 @@ class Bridge(QObject):
         folders.sort(key=name_key)
         media.sort(key=name_key)
         return folders + media
+
+    @staticmethod
+    def _file_type_sort_key(row: dict) -> str:
+        path = str(row.get("path") or "").strip()
+        suffix = Path(path).suffix.lower().lstrip(".")
+        if suffix:
+            return suffix
+        media_type = str(row.get("media_type") or "").strip().lower()
+        return media_type or ""
 
     def _get_gallery_entries(self, folders: list[str], sort_by: str = "none", filter_type: str = "all", search_query: str = "") -> list[dict]:
         _, text_filter = self._parse_filter_groups(filter_type)
