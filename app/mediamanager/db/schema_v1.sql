@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS media_items (
   file_size_bytes INTEGER,
   file_created_time_utc TEXT,
   modified_time_utc TEXT,
+  original_file_date_utc TEXT,
   exif_date_taken TEXT,
   metadata_date TEXT,
   width INTEGER,

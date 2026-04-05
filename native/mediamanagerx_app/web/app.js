@@ -333,6 +333,17 @@ function isTextFilterActive() {
   return normalized === 'text_detected' || normalized === 'no_text_detected';
 }
 
+function resolveMetadataFieldEnabled(settings, mode, key, defaultEnabled) {
+  const directKey = metadataFieldEnabledKey(mode, key);
+  if (settings && settings[directKey] !== undefined) return !!settings[directKey];
+  if (key === 'originalfiledate') {
+    const fallbackModeKey = metadataFieldEnabledKey(mode, 'filecreateddate');
+    if (settings && settings[fallbackModeKey] !== undefined) return !!settings[fallbackModeKey];
+    if (settings && settings['metadata.display.filecreateddate'] !== undefined) return !!settings['metadata.display.filecreateddate'];
+  }
+  return !!defaultEnabled;
+}
+
 const METADATA_SETTINGS_CONFIG = {
   image: {
     groups: {
@@ -341,7 +352,7 @@ const METADATA_SETTINGS_CONFIG = {
         fields: [
           ['res', 'Resolution', true], ['size', 'File Size', true],
           ['exifdatetaken', 'Date Taken', false], ['metadatadate', 'Date Acquired', false],
-          ['filecreateddate', 'Date Created', false], ['filemodifieddate', 'Date Modified', false],
+          ['originalfiledate', 'Original File Date', false], ['filecreateddate', 'Windows ctime', false], ['filemodifieddate', 'Date Modified', false],
           ['description', 'Description', true],
           ['tags', 'Tags', true], ['notes', 'Notes', true], ['embeddedtags', 'Embedded Tags', true],
           ['embeddedcomments', 'Embedded Comments', true],
@@ -377,7 +388,7 @@ const METADATA_SETTINGS_CONFIG = {
         fields: [
           ['res', 'Resolution', true], ['size', 'File Size', true],
           ['exifdatetaken', 'Date Taken', false], ['metadatadate', 'Date Acquired', false],
-          ['filecreateddate', 'Date Created', false], ['filemodifieddate', 'Date Modified', false],
+          ['originalfiledate', 'Original File Date', false], ['filecreateddate', 'Windows ctime', false], ['filemodifieddate', 'Date Modified', false],
           ['duration', 'Duration', true], ['fps', 'Frames Per Second', true],
           ['codec', 'Codec', true], ['audio', 'Audio', true], ['description', 'Description', true], ['tags', 'Tags', true], ['notes', 'Notes', true],
         ],
@@ -402,7 +413,7 @@ const METADATA_SETTINGS_CONFIG = {
         fields: [
           ['res', 'Resolution', true], ['size', 'File Size', true],
           ['exifdatetaken', 'Date Taken', false], ['metadatadate', 'Date Acquired', false],
-          ['filecreateddate', 'Date Created', false], ['filemodifieddate', 'Date Modified', false],
+          ['originalfiledate', 'Original File Date', false], ['filecreateddate', 'Windows ctime', false], ['filemodifieddate', 'Date Modified', false],
           ['duration', 'Duration', true], ['fps', 'Frames Per Second', true],
           ['description', 'Description', true], ['tags', 'Tags', true], ['notes', 'Notes', true], ['embeddedtags', 'Embedded Tags', true],
           ['embeddedcomments', 'Embedded Comments', true],
@@ -5677,11 +5688,11 @@ function renderMetadataSettings(settings) {
       row.draggable = true;
       row.dataset.key = key;
       row.dataset.groupKey = groupKey;
-      const enabled = settings && settings[metadataFieldEnabledKey(gActiveMetadataMode, key)];
+      const enabled = resolveMetadataFieldEnabled(settings, gActiveMetadataMode, key, defaultEnabled);
       row.innerHTML = `
         <div class="drag-handle" title="Drag field">☰</div>
         <label class="toggle">
-          <input type="checkbox" class="metadata-field-toggle" data-field-key="${key}" ${enabled !== undefined ? (enabled ? 'checked' : '') : (defaultEnabled ? 'checked' : '')} />
+          <input type="checkbox" class="metadata-field-toggle" data-field-key="${key}" ${enabled ? 'checked' : ''} />
           <span>${label}</span>
         </label>
       `;

@@ -74,6 +74,8 @@ def _ensure_media_item_date_columns(conn: sqlite3.Connection) -> None:
     cols = {row[1] for row in conn.execute("PRAGMA table_info(media_items)").fetchall()}
     if "file_created_time_utc" not in cols:
         conn.execute("ALTER TABLE media_items ADD COLUMN file_created_time_utc TEXT")
+    if "original_file_date_utc" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN original_file_date_utc TEXT")
     if "exif_date_taken" not in cols:
         conn.execute("ALTER TABLE media_items ADD COLUMN exif_date_taken TEXT")
     if "metadata_date" not in cols:
@@ -98,6 +100,17 @@ def _ensure_media_item_date_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE media_items ADD COLUMN text_verification_score REAL")
     if "text_verification_version" not in cols:
         conn.execute("ALTER TABLE media_items ADD COLUMN text_verification_version INTEGER")
+    rows = conn.execute(
+        "SELECT id, file_created_time_utc, modified_time_utc, original_file_date_utc FROM media_items"
+    ).fetchall()
+    for media_id, created_time, modified_time, original_file_date in rows:
+        candidates = [str(value).strip() for value in (created_time, modified_time, original_file_date) if str(value or "").strip()]
+        next_original = min(candidates) if candidates else None
+        if next_original != (str(original_file_date).strip() if original_file_date is not None else None):
+            conn.execute(
+                "UPDATE media_items SET original_file_date_utc = ? WHERE id = ?",
+                (next_original, int(media_id)),
+            )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_media_items_phash ON media_items(phash)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_media_items_text_detected ON media_items(text_detected)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_media_items_text_more_likely ON media_items(text_more_likely)")

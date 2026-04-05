@@ -112,6 +112,7 @@ from PySide6.QtCore import (
     QMetaObject,
     QRect,
     QRectF,
+    QItemSelectionModel,
 )
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 from PySide6.QtGui import (
@@ -3121,11 +3122,18 @@ class Bridge(QObject):
             return len(format_order) - idx
 
         def _original_timestamp(entry: dict) -> int:
-            for key in ("exif_date_taken", "metadata_date", "file_created_time"):
+            for key in ("exif_date_taken", "metadata_date"):
                 raw_value = entry.get(key)
                 value = raw_value if isinstance(raw_value, int) else self._iso_to_ns(raw_value)
                 if value > 0:
                     return value
+            value = self._original_file_date_ns(entry)
+            if value > 0:
+                return value
+            raw_value = entry.get("file_created_time")
+            value = raw_value if isinstance(raw_value, int) else self._iso_to_ns(raw_value)
+            if value > 0:
+                return value
             return 0
 
         def _modified_timestamp(entry: dict) -> int:
@@ -4065,6 +4073,7 @@ class Bridge(QObject):
                 "metadata.display.size": bool(self.settings.value("metadata/display/size", True, type=bool)),
                 "metadata.display.exifdatetaken": bool(self.settings.value("metadata/display/exifdatetaken", False, type=bool)),
                 "metadata.display.metadatadate": bool(self.settings.value("metadata/display/metadatadate", False, type=bool)),
+                "metadata.display.originalfiledate": bool(self.settings.value("metadata/display/originalfiledate", self.settings.value("metadata/display/filecreateddate", False, type=bool), type=bool)),
                 "metadata.display.filecreateddate": bool(self.settings.value("metadata/display/filecreateddate", False, type=bool)),
                 "metadata.display.filemodifieddate": bool(self.settings.value("metadata/display/filemodifieddate", False, type=bool)),
                 "metadata.display.description": bool(self.settings.value("metadata/display/description", True, type=bool)),
@@ -4182,10 +4191,13 @@ class Bridge(QObject):
             file_size = int(stat.st_size)
         modified_time = self._iso_to_ns(media.get("modified_time"))
         file_created_time = self._iso_to_ns(media.get("file_created_time"))
+        original_file_date = self._iso_to_ns(media.get("original_file_date"))
         if modified_time <= 0 and stat is not None:
             modified_time = int(stat.st_mtime_ns)
         if file_created_time <= 0 and stat is not None:
             file_created_time = int(stat.st_ctime_ns)
+        if original_file_date <= 0:
+            original_file_date = self._normalized_file_date_ns(file_created_time, modified_time)
         entry = {
             "path": clean,
             "name": p.name,
@@ -4195,6 +4207,7 @@ class Bridge(QObject):
             "height": height,
             "modified_time": modified_time,
             "file_created_time": file_created_time,
+            "original_file_date": original_file_date,
             "exif_date_taken": media.get("exif_date_taken") or "",
             "metadata_date": media.get("metadata_date") or "",
             "preferred_date": 0,
@@ -5333,6 +5346,9 @@ class Bridge(QObject):
                         m["file_created_time"] = datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc).replace(microsecond=0).isoformat()
                     if not m.get("modified_time"):
                         m["modified_time"] = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat()
+                    if not m.get("original_file_date"):
+                        values = [str(value).strip() for value in (m.get("file_created_time"), m.get("modified_time")) if str(value or "").strip()]
+                        m["original_file_date"] = min(values) if values else ""
                 except Exception:
                     pass
             meta = get_media_metadata(self.conn, m["id"]) or {}
@@ -5359,6 +5375,7 @@ class Bridge(QObject):
                 "duration_ms": m.get("duration_ms"),
                 "exif_date_taken": m.get("exif_date_taken") or "",
                 "metadata_date": m.get("metadata_date") or "",
+                "original_file_date": m.get("original_file_date") or "",
                 "file_created_time": m.get("file_created_time") or "",
                 "modified_time": m.get("modified_time") or "",
             }
@@ -5580,7 +5597,8 @@ class Bridge(QObject):
                 if r.get("is_folder"):
                     created_time = int(r.get("file_created_time") or 0)
                     modified_time = int(r.get("modified_time") or 0)
-                    auto_date = int(r.get("preferred_date") or created_time or modified_time)
+                    original_file_date = int(r.get("original_file_date") or self._normalized_file_date_ns(created_time, modified_time))
+                    auto_date = int(r.get("preferred_date") or original_file_date or created_time or modified_time)
                     out.append(
                         {
                             "path": str(r["path"]),
@@ -5594,6 +5612,7 @@ class Bridge(QObject):
                             "duration": None,
                             "file_created_time": created_time,
                             "modified_time": modified_time,
+                            "original_file_date": original_file_date,
                             "exif_date_taken": None,
                             "metadata_date": None,
                             "auto_date": auto_date,
@@ -5633,6 +5652,7 @@ class Bridge(QObject):
                 except Exception:
                     mtime = self._iso_to_ns(r.get("modified_time"))
                     ctime = self._iso_to_ns(r.get("file_created_time"))
+                original_file_date = self._original_file_date_ns(r)
                 auto_date = int(r.get("preferred_date") or self._preferred_date_ns(r))
                     
                 out.append({
@@ -5647,6 +5667,7 @@ class Bridge(QObject):
                     "duration": r.get("duration"),
                     "file_created_time": ctime,
                     "modified_time": mtime,
+                    "original_file_date": original_file_date or self._normalized_file_date_ns(ctime, mtime),
                     "exif_date_taken": r.get("exif_date_taken"),
                     "metadata_date": r.get("metadata_date"),
                     "auto_date": auto_date,
@@ -5848,14 +5869,47 @@ class Bridge(QObject):
             return 0
 
     def _preferred_date_ns(self, row: dict) -> int:
-        for key in ("exif_date_taken", "metadata_date", "file_created_time"):
+        for key in ("exif_date_taken", "metadata_date"):
             value = self._iso_to_ns(row.get(key))
+            if value > 0:
+                return value
+        original_file_date = self._original_file_date_ns(row)
+        if original_file_date > 0:
+            return original_file_date
+        file_created_value = row.get("file_created_time")
+        if isinstance(file_created_value, int):
+            if file_created_value > 0:
+                return file_created_value
+        else:
+            value = self._iso_to_ns(file_created_value)
             if value > 0:
                 return value
         raw_modified = row.get("modified_time")
         if isinstance(raw_modified, int):
             return raw_modified
         return self._iso_to_ns(raw_modified)
+
+    def _normalized_file_date_ns(self, file_created_value, modified_value) -> int:
+        values: list[int] = []
+        for raw_value in (file_created_value, modified_value):
+            if isinstance(raw_value, int):
+                value = raw_value
+            else:
+                value = self._iso_to_ns(raw_value)
+            if value > 0:
+                values.append(value)
+        return min(values) if values else 0
+
+    def _original_file_date_ns(self, row: dict) -> int:
+        raw_value = row.get("original_file_date")
+        if isinstance(raw_value, int):
+            if raw_value > 0:
+                return raw_value
+        else:
+            value = self._iso_to_ns(raw_value)
+            if value > 0:
+                return value
+        return self._normalized_file_date_ns(row.get("file_created_time"), row.get("modified_time"))
 
     def _list_folder_entries(self, folders: list[str], search_query: str = "") -> list[dict]:
         if not folders:
@@ -5901,7 +5955,8 @@ class Bridge(QObject):
                             "file_size": None,
                             "file_created_time": created_time,
                             "modified_time": modified_time,
-                            "preferred_date": created_time or modified_time,
+                            "original_file_date": self._normalized_file_date_ns(created_time, modified_time),
+                            "preferred_date": self._normalized_file_date_ns(created_time, modified_time) or created_time or modified_time,
                             "width": None,
                             "height": None,
                             "duration": None,
@@ -7139,6 +7194,9 @@ class MainWindow(QMainWindow):
         self.meta_metadata_date_edit = QLineEdit()
         self.meta_metadata_date_edit.setObjectName("metaMetadataDateEdit")
         self.meta_metadata_date_edit.setPlaceholderText("YYYY-MM-DD HH:MM:SS")
+
+        self.meta_original_file_date_lbl = QLabel("")
+        self.meta_original_file_date_lbl.setObjectName("metaOriginalFileDateLabel")
 
         self.meta_file_created_date_lbl = QLabel("")
         self.meta_file_created_date_lbl.setObjectName("metaFileCreatedDateLabel")
@@ -9427,9 +9485,12 @@ class MainWindow(QMainWindow):
             self.meta_ai_raw_paths_edit.setPlainText(ai_ui.get("ai_raw_paths_summary", ""))
             self.meta_exif_date_taken_edit.setText(self._format_editable_datetime((media or {}).get("exif_date_taken")))
             self.meta_metadata_date_edit.setText(self._format_editable_datetime((media or {}).get("metadata_date")))
+            original_file_text = self._format_sidebar_datetime((media or {}).get("original_file_date"))
+            if original_file_text:
+                self.meta_original_file_date_lbl.setText(f"Original File Date: {original_file_text}")
             file_created_text = self._format_sidebar_datetime((media or {}).get("file_created_time"))
             if file_created_text:
-                self.meta_file_created_date_lbl.setText(f"Date Created: {file_created_text}")
+                self.meta_file_created_date_lbl.setText(f"Windows ctime: {file_created_text}")
             file_modified_text = self._format_sidebar_datetime((media or {}).get("modified_time"))
             if file_modified_text:
                 self.meta_file_modified_date_lbl.setText(f"Date Modified: {file_modified_text}")
@@ -9990,9 +10051,12 @@ class MainWindow(QMainWindow):
                 data = self.bridge.get_media_metadata(str(p))
                 self.meta_exif_date_taken_edit.setText(self._format_editable_datetime(data.get("exif_date_taken")))
                 self.meta_metadata_date_edit.setText(self._format_editable_datetime(data.get("metadata_date")))
+                original_file_text = self._format_sidebar_datetime(data.get("original_file_date"))
+                if original_file_text:
+                    self.meta_original_file_date_lbl.setText(f"Original File Date: {original_file_text}")
                 file_created_text = self._format_sidebar_datetime(data.get("file_created_time"))
                 if file_created_text:
-                    self.meta_file_created_date_lbl.setText(f"Date Created: {file_created_text}")
+                    self.meta_file_created_date_lbl.setText(f"Windows ctime: {file_created_text}")
                 file_modified_text = self._format_sidebar_datetime(data.get("modified_time"))
                 if file_modified_text:
                     self.meta_file_modified_date_lbl.setText(f"Date Modified: {file_modified_text}")
@@ -10087,6 +10151,7 @@ class MainWindow(QMainWindow):
         show_size = "size" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "size", True)
         show_exif_date_taken = "exifdatetaken" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "exifdatetaken", False)
         show_metadata_date = "metadatadate" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "metadatadate", False)
+        show_original_file_date = "originalfiledate" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "originalfiledate", False)
         show_file_created_date = "filecreateddate" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "filecreateddate", False)
         show_file_modified_date = "filemodifieddate" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "filemodifieddate", False)
         show_duration = "duration" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "duration", True)
@@ -10137,6 +10202,7 @@ class MainWindow(QMainWindow):
         self.meta_exif_date_taken_edit.setVisible(not is_bulk and show_exif_date_taken)
         self.lbl_metadata_date_cap.setVisible(not is_bulk and show_metadata_date)
         self.meta_metadata_date_edit.setVisible(not is_bulk and show_metadata_date)
+        self.meta_original_file_date_lbl.setVisible(not is_bulk and show_original_file_date)
         self.meta_file_created_date_lbl.setVisible(not is_bulk and show_file_created_date)
         self.meta_file_modified_date_lbl.setVisible(not is_bulk and show_file_modified_date)
         self.meta_duration_lbl.setVisible(not is_bulk and show_duration)
@@ -10207,7 +10273,8 @@ class MainWindow(QMainWindow):
         self.meta_size_lbl.setText("File Size: ")
         self.meta_exif_date_taken_edit.setText("")
         self.meta_metadata_date_edit.setText("")
-        self.meta_file_created_date_lbl.setText("Date Created: ")
+        self.meta_original_file_date_lbl.setText("Original File Date: ")
+        self.meta_file_created_date_lbl.setText("Windows ctime: ")
         self.meta_file_modified_date_lbl.setText("Date Modified: ")
         self.meta_duration_lbl.setText("Duration: ")
         self.meta_fps_lbl.setText("FPS: ")
@@ -10313,9 +10380,12 @@ class MainWindow(QMainWindow):
                 metadata_date = self._format_editable_datetime(data.get("metadata_date"))
                 if metadata_date:
                     self.meta_metadata_date_edit.setText(metadata_date)
+                original_file_date = self._format_sidebar_datetime(data.get("original_file_date"))
+                if original_file_date:
+                    self.meta_original_file_date_lbl.setText(f"Original File Date: {original_file_date}")
                 file_created_date = self._format_sidebar_datetime(data.get("file_created_time"))
                 if file_created_date:
-                    self.meta_file_created_date_lbl.setText(f"Date Created: {file_created_date}")
+                    self.meta_file_created_date_lbl.setText(f"Windows ctime: {file_created_date}")
                 file_modified_date = self._format_sidebar_datetime(data.get("modified_time"))
                 if file_modified_date:
                     self.meta_file_modified_date_lbl.setText(f"Date Modified: {file_modified_date}")
@@ -10351,7 +10421,8 @@ class MainWindow(QMainWindow):
                     stat = p.stat()
                     created_iso = datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc).replace(microsecond=0).isoformat()
                     modified_iso = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat()
-                    self.meta_file_created_date_lbl.setText(f"Date Created: {self._format_sidebar_datetime(created_iso)}")
+                    self.meta_original_file_date_lbl.setText(f"Original File Date: {self._format_sidebar_datetime(min(created_iso, modified_iso))}")
+                    self.meta_file_created_date_lbl.setText(f"Windows ctime: {self._format_sidebar_datetime(created_iso)}")
                     self.meta_file_modified_date_lbl.setText(f"Date Modified: {self._format_sidebar_datetime(modified_iso)}")
                 except Exception:
                     pass
@@ -10514,6 +10585,13 @@ class MainWindow(QMainWindow):
             self.bridge.settings.sync()
             val = self.bridge.settings.value(qkey)
             if val is None:
+                if key == "originalfiledate":
+                    fallback = self.bridge.settings.value("metadata/display/filecreateddate")
+                    if fallback is None:
+                        return default
+                    if isinstance(fallback, str):
+                        return fallback.lower() in ("true", "1")
+                    return bool(fallback)
                 return default
             # Handle PySide6/Qt behavior on different platforms
             if isinstance(val, str):
@@ -10533,7 +10611,7 @@ class MainWindow(QMainWindow):
         return "video"
 
     def _metadata_group_fields(self, kind: str) -> dict[str, list[str]]:
-        image_general = ["res", "size", "exifdatetaken", "metadatadate", "filecreateddate", "filemodifieddate", "description", "tags", "notes", "embeddedtags", "embeddedcomments"]
+        image_general = ["res", "size", "exifdatetaken", "metadatadate", "originalfiledate", "filecreateddate", "filemodifieddate", "description", "tags", "notes", "embeddedtags", "embeddedcomments"]
         image_camera = ["camera", "location", "iso", "shutter", "aperture", "software", "lens", "dpi"]
         image_ai = [
             "aistatus", "aisource", "aifamilies", "aidetectionreasons", "ailoras", "aimodel", "aicheckpoint",
@@ -10542,12 +10620,12 @@ class MainWindow(QMainWindow):
         ]
         if kind == "video":
             return {
-                "general": ["res", "size", "exifdatetaken", "metadatadate", "filecreateddate", "filemodifieddate", "duration", "fps", "codec", "audio", "description", "tags", "notes"],
+                "general": ["res", "size", "exifdatetaken", "metadatadate", "originalfiledate", "filecreateddate", "filemodifieddate", "duration", "fps", "codec", "audio", "description", "tags", "notes"],
                 "ai": image_ai,
             }
         if kind == "gif":
             return {
-                "general": ["res", "size", "exifdatetaken", "metadatadate", "filecreateddate", "filemodifieddate", "duration", "fps", "description", "tags", "notes", "embeddedtags", "embeddedcomments"],
+                "general": ["res", "size", "exifdatetaken", "metadatadate", "originalfiledate", "filecreateddate", "filemodifieddate", "duration", "fps", "description", "tags", "notes", "embeddedtags", "embeddedcomments"],
                 "ai": image_ai,
             }
         return {"general": image_general, "camera": image_camera, "ai": image_ai}
@@ -10602,6 +10680,13 @@ class MainWindow(QMainWindow):
             self.bridge.settings.sync()
             val = self.bridge.settings.value(qkey)
             if val is None:
+                if key == "originalfiledate":
+                    fallback = self.bridge.settings.value(f"metadata/display/{kind}/filecreateddate")
+                    if fallback is None:
+                        return self._is_metadata_enabled("filecreateddate", default)
+                    if isinstance(fallback, str):
+                        return fallback.lower() in ("true", "1")
+                    return bool(fallback)
                 return self._is_metadata_enabled(key, default)
             if isinstance(val, str):
                 return val.lower() in ("true", "1")
@@ -10786,6 +10871,7 @@ class MainWindow(QMainWindow):
             "size": [self.meta_size_lbl],
             "exifdatetaken": [self.lbl_exif_date_taken_cap, self.meta_exif_date_taken_edit],
             "metadatadate": [self.lbl_metadata_date_cap, self.meta_metadata_date_edit],
+            "originalfiledate": [self.meta_original_file_date_lbl],
             "filecreateddate": [self.meta_file_created_date_lbl],
             "filemodifieddate": [self.meta_file_modified_date_lbl],
             "duration": [self.meta_duration_lbl],
@@ -10873,7 +10959,8 @@ class MainWindow(QMainWindow):
         self.meta_res_lbl.setText("Resolution: ")
         self.meta_exif_date_taken_edit.setText("")
         self.meta_metadata_date_edit.setText("")
-        self.meta_file_created_date_lbl.setText("Date Created: ")
+        self.meta_original_file_date_lbl.setText("Original File Date: ")
+        self.meta_file_created_date_lbl.setText("Windows ctime: ")
         self.meta_file_modified_date_lbl.setText("Date Modified: ")
         self.meta_duration_lbl.setText("Duration: ")
         self.meta_fps_lbl.setText("FPS: ")
@@ -10897,6 +10984,7 @@ class MainWindow(QMainWindow):
         self.meta_exif_date_taken_edit.setVisible("exifdatetaken" in active_fields and self._is_metadata_enabled_for_kind(kind, "exifdatetaken", False))
         self.lbl_metadata_date_cap.setVisible("metadatadate" in active_fields and self._is_metadata_enabled_for_kind(kind, "metadatadate", False))
         self.meta_metadata_date_edit.setVisible("metadatadate" in active_fields and self._is_metadata_enabled_for_kind(kind, "metadatadate", False))
+        self.meta_original_file_date_lbl.setVisible("originalfiledate" in active_fields and self._is_metadata_enabled_for_kind(kind, "originalfiledate", False))
         self.meta_file_created_date_lbl.setVisible("filecreateddate" in active_fields and self._is_metadata_enabled_for_kind(kind, "filecreateddate", False))
         self.meta_file_modified_date_lbl.setVisible("filemodifieddate" in active_fields and self._is_metadata_enabled_for_kind(kind, "filemodifieddate", False))
         self.meta_duration_lbl.setVisible("duration" in active_fields and self._is_metadata_enabled_for_kind(kind, "duration", True))
