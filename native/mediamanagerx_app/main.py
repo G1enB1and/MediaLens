@@ -4743,7 +4743,7 @@ class Bridge(QObject):
                 try:
                     with open(setup_path, "wb") as f:
                         f.write(data)
-                    subprocess.Popen([setup_path, "/SILENT", "/SP-", "/NOICONS"])
+                    subprocess.Popen([setup_path, "/SILENT", "/SP-", "/NOICONS", "/RELAUNCH"])
                     QApplication.quit()
                 except Exception as e:
                     self.updateError.emit(f"Failed to save or launch installer: {e}")
