@@ -7021,38 +7021,6 @@ class MainWindow(QMainWindow):
         left_layout.setContentsMargins(10, 10, 10, 10)
         left_layout.setSpacing(0)
 
-        self.left_brand_row = QWidget(self.left_panel)
-        self.left_brand_row.setObjectName("leftBrandRow")
-        left_brand_layout = QHBoxLayout(self.left_brand_row)
-        left_brand_layout.setContentsMargins(0, 0, 0, 10)
-        left_brand_layout.setSpacing(10)
-
-        self.left_brand_logo = QLabel(self.left_brand_row)
-        self.left_brand_logo.setObjectName("leftBrandLogo")
-        self.left_brand_logo.setFixedSize(24, 24)
-        self.left_brand_logo.setScaledContents(True)
-        logo_path = Path(__file__).with_name("web") / "MediaLens-Logo-3-64.png"
-        if logo_path.exists():
-            logo_pixmap = QPixmap(str(logo_path))
-            if not logo_pixmap.isNull():
-                self.left_brand_logo.setPixmap(
-                    logo_pixmap.scaled(
-                        24,
-                        24,
-                        Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation,
-                    )
-                )
-        left_brand_layout.addWidget(self.left_brand_logo, 0, Qt.AlignmentFlag.AlignVCenter)
-
-        self.left_brand_label = QLabel("MediaLens", self.left_brand_row)
-        self.left_brand_label.setObjectName("leftBrandLabel")
-        left_brand_layout.addWidget(self.left_brand_label, 0, Qt.AlignmentFlag.AlignVCenter)
-        left_brand_layout.addStretch(1)
-        left_layout.addWidget(self.left_brand_row, 0)
-        self.left_brand_separator = self._add_sep("leftBrandSeparator")
-        left_layout.addWidget(self.left_brand_separator, 0)
-
         # Choose initial root based on settings.
         default_root = None
         if self.bridge._restore_last_enabled():
@@ -11836,16 +11804,6 @@ class MainWindow(QMainWindow):
             }}
             QLabel#pinnedFolderText[selected="true"] {{
                 font-weight: 700;
-            }}
-            QWidget#leftBrandRow, QLabel#leftBrandLogo, QLabel#leftBrandLabel {{
-                background: transparent;
-                border: none;
-            }}
-            QLabel#leftBrandLabel {{
-                color: {text};
-                font-size: 16px;
-                font-weight: 700;
-                padding-bottom: 1px;
             }}
             QPushButton#foldersMenuButton {{
                 background-color: {Theme.get_control_bg(accent)};
