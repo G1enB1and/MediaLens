@@ -200,6 +200,110 @@ if os.name == "nt":
         pass
 
 
+def _dpi_awareness_context_handle(value: int):
+    mask = (1 << (ctypes.sizeof(ctypes.c_void_p) * 8)) - 1
+    return ctypes.c_void_p(value & mask)
+
+
+def _describe_windows_dpi_awareness() -> str:
+    if os.name != "nt":
+        return "non-windows"
+
+    user32 = getattr(ctypes.windll, "user32", None)
+    if user32 is not None:
+        try:
+            get_thread_context = user32.GetThreadDpiAwarenessContext
+            get_thread_context.restype = wintypes.HANDLE
+            are_equal = user32.AreDpiAwarenessContextsEqual
+            are_equal.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+            are_equal.restype = wintypes.BOOL
+            current = get_thread_context()
+            known_contexts = (
+                ("unaware", -1),
+                ("system", -2),
+                ("permonitor", -3),
+                ("permonitorv2", -4),
+                ("unawaregdiscaled", -5),
+            )
+            for name, raw_value in known_contexts:
+                if are_equal(current, _dpi_awareness_context_handle(raw_value)):
+                    return name
+        except Exception:
+            pass
+
+    shcore = getattr(ctypes.windll, "shcore", None)
+    if shcore is not None:
+        try:
+            awareness = ctypes.c_int(-1)
+            get_process_awareness = shcore.GetProcessDpiAwareness
+            get_process_awareness.argtypes = [wintypes.HANDLE, ctypes.POINTER(ctypes.c_int)]
+            get_process_awareness.restype = ctypes.c_long
+            result = get_process_awareness(None, ctypes.byref(awareness))
+            if result == 0:
+                return {
+                    0: "unaware",
+                    1: "system",
+                    2: "permonitor",
+                }.get(int(awareness.value), f"unknown({awareness.value})")
+        except Exception:
+            pass
+
+    return "unknown"
+
+
+def _describe_qt_dpi_policy() -> str:
+    try:
+        policy = QApplication.highDpiScaleFactorRoundingPolicy()
+        names = {
+            Qt.HighDpiScaleFactorRoundingPolicy.Round: "Round",
+            Qt.HighDpiScaleFactorRoundingPolicy.Ceil: "Ceil",
+            Qt.HighDpiScaleFactorRoundingPolicy.Floor: "Floor",
+            Qt.HighDpiScaleFactorRoundingPolicy.RoundPreferFloor: "RoundPreferFloor",
+            Qt.HighDpiScaleFactorRoundingPolicy.PassThrough: "PassThrough",
+        }
+        return names.get(policy, str(policy))
+    except Exception:
+        return "unknown"
+
+
+def _format_dpi_state(app: QApplication | None = None) -> str:
+    if app is None:
+        try:
+            app = QApplication.instance()
+        except Exception:
+            app = None
+
+    awareness = _describe_windows_dpi_awareness()
+    qt_policy = _describe_qt_dpi_policy()
+    screen_parts: list[str] = []
+    if app is not None:
+        for screen in app.screens():
+            try:
+                geometry = screen.geometry()
+                screen_parts.append(
+                    f"{screen.name()}: dpr={screen.devicePixelRatio():.2f}, "
+                    f"logical={screen.logicalDotsPerInch():.2f}, "
+                    f"physical={screen.physicalDotsPerInch():.2f}, "
+                    f"geom={geometry.width()}x{geometry.height()}@{geometry.x()},{geometry.y()}"
+                )
+            except Exception:
+                continue
+    screens_text = "; ".join(screen_parts) if screen_parts else "none"
+    return (
+        "DPI: "
+        f"windows_awareness={awareness}, "
+        f"qt_rounding_policy={qt_policy}, "
+        f"screens=[{screens_text}]"
+    )
+
+
+def _log_dpi_state(app: QApplication, log) -> None:
+    try:
+        log(_format_dpi_state(app))
+    except Exception:
+        pass
+
+
 def _run_hidden_subprocess(cmd: list[str], **kwargs):
     if _WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS:
         kwargs = {**_WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS, **kwargs}
@@ -233,6 +337,7 @@ def _write_crash_report(kind: str, exc_type=None, exc_value=None, exc_tb=None) -
             f"Executable: {sys.executable}",
             f"Frozen: {bool(getattr(sys, 'frozen', False))}",
             f"CWD: {os.getcwd()}",
+            _format_dpi_state(),
         ]
         if exc_type is not None:
             lines.extend([
@@ -12674,6 +12779,10 @@ def main() -> None:
         app.processEvents()
 
     win = MainWindow()
+    try:
+        _log_dpi_state(app, win.bridge._log)
+    except Exception:
+        pass
 
     splash_closed = False
 

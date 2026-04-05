@@ -33,6 +33,11 @@ if (-not (Test-Path $distDir)) {
     throw "Expected application bundle at '$distDir' was not created."
 }
 
+$qtConfSource = Join-Path $repoRoot "qt.conf"
+if (Test-Path $qtConfSource) {
+    Copy-Item -LiteralPath $qtConfSource -Destination (Join-Path $distDir "qt.conf") -Force
+}
+
 Write-Host "Compiling MediaLens installer with Inno Setup..."
 Push-Location $repoRoot
 try {
