@@ -3429,7 +3429,7 @@ function createStructuredCard(item, idx) {
 
   const thumbWrap = document.createElement('div');
   thumbWrap.className = 'structured-thumb';
-  if (item.svg_bg_hint) thumbWrap.setAttribute('data-svg-bg-hint', item.svg_bg_hint);
+  if (item.thumb_bg_hint) thumbWrap.setAttribute('data-thumb-bg-hint', item.thumb_bg_hint);
   card.appendChild(thumbWrap);
 
   if (isFolder) {
@@ -3756,7 +3756,7 @@ function createMasonryCard(item, idx) {
   const card = document.createElement('div');
   card.className = 'card loading';
   card.tabIndex = 0;
-  if (item.svg_bg_hint) card.setAttribute('data-svg-bg-hint', item.svg_bg_hint);
+  if (item.thumb_bg_hint) card.setAttribute('data-thumb-bg-hint', item.thumb_bg_hint);
   if (item.width && item.height) {
     card.style.aspectRatio = `${item.width} / ${item.height}`;
   }

@@ -1792,23 +1792,23 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   height: 72px;
 }
 
-.gallery-grid .structured-thumb[data-svg-bg-hint="light"],
-.gallery-content .structured-thumb[data-svg-bg-hint="light"],
-.gallery-details .structured-thumb[data-svg-bg-hint="light"] {
+.gallery-grid .structured-thumb[data-thumb-bg-hint="light"],
+.gallery-content .structured-thumb[data-thumb-bg-hint="light"],
+.gallery-details .structured-thumb[data-thumb-bg-hint="light"] {
   background: var(--svg-bg-for-dark-art);
 }
 
-.gallery-grid .structured-thumb[data-svg-bg-hint="dark"],
-.gallery-content .structured-thumb[data-svg-bg-hint="dark"],
-.gallery-details .structured-thumb[data-svg-bg-hint="dark"] {
+.gallery-grid .structured-thumb[data-thumb-bg-hint="dark"],
+.gallery-content .structured-thumb[data-thumb-bg-hint="dark"],
+.gallery-details .structured-thumb[data-thumb-bg-hint="dark"] {
   background: var(--svg-bg-for-light-art);
 }
 
-.card[data-svg-bg-hint="light"] {
+.card[data-thumb-bg-hint="light"] {
   background: var(--svg-bg-for-dark-art);
 }
 
-.card[data-svg-bg-hint="dark"] {
+.card[data-thumb-bg-hint="dark"] {
   background: var(--svg-bg-for-light-art);
 }
 
@@ -2133,11 +2133,11 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   transition: opacity 0.25s ease;
 }
 
-.structured-thumb[data-svg-bg-hint] .thumb {
+.structured-thumb[data-thumb-bg-hint] .thumb {
   background: transparent;
 }
 
-.card[data-svg-bg-hint] > .thumb {
+.card[data-thumb-bg-hint] > .thumb {
   background: transparent;
 }
 

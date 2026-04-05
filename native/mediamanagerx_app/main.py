@@ -197,7 +197,7 @@ if os.name == "nt":
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif", ".svg"}
 RASTER_IMAGE_EXTS = IMAGE_EXTS - {".svg"}
 VIDEO_EXTS = {".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"}
-_SVG_THUMBNAIL_BG_HINT_CACHE: dict[tuple[str, int, int], str] = {}
+_THUMBNAIL_BG_HINT_CACHE: dict[tuple[str, int, int], str] = {}
 
 
 def _render_svg_image(path: str | Path) -> QImage | None:
@@ -291,31 +291,68 @@ def _image_visible_luminance(image: QImage | None) -> float | None:
     return weighted_luminance / total_alpha
 
 
-def _svg_thumbnail_bg_hint(path: str | Path) -> str:
+def _image_has_meaningful_transparency(image: QImage | None) -> bool:
+    if image is None or image.isNull():
+        return False
+    sample = image
+    if sample.width() > 96 or sample.height() > 96:
+        sample = sample.scaled(
+            96,
+            96,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+    if sample.isNull():
+        return False
+    total_pixels = max(1, sample.width() * sample.height())
+    transparent_pixels = 0
+    partial_alpha_pixels = 0
+    opaque_visible_pixels = 0
+    for y in range(sample.height()):
+        for x in range(sample.width()):
+            alpha = sample.pixelColor(x, y).alphaF()
+            if alpha <= 0.01:
+                transparent_pixels += 1
+            elif alpha < 0.98:
+                partial_alpha_pixels += 1
+            else:
+                opaque_visible_pixels += 1
+    transparency_ratio = (transparent_pixels + partial_alpha_pixels) / total_pixels
+    return transparency_ratio >= 0.05 and (transparent_pixels + partial_alpha_pixels) > 0 and opaque_visible_pixels > 0
+
+
+def _thumbnail_bg_hint(path: str | Path) -> str:
     clean = str(path or "").strip()
-    if not clean or Path(clean).suffix.lower() != ".svg":
+    if not clean:
+        return ""
+    suffix = Path(clean).suffix.lower()
+    if suffix not in {".svg", ".png"}:
         return ""
     try:
         stat = Path(clean).stat()
         cache_key = (clean, int(stat.st_mtime_ns), int(stat.st_size))
     except Exception:
         cache_key = (clean, 0, 0)
-    cached = _SVG_THUMBNAIL_BG_HINT_CACHE.get(cache_key)
+    cached = _THUMBNAIL_BG_HINT_CACHE.get(cache_key)
     if cached is not None:
         return cached
-    luminance = _image_visible_luminance(_render_svg_image(clean))
-    # Only force contrast backgrounds for mostly dark or mostly light SVG art.
-    if luminance is None:
+    image = _render_svg_image(clean) if suffix == ".svg" else _read_image_with_svg_support(clean)
+    if suffix == ".png" and not _image_has_meaningful_transparency(image):
         hint = ""
-    elif luminance <= 0.35:
-        hint = "light"
-    elif luminance >= 0.75:
-        hint = "dark"
     else:
-        hint = ""
-    if len(_SVG_THUMBNAIL_BG_HINT_CACHE) > 512:
-        _SVG_THUMBNAIL_BG_HINT_CACHE.clear()
-    _SVG_THUMBNAIL_BG_HINT_CACHE[cache_key] = hint
+        luminance = _image_visible_luminance(image)
+        # Only force contrast backgrounds for mostly dark or mostly light artwork.
+        if luminance is None:
+            hint = ""
+        elif luminance <= 0.35:
+            hint = "light"
+        elif luminance >= 0.75:
+            hint = "dark"
+        else:
+            hint = ""
+    if len(_THUMBNAIL_BG_HINT_CACHE) > 512:
+        _THUMBNAIL_BG_HINT_CACHE.clear()
+    _THUMBNAIL_BG_HINT_CACHE[cache_key] = hint
     return hint
     try:
         startupinfo = subprocess.STARTUPINFO()
@@ -5862,7 +5899,7 @@ class Bridge(QObject):
                             "url": "",
                             "media_type": "folder",
                             "is_folder": True,
-                            "svg_bg_hint": "",
+                            "thumb_bg_hint": "",
                             "is_hidden": bool(r.get("is_hidden")),
                             "is_animated": False,
                             "width": None,
@@ -5918,7 +5955,7 @@ class Bridge(QObject):
                     "url": f"{QUrl.fromLocalFile(str(p)).toString()}?t={mtime}", 
                     "media_type": r["media_type"], 
                     "is_folder": False,
-                    "svg_bg_hint": _svg_thumbnail_bg_hint(p),
+                    "thumb_bg_hint": _thumbnail_bg_hint(p),
                     "is_hidden": bool(r.get("is_hidden")),
                     "is_animated": self._is_animated(p),
                     "width": r.get("width"),
@@ -9406,7 +9443,7 @@ class MainWindow(QMainWindow):
         if img is None or img.isNull():
             self._set_preview_pixmap(None)
             return
-        self._set_preview_pixmap(QPixmap.fromImage(img), bg_hint=_svg_thumbnail_bg_hint(preview_path))
+        self._set_preview_pixmap(QPixmap.fromImage(img), bg_hint=_thumbnail_bg_hint(preview_path))
         if suffix in VIDEO_EXTS:
             overlay = getattr(self, "sidebar_video_overlay", None)
             if overlay is not None:
