@@ -47,6 +47,14 @@ Supported text fields:
 - `type`
 - `ext`
 
+Supported date fields:
+
+- `datetaken` or `exifdatetaken`
+- `dateacquired` or `metadatadate`
+- `originalfiledate`
+- `datecreated` or `filecreateddate`
+- `datemodified` or `filemodifieddate`
+
 Examples:
 
 - `collection:vacation`
@@ -54,6 +62,8 @@ Examples:
 - `model:flux`
 - `prompt:"red dress"`
 - `ext:png`
+- `datemodified:>=2026-05-20`
+- `datetaken:=2026-05-20`
 
 ## Numeric Search
 

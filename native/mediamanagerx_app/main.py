@@ -4348,6 +4348,15 @@ class Bridge(QObject):
                 "ui.show_bottom_panel": bool(self.settings.value("ui/show_bottom_panel", True, type=bool)),
                 "ui.show_dismissed_progress_toasts": bool(self.settings.value("ui/show_dismissed_progress_toasts", False, type=bool)),
                 "ui.show_splash_screen": bool(self.settings.value("ui/show_splash_screen", True, type=bool)),
+                "ui.advanced_search_expanded": bool(self.settings.value("ui/advanced_search_expanded", False, type=bool)),
+                "ui.advanced_search_saved_queries": str(self.settings.value(
+                    "ui/advanced_search_saved_queries",
+                    json.dumps([
+                        {"name": "Date Range and Search Term", "query": "originalfiledate:>=2024-01-06 AND originalfiledate:<=2026-04-01 AND"},
+                        {"name": "File Size Range and Search Term", "query": "size:>=1kb AND size:<=100kb AND"},
+                    ]),
+                    type=str,
+                ) or "[]"),
                 "ui.preview_above_details": self._preview_above_details_enabled(),
                 "ui.theme_mode": str(self.settings.value("ui/theme_mode", "dark", type=str) or "dark"),
                 "metadata.display.res": bool(self.settings.value("metadata/display/res", True, type=bool)),
@@ -4423,6 +4432,11 @@ class Bridge(QObject):
                 "ui.show_bottom_panel": True,
                 "ui.show_dismissed_progress_toasts": False,
                 "ui.show_splash_screen": True,
+                "ui.advanced_search_expanded": False,
+                "ui.advanced_search_saved_queries": json.dumps([
+                    {"name": "Date Range and Search Term", "query": "originalfiledate:>=2024-01-06 AND originalfiledate:<=2026-04-01 AND"},
+                    {"name": "File Size Range and Search Term", "query": "size:>=1kb AND size:<=100kb AND"},
+                ]),
                 "ui.preview_above_details": True,
                 "ui.theme_mode": "dark",
             }
@@ -4784,6 +4798,7 @@ class Bridge(QObject):
                 "ui.show_bottom_panel",
                 "ui.show_dismissed_progress_toasts",
                 "ui.show_splash_screen",
+                "ui.advanced_search_expanded",
                 "ui.preview_above_details",
                 "updates.check_on_launch"
             )
@@ -4803,7 +4818,7 @@ class Bridge(QObject):
     @Slot(str, str, result=bool)
     def set_setting_str(self, key: str, value: str) -> bool:
         try:
-            if key not in ("gallery.start_folder", "gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "gallery.similarity_threshold", "ui.accent_color", "ui.theme_mode", "metadata.display.order", "duplicate.settings.active_tab", "player.video_loop_mode", "player.video_loop_cutoff_seconds") and not key.startswith("metadata.layout.") and not key.startswith("duplicate.rules.") and key != "duplicate.priorities.order":
+            if key not in ("gallery.start_folder", "gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "gallery.similarity_threshold", "ui.accent_color", "ui.theme_mode", "ui.advanced_search_saved_queries", "metadata.display.order", "duplicate.settings.active_tab", "player.video_loop_mode", "player.video_loop_cutoff_seconds") and not key.startswith("metadata.layout.") and not key.startswith("duplicate.rules.") and key != "duplicate.priorities.order":
                 return False
             if key == "gallery.view_mode":
                 allowed = {"masonry", "grid_small", "grid_medium", "grid_large", "grid_xlarge", "list", "content", "details", "duplicates", "similar", "similar_only"}
@@ -4843,6 +4858,8 @@ class Bridge(QObject):
             elif key in ("gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "gallery.similarity_threshold"):
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, True)
+            elif key == "ui.advanced_search_saved_queries":
+                self.settings.sync()
             elif key == "metadata.display.order" or key.startswith("metadata.layout."):
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, True)

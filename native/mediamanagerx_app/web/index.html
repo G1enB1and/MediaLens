@@ -95,7 +95,12 @@
 
       <div class="toolbar" data-pager>
         <div class="search">
-          <input id="searchInput" class="search-input" placeholder="Search…" />
+          <div class="search-input-row">
+            <input id="searchInput" class="search-input" placeholder="Search…" />
+            <button class="icon-btn advanced-search-toggle" id="toggleAdvancedSearch" title="Expand Advanced Search" aria-label="Toggle Advanced Search" aria-expanded="false">
+              <img src="icons/search-expand-white.png" alt="" id="iconAdvancedSearch" />
+            </button>
+          </div>
         </div>
         <div class="files-count-chip" id="galleryCountChip">0 Files</div>
         <div class="pager">
@@ -108,6 +113,29 @@
           <button class="tb-btn tb-icon-btn" id="scrollTop" title="Scroll to top" aria-label="Scroll to top">
             <img src="icons/to_top.svg" alt="" />
           </button>
+        </div>
+      </div>
+      <div class="advanced-search-panel" id="advancedSearchPanel" hidden>
+        <div class="advanced-search-shell">
+          <div class="advanced-search-head">
+            <div class="advanced-search-head-row">
+              <div class="advanced-search-section-title">Guided Search Builder</div>
+              <button class="tb-btn" id="advClearSearch" type="button">Clear Search</button>
+            </div>
+            <div class="advanced-search-section-copy">Build one search clause at a time. Choose AND or OR at the end of a clause to reveal the next one. `*` works as a wildcard.</div>
+          </div>
+          <div class="advanced-search-rules" id="advancedSearchRules"></div>
+          <div class="advanced-search-saved">
+            <div class="advanced-search-save-load-row">
+              <input class="advanced-search-input" id="advSavedSearchName" type="text" placeholder="Name this search" />
+              <button class="tb-btn" id="advSaveCurrentSearch" type="button">Save Current Search</button>
+              <div class="custom-select advanced-search-custom-select" id="advSavedSearchSelect" tabindex="0">
+                <div class="select-trigger">Load a saved search</div>
+                <div class="select-options"></div>
+              </div>
+              <button class="tb-btn tb-icon-btn advanced-search-delete-btn" id="advDeleteSavedSearch" type="button" aria-label="Delete saved search" title="Delete selected saved search"></button>
+            </div>
+          </div>
         </div>
       </div>
     </header>

@@ -4,6 +4,7 @@ import fnmatch
 import re
 import shlex
 from pathlib import Path
+from datetime import datetime, timezone
 
 
 STRING_FIELD_ALIASES = {
@@ -48,7 +49,21 @@ NUMERIC_FIELD_ALIASES = {
     "size": "file_size",
 }
 
-FIELD_ALIASES = {**STRING_FIELD_ALIASES, **NUMERIC_FIELD_ALIASES}
+DATE_FIELD_ALIASES = {
+    "datetaken": "exif_date_taken",
+    "exifdatetaken": "exif_date_taken",
+    "dateacquired": "metadata_date",
+    "metadatadate": "metadata_date",
+    "originalfiledate": "original_file_date",
+    "datecreated": "file_created_time",
+    "filecreateddate": "file_created_time",
+    "created": "file_created_time",
+    "datemodified": "modified_time",
+    "filemodifieddate": "modified_time",
+    "modified": "modified_time",
+}
+
+FIELD_ALIASES = {**STRING_FIELD_ALIASES, **NUMERIC_FIELD_ALIASES, **DATE_FIELD_ALIASES}
 OPERATORS = (">=", "<=", ">", "<", "=")
 
 
@@ -140,6 +155,8 @@ def _parse_field_term(term: str) -> tuple[str | None, str | None, str]:
 def _match_field(row: dict, field: str, operator: str | None, value: str) -> bool:
     if field in NUMERIC_FIELD_ALIASES.values():
         return _match_numeric_field(row, field, operator or "=", value)
+    if field in DATE_FIELD_ALIASES.values():
+        return _match_date_field(row, field, operator or "=", value)
 
     values = _field_values(row, field)
     if not values:
@@ -195,6 +212,35 @@ def _match_generic(row: dict, term: str) -> bool:
         if needle in candidate_text:
             return True
     return False
+
+
+def _match_date_field(row: dict, field: str, operator: str, value: str) -> bool:
+    candidate = _date_value_for_field(row, field)
+    expected, date_only = _parse_date_query_value(value)
+    if candidate is None or expected is None:
+        return False
+
+    if date_only:
+        day_end = expected + 86400
+        if operator == ">":
+            return candidate >= day_end
+        if operator == ">=":
+            return candidate >= expected
+        if operator == "<":
+            return candidate < expected
+        if operator == "<=":
+            return candidate < day_end
+        return expected <= candidate < day_end
+
+    if operator == ">":
+        return candidate > expected
+    if operator == ">=":
+        return candidate >= expected
+    if operator == "<":
+        return candidate < expected
+    if operator == "<=":
+        return candidate <= expected
+    return candidate == expected
 
 
 def _wildcard_matches(candidate_text: str, pattern: str) -> bool:
@@ -280,6 +326,10 @@ def _numeric_value_for_field(row: dict, field: str) -> float | None:
         return None
 
 
+def _date_value_for_field(row: dict, field: str) -> float | None:
+    return _parse_date_value(row.get(field))
+
+
 def _parse_numeric_value(field: str, raw: str) -> float | None:
     text = str(raw or "").strip().lower()
     if not text:
@@ -292,6 +342,65 @@ def _parse_numeric_value(field: str, raw: str) -> float | None:
         return float(text)
     except Exception:
         return None
+
+
+def _parse_date_value(raw: str | None) -> float | None:
+    parsed, _ = _parse_date_query_value(raw)
+    return parsed
+
+
+def _parse_date_query_value(raw: str | None) -> tuple[float | None, bool]:
+    text = str(raw or "").strip()
+    if not text:
+        return None, False
+    normalized = text.replace("Z", "+00:00")
+    for parser in (
+        _parse_iso_datetime,
+        _parse_slash_datetime,
+        _parse_dash_datetime,
+    ):
+        parsed = parser(normalized)
+        if parsed is not None:
+            return parsed, _is_date_only_value(text)
+    return None, False
+
+
+def _parse_iso_datetime(text: str) -> float | None:
+    try:
+        dt = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
+
+def _parse_slash_datetime(text: str) -> float | None:
+    for fmt in ("%m/%d/%Y", "%m/%d/%Y %H:%M", "%m/%d/%Y %H:%M:%S"):
+        try:
+            dt = datetime.strptime(text, fmt).replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except Exception:
+            continue
+    return None
+
+
+def _parse_dash_datetime(text: str) -> float | None:
+    for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"):
+        try:
+            dt = datetime.strptime(text, fmt).replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except Exception:
+            continue
+    return None
+
+
+def _is_date_only_value(text: str) -> bool:
+    value = str(text or "").strip()
+    return bool(
+        re.match(r"^\d{4}-\d{2}-\d{2}$", value)
+        or re.match(r"^\d{1,2}/\d{1,2}/\d{4}$", value)
+    )
 
 
 def _parse_size_bytes(text: str) -> float:
