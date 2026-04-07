@@ -1,6 +1,37 @@
 # Change Log
 
-## v1.1.10 (Current)
+## v1.1.11 (Current)
+
+### Summary
+
+This release brings a major search upgrade to MediaLens while also expanding file support and polishing everyday browsing. It makes powerful search easier to use, adds first-class SVG support, and improves several core gallery workflows.
+
+### Highlights
+
+- Advanced Search now includes a guided builder that helps users create powerful searches without memorizing syntax.
+- SVG files now have first-class support with filtering, metadata handling, and better visibility for transparent artwork.
+- File browsing is more polished with Sort by File Type and clearer high-contrast backgrounds for transparent PNG files.
+
+### Added
+
+- Added a new Advanced Search guided query builder with a header toggle, visual query controls, saved searches, field-based search options, and synchronization with the existing search syntax.
+- Added full SVG media support with dedicated filtering, metadata handling, and transparent-background visibility improvements.
+- Added Sort by File Type to the gallery sort options.
+
+### Changed
+
+- Updated advanced search to behave like a compact inline builder instead of a large full-screen panel, with responsive single-line controls, clearer labels, and theme-aware custom dropdown styling.
+- Improved transparent PNG visibility by using the same high-contrast background logic already used for SVG files.
+- Refined startup and update flow so the auto-updater relaunches more reliably after install.
+- Suppressed harmless DirectWrite legacy font fallback warnings in the console so real runtime issues are easier to spot.
+
+### Removed
+
+- Removed the older splash branding above pinned folders in favor of a cleaner left-panel presentation.
+
+---
+
+## v1.1.10
 
 ### Summary
 

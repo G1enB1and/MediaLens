@@ -1,18 +1,18 @@
-## MediaLens v1.1.10
+## MediaLens v1.1.11
 
 ### Summary
 
-This release makes MediaLens feel steadier and more polished during everyday browsing. It reduces screen flicker for many Windows setups, replaces the old settings overlay with a cleaner native settings window, and gives you more control over header space when you want a roomier gallery view.
+This release brings a major search upgrade to MediaLens while also expanding file support and polishing everyday browsing. It makes powerful search easier to use, adds first-class SVG support, and improves several core gallery workflows.
 
 ### Highlights
 
-- Settings now open in a native Qt window with a standard title bar, better layout, and more consistent controls.
-- Panel toggles have moved into the File menu, and a new header toggle lets you hide the top header to free up screen space when needed.
-- Accent color contrast has been improved in settings and the header address bar so highlighted text and toggles stay easier to read.
+- Advanced Search is now available as a guided builder, so users can create powerful searches without memorizing syntax.
+- SVG files now feel like first-class citizens with filtering, metadata support, and better visibility for transparent artwork.
+- File browsing is more polished with Sort by File Type, clearer transparent PNG backgrounds, and a more reliable updater relaunch flow.
 
 ### Notes
 
-- Windows installer builds now use a more stable DPI awareness mode to help reduce flicker on some displays.
+- Console noise was reduced by suppressing harmless DirectWrite legacy font fallback warnings, making real issues easier to spot.
 
 ---
 
