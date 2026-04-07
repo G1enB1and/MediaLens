@@ -50,11 +50,21 @@ def _install_stderr_filter() -> None:
       Fired once per swscale context when a video uses the legacy `yuvj420p`
       full-range pixel format (common in MJPEG and some H.264 files). It is
       informational only \u2014 playback is unaffected.
+    - DirectWrite legacy bitmap font probe failures for old Windows font
+      aliases such as 8514oem / Fixedsys / Modern / MS Sans Serif / MS Serif.
+      These are emitted during Qt font fallback probing and are harmless when
+      text rendering in the UI otherwise looks normal.
     """
     _SUPPRESS = (
         b"deprecated pixel format used",
         b"Could not parse stylesheet of object QProgressBar",
         b"Could not update timestamps for skipped samples.",
+        b"qt.qpa.fonts: DirectWrite: CreateFontFaceFromHDC() failed",
+        b'QFontDef(Family="8514oem"',
+        b'QFontDef(Family="Fixedsys"',
+        b'QFontDef(Family="Modern"',
+        b'QFontDef(Family="MS Sans Serif"',
+        b'QFontDef(Family="MS Serif"',
     )
 
     try:
