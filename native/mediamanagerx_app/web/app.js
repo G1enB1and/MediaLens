@@ -110,11 +110,11 @@ const ADVANCED_SEARCH_FIELD_DEFS = [
   { key: 'title', label: 'Title', kind: 'text' },
   { key: 'type', label: 'Media Type', kind: 'text' },
   { key: 'ext', label: 'Extension', kind: 'text' },
-  { key: 'datemodified', label: 'Date Modified', kind: 'date' },
-  { key: 'originalfiledate', label: 'Original File Date', kind: 'date' },
-  { key: 'datetaken', label: 'Date Taken', kind: 'date' },
-  { key: 'dateacquired', label: 'Date Acquired', kind: 'date' },
-  { key: 'datecreated', label: 'Date Created', kind: 'date' },
+  { key: 'date-modified', label: 'Date Modified', kind: 'date' },
+  { key: 'original-file-date', label: 'Original File Date', kind: 'date' },
+  { key: 'date-taken', label: 'Date Taken', kind: 'date' },
+  { key: 'date-acquired', label: 'Date Acquired', kind: 'date' },
+  { key: 'date-created', label: 'Date Created', kind: 'date' },
   { key: 'size', label: 'File Size', kind: 'detail' },
   { key: 'duration', label: 'Duration', kind: 'detail' },
   { key: 'width', label: 'Width', kind: 'detail' },
@@ -182,15 +182,24 @@ const ADVANCED_SEARCH_FIELD_ALIASES = {
   height: 'height',
   duration: 'duration',
   size: 'file_size',
+  'date-taken': 'exif_date_taken',
   datetaken: 'exif_date_taken',
+  'exif-date-taken': 'exif_date_taken',
   exifdatetaken: 'exif_date_taken',
+  'date-acquired': 'metadata_date',
   dateacquired: 'metadata_date',
+  'metadata-date': 'metadata_date',
   metadatadate: 'metadata_date',
+  'original-file-date': 'original_file_date',
   originalfiledate: 'original_file_date',
+  'date-created': 'file_created_time',
   datecreated: 'file_created_time',
+  'file-created-date': 'file_created_time',
   filecreateddate: 'file_created_time',
   created: 'file_created_time',
+  'date-modified': 'modified_time',
   datemodified: 'modified_time',
+  'file-modified-date': 'modified_time',
   filemodifieddate: 'modified_time',
   modified: 'modified_time',
 };
@@ -233,17 +242,17 @@ const ADVANCED_SEARCH_PREFERRED_ALIASES = {
   height: 'height',
   duration: 'duration',
   file_size: 'size',
-  exif_date_taken: 'datetaken',
-  metadata_date: 'dateacquired',
-  original_file_date: 'originalfiledate',
-  file_created_time: 'datecreated',
-  modified_time: 'datemodified',
+  exif_date_taken: 'date-taken',
+  metadata_date: 'date-acquired',
+  original_file_date: 'original-file-date',
+  file_created_time: 'date-created',
+  modified_time: 'date-modified',
 };
 const SEARCH_OPERATORS = ['>=', '<=', '>', '<', '='];
 const ADVANCED_SEARCH_DEFAULT_SAVED_QUERIES = [
   {
     name: 'Date Range and Search Term',
-    query: 'originalfiledate:>=2024-01-06 AND originalfiledate:<=2026-04-01 AND',
+    query: 'original-file-date:>=2024-01-06 AND original-file-date:<=2026-04-01 AND',
   },
   {
     name: 'File Size Range and Search Term',
@@ -1959,6 +1968,13 @@ function getDefaultDuplicateKeepPaths(groupKey) {
   return keepItem && keepItem.path ? [keepItem.path] : [];
 }
 
+function getDefaultDuplicateBestPath(groupKey) {
+  const keepItem = gMedia.find(item => String(item.duplicate_group_key || '') === String(groupKey || '') && item.duplicate_is_overall_best);
+  if (keepItem && keepItem.path) return keepItem.path;
+  const defaultKeepPaths = getDefaultDuplicateKeepPaths(groupKey);
+  return defaultKeepPaths[0] || '';
+}
+
 function getDuplicateDeletePaths(groupKey) {
   const override = gDuplicateDeleteOverrides.get(String(groupKey || ''));
   if (override instanceof Set) return Array.from(override);
@@ -2034,6 +2050,32 @@ function setDuplicateBestPath(groupKey, path) {
     if (overall) overall.hidden = !checked;
   });
   syncCompareStateFromReviewGroup(key, getDuplicateKeepPaths(key), getDuplicateDeletePaths(key), nextPath);
+}
+
+function resetDuplicateGroupCheckboxesToRules(groupKey) {
+  const key = String(groupKey || '');
+  if (!key) return;
+  const groupItems = getDuplicateGroupItems(key);
+  if (!groupItems.length) return;
+  const groupPaths = new Set(groupItems.map(item => String(item.path || '')).filter(Boolean));
+  const defaultKeepPaths = getDefaultDuplicateKeepPaths(key).filter(path => groupPaths.has(path));
+  const normalizedKeepPaths = new Set(defaultKeepPaths.map(normalizeMediaPath).filter(Boolean));
+  const defaultDeletePaths = groupItems
+    .map(item => String(item.path || ''))
+    .filter(path => path && !normalizedKeepPaths.has(normalizeMediaPath(path)));
+  const defaultBestPath = getDefaultDuplicateBestPath(key);
+  gDuplicateKeepOverrides.delete(key);
+  gDuplicateDeleteOverrides.delete(key);
+  gDuplicateBestOverrides.delete(key);
+  setDuplicateKeepPaths(key, defaultKeepPaths);
+  setDuplicateDeletePaths(key, defaultDeletePaths);
+  setDuplicateBestPath(key, defaultBestPath);
+}
+
+function resetAllSimilarGroupCheckboxesToRules() {
+  buildDuplicateGroups(gMedia).forEach((group) => {
+    resetDuplicateGroupCheckboxesToRules(group.key);
+  });
 }
 
 function toggleDuplicateKeepPath(groupKey, path, checked) {
@@ -2232,11 +2274,11 @@ function keepBestInDuplicateGroup(groupKey) {
   setGlobalLoading(true, 'Deleting duplicate files...', 25);
   gBridge.get_settings((settings) => {
     const nextSettings = settings || {};
-    const keepPath = getDuplicateBestPath(groupKey);
     const items = getDuplicateGroupItems(groupKey);
     const paths = items.map(item => item.path).filter(Boolean);
-    const deletePaths = paths.filter(path => path !== keepPath);
-    if (!keepPath || !deletePaths.length) {
+    const keepPaths = new Set(getDuplicateKeepPaths(groupKey).filter(path => paths.includes(path)));
+    const deletePaths = paths.filter(path => !keepPaths.has(path));
+    if (!keepPaths.size || !deletePaths.length) {
       setGlobalLoading(false);
       return;
     }
@@ -4478,6 +4520,14 @@ function renderDuplicateMediaList(el, items) {
   `;
   const summaryActions = document.createElement('div');
   summaryActions.className = 'duplicate-summary-actions';
+  if (reviewMode === 'similar' || reviewMode === 'similar_only') {
+    const resetAllBtn = document.createElement('button');
+    resetAllBtn.type = 'button';
+    resetAllBtn.className = 'tb-btn highlight';
+    resetAllBtn.textContent = 'Reset Checkboxes to Rules';
+    resetAllBtn.addEventListener('click', resetAllSimilarGroupCheckboxesToRules);
+    summaryActions.appendChild(resetAllBtn);
+  }
   const autoResolveBtn = document.createElement('button');
   autoResolveBtn.type = 'button';
   autoResolveBtn.className = 'tb-btn highlight';
@@ -4541,12 +4591,12 @@ function renderDuplicateMediaList(el, items) {
     const actions = document.createElement('div');
     actions.className = 'duplicate-group-actions';
 
-    const keepBtn = document.createElement('button');
-    keepBtn.type = 'button';
-    keepBtn.className = 'tb-btn';
-    keepBtn.textContent = 'Keep Best';
-    keepBtn.addEventListener('click', () => keepBestInDuplicateGroup(group.key));
-    actions.appendChild(keepBtn);
+    const mergeBtn = document.createElement('button');
+    mergeBtn.type = 'button';
+    mergeBtn.className = 'tb-btn';
+    mergeBtn.textContent = 'Merge Metadata';
+    mergeBtn.addEventListener('click', () => mergeDuplicateGroupMetadata(group.key));
+    actions.appendChild(mergeBtn);
 
     const deleteUncheckedBtn = document.createElement('button');
     deleteUncheckedBtn.type = 'button';
@@ -4555,12 +4605,21 @@ function renderDuplicateMediaList(el, items) {
     deleteUncheckedBtn.addEventListener('click', () => deleteSelectedInDuplicateGroup(group.key));
     actions.appendChild(deleteUncheckedBtn);
 
-    const mergeBtn = document.createElement('button');
-    mergeBtn.type = 'button';
-    mergeBtn.className = 'tb-btn';
-    mergeBtn.textContent = 'Merge Metadata';
-    mergeBtn.addEventListener('click', () => mergeDuplicateGroupMetadata(group.key));
-    actions.appendChild(mergeBtn);
+    const keepBtn = document.createElement('button');
+    keepBtn.type = 'button';
+    keepBtn.className = 'tb-btn';
+    keepBtn.textContent = 'Keep Only Selected Files';
+    keepBtn.addEventListener('click', () => keepBestInDuplicateGroup(group.key));
+    actions.appendChild(keepBtn);
+
+    if (reviewMode === 'similar' || reviewMode === 'similar_only') {
+      const resetGroupBtn = document.createElement('button');
+      resetGroupBtn.type = 'button';
+      resetGroupBtn.className = 'tb-btn';
+      resetGroupBtn.textContent = 'Reset Checkboxes to Rules';
+      resetGroupBtn.addEventListener('click', () => resetDuplicateGroupCheckboxesToRules(group.key));
+      actions.appendChild(resetGroupBtn);
+    }
 
     section.appendChild(header);
     section.appendChild(body);

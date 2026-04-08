@@ -49,11 +49,11 @@ Supported text fields:
 
 Supported date fields:
 
-- `datetaken` or `exifdatetaken`
-- `dateacquired` or `metadatadate`
-- `originalfiledate`
-- `datecreated` or `filecreateddate`
-- `datemodified` or `filemodifieddate`
+- `date-taken` or `exif-date-taken`
+- `date-acquired` or `metadata-date`
+- `original-file-date`
+- `date-created` or `file-created-date`
+- `date-modified` or `file-modified-date`
 
 Examples:
 
@@ -62,8 +62,8 @@ Examples:
 - `model:flux`
 - `prompt:"red dress"`
 - `ext:png`
-- `datemodified:>=2026-05-20`
-- `datetaken:=2026-05-20`
+- `date-modified:>=2026-05-20`
+- `date-taken:=2026-05-20`
 
 ## Numeric Search
 

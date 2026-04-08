@@ -1485,6 +1485,7 @@ body:not(.gallery-scroll-top) .duplicate-review-note {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  gap: 10px;
   margin-left: auto;
   flex: 0 0 auto;
 }

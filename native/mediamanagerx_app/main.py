@@ -4448,7 +4448,7 @@ class Bridge(QObject):
                 "ui.advanced_search_saved_queries": str(self.settings.value(
                     "ui/advanced_search_saved_queries",
                     json.dumps([
-                        {"name": "Date Range and Search Term", "query": "originalfiledate:>=2024-01-06 AND originalfiledate:<=2026-04-01 AND"},
+                        {"name": "Date Range and Search Term", "query": "original-file-date:>=2024-01-06 AND original-file-date:<=2026-04-01 AND"},
                         {"name": "File Size Range and Search Term", "query": "size:>=1kb AND size:<=100kb AND"},
                     ]),
                     type=str,
@@ -4530,7 +4530,7 @@ class Bridge(QObject):
                 "ui.show_splash_screen": True,
                 "ui.advanced_search_expanded": False,
                 "ui.advanced_search_saved_queries": json.dumps([
-                    {"name": "Date Range and Search Term", "query": "originalfiledate:>=2024-01-06 AND originalfiledate:<=2026-04-01 AND"},
+                    {"name": "Date Range and Search Term", "query": "original-file-date:>=2024-01-06 AND original-file-date:<=2026-04-01 AND"},
                     {"name": "File Size Range and Search Term", "query": "size:>=1kb AND size:<=100kb AND"},
                 ]),
                 "ui.preview_above_details": True,

@@ -50,15 +50,24 @@ NUMERIC_FIELD_ALIASES = {
 }
 
 DATE_FIELD_ALIASES = {
+    "date-taken": "exif_date_taken",
     "datetaken": "exif_date_taken",
+    "exif-date-taken": "exif_date_taken",
     "exifdatetaken": "exif_date_taken",
+    "date-acquired": "metadata_date",
     "dateacquired": "metadata_date",
+    "metadata-date": "metadata_date",
     "metadatadate": "metadata_date",
+    "original-file-date": "original_file_date",
     "originalfiledate": "original_file_date",
+    "date-created": "file_created_time",
     "datecreated": "file_created_time",
+    "file-created-date": "file_created_time",
     "filecreateddate": "file_created_time",
     "created": "file_created_time",
+    "date-modified": "modified_time",
     "datemodified": "modified_time",
+    "file-modified-date": "modified_time",
     "filemodifieddate": "modified_time",
     "modified": "modified_time",
 }
