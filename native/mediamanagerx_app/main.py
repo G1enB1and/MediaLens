@@ -1831,6 +1831,7 @@ class CompareSlotCard(QFrame):
     isolateReleased = Signal()
     swapStarted = Signal()
     keepToggled = Signal(str, bool)
+    deleteToggled = Signal(str, bool)
     bestRequested = Signal(str, bool)
     deleteRequested = Signal(str, str)
 
@@ -1926,24 +1927,41 @@ class CompareSlotCard(QFrame):
         self.keep_toggle.clicked.connect(self._emit_keep_changed)
         controls.addWidget(self.keep_toggle)
 
+        self.delete_toggle = QCheckBox("Delete")
+        self.delete_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.delete_toggle.clicked.connect(self._emit_delete_changed)
+        controls.addWidget(self.delete_toggle)
+
         self.best_toggle = QCheckBox("Best Overall")
         self.best_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
         self.best_toggle.clicked.connect(self._emit_best_changed)
         controls.addWidget(self.best_toggle)
 
-        self.delete_btn = QPushButton("Delete")
-        self.delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.delete_btn.clicked.connect(self._emit_delete_clicked)
-        self.delete_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        controls.addWidget(self.delete_btn, 1)
+        self.identical_label = QLabel("Identical")
+        self.identical_label.setVisible(False)
+        controls.addWidget(self.identical_label)
 
         layout.addLayout(controls)
+
+        actions = QHBoxLayout()
+        actions.setContentsMargins(0, 0, 0, 0)
+        actions.setSpacing(8)
 
         self.browse_btn = QPushButton("Browse…")
         self.browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.browse_btn.clicked.connect(lambda: self.browseRequested.emit(self.slot_name))
         self.browse_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        layout.addWidget(self.browse_btn)
+        actions.addWidget(self.browse_btn, 1)
+
+        self.delete_btn = QPushButton("")
+        self.delete_btn.setObjectName("compareSlotDeleteButton")
+        self.delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.delete_btn.setFixedSize(32, 30)
+        self.delete_btn.setToolTip("Delete this file")
+        self.delete_btn.clicked.connect(self._emit_delete_clicked)
+        actions.addWidget(self.delete_btn, 0, Qt.AlignmentFlag.AlignRight)
+
+        layout.addLayout(actions)
 
         self._render_entry({})
 
@@ -1974,6 +1992,10 @@ class CompareSlotCard(QFrame):
         close_btn_hover_text = text if is_light else "#ffffff"
         close_btn_disabled_text = text_muted if is_light else "#9a9a9a"
         check_svg = (Path(__file__).with_name("web") / "scrollbar_arrows" / "check.svg").as_posix()
+        trash_svg_name = "trashcan.svg" if is_light else "trashcan-white.svg"
+        trash_svg = (Path(__file__).with_name("web") / "icons" / trash_svg_name).as_posix()
+        trash_red_svg = (Path(__file__).with_name("web") / "icons" / "trashcan-red.svg").as_posix()
+        trash_disabled_svg = (Path(__file__).with_name("web") / "icons" / "trashcan-gray.svg").as_posix()
 
         name_font = QFont(self.name_label.font())
         name_font.setBold(True)
@@ -2029,13 +2051,34 @@ class CompareSlotCard(QFrame):
             f"border-radius: 8px; padding: 6px 10px; }}"
             f"QPushButton:hover {{ background-color: {btn_hover}; border-color: {btn_border_hover}; }}"
         )
-        for button in (self.browse_btn, self.delete_btn):
+        for button in (self.browse_btn,):
             button.setStyleSheet(button_qss)
+        self.delete_btn.setStyleSheet(
+            f"""
+            QPushButton#compareSlotDeleteButton {{
+                background-color: {btn_base};
+                border: 1px solid {btn_border};
+                border-radius: 8px;
+                padding: 6px;
+                image: url('{trash_svg}');
+            }}
+            QPushButton#compareSlotDeleteButton:hover {{
+                background-color: {close_btn_hover_bg};
+                border-color: #d45a5a;
+                padding: 6px;
+                image: url('{trash_red_svg}');
+            }}
+            QPushButton#compareSlotDeleteButton:disabled {{
+                background-color: {close_btn_disabled_bg};
+                border-color: {btn_border};
+                padding: 6px;
+                image: url('{trash_disabled_svg}');
+            }}
+            """
+        )
         self._update_thumb_pixmap()
         self.browse_btn.setMinimumWidth(0)
         self.browse_btn.setMaximumWidth(16777215)
-        self.delete_btn.setMinimumWidth(0)
-        self.delete_btn.setMaximumWidth(16777215)
 
         checkbox_qss = (
             f"QCheckBox {{ color: {text_muted}; spacing: 6px; }}"
@@ -2045,19 +2088,23 @@ class CompareSlotCard(QFrame):
             f"QCheckBox::indicator:hover {{ border-color: {btn_border_hover}; }}"
         )
         self.keep_toggle.setStyleSheet(checkbox_qss)
+        self.delete_toggle.setStyleSheet(checkbox_qss)
         self.best_toggle.setStyleSheet(checkbox_qss)
+        self.identical_label.setStyleSheet(f"color: {accent_hex}; font-weight: 700;")
         for widget in (
             self.name_label,
             self.meta_label,
             self.reasons_label,
             self.best_label,
             self.clear_btn,
+            self.delete_btn,
             self.thumb_frame,
             self.thumb_label,
             self.keep_toggle,
+            self.delete_toggle,
             self.best_toggle,
+            self.identical_label,
             self.browse_btn,
-            self.delete_btn,
             self,
         ):
             try:
@@ -2071,6 +2118,11 @@ class CompareSlotCard(QFrame):
         path = str(self._entry.get("path") or "")
         if path:
             self.keepToggled.emit(path, bool(checked))
+
+    def _emit_delete_changed(self, checked: bool) -> None:
+        path = str(self._entry.get("path") or "")
+        if path:
+            self.deleteToggled.emit(path, bool(checked))
 
     def _emit_best_changed(self, checked: bool) -> None:
         path = str(self._entry.get("path") or "")
@@ -2130,9 +2182,14 @@ class CompareSlotCard(QFrame):
             self.keep_toggle.blockSignals(True)
             self.keep_toggle.setChecked(False)
             self.keep_toggle.blockSignals(False)
+            self.delete_toggle.blockSignals(True)
+            self.delete_toggle.setChecked(False)
+            self.delete_toggle.blockSignals(False)
             self.best_toggle.blockSignals(True)
             self.best_toggle.setChecked(False)
             self.best_toggle.blockSignals(False)
+            self.best_toggle.setVisible(True)
+            self.identical_label.setVisible(False)
             self.delete_btn.setEnabled(False)
             return
 
@@ -2161,15 +2218,28 @@ class CompareSlotCard(QFrame):
         )
         reasons = list(self._entry.get("duplicate_category_reasons") or [])[:5]
         self.reasons_label.setText("\n".join(reasons))
-        if self._entry.get("compare_best_in_pair"):
-            self.best_label.setText("\u2605 Best in Comparison")
-        elif self._entry.get("compare_marked_best"):
+        compare_best_in_pair = bool(self._entry.get("compare_best_in_pair"))
+        compare_marked_best = bool(self._entry.get("compare_marked_best"))
+        compare_best_reason = str(self._entry.get("compare_best_reason") or "").strip()
+        is_identical_pair = bool(self._entry.get("compare_identical_pair"))
+        self.best_toggle.setVisible(not is_identical_pair)
+        self.identical_label.setVisible(is_identical_pair)
+        if is_identical_pair:
+            self.best_label.setText("")
+        elif compare_best_in_pair and compare_marked_best:
+            self.best_label.setText("\u2605 Best Overall")
+        elif compare_best_in_pair:
+            self.best_label.setText(f"\u2605 Wins this comparison: {compare_best_reason}" if compare_best_reason else "\u2605 Best in Comparison")
+        elif compare_marked_best:
             self.best_label.setText("\u2605 Best Overall")
         else:
             self.best_label.setText("")
         self.keep_toggle.blockSignals(True)
         self.keep_toggle.setChecked(bool(self._entry.get("compare_keep_checked")))
         self.keep_toggle.blockSignals(False)
+        self.delete_toggle.blockSignals(True)
+        self.delete_toggle.setChecked(bool(self._entry.get("compare_delete_checked")))
+        self.delete_toggle.blockSignals(False)
         self.best_toggle.blockSignals(True)
         self.best_toggle.setChecked(bool(self._entry.get("compare_marked_best")))
         self.best_toggle.blockSignals(False)
@@ -2359,12 +2429,13 @@ class ComparePanel(QWidget):
             slot.slotSwapRequested.connect(self.bridge.swap_compare_slots)
             slot.browseRequested.connect(self._browse_for_slot)
             slot.clearRequested.connect(self.bridge.clear_compare_slot)
+            slot.deleteRequested.connect(self._delete_compare_path)
             slot.isolateRequested.connect(self.viewer.set_isolated_slot)
             slot.isolateReleased.connect(lambda: self.viewer.set_isolated_slot(""))
             slot.swapStarted.connect(lambda: self.viewer.set_isolated_slot(""))
             slot.keepToggled.connect(self._set_compare_keep_path)
+            slot.deleteToggled.connect(self._set_compare_delete_path)
             slot.bestRequested.connect(self._set_compare_best_path)
-            slot.deleteRequested.connect(self._delete_compare_path)
 
         self.bridge.compareStateChanged.connect(self._apply_compare_state)
         self.bridge.accentColorChanged.connect(self._on_accent_changed)
@@ -2476,6 +2547,10 @@ class ComparePanel(QWidget):
         self.bridge.set_compare_keep_path(path, checked)
         self.bridge.compareKeepPathChanged.emit(str(path or ""), bool(checked))
 
+    def _set_compare_delete_path(self, path: str, checked: bool) -> None:
+        self.bridge.set_compare_delete_path(path, checked)
+        self.bridge.compareDeletePathChanged.emit(str(path or ""), bool(checked))
+
     def _set_compare_best_path(self, path: str, checked: bool) -> None:
         def _apply_best_toggle_selection(chosen_path: str) -> None:
             target = str(chosen_path or "")
@@ -2564,6 +2639,7 @@ class Bridge(QObject):
     compareStateChanged = Signal("QVariantMap")
     compareSelectionStateChanged = Signal(str, list)
     compareKeepPathChanged = Signal(str, bool)
+    compareDeletePathChanged = Signal(str, bool)
     compareBestPathChanged = Signal(str, bool)
     metadataRequested = Signal(list)
     loadFolderRequested = Signal(str)
@@ -2704,6 +2780,7 @@ class Bridge(QObject):
         self._text_processing_thread: threading.Thread | None = None
         self._compare_paths: dict[str, str] = {"left": "", "right": ""}
         self._compare_keep_paths: set[str] = set()
+        self._compare_delete_paths: set[str] = set()
         self._compare_best_path: str = ""
         self._compare_selection_revision: int = 0
         self._compare_state_emit_pending: bool = False
@@ -3607,7 +3684,7 @@ class Bridge(QObject):
                 break
             candidate_indices = survivors
 
-        def final_score(idx: int) -> tuple:
+        def core_score(idx: int) -> tuple:
             entry = ranked[idx]
             priority_scores: list[int] = []
             for name in configured_priorities:
@@ -3652,12 +3729,17 @@ class Bridge(QObject):
                 tag_count,
                 filled_fields,
                 modified_time,
-                str(entry.get("path", "")).lower(),
             )
+
+        def final_score(idx: int) -> tuple:
+            entry = ranked[idx]
+            return (*core_score(idx), str(entry.get("path", "")).lower())
 
         contenders = candidate_indices or list(range(len(ranked)))
         best_idx = max(contenders, key=final_score, default=0)
-        order = sorted(range(len(ranked)), key=final_score, reverse=True)
+        core_score_by_index = {idx: core_score(idx) for idx in range(len(ranked))}
+        score_by_index = {idx: final_score(idx) for idx in range(len(ranked))}
+        order = sorted(range(len(ranked)), key=lambda idx: score_by_index[idx], reverse=True)
         sorted_ranked = [ranked[idx] for idx in order]
 
         for position, original_idx in enumerate(order):
@@ -3671,6 +3753,10 @@ class Bridge(QObject):
             entry["duplicate_category_reasons"] = reasons
             entry["duplicate_best_reason"] = " • ".join(reasons)
             entry["duplicate_is_overall_best"] = original_idx == best_idx
+            next_idx = order[position + 1] if position + 1 < len(order) else None
+            entry["duplicate_rank_tied_with_next"] = bool(
+                next_idx is not None and core_score_by_index[original_idx] == core_score_by_index[next_idx]
+            )
         return sorted_ranked
 
     def _build_duplicate_entries(self, entries: list[dict], sort_by: str) -> list[dict]:
@@ -4471,6 +4557,11 @@ class Bridge(QObject):
         return get_media_by_path(self.conn, clean) or {}
 
     def _build_compare_entry(self, path: str) -> dict:
+        from app.mediamanager.utils.hashing import calculate_file_hash
+        from app.mediamanager.db.metadata_repo import get_media_metadata
+        from app.mediamanager.db.ai_metadata_repo import get_media_ai_metadata
+        from app.mediamanager.db.tags_repo import list_media_tags
+
         clean = str(path or "").strip()
         if not clean:
             return {}
@@ -4506,6 +4597,38 @@ class Bridge(QObject):
             file_created_time = int(stat.st_ctime_ns)
         if original_file_date <= 0:
             original_file_date = self._normalized_file_date_ns(file_created_time, modified_time)
+        content_hash = str(media.get("content_hash") or "").strip()
+        if not content_hash:
+            try:
+                content_hash = calculate_file_hash(p)
+            except Exception:
+                content_hash = ""
+            if content_hash:
+                media["content_hash"] = content_hash
+                try:
+                    self.conn.execute("UPDATE media_items SET content_hash = ? WHERE path = ?", (content_hash, clean))
+                    self.conn.commit()
+                except Exception:
+                    pass
+        media_id = int(media.get("id") or 0)
+        meta = get_media_metadata(self.conn, media_id) if media_id > 0 else {}
+        ai_meta = get_media_ai_metadata(self.conn, media_id) if media_id > 0 else {}
+        tags = ", ".join(list_media_tags(self.conn, media_id)) if media_id > 0 else ""
+        collection_names = ""
+        if media_id > 0:
+            try:
+                row = self.conn.execute(
+                    """
+                    SELECT GROUP_CONCAT(c.name, ', ')
+                    FROM collections c
+                    JOIN collection_items ci ON c.id = ci.collection_id
+                    WHERE ci.media_id = ?
+                    """,
+                    (media_id,),
+                ).fetchone()
+                collection_names = str(row[0] or "") if row else ""
+            except Exception:
+                collection_names = ""
         entry = {
             "path": clean,
             "name": p.name,
@@ -4519,6 +4642,16 @@ class Bridge(QObject):
             "exif_date_taken": media.get("exif_date_taken") or "",
             "metadata_date": media.get("metadata_date") or "",
             "preferred_date": 0,
+            "content_hash": content_hash,
+            "phash": media.get("phash") or "",
+            "tags": tags,
+            "title": (meta or {}).get("title") or "",
+            "description": ((meta or {}).get("description") or (ai_meta or {}).get("description") or ""),
+            "notes": (meta or {}).get("notes") or "",
+            "collection_names": collection_names,
+            "ai_prompt": ((meta or {}).get("ai_prompt") or (ai_meta or {}).get("ai_prompt") or ""),
+            "ai_loras": ", ".join(str(item.get("name") or "").strip() for item in ((ai_meta or {}).get("loras") or []) if str(item.get("name") or "").strip()),
+            "model_name": (ai_meta or {}).get("model_name") or "",
             "text_detected": media.get("text_detected"),
         }
         entry["preferred_date"] = self._preferred_date_ns(entry)
@@ -4557,16 +4690,36 @@ class Bridge(QObject):
                 ranked_entries.append(dict(entry))
         ranked = self._rank_duplicate_group(ranked_entries) if ranked_entries else []
         ranked_by_path = {str(entry.get("path") or ""): entry for entry in ranked}
-        comparison_best_path = next((str(entry.get("path") or "") for entry in ranked if entry.get("duplicate_is_overall_best")), "")
         active_paths = {str(entry.get("path") or "") for entry in slot_entries.values() if entry}
+        active_entries = [entry for entry in slot_entries.values() if entry]
+        compare_identical_pair = (
+            len(active_entries) == 2
+            and all(str(entry.get("content_hash") or "").strip() for entry in active_entries)
+            and len({str(entry.get("content_hash") or "").strip() for entry in active_entries}) == 1
+        )
+        overall_best_in_pair = self._compare_best_path if self._compare_best_path in active_paths else ""
+        ranked_best_entry = ranked[0] if ranked else {}
+        ranked_best_path = str(ranked_best_entry.get("path") or "")
+        ranked_best_is_tie = bool(ranked_best_entry.get("duplicate_rank_tied_with_next"))
+        comparison_best_path = ranked_best_path
+        comparison_best_reason = ""
+        if overall_best_in_pair:
+            if ranked_best_is_tie or not ranked_best_path or ranked_best_path == overall_best_in_pair:
+                comparison_best_path = overall_best_in_pair
+            else:
+                comparison_best_reason = str(ranked_best_entry.get("duplicate_best_reason") or "").strip()
         self._compare_keep_paths = {path for path in self._compare_keep_paths if path in active_paths}
+        self._compare_delete_paths = {path for path in self._compare_delete_paths if path in active_paths}
         payload = {
             "visible": bool(self.settings.value("ui/show_bottom_panel", True, type=bool)),
             "left": {},
             "right": {},
             "best_path": self._compare_best_path,
             "comparison_best_path": comparison_best_path,
+            "comparison_best_reason": comparison_best_reason,
+            "compare_identical_pair": compare_identical_pair,
             "keep_paths": list(self._compare_keep_paths),
+            "delete_paths": list(self._compare_delete_paths),
             "selection_revision": int(self._compare_selection_revision),
         }
         for slot_name, base_entry in slot_entries.items():
@@ -4574,8 +4727,11 @@ class Bridge(QObject):
             entry = dict(ranked_by_path.get(path) or base_entry or {})
             if entry:
                 entry["compare_keep_checked"] = path in self._compare_keep_paths
+                entry["compare_delete_checked"] = path in self._compare_delete_paths
                 entry["compare_marked_best"] = bool(self._compare_best_path) and path == self._compare_best_path
                 entry["compare_best_in_pair"] = path == comparison_best_path
+                entry["compare_best_reason"] = comparison_best_reason if path == comparison_best_path else ""
+                entry["compare_identical_pair"] = compare_identical_pair
             payload[slot_name] = entry
         return payload
 
@@ -4669,22 +4825,53 @@ class Bridge(QObject):
         if not clean:
             return
         before = clean in self._compare_keep_paths
+        delete_before = clean in self._compare_delete_paths
         if checked:
             self._compare_keep_paths.add(clean)
+            self._compare_delete_paths.discard(clean)
         else:
             self._compare_keep_paths.discard(clean)
         after = clean in self._compare_keep_paths
-        if before == after:
+        delete_after = clean in self._compare_delete_paths
+        if before == after and delete_before == delete_after:
             return
         self._compare_selection_revision += 1
         self._emit_compare_state_changed()
 
-    @Slot(str, list)
-    def set_compare_selection_state(self, best_path: str, keep_paths: list) -> None:
+    @Slot(str, bool)
+    def set_compare_delete_path(self, path: str, checked: bool) -> None:
+        clean = str(path or "").strip()
+        if not clean:
+            return
+        before = clean in self._compare_delete_paths
+        keep_before = clean in self._compare_keep_paths
+        best_before = self._compare_best_path == clean
+        if checked:
+            self._compare_delete_paths.add(clean)
+            self._compare_keep_paths.discard(clean)
+            if self._compare_best_path == clean:
+                self._compare_best_path = ""
+        else:
+            self._compare_delete_paths.discard(clean)
+        after = clean in self._compare_delete_paths
+        keep_after = clean in self._compare_keep_paths
+        best_after = self._compare_best_path == clean
+        if before == after and keep_before == keep_after and best_before == best_after:
+            return
+        self._compare_selection_revision += 1
+        self._emit_compare_state_changed()
+
+    @Slot(str, list, list)
+    def set_compare_selection_state(self, best_path: str, keep_paths: list, delete_paths: list) -> None:
         clean_best_path = str(best_path or "").strip()
         clean_keep_paths = {
             str(path or "").strip()
             for path in (keep_paths or [])
+            if str(path or "").strip()
+        }
+        clean_delete_paths = {
+            str(path or "").strip()
+            for path in (delete_paths or [])
             if str(path or "").strip()
         }
         changed = False
@@ -4693,6 +4880,12 @@ class Bridge(QObject):
             changed = True
         if self._compare_keep_paths != clean_keep_paths:
             self._compare_keep_paths = clean_keep_paths
+            changed = True
+        if self._compare_delete_paths != clean_delete_paths:
+            self._compare_delete_paths = clean_delete_paths
+            changed = True
+        if clean_best_path and clean_best_path in self._compare_delete_paths:
+            self._compare_delete_paths.discard(clean_best_path)
             changed = True
         if changed:
             self._compare_selection_revision += 1
@@ -4703,9 +4896,13 @@ class Bridge(QObject):
         clean = str(path or "").strip()
         if not clean:
             return
-        if self._compare_best_path == clean:
+        before_keep = clean in self._compare_keep_paths
+        before_delete = clean in self._compare_delete_paths
+        if self._compare_best_path == clean and before_keep and not before_delete:
             return
         self._compare_best_path = clean
+        self._compare_keep_paths.add(clean)
+        self._compare_delete_paths.discard(clean)
         self._compare_selection_revision += 1
         self._emit_compare_state_changed()
 
