@@ -7191,9 +7191,6 @@ class MainWindow(QMainWindow):
         whats_new_action = QAction("&What's New", self)
         whats_new_action.triggered.connect(self.show_whats_new)
         help_menu.addAction(whats_new_action)
-        search_help_action = QAction("&Search Syntax Help", self)
-        search_help_action.triggered.connect(self.show_search_syntax_help)
-        help_menu.addAction(search_help_action)
         
         help_menu.addSeparator()
 
@@ -13121,25 +13118,14 @@ class MainWindow(QMainWindow):
 
     def show_whats_new(self) -> None:
         try:
-            release_notes = self._read_markdown_file("ReleaseNotes.md")
             changelog = self._read_markdown_file("CHANGELOG.md")
-            if release_notes is None and changelog is None:
-                QMessageBox.warning(self, "What's New", "Files not found: ReleaseNotes.md, CHANGELOG.md")
+            if changelog is None:
+                QMessageBox.warning(self, "What's New", "File not found: CHANGELOG.md")
                 return
 
-            parts: list[str] = []
-            if release_notes:
-                parts.append(release_notes.strip())
-            if changelog:
-                if parts:
-                    parts.append("---")
-                parts.append(changelog.strip())
-            self._show_themed_dialog("What's New", "\n\n".join(parts), is_markdown=True)
+            self._show_themed_dialog("What's New", changelog.strip(), is_markdown=True)
         except Exception as e:
-            QMessageBox.critical(self, "What's New", f"Error loading release notes: {e}")
-
-    def show_search_syntax_help(self) -> None:
-        self._show_markdown_dialog("Search Syntax Help", "SEARCH_SYNTAX.md")
+            QMessageBox.critical(self, "What's New", f"Error loading changelog: {e}")
 
     def open_crash_report_folder(self) -> None:
         folder = _appdata_runtime_dir() / "crash-reports"
