@@ -14,7 +14,7 @@ let gPosterRequested = new Set();
 let gPosterObserver = null;
 let gSort = 'none';
 let gFilter = 'all';
-let gFilterGroups = { media: 'all', text: 'all' };
+let gFilterGroups = { media: 'all', text: 'all', meta: 'all' };
 let gCurrentTargetFolderName = '';
 let gCurrentDropFolderPath = '';
 let gCurrentDragPaths = [];
@@ -568,23 +568,32 @@ function normalizeMediaFilter(filterValue) {
   return ['image', 'svg', 'video', 'animated'].includes(filterValue) ? filterValue : 'all';
 }
 
+function normalizeMetaFilter(filterValue) {
+  return ['no_tags', 'no_description'].includes(filterValue) ? filterValue : 'all';
+}
+
 function normalizeFilterValue(filterValue) {
   const raw = String(filterValue || 'all').trim();
-  if (!raw || raw === 'all') return { media: 'all', text: 'all' };
+  if (!raw || raw === 'all') return { media: 'all', text: 'all', meta: 'all' };
   if (!raw.includes(':')) {
     const normalizedText = normalizeTextFilter(raw);
     if (normalizedText === 'text_detected' || normalizedText === 'no_text_detected') {
-      return { media: 'all', text: normalizedText };
+      return { media: 'all', text: normalizedText, meta: 'all' };
     }
-    return { media: normalizeMediaFilter(raw), text: 'all' };
+    const normalizedMeta = normalizeMetaFilter(raw);
+    if (normalizedMeta !== 'all') {
+      return { media: 'all', text: 'all', meta: normalizedMeta };
+    }
+    return { media: normalizeMediaFilter(raw), text: 'all', meta: 'all' };
   }
-  const groups = { media: 'all', text: 'all' };
+  const groups = { media: 'all', text: 'all', meta: 'all' };
   raw.split(';').forEach((part) => {
     const [groupRaw, valueRaw] = String(part || '').split(':');
     const group = String(groupRaw || '').trim();
     const value = String(valueRaw || '').trim();
     if (group === 'media') groups.media = normalizeMediaFilter(value);
     if (group === 'text') groups.text = normalizeTextFilter(value) === 'no_text_detected' ? 'no_text_detected' : (normalizeTextFilter(value) === 'text_detected' ? 'text_detected' : 'all');
+    if (group === 'meta') groups.meta = normalizeMetaFilter(value);
   });
   return groups;
 }
@@ -593,9 +602,11 @@ function serializeFilterValue(groups) {
   const media = normalizeMediaFilter(groups && groups.media);
   const normalizedText = normalizeTextFilter(groups && groups.text);
   const text = normalizedText === 'text_detected' || normalizedText === 'no_text_detected' ? normalizedText : 'all';
+  const meta = normalizeMetaFilter(groups && groups.meta);
   const parts = [];
   if (media !== 'all') parts.push(`media:${media}`);
   if (text !== 'all') parts.push(`text:${text}`);
+  if (meta !== 'all') parts.push(`meta:${meta}`);
   return parts.length ? parts.join(';') : 'all';
 }
 
@@ -607,7 +618,9 @@ function getFilterTriggerText(groups) {
   else if (groups.media === 'animated') labels.push('Animated GIFs');
   if (groups.text === 'text_detected') labels.push('Text Detected');
   else if (groups.text === 'no_text_detected') labels.push('No Text Detected');
-  return labels.length ? `Filter: ${labels.join(' | ')}` : 'Filter: All';
+  if (groups.meta === 'no_tags') labels.push('No Tags');
+  else if (groups.meta === 'no_description') labels.push('No Description');
+  return labels.length ? `Filter: ${labels.join(' | ')}` : 'Filter: None';
 }
 
 function isTextFilterActive() {
@@ -5289,11 +5302,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!el) return;
     const trigger = el.querySelector('.select-trigger');
     const options = el.querySelector('.select-options');
+    const clearOpt = options.querySelector('[data-clear-filters]');
 
     function render(groups) {
       gFilterGroups = normalizeFilterValue(serializeFilterValue(groups));
       gFilter = serializeFilterValue(gFilterGroups);
       trigger.textContent = getFilterTriggerText(gFilterGroups);
+      const hasAnyFilter = gFilter !== 'all';
+      if (clearOpt) clearOpt.classList.toggle('selected', !hasAnyFilter);
       options.querySelectorAll('[data-group]').forEach((opt) => {
         const group = opt.getAttribute('data-group');
         const value = opt.getAttribute('data-value');
@@ -5313,6 +5329,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     options.addEventListener('click', (e) => {
       e.stopPropagation();
+      const clearTarget = e.target.closest('[data-clear-filters]');
+      if (clearTarget) {
+        render({ media: 'all', text: 'all', meta: 'all' });
+        onChange(gFilter);
+        return;
+      }
       const opt = e.target.closest('[data-group][data-value]');
       if (!opt) return;
       const group = opt.getAttribute('data-group');

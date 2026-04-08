@@ -50,8 +50,9 @@
             </div>
           </div>
           <div class="custom-select" id="filterSelect" tabindex="0">
-            <div class="select-trigger">Filter: All</div>
+            <div class="select-trigger">Filter: None</div>
             <div class="select-options">
+              <div data-clear-filters="true">None</div>
               <div class="select-group-label">Media Type</div>
               <div data-group="media" data-value="image">Images</div>
               <div data-group="media" data-value="svg">SVGs</div>
@@ -60,6 +61,9 @@
               <div class="select-group-label">Text Detection</div>
               <div data-group="text" data-value="text_detected">Text Detected</div>
               <div data-group="text" data-value="no_text_detected">No Text Detected</div>
+              <div class="select-group-label">Metadata</div>
+              <div data-group="meta" data-value="no_tags">No Tags</div>
+              <div data-group="meta" data-value="no_description">No Description</div>
             </div>
           </div>
           <div class="custom-select" id="groupBySelect" tabindex="0">

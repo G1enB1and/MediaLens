@@ -6356,7 +6356,7 @@ class Bridge(QObject):
         from app.mediamanager.utils.pathing import normalize_windows_path
         ALL_EXTS = IMAGE_EXTS | VIDEO_EXTS
         image_exts = IMAGE_EXTS
-        media_filter, _ = self._parse_filter_groups(filter_type)
+        media_filter, _, meta_filter = self._parse_filter_groups(filter_type)
         if not folders: return []
         current_key = hashlib.sha1(",".join(sorted(folders)).encode()).hexdigest()
         if self._disk_cache and self._disk_cache_key == current_key: disk_files = self._disk_cache
@@ -6410,6 +6410,7 @@ class Bridge(QObject):
             candidates = [r for r in candidates if Path(r["path"]).suffix.lower() not in image_exts]
         elif media_filter == "animated":
             candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
+        candidates = self._apply_metadata_filter(candidates, meta_filter)
         
         if search_query.strip():
             candidates = [r for r in candidates if self._matches_media_search(r, search_query)]
@@ -6419,7 +6420,7 @@ class Bridge(QObject):
         from app.mediamanager.db.media_repo import list_media_in_collection
         image_exts = IMAGE_EXTS
         show_hidden = self._show_hidden_enabled()
-        media_filter, _ = self._parse_filter_groups(filter_type)
+        media_filter, _, meta_filter = self._parse_filter_groups(filter_type)
         
         raw_candidates = list_media_in_collection(self.conn, int(collection_id))
         candidates = []
@@ -6443,6 +6444,7 @@ class Bridge(QObject):
             candidates = [r for r in candidates if Path(r["path"]).suffix.lower() not in image_exts]
         elif media_filter == "animated":
             candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
+        candidates = self._apply_metadata_filter(candidates, meta_filter)
             
         if search_query.strip():
             candidates = [r for r in candidates if self._matches_media_search(r, search_query)]
@@ -6455,7 +6457,7 @@ class Bridge(QObject):
             return []
         image_exts = IMAGE_EXTS
         show_hidden = self._show_hidden_enabled()
-        media_filter, _ = self._parse_filter_groups(filter_type)
+        media_filter, _, meta_filter = self._parse_filter_groups(filter_type)
         cutoff_iso = self._smart_collection_cutoff_iso(int(definition.get("days") or 0))
         raw_candidates = list_media_in_smart_collection(self.conn, str(definition.get("field") or ""), cutoff_iso)
         candidates = []
@@ -6479,9 +6481,19 @@ class Bridge(QObject):
             candidates = [r for r in candidates if Path(r["path"]).suffix.lower() not in image_exts]
         elif media_filter == "animated":
             candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
+        candidates = self._apply_metadata_filter(candidates, meta_filter)
 
         if search_query.strip():
             candidates = [r for r in candidates if self._matches_media_search(r, search_query)]
+        return candidates
+
+    @staticmethod
+    def _apply_metadata_filter(candidates: list[dict], meta_filter: str) -> list[dict]:
+        mode = str(meta_filter or "all").strip().lower()
+        if mode == "no_tags":
+            return [r for r in candidates if not str(r.get("tags") or "").strip()]
+        if mode == "no_description":
+            return [r for r in candidates if not str(r.get("description") or "").strip()]
         return candidates
 
     def _matches_media_search(self, row: dict, search_query: str) -> bool:
@@ -6489,20 +6501,23 @@ class Bridge(QObject):
         return matches_media_search(row, search_query)
 
     @staticmethod
-    def _parse_filter_groups(filter_type: str) -> tuple[str, str]:
+    def _parse_filter_groups(filter_type: str) -> tuple[str, str, str]:
         raw = str(filter_type or "all").strip()
         media_filter = "all"
         text_filter = "all"
+        meta_filter = "all"
         if not raw or raw == "all":
-            return media_filter, text_filter
+            return media_filter, text_filter, meta_filter
         if ":" not in raw:
             if raw in {"text_detected", "text_more_likely", "text_verified"}:
-                return media_filter, "text_detected"
+                return media_filter, "text_detected", meta_filter
             if raw == "no_text_detected":
-                return media_filter, "no_text_detected"
+                return media_filter, "no_text_detected", meta_filter
+            if raw in {"no_tags", "no_description"}:
+                return media_filter, text_filter, raw
             if raw in {"image", "svg", "video", "animated"}:
-                return raw, text_filter
-            return media_filter, text_filter
+                return raw, text_filter, meta_filter
+            return media_filter, text_filter, meta_filter
         for part in raw.split(";"):
             group, _, value = str(part or "").partition(":")
             group = group.strip().lower()
@@ -6514,7 +6529,9 @@ class Bridge(QObject):
                     text_filter = "text_detected"
                 elif value == "no_text_detected":
                     text_filter = "no_text_detected"
-        return media_filter, text_filter
+            elif group == "meta" and value in {"no_tags", "no_description"}:
+                meta_filter = value
+        return media_filter, text_filter, meta_filter
 
     @staticmethod
     def _iso_to_ns(value) -> int:
@@ -6691,7 +6708,7 @@ class Bridge(QObject):
         return media_type or ""
 
     def _get_gallery_entries(self, folders: list[str], sort_by: str = "none", filter_type: str = "all", search_query: str = "") -> list[dict]:
-        _, text_filter = self._parse_filter_groups(filter_type)
+        _, text_filter, _ = self._parse_filter_groups(filter_type)
         if folders:
             entries = self._get_reconciled_candidates(folders, filter_type, search_query)
             if self._gallery_view_mode() not in {"masonry", "duplicates", "similar", "similar_only"} and self._review_group_mode() is None:
