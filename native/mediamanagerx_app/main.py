@@ -22,7 +22,7 @@ import html
 import shlex
 import traceback
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from math import gcd
 from packaging.version import Version
 from pathlib import Path
@@ -2689,6 +2689,8 @@ class Bridge(QObject):
         self._selected_folders: list[str] = []
         self._active_collection_id: int | None = None
         self._active_collection_name: str = ""
+        self._active_smart_collection_key: str = ""
+        self._active_smart_collection_name: str = ""
         self._scan_abort = False
         self._scan_lock = threading.Lock()
         self.drag_paths: list[str] = []
@@ -2906,6 +2908,8 @@ class Bridge(QObject):
         if folders:
             self._active_collection_id = None
             self._active_collection_name = ""
+            self._active_smart_collection_key = ""
+            self._active_smart_collection_name = ""
         try:
             # Persistent settings
             settings = QSettings("G1enB1and", "MediaManagerX")
@@ -3116,6 +3120,8 @@ class Bridge(QObject):
                 return False
             self._active_collection_id = int(collection["id"])
             self._active_collection_name = str(collection["name"])
+            self._active_smart_collection_key = ""
+            self._active_smart_collection_name = ""
             self._selected_folders = []
             self.selectionChanged.emit([])
             return True
@@ -3124,9 +3130,75 @@ class Bridge(QObject):
 
     @Slot(result=dict)
     def get_active_collection(self) -> dict:
-        if self._active_collection_id is None:
+        if self._active_collection_id is not None:
+            return {"id": self._active_collection_id, "name": self._active_collection_name}
+        if self._active_smart_collection_key:
+            return {"id": -1, "name": self._active_smart_collection_name, "key": self._active_smart_collection_key, "smart": True}
+        return {}
+
+    def _smart_collection_defs(self) -> list[dict]:
+        return [
+            {"key": "acquired_7d", "name": "Acquired Last 7 Days", "field": "metadata_date", "days": 7},
+            {"key": "acquired_14d", "name": "Acquired Last 14 Days", "field": "metadata_date", "days": 14},
+            {"key": "acquired_30d", "name": "Acquired Last 30 Days", "field": "metadata_date", "days": 30},
+            {"key": "modified_7d", "name": "Modified Last 7 Days", "field": "modified_time_utc", "days": 7},
+            {"key": "modified_14d", "name": "Modified Last 14 Days", "field": "modified_time_utc", "days": 14},
+            {"key": "modified_30d", "name": "Modified Last 30 Days", "field": "modified_time_utc", "days": 30},
+        ]
+
+    def _smart_collection_def(self, key: str) -> dict | None:
+        wanted = str(key or "").strip().lower()
+        if not wanted:
+            return None
+        return next((item for item in self._smart_collection_defs() if str(item.get("key") or "").lower() == wanted), None)
+
+    def _smart_collection_cutoff_iso(self, days: int) -> str:
+        try:
+            count = max(1, int(days or 0))
+        except Exception:
+            count = 7
+        return (datetime.now(timezone.utc) - timedelta(days=count)).replace(microsecond=0).isoformat()
+
+    @Slot(str, result=bool)
+    def set_active_smart_collection(self, smart_key: str) -> bool:
+        try:
+            definition = self._smart_collection_def(str(smart_key or ""))
+            if not definition:
+                return False
+            self._active_smart_collection_key = str(definition["key"])
+            self._active_smart_collection_name = str(definition["name"])
+            self._active_collection_id = None
+            self._active_collection_name = ""
+            self._selected_folders = []
+            self.selectionChanged.emit([])
+            return True
+        except Exception:
+            return False
+
+    @Slot(result=dict)
+    def get_active_smart_collection(self) -> dict:
+        if not self._active_smart_collection_key:
             return {}
-        return {"id": self._active_collection_id, "name": self._active_collection_name}
+        return {"key": self._active_smart_collection_key, "name": self._active_smart_collection_name}
+
+    @Slot(result=list)
+    def list_smart_collections(self) -> list:
+        from app.mediamanager.db.media_repo import count_media_in_smart_collection
+        items: list[dict] = []
+        try:
+            for definition in self._smart_collection_defs():
+                cutoff_iso = self._smart_collection_cutoff_iso(int(definition.get("days") or 0))
+                count = count_media_in_smart_collection(self.conn, str(definition.get("field") or ""), cutoff_iso)
+                items.append({
+                    "key": str(definition.get("key") or ""),
+                    "name": str(definition.get("name") or ""),
+                    "field": str(definition.get("field") or ""),
+                    "days": int(definition.get("days") or 0),
+                    "item_count": int(count or 0),
+                })
+            return items
+        except Exception:
+            return []
 
     @Slot(result=list)
     def list_collections(self) -> list:
@@ -4025,6 +4097,8 @@ class Bridge(QObject):
             return ("folders", tuple(sorted(str(folder or "") for folder in self._selected_folders if str(folder or "").strip())))
         if self._active_collection_id is not None:
             return ("collection", int(self._active_collection_id))
+        if self._active_smart_collection_key:
+            return ("smart_collection", str(self._active_smart_collection_key))
         return ("none",)
 
     def _collect_text_scope_entries(self, folders: list[str] | None = None, collection_id: int | None = None) -> list[dict]:
@@ -4036,6 +4110,8 @@ class Bridge(QObject):
             return self._get_reconciled_candidates(self._selected_folders, "all", "")
         if self._active_collection_id is not None:
             return self._get_collection_candidates(self._active_collection_id, "all", "")
+        if self._active_smart_collection_key:
+            return self._get_smart_collection_candidates(self._active_smart_collection_key, "all", "")
         return []
 
     def _ensure_background_text_processing(
@@ -5594,6 +5670,7 @@ class Bridge(QObject):
             self.conn.commit()
             self._disk_cache = {}
             self._disk_cache_key = ""
+            self.collectionsChanged.emit()
             self.fileOpFinished.emit("delete", True, path_str, "")
             return True
         except Exception:
@@ -6364,6 +6441,42 @@ class Bridge(QObject):
             candidates = [r for r in candidates if self._matches_media_search(r, search_query)]
         return candidates
 
+    def _get_smart_collection_candidates(self, smart_key: str, filter_type: str = "all", search_query: str = "") -> list[dict]:
+        from app.mediamanager.db.media_repo import list_media_in_smart_collection
+        definition = self._smart_collection_def(smart_key)
+        if not definition:
+            return []
+        image_exts = IMAGE_EXTS
+        show_hidden = self._show_hidden_enabled()
+        media_filter, _ = self._parse_filter_groups(filter_type)
+        cutoff_iso = self._smart_collection_cutoff_iso(int(definition.get("days") or 0))
+        raw_candidates = list_media_in_smart_collection(self.conn, str(definition.get("field") or ""), cutoff_iso)
+        candidates = []
+        for r in raw_candidates:
+            if not show_hidden and r.get("is_hidden"):
+                continue
+            path_obj = Path(r["path"])
+            if path_obj.exists() and path_obj.is_file():
+                candidates.append(r)
+
+        if media_filter == "image":
+            candidates = [
+                r for r in candidates
+                if Path(r["path"]).suffix.lower() in image_exts
+                and Path(r["path"]).suffix.lower() != ".svg"
+                and not self._is_animated(Path(r["path"]))
+            ]
+        elif media_filter == "svg":
+            candidates = [r for r in candidates if Path(r["path"]).suffix.lower() == ".svg"]
+        elif media_filter == "video":
+            candidates = [r for r in candidates if Path(r["path"]).suffix.lower() not in image_exts]
+        elif media_filter == "animated":
+            candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
+
+        if search_query.strip():
+            candidates = [r for r in candidates if self._matches_media_search(r, search_query)]
+        return candidates
+
     def _matches_media_search(self, row: dict, search_query: str) -> bool:
         from app.mediamanager.search_query import matches_media_search
         return matches_media_search(row, search_query)
@@ -6578,6 +6691,8 @@ class Bridge(QObject):
                 entries = self._list_folder_entries(folders, search_query) + entries
         elif self._active_collection_id is not None:
             entries = self._get_collection_candidates(self._active_collection_id, filter_type, search_query)
+        elif self._active_smart_collection_key:
+            entries = self._get_smart_collection_candidates(self._active_smart_collection_key, filter_type, search_query)
         else:
             entries = []
         if text_filter in {"text_detected", "no_text_detected"}:
@@ -7597,25 +7712,45 @@ class MainWindow(QMainWindow):
         collections_layout.addWidget(self.collections_list, 1)
         collections_section.setMinimumHeight(self.collections_header.sizeHint().height() + collections_layout.contentsMargins().top())
 
+        smart_collections_section = QWidget(self.left_sections_splitter)
+        smart_collections_layout = QVBoxLayout(smart_collections_section)
+        smart_collections_layout.setContentsMargins(0, 8, 0, 0)
+        smart_collections_layout.setSpacing(6)
+        self.smart_collections_header = QLabel("Smart Collections")
+        smart_collections_layout.addWidget(self.smart_collections_header)
+
+        self.smart_collections_list = CollectionListWidget()
+        self.smart_collections_list.setObjectName("smartCollectionsList")
+        self.smart_collections_list.setMinimumHeight(0)
+        self.smart_collections_list.setAcceptDrops(False)
+        self.smart_collections_list.setDropIndicatorShown(False)
+        self.smart_collections_list.itemSelectionChanged.connect(self._on_smart_collection_selection_changed)
+        smart_collections_layout.addWidget(self.smart_collections_list, 1)
+        smart_collections_section.setMinimumHeight(self.smart_collections_header.sizeHint().height() + smart_collections_layout.contentsMargins().top())
+
         self.left_sections_splitter.addWidget(pinned_section)
         self.left_sections_splitter.addWidget(folders_section)
         self.left_sections_splitter.addWidget(collections_section)
+        self.left_sections_splitter.addWidget(smart_collections_section)
         self.left_sections_splitter.setStretchFactor(0, 0)
         self.left_sections_splitter.setStretchFactor(1, 1)
         self.left_sections_splitter.setStretchFactor(2, 0)
-        left_sections_state = self.bridge.settings.value("ui/left_sections_splitter_state_v2")
+        self.left_sections_splitter.setStretchFactor(3, 0)
+        left_sections_state = self.bridge.settings.value("ui/left_sections_splitter_state_v3")
         if left_sections_state:
             self.left_sections_splitter.restoreState(left_sections_state)
         else:
-            self.left_sections_splitter.setSizes([140, 290, 170])
+            self.left_sections_splitter.setSizes([140, 260, 150, 150])
         self.left_sections_splitter.splitterMoved.connect(lambda *args: self._save_splitter_state())
 
         left_layout.addWidget(self.left_sections_splitter, 1)
 
         self.bridge.pinnedFoldersChanged.connect(self._reload_pinned_folders)
         self.bridge.collectionsChanged.connect(self._reload_collections)
+        self.bridge.collectionsChanged.connect(self._reload_smart_collections)
         self._reload_pinned_folders()
         self._reload_collections()
+        self._reload_smart_collections()
 
         self._navigate_to_folder(str(default_root), record_history=True, re_root_tree=True)
 
@@ -8678,6 +8813,10 @@ class MainWindow(QMainWindow):
                 self.collections_list.blockSignals(True)
                 self.collections_list.clearSelection()
                 self.collections_list.blockSignals(False)
+            if hasattr(self, "smart_collections_list"):
+                self.smart_collections_list.blockSignals(True)
+                self.smart_collections_list.clearSelection()
+                self.smart_collections_list.blockSignals(False)
             if len(paths) == 1:
                 self._navigate_to_folder(paths[0], record_history=True)
             else:
@@ -8850,6 +8989,10 @@ class MainWindow(QMainWindow):
             self.collections_list.blockSignals(True)
             self.collections_list.clearSelection()
             self.collections_list.blockSignals(False)
+        if hasattr(self, "smart_collections_list"):
+            self.smart_collections_list.blockSignals(True)
+            self.smart_collections_list.clearSelection()
+            self.smart_collections_list.blockSignals(False)
         self._navigate_to_folder(folder_path, record_history=True, re_root_tree=True)
 
     def _on_pinned_folders_context_menu(self, pos: QPoint) -> None:
@@ -8971,6 +9114,31 @@ class MainWindow(QMainWindow):
                 self.collections_list.setCurrentItem(item)
         self.collections_list.blockSignals(False)
 
+    def _reload_smart_collections(self) -> None:
+        if not hasattr(self, "smart_collections_list"):
+            return
+        try:
+            smart_collections = self.bridge.list_smart_collections()
+            active = self.bridge.get_active_smart_collection()
+            active_key = str(active.get("key", "") or "")
+        except Exception:
+            smart_collections = []
+            active_key = ""
+
+        self.smart_collections_list.blockSignals(True)
+        self.smart_collections_list.clear()
+        for definition in smart_collections:
+            count = int(definition.get("item_count", 0) or 0)
+            label = str(definition.get("name", ""))
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, str(definition.get("key", "") or ""))
+            item.setToolTip(f"{label} ({count} items)")
+            self.smart_collections_list.addItem(item)
+            if str(definition.get("key", "") or "") == active_key:
+                item.setSelected(True)
+                self.smart_collections_list.setCurrentItem(item)
+        self.smart_collections_list.blockSignals(False)
+
     def _on_collection_selection_changed(self) -> None:
         if not hasattr(self, "collections_list"):
             return
@@ -8985,7 +9153,31 @@ class MainWindow(QMainWindow):
             self.pinned_folders_list.blockSignals(True)
             self.pinned_folders_list.clearSelection()
             self.pinned_folders_list.blockSignals(False)
+        if hasattr(self, "smart_collections_list"):
+            self.smart_collections_list.blockSignals(True)
+            self.smart_collections_list.clearSelection()
+            self.smart_collections_list.blockSignals(False)
         self.bridge.set_active_collection(collection_id)
+
+    def _on_smart_collection_selection_changed(self) -> None:
+        if not hasattr(self, "smart_collections_list"):
+            return
+        item = self.smart_collections_list.currentItem()
+        if not item:
+            return
+        smart_key = str(item.data(Qt.ItemDataRole.UserRole) or "")
+        if not smart_key:
+            return
+        self.tree.selectionModel().clearSelection()
+        if hasattr(self, "pinned_folders_list"):
+            self.pinned_folders_list.blockSignals(True)
+            self.pinned_folders_list.clearSelection()
+            self.pinned_folders_list.blockSignals(False)
+        if hasattr(self, "collections_list"):
+            self.collections_list.blockSignals(True)
+            self.collections_list.clearSelection()
+            self.collections_list.blockSignals(False)
+        self.bridge.set_active_smart_collection(smart_key)
 
     def _on_collections_context_menu(self, pos: QPoint) -> None:
         item = self.collections_list.itemAt(pos)
@@ -12850,7 +13042,7 @@ class MainWindow(QMainWindow):
             self._save_main_panel_widths()
             self._save_bottom_panel_height()
             if hasattr(self, "left_sections_splitter"):
-                self.bridge.settings.setValue("ui/left_sections_splitter_state_v2", self.left_sections_splitter.saveState())
+                self.bridge.settings.setValue("ui/left_sections_splitter_state_v3", self.left_sections_splitter.saveState())
         except Exception:
             pass
 

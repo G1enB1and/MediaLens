@@ -358,6 +358,42 @@ def list_media_in_collection(
     return _list_media_with_where(conn, where_sql, [int(collection_id)], limit=limit, offset=offset)
 
 
+def list_media_in_smart_collection(
+    conn: sqlite3.Connection,
+    field_name: str,
+    cutoff_iso: str,
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
+) -> list[dict]:
+    field = str(field_name or "").strip()
+    if field not in {"metadata_date", "modified_time_utc"}:
+        return []
+    db_field = "m.metadata_date" if field == "metadata_date" else "m.modified_time_utc"
+    where_sql = f"{db_field} IS NOT NULL AND {db_field} != '' AND {db_field} >= ?"
+    return _list_media_with_where(conn, where_sql, [str(cutoff_iso or "")], limit=limit, offset=offset)
+
+
+def count_media_in_smart_collection(
+    conn: sqlite3.Connection,
+    field_name: str,
+    cutoff_iso: str,
+) -> int:
+    _ensure_media_items_scan_columns(conn)
+    field = str(field_name or "").strip()
+    if field not in {"metadata_date", "modified_time_utc"}:
+        return 0
+    db_field = "metadata_date" if field == "metadata_date" else "modified_time_utc"
+    row = conn.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM media_items
+        WHERE {db_field} IS NOT NULL AND {db_field} != '' AND {db_field} >= ?
+        """,
+        (str(cutoff_iso or ""),),
+    ).fetchone()
+    return int((row[0] if row else 0) or 0)
+
+
 def _list_media_with_where(
     conn: sqlite3.Connection,
     where_sql: str,

@@ -7,6 +7,7 @@ let gTotal = 0;
 let gMedia = []; // Current page items
 let gSelectedFolders = [];
 let gActiveCollection = null;
+let gActiveSmartCollection = null;
 let gPinnedFolders = new Set();
 let gBridge = null;
 let gPosterRequested = new Set();
@@ -1410,9 +1411,11 @@ function toggleFolderCrumbMenu(folderPath, anchor, level = 0, preloadedItems = n
   });
 }
 
-function setSelectedFolder(paths, activeCollection = null) {
+function setSelectedFolder(paths, activeCollection = null, activeSmartCollection = null) {
   if (activeCollection && activeCollection.name && !gNavState.currentPath) {
     gAddressBarFallbackText = activeCollection.name;
+  } else if (activeSmartCollection && activeSmartCollection.name && !gNavState.currentPath) {
+    gAddressBarFallbackText = activeSmartCollection.name;
   } else if (!paths || paths.length === 0) {
     gAddressBarFallbackText = '(none)';
   } else if (paths.length === 1) {
