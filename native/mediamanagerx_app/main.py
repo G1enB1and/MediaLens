@@ -3144,6 +3144,13 @@ class Bridge(QObject):
             {"key": "modified_7d", "name": "Modified Last 7 Days", "field": "modified_time_utc", "days": 7},
             {"key": "modified_14d", "name": "Modified Last 14 Days", "field": "modified_time_utc", "days": 14},
             {"key": "modified_30d", "name": "Modified Last 30 Days", "field": "modified_time_utc", "days": 30},
+            {"key": "no_tags", "name": "No Tags", "field": "no_tags"},
+            {"key": "no_description", "name": "No Description", "field": "no_description"},
+            {"key": "large_3mb", "name": "Larger Than 3 MB", "field": "file_size_gt_3mb"},
+            {"key": "large_10mb", "name": "Larger Than 10 MB", "field": "file_size_gt_10mb"},
+            {"key": "large_25mb", "name": "Larger Than 25 MB", "field": "file_size_gt_25mb"},
+            {"key": "large_100mb", "name": "Larger Than 100 MB", "field": "file_size_gt_100mb"},
+            {"key": "large_1gb", "name": "Larger Than 1 GB", "field": "file_size_gt_1gb"},
         ]
 
     def _smart_collection_def(self, key: str) -> dict | None:

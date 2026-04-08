@@ -366,6 +366,17 @@ def list_media_in_smart_collection(
     offset: Optional[int] = None,
 ) -> list[dict]:
     field = str(field_name or "").strip()
+    predicate_map = {
+        "no_tags": "NOT EXISTS (SELECT 1 FROM media_tags mt WHERE mt.media_id = m.id)",
+        "no_description": "(meta.description IS NULL OR TRIM(meta.description) = '')",
+        "file_size_gt_3mb": "m.file_size_bytes > 3145728",
+        "file_size_gt_10mb": "m.file_size_bytes > 10485760",
+        "file_size_gt_25mb": "m.file_size_bytes > 26214400",
+        "file_size_gt_100mb": "m.file_size_bytes > 104857600",
+        "file_size_gt_1gb": "m.file_size_bytes > 1073741824",
+    }
+    if field in predicate_map:
+        return _list_media_with_where(conn, predicate_map[field], [], limit=limit, offset=offset)
     if field not in {"metadata_date", "modified_time_utc"}:
         return []
     db_field = "m.metadata_date" if field == "metadata_date" else "m.modified_time_utc"
@@ -380,6 +391,47 @@ def count_media_in_smart_collection(
 ) -> int:
     _ensure_media_items_scan_columns(conn)
     field = str(field_name or "").strip()
+    predicate_map = {
+        "no_tags": """
+            SELECT COUNT(*)
+            FROM media_items m
+            WHERE NOT EXISTS (SELECT 1 FROM media_tags mt WHERE mt.media_id = m.id)
+        """,
+        "no_description": """
+            SELECT COUNT(*)
+            FROM media_items m
+            LEFT JOIN media_metadata meta ON m.id = meta.media_id
+            WHERE meta.description IS NULL OR TRIM(meta.description) = ''
+        """,
+        "file_size_gt_3mb": """
+            SELECT COUNT(*)
+            FROM media_items m
+            WHERE m.file_size_bytes > 3145728
+        """,
+        "file_size_gt_10mb": """
+            SELECT COUNT(*)
+            FROM media_items m
+            WHERE m.file_size_bytes > 10485760
+        """,
+        "file_size_gt_25mb": """
+            SELECT COUNT(*)
+            FROM media_items m
+            WHERE m.file_size_bytes > 26214400
+        """,
+        "file_size_gt_100mb": """
+            SELECT COUNT(*)
+            FROM media_items m
+            WHERE m.file_size_bytes > 104857600
+        """,
+        "file_size_gt_1gb": """
+            SELECT COUNT(*)
+            FROM media_items m
+            WHERE m.file_size_bytes > 1073741824
+        """,
+    }
+    if field in predicate_map:
+        row = conn.execute(predicate_map[field]).fetchone()
+        return int((row[0] if row else 0) or 0)
     if field not in {"metadata_date", "modified_time_utc"}:
         return 0
     db_field = "metadata_date" if field == "metadata_date" else "modified_time_utc"
