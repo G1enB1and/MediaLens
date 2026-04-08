@@ -1,18 +1,18 @@
-## MediaLens v1.1.11
+## MediaLens v1.1.12
 
 ### Summary
 
-This release brings a major search upgrade to MediaLens while also expanding file support and polishing everyday browsing. It makes powerful search easier to use, adds first-class SVG support, and improves several core gallery workflows.
+This release makes duplicate cleanup more reliable, easier to review, and faster to act on. MediaLens now applies your duplicate rules more consistently, keeps comparison decisions in sync, and makes it clearer what is identical, what should be kept, and how much space you can reclaim.
 
 ### Highlights
 
-- Advanced Search is now available as a guided builder, so users can create powerful searches without memorizing syntax.
-- SVG files now feel like first-class citizens with filtering, metadata support, and better visibility for transparent artwork.
-- File browsing is more polished with Sort by File Type, clearer transparent PNG backgrounds, and a more reliable updater relaunch flow.
+- Duplicate and similar review now preselects Keep and Delete choices from your rules, cutting down manual cleanup work.
+- The comparison panel now matches duplicate review more closely with synced delete controls, clearer best-file labeling, and better handling for identical files.
 
 ### Notes
 
-- Console noise was reduced by suppressing harmless DirectWrite legacy font fallback warnings, making real issues easier to spot.
+- Live review stats now show Keep, Delete, and Potential Savings based on your current selections.
+- Advanced Search duration and file-size unit selectors were also corrected in this release.
 
 ---
 

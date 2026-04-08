@@ -1,6 +1,36 @@
 # Change Log
 
-## v1.1.11 (Current)
+## v1.1.12 (Current)
+
+### Summary
+
+This release makes duplicate cleanup much easier to trust and much faster to review. MediaLens now applies your review rules more consistently, keeps duplicate and comparison decisions in sync, and gives you clearer signals about what is identical, what should be kept, and how much space you can recover.
+
+### Highlights
+
+- Duplicate and similar review now pre-fills Keep and Delete selections from your rules, so there is less manual cleanup before using Auto Resolve.
+- The comparison panel now stays aligned with duplicate review decisions, including matching delete controls, clearer winner labels, and better handling for truly identical files.
+- Review stats are easier to follow with live Keep, Delete, and Potential Savings cards that reflect the current cleanup plan.
+
+### Added
+
+- Added Delete checkboxes to duplicate and similar review cards so review choices can be adjusted before running Auto Resolve.
+- Added rule-based preselection for Keep and Delete in similar-file review so duplicate cleanup can start from your preferred decisions.
+- Added a sticky review message and live summary cards for Keep, Delete, and Potential Savings based on the current checked selections.
+- Added matching trashcan actions and delete-state syncing in the comparison panel so review actions stay consistent across both workflows.
+
+### Changed
+
+- Changed exact duplicate review so `Identical` is shown in place of `Best Overall` across duplicate groups, mixed duplicate-and-similar groups, and the comparison panel.
+- Improved comparison winner logic so `Best in Comparison` follows `Best Overall` when files are effectively tied, with clearer winner labels only when there is a real difference.
+- Restored and aligned duplicate scoring labels such as `Most metadata` so they appear more consistently in duplicate review and comparison.
+- Updated duplicate-review and comparison trash buttons to use matching icon styling, hover states, and theme-aware colors.
+- Renamed and refined the duplicate-review stats cards for clearer wording and better responsive behavior at smaller window sizes.
+- Fixed Advanced Search duration and file-size unit selectors.
+
+---
+
+## v1.1.11
 
 ### Summary
 
