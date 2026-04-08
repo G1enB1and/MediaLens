@@ -6538,10 +6538,10 @@ function getAdvancedSearchRules() {
     match: getSelectLikeValue(row.querySelector('[data-role="match"]')) || 'contains',
     field: getSelectLikeValue(row.querySelector('[data-role="field"]')) || '',
     operator: getSelectLikeValue(row.querySelector('[data-role="operator"]')) || '=',
-    value: advancedFieldUsesValueSelect(row.querySelector('[data-role="field"]')?.value || '')
+    value: advancedFieldUsesValueSelect(getSelectLikeValue(row.querySelector('[data-role="field"]')) || '')
       ? (row.querySelector('[data-role="value-select"]')?.value || '')
       : (row.querySelector('[data-role="value"]')?.value || ''),
-    unit: row.querySelector('[data-role="unit"]')?.value || '',
+    unit: getSelectLikeValue(row.querySelector('[data-role="unit"]')) || '',
     join: getSelectLikeValue(row.querySelector('[data-role="join"]')) || '',
   }));
 }
@@ -6695,14 +6695,17 @@ function renderAdvancedSearchRules(rules) {
         </div>
         <div class="advanced-search-rule-cell" data-cell="value">
           <div class="advanced-search-value-group">
-            <label class="advanced-search-value-wrap">
+            <div class="advanced-search-value-wrap">
               <span class="advanced-search-label">Search Value</span>
               <div class="advanced-search-value-controls">
                 <input class="advanced-search-input" data-role="value" type="${def.kind === 'date' ? 'date' : 'text'}" />
                 <select class="advanced-search-select" data-role="value-select" hidden></select>
-                <select class="advanced-search-select" data-role="unit" hidden></select>
+                <div class="custom-select advanced-search-inline-select advanced-search-unit-select" data-role="unit" tabindex="0" hidden>
+                  <div class="select-trigger"></div>
+                  <div class="select-options"></div>
+                </div>
               </div>
-            </label>
+            </div>
             <div class="advanced-search-join-wrap">
               <span class="advanced-search-label">Then</span>
               <div class="custom-select advanced-search-inline-select advanced-search-join-select" data-role="join" tabindex="0">
@@ -6733,13 +6736,19 @@ function renderAdvancedSearchRules(rules) {
       valueInput.value = def.kind === 'date' ? (normalizeDateInputValue(normalized.value) || '') : normalized.value;
     }
     const unitSelect = row.querySelector('[data-role="unit"]');
-    if (unitSelect) unitSelect.value = normalized.unit || '';
+    if (unitSelect) {
+      setCustomSelectOptions(
+        unitSelect,
+        getAdvancedUnitOptions(normalized.field),
+        normalized.unit || getAdvancedDefaultUnit(normalized.field)
+      );
+    }
   });
 }
 
 function updateAdvancedRuleControls(row) {
   if (!row) return;
-  const fieldValue = row.querySelector('[data-role="field"]')?.value || '';
+  const fieldValue = getSelectLikeValue(row.querySelector('[data-role="field"]')) || '';
   const matchEl = row.querySelector('[data-role="match"]');
   const operatorEl = row.querySelector('[data-role="operator"]');
   const valueEl = row.querySelector('[data-role="value"]');
@@ -6783,8 +6792,11 @@ function updateAdvancedRuleControls(row) {
     const shouldUseUnit = advancedFieldUsesUnitSelect(fieldValue);
     unitEl.hidden = !shouldUseUnit;
     if (shouldUseUnit) {
-      populateSelectOptions(unitEl, getAdvancedUnitOptions(fieldValue));
-      if (!unitEl.value) unitEl.value = getAdvancedDefaultUnit(fieldValue);
+      setCustomSelectOptions(
+        unitEl,
+        getAdvancedUnitOptions(fieldValue),
+        getSelectLikeValue(unitEl) || getAdvancedDefaultUnit(fieldValue)
+      );
     }
   }
   row.dataset.fieldKind = def.kind;

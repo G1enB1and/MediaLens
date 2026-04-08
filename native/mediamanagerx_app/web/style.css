@@ -1075,6 +1075,7 @@ main {
 
 .advanced-search-operator-select .select-options div:hover,
 .advanced-search-join-select .select-options div:hover,
+#advancedSearchRules .advanced-search-unit-select .select-options div:hover,
 #advancedSearchRules .advanced-search-inline-select .select-options div:hover {
   background: var(--accent);
   color: var(--accent-contrast);
@@ -1082,6 +1083,7 @@ main {
 
 .advanced-search-operator-select .select-options div.selected,
 .advanced-search-join-select .select-options div.selected,
+#advancedSearchRules .advanced-search-unit-select .select-options div.selected,
 #advancedSearchRules .advanced-search-inline-select .select-options div.selected {
   background: var(--input-bg);
   color: var(--fg);
