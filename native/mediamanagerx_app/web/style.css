@@ -2198,6 +2198,11 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   cursor: pointer;
 }
 
+.duplicate-identical-label {
+  color: color-mix(in srgb, var(--accent), var(--fg) 24%);
+  font-weight: 700;
+}
+
 .duplicate-keep-toggle {
   accent-color: var(--accent);
 }

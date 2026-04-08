@@ -3934,6 +3934,7 @@ function createStructuredCard(item, idx) {
     const bestLabel = document.createElement('label');
     bestLabel.className = 'duplicate-keep-label';
     if (isExactDuplicateReviewItem(item)) {
+      bestLabel.classList.add('duplicate-identical-label');
       const identicalText = document.createElement('span');
       identicalText.textContent = 'Identical';
       bestLabel.appendChild(identicalText);
