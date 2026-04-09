@@ -179,6 +179,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QGridLayout,
     QAbstractItemView,
+    QStackedWidget,
     QListView,
     QListWidget,
     QListWidgetItem,
@@ -1435,12 +1436,14 @@ class TagListTagRow(QWidget):
         self._tag_name = str(entry.get("name") or "")
         self._scope_use_count = int(entry.get("scope_use_count") or 0)
         self._global_use_count = int(entry.get("global_use_count") or 0)
-        self._in_selected_tags = bool(entry.get("in_selected_tags"))
+        self._selection_state = str(entry.get("selection_state") or ("selected" if entry.get("in_selected_tags") else "none"))
+        self._filter_active = bool(entry.get("filter_active"))
         self._drag_bg_color = QColor("#dbeafe")
         self._drag_border_color = QColor("#8ab4f8")
         self._drag_text_color = QColor("#111111")
         self.setObjectName("tagListTagRow")
         self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(6, 2, 6, 2)
@@ -1496,30 +1499,52 @@ class TagListTagRow(QWidget):
     def update_entry(self, entry: dict) -> None:
         self._scope_use_count = int(entry.get("scope_use_count") or 0)
         self._global_use_count = int(entry.get("global_use_count") or 0)
-        self._in_selected_tags = bool(entry.get("in_selected_tags"))
+        self._selection_state = str(entry.get("selection_state") or ("selected" if entry.get("in_selected_tags") else "none"))
+        self._filter_active = bool(entry.get("filter_active"))
         self.scope_btn.setText(str(self._scope_use_count))
 
-    def apply_theme(self, *, accent_color: str, accent_text: str, text: str, text_muted: str, btn_bg: str, btn_hover: str, btn_border: str, btn_border_hover: str, is_light: bool) -> None:
+    def apply_theme(self, *, accent_color: str, accent_text: str, accent_text_muted: str, text: str, text_muted: str, btn_bg: str, btn_hover: str, btn_border: str, btn_border_hover: str, is_light: bool) -> None:
         trash_svg_name = "trashcan.svg" if is_light else "trashcan-white.svg"
         trash_svg = (Path(__file__).with_name("web") / "icons" / trash_svg_name).as_posix()
         trash_red_svg = (Path(__file__).with_name("web") / "icons" / "trashcan-red.svg").as_posix()
         trash_disabled_svg = (Path(__file__).with_name("web") / "icons" / "trashcan-gray.svg").as_posix()
         self._drag_bg_color = QColor(Theme.get_accent_soft(QColor(accent_color)))
         self._drag_border_color = QColor(accent_color)
-        self._drag_text_color = QColor(accent_text if self._in_selected_tags else text)
+        is_selected = self._selection_state in {"selected", "common"}
+        is_uncommon = self._selection_state == "uncommon"
+        row_filter_active = self._filter_active
+        row_text = accent_text if is_selected else (accent_text_muted if is_uncommon else text)
+        row_weight = "700" if is_selected else ("600" if is_uncommon else "400")
+        self._drag_text_color = QColor(row_text)
+        row_bg = btn_bg if row_filter_active else "transparent"
+        row_border = accent_color if row_filter_active else "transparent"
+
+        self.setStyleSheet(
+            f"""
+            QWidget#tagListTagRow {{
+                background-color: {row_bg};
+                border: 1px solid {row_border};
+                border-radius: 8px;
+            }}
+            """
+        )
 
         self.name_lbl.setStyleSheet(
-            f"color: {accent_text if self._in_selected_tags else text}; "
-            f"font-weight: {'700' if self._in_selected_tags else '400'}; background: transparent;"
+            f"color: {row_text}; "
+            f"font-weight: {row_weight}; background: transparent;"
         )
+        scope_text = accent_text if row_filter_active else text
         button_qss = (
             f"QPushButton {{ background-color: {btn_bg}; color: {text}; border: 1px solid {btn_border}; border-radius: 6px; padding: 2px 6px; }}"
             f"QPushButton:hover {{ background-color: {btn_hover}; border-color: {btn_border_hover}; }}"
         )
-        self.scope_btn.setStyleSheet(button_qss)
+        self.scope_btn.setStyleSheet(
+            f"QPushButton {{ background-color: {btn_bg}; color: {scope_text}; border: 1px solid {btn_border}; border-radius: 6px; padding: 2px 6px; }}"
+            f"QPushButton:hover {{ background-color: {btn_hover}; border-color: {btn_border_hover}; }}"
+        )
         self.add_btn.setStyleSheet(button_qss)
 
-        can_remove_from_selection = self._in_selected_tags
+        can_remove_from_selection = self._selection_state in {"selected", "common", "uncommon"}
         self.remove_from_selection_btn.setEnabled(can_remove_from_selection)
         self.remove_from_selection_btn.setStyleSheet(
             f"""
@@ -3164,6 +3189,7 @@ class Bridge(QObject):
         self._session_shuffle_seed = random.getrandbits(32)
         self._current_gallery_filter: str = "all"
         self._current_gallery_search: str = ""
+        self._current_gallery_tag_scope_search: str = ""
         
         # Hybrid Fast-Load Cache
         self._disk_cache: dict[str, Path] = {}
@@ -3451,6 +3477,14 @@ class Bridge(QObject):
             return
         self._current_gallery_filter = next_filter
         self._current_gallery_search = next_search
+        self.galleryScopeChanged.emit()
+
+    @Slot(str)
+    def set_current_gallery_tag_scope_state(self, search_query: str) -> None:
+        next_search = str(search_query or "")
+        if next_search == self._current_gallery_tag_scope_search:
+            return
+        self._current_gallery_tag_scope_search = next_search
         self.galleryScopeChanged.emit()
 
     @Slot(result="QVariantMap")
@@ -7821,6 +7855,10 @@ class MainWindow(QMainWindow):
         self.act_toggle_tag_list_panel.triggered.connect(self._toggle_tag_list_panel_from_menu)
         view_menu.addAction(self.act_toggle_tag_list_panel)
 
+        self.act_open_bulk_tag_editor = QAction("Bulk Tag Editor", self)
+        self.act_open_bulk_tag_editor.triggered.connect(self._open_bulk_tag_editor_from_menu)
+        view_menu.addAction(self.act_open_bulk_tag_editor)
+
         self.act_show_dismissed_progress_toasts = QAction("Show Hidden Progress Toasts", self)
         self.act_show_dismissed_progress_toasts.triggered.connect(self.bridge.reveal_progress_toasts)
         view_menu.addAction(self.act_show_dismissed_progress_toasts)
@@ -8456,6 +8494,13 @@ class MainWindow(QMainWindow):
         self.btn_import_tag_list_tags.setVisible(False)
         self.tag_list_panel_layout.addWidget(self.btn_import_tag_list_tags)
 
+        self.btn_clear_tag_scope_filter = QPushButton("Deselect Tag Filter")
+        self.btn_clear_tag_scope_filter.setObjectName("btnClearTagScopeFilter")
+        self.btn_clear_tag_scope_filter.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_clear_tag_scope_filter.clicked.connect(self._clear_tag_scope_filter)
+        self.btn_clear_tag_scope_filter.setVisible(False)
+        self.tag_list_panel_layout.addWidget(self.btn_clear_tag_scope_filter)
+
         self.tag_list_rows = TagListRowsWidget(self.tag_list_panel)
         self.tag_list_rows.setObjectName("tagListRows")
         self.tag_list_rows.orderChanged.connect(self._persist_active_tag_list_order)
@@ -8473,6 +8518,16 @@ class MainWindow(QMainWindow):
         outer_right_layout = QVBoxLayout(self.right_panel)
         outer_right_layout.setContentsMargins(0, 0, 0, 0)
         outer_right_layout.setSpacing(0)
+
+        self.right_workspace_stack = QStackedWidget(self.right_panel)
+        self.right_workspace_stack.setObjectName("rightWorkspaceStack")
+        outer_right_layout.addWidget(self.right_workspace_stack)
+
+        self.details_workspace = QWidget(self.right_workspace_stack)
+        self.details_workspace.setObjectName("detailsWorkspace")
+        details_workspace_layout = QVBoxLayout(self.details_workspace)
+        details_workspace_layout.setContentsMargins(0, 0, 0, 0)
+        details_workspace_layout.setSpacing(0)
 
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
@@ -8572,8 +8627,15 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(self.meta_empty_state_lbl)
         self.meta_empty_state_lbl.setVisible(False)
 
+        self.meta_empty_select_all_btn = QPushButton("Select All")
+        self.meta_empty_select_all_btn.setObjectName("metaEmptySelectAllButton")
+        self.meta_empty_select_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.meta_empty_select_all_btn.clicked.connect(self._select_all_visible_gallery_items)
+        self.meta_empty_select_all_btn.setVisible(False)
+        right_layout.addWidget(self.meta_empty_select_all_btn)
+
         self.scroll_area.setWidget(self.scroll_container)
-        outer_right_layout.addWidget(self.scroll_area)
+        details_workspace_layout.addWidget(self.scroll_area)
 
         # --- Filename (editable, triggers rename) ---
         self.lbl_fn_cap = QLabel("Filename:")
@@ -8955,6 +9017,115 @@ class MainWindow(QMainWindow):
         self.meta_status_lbl.setObjectName("metaStatusLabel")
         self.meta_status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         right_layout.addWidget(self.meta_status_lbl)
+
+        self.bulk_editor_panel = QWidget(self.right_workspace_stack)
+        self.bulk_editor_panel.setObjectName("bulkTagEditorPanel")
+        bulk_editor_outer_layout = QVBoxLayout(self.bulk_editor_panel)
+        bulk_editor_outer_layout.setContentsMargins(0, 0, 0, 0)
+        bulk_editor_outer_layout.setSpacing(0)
+
+        self.bulk_scroll_area = QScrollArea()
+        self.bulk_scroll_area.setWidgetResizable(True)
+        self.bulk_scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.bulk_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.bulk_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.bulk_scroll_area.setObjectName("bulkTagEditorScrollArea")
+
+        self.bulk_scroll_container = QWidget(self.bulk_scroll_area)
+        self.bulk_scroll_container.setObjectName("bulkTagEditorScrollContainer")
+        self.bulk_right_layout = QVBoxLayout(self.bulk_scroll_container)
+        self.bulk_right_layout.setContentsMargins(12, 12, 12, 12)
+        self.bulk_right_layout.setSpacing(6)
+
+        self.bulk_header_lbl = QLabel("Bulk Tag Editor")
+        self.bulk_header_lbl.setObjectName("bulkTagEditorHeaderLabel")
+        self.bulk_right_layout.addWidget(self.bulk_header_lbl)
+
+        self.bulk_selection_lbl = QLabel("")
+        self.bulk_selection_lbl.setObjectName("bulkTagEditorSelectionLabel")
+        self.bulk_selection_lbl.setWordWrap(True)
+        self.bulk_right_layout.addWidget(self.bulk_selection_lbl)
+
+        self.bulk_btn_select_all_gallery = QPushButton("Select All Files in Gallery")
+        self.bulk_btn_select_all_gallery.setObjectName("bulkBtnSelectAllGallery")
+        self.bulk_btn_select_all_gallery.setProperty("baseText", "Select All Files in Gallery")
+        self.bulk_btn_select_all_gallery.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.bulk_btn_select_all_gallery.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.bulk_btn_select_all_gallery.clicked.connect(self._select_all_visible_gallery_items)
+        self.bulk_right_layout.addWidget(self.bulk_btn_select_all_gallery)
+
+        self.bulk_tags_cap_lbl = QLabel("Tags (comma or semicolon separated):")
+        self.bulk_tags_cap_lbl.setObjectName("bulkTagEditorTagsLabel")
+        self.bulk_right_layout.addWidget(self.bulk_tags_cap_lbl)
+
+        self.bulk_meta_tags = QLineEdit()
+        self.bulk_meta_tags.setObjectName("bulkTagEditorTagsEdit")
+        self.bulk_meta_tags.setPlaceholderText("tag1, tag2, tag3")
+        self.bulk_meta_tags.editingFinished.connect(self._save_native_tags)
+        self.bulk_meta_tags.textChanged.connect(lambda _text: self._refresh_tag_list_rows_state())
+        self.bulk_right_layout.addWidget(self.bulk_meta_tags)
+
+        self.bulk_common_tags_lbl = QLabel("Common Tags:")
+        self.bulk_common_tags_lbl.setObjectName("bulkTagEditorCommonTagsLabel")
+        self.bulk_right_layout.addWidget(self.bulk_common_tags_lbl)
+
+        self.bulk_common_tags_text = QPlainTextEdit()
+        self.bulk_common_tags_text.setObjectName("bulkTagEditorCommonTagsText")
+        self.bulk_common_tags_text.setReadOnly(True)
+        self.bulk_common_tags_text.setPlaceholderText("Tags present in all selected files")
+        self.bulk_common_tags_text.setMaximumHeight(72)
+        self.bulk_right_layout.addWidget(self.bulk_common_tags_text)
+
+        self.bulk_uncommon_tags_lbl = QLabel("Uncommon Tags:")
+        self.bulk_uncommon_tags_lbl.setObjectName("bulkTagEditorUncommonTagsLabel")
+        self.bulk_right_layout.addWidget(self.bulk_uncommon_tags_lbl)
+
+        self.bulk_uncommon_tags_text = QPlainTextEdit()
+        self.bulk_uncommon_tags_text.setObjectName("bulkTagEditorUncommonTagsText")
+        self.bulk_uncommon_tags_text.setReadOnly(True)
+        self.bulk_uncommon_tags_text.setPlaceholderText("Tags present in some, but not all, selected files")
+        self.bulk_uncommon_tags_text.setMaximumHeight(96)
+        self.bulk_right_layout.addWidget(self.bulk_uncommon_tags_text)
+
+        self.bulk_status_lbl = QLabel("")
+        self.bulk_status_lbl.setObjectName("bulkTagEditorStatusLabel")
+        self.bulk_status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.bulk_status_lbl.setWordWrap(True)
+        self.bulk_right_layout.addWidget(self.bulk_status_lbl)
+
+        self.bulk_right_layout.addStretch(1)
+
+        self.bulk_btn_clear_tags = QPushButton("Clear All Tags")
+        self.bulk_btn_clear_tags.setObjectName("bulkBtnClearTags")
+        self.bulk_btn_clear_tags.setProperty("baseText", "Clear All Tags")
+        self.bulk_btn_clear_tags.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.bulk_btn_clear_tags.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.bulk_btn_clear_tags.clicked.connect(self._clear_bulk_tags)
+        self.bulk_right_layout.addWidget(self.bulk_btn_clear_tags)
+
+        self.bulk_btn_save_meta = QPushButton("Save Tags to DB")
+        self.bulk_btn_save_meta.setObjectName("bulkBtnSaveMeta")
+        self.bulk_btn_save_meta.setProperty("baseText", "Save Tags to DB")
+        self.bulk_btn_save_meta.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.bulk_btn_save_meta.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.bulk_btn_save_meta.clicked.connect(self._save_native_metadata)
+        self.bulk_right_layout.addWidget(self.bulk_btn_save_meta)
+
+        self.bulk_btn_save_to_exif = QPushButton("Embed Tags in Files")
+        self.bulk_btn_save_to_exif.setObjectName("bulkBtnSaveToExif")
+        self.bulk_btn_save_to_exif.setProperty("baseText", "Embed Tags in Files")
+        self.bulk_btn_save_to_exif.setToolTip("Write only the entered tags into each selected file's embedded metadata")
+        self.bulk_btn_save_to_exif.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.bulk_btn_save_to_exif.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.bulk_btn_save_to_exif.clicked.connect(self._save_to_exif_cmd)
+        self.bulk_right_layout.addWidget(self.bulk_btn_save_to_exif)
+
+        self.bulk_scroll_area.setWidget(self.bulk_scroll_container)
+        bulk_editor_outer_layout.addWidget(self.bulk_scroll_area)
+
+        self.right_workspace_stack.addWidget(self.details_workspace)
+        self.right_workspace_stack.addWidget(self.bulk_editor_panel)
+        self.right_workspace_stack.setCurrentWidget(self.details_workspace)
         self._update_sidebar_action_buttons()
         self._update_sidebar_input_widths()
 
@@ -10243,10 +10414,16 @@ class MainWindow(QMainWindow):
     def _right_panel_content_width(self) -> int:
         if not hasattr(self, "scroll_area"):
             return 180
-        margins = self.right_layout.contentsMargins() if hasattr(self, "right_layout") else None
+        if self._is_bulk_editor_active() and hasattr(self, "bulk_scroll_area") and hasattr(self, "bulk_right_layout"):
+            scroll_area = self.bulk_scroll_area
+            layout = self.bulk_right_layout
+        else:
+            scroll_area = self.scroll_area
+            layout = self.right_layout if hasattr(self, "right_layout") else None
+        margins = layout.contentsMargins() if layout is not None else None
         left = margins.left() if margins else 12
         right = margins.right() if margins else 12
-        viewport_w = self.scroll_area.viewport().width()
+        viewport_w = scroll_area.viewport().width()
         return max(90, viewport_w - left - right)
 
     def _update_sidebar_action_buttons(self) -> None:
@@ -10254,11 +10431,16 @@ class MainWindow(QMainWindow):
             return
         available_w = self._right_panel_content_width()
         buttons = [
+            getattr(self, "meta_empty_select_all_btn", None),
             getattr(self, "btn_clear_bulk_tags", None),
             getattr(self, "btn_save_meta", None),
             getattr(self, "btn_import_exif", None),
             getattr(self, "btn_merge_hidden_meta", None),
             getattr(self, "btn_save_to_exif", None),
+            getattr(self, "bulk_btn_select_all_gallery", None),
+            getattr(self, "bulk_btn_clear_tags", None),
+            getattr(self, "bulk_btn_save_meta", None),
+            getattr(self, "bulk_btn_save_to_exif", None),
         ]
         for button in buttons:
             if button is None:
@@ -10275,8 +10457,10 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "scroll_container"):
             return
         available_w = self._right_panel_content_width()
-        self.preview_image_lbl.setFixedWidth(available_w)
-        for widget in self.scroll_container.findChildren(QWidget):
+        if hasattr(self, "preview_image_lbl"):
+            self.preview_image_lbl.setFixedWidth(available_w)
+        active_container = self.bulk_scroll_container if self._is_bulk_editor_active() and hasattr(self, "bulk_scroll_container") else self.scroll_container
+        for widget in active_container.findChildren(QWidget):
             if not isinstance(widget, (QLineEdit, QTextEdit, QPlainTextEdit)):
                 continue
             widget.setMinimumWidth(0)
@@ -10315,6 +10499,8 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "meta_empty_state_lbl"):
             return
         self.meta_empty_state_lbl.setVisible(visible)
+        if hasattr(self, "meta_empty_select_all_btn"):
+            self.meta_empty_select_all_btn.setVisible(visible)
         if visible:
             self._clear_preview_media()
             self.preview_image_lbl.setText("")
@@ -10322,35 +10508,37 @@ class MainWindow(QMainWindow):
                 widget.setVisible(False)
 
     def _configure_bulk_tag_editor(self, selection_count: int) -> None:
-        if hasattr(self, "preview_header_row"):
-             self.preview_header_row.setVisible(False)
-        self.preview_image_lbl.setVisible(False)
-        self.preview_sep.setVisible(False)
-        self.details_header_row.setVisible(False)
-        self.lbl_group_general.setVisible(False)
-        self.lbl_group_camera.setVisible(False)
-        self.lbl_group_ai.setVisible(False)
-        self.meta_sep1.setVisible(False)
-        self.meta_sep2.setVisible(False)
-        self.meta_sep3.setVisible(False)
-        self.lbl_fn_cap.setVisible(False)
-        self.meta_filename_edit.setVisible(False)
-        self.meta_path_lbl.setVisible(False)
-        self.btn_import_exif.setVisible(False)
-        self.btn_merge_hidden_meta.setVisible(False)
-        self.lbl_tags_cap.setText("Tags (comma or semicolon separated):")
-        self.lbl_tags_cap.setVisible(True)
-        self.meta_tags.setVisible(True)
-        self.tag_list_open_btn_row.setVisible(False)
-        self.meta_tags.setPlaceholderText("tag1, tag2, tag3")
-        self.btn_save_meta.setVisible(True)
-        self.btn_save_meta.setProperty("baseText", f"Save Tags to DB for {selection_count} Items")
-        self.btn_clear_bulk_tags.setVisible(True)
-        self.btn_clear_bulk_tags.setProperty("baseText", f"Clear Tags from DB for {selection_count} Items")
-        self.btn_save_to_exif.setVisible(True)
-        self.btn_save_to_exif.setProperty("baseText", f"Embed Tags in {selection_count} Files")
-        self.btn_save_to_exif.setToolTip("Write only the entered tags into each selected file's embedded metadata")
+        self._set_active_right_workspace("bulk")
+        self.bulk_selection_lbl.setText(f"<span style=\"font-weight:700;\">{selection_count}</span> files selected")
+        self.bulk_meta_tags.setPlaceholderText("tag1, tag2, tag3")
+        self.bulk_btn_select_all_gallery.setProperty("baseText", "Select All Files in Gallery")
+        self.bulk_btn_save_meta.setProperty("baseText", f"Save Tags to DB for {selection_count} Items")
+        self.bulk_btn_clear_tags.setProperty("baseText", f"Clear Tags from DB for {selection_count} Items")
+        self.bulk_btn_save_to_exif.setProperty("baseText", f"Embed Tags in {selection_count} Files")
+        self.bulk_btn_save_to_exif.setToolTip("Write only the entered tags into each selected file's embedded metadata")
+        self._refresh_bulk_tag_editor_summary()
         self._update_sidebar_action_buttons()
+
+    def _select_all_visible_gallery_items(self, _checked: bool = False) -> None:
+        try:
+            self.web.page().runJavaScript(
+                "try{ if(window.__mmx_selectAllVisible){ window.__mmx_selectAllVisible(); } else if(window.selectAll){ window.selectAll(); } }catch(e){}"
+            )
+        except Exception:
+            pass
+
+    def _open_bulk_tag_editor_from_menu(self, _checked: bool = False) -> None:
+        try:
+            if not bool(self.bridge.settings.value("ui/show_right_panel", True, type=bool)):
+                self.bridge.settings.setValue("ui/show_right_panel", True)
+                self.bridge.uiFlagChanged.emit("ui.show_right_panel", True)
+        except Exception:
+            pass
+        self._set_tag_list_panel_requested_visible(True)
+        scope_paths = self._current_gallery_scope_paths()
+        if len(scope_paths) > 1:
+            self._show_metadata_for_path(scope_paths)
+        QTimer.singleShot(0, self._select_all_visible_gallery_items)
 
     @staticmethod
     def _normalize_tag_list(text: str) -> list[str]:
@@ -10377,6 +10565,112 @@ class MainWindow(QMainWindow):
             return 0
         return int(self.tag_list_select.currentData() or 0)
 
+    def _is_bulk_editor_active(self) -> bool:
+        return bool(hasattr(self, "right_workspace_stack") and self.right_workspace_stack.currentWidget() is getattr(self, "bulk_editor_panel", None))
+
+    def _set_active_right_workspace(self, workspace: str) -> None:
+        if not hasattr(self, "right_workspace_stack"):
+            return
+        if workspace == "bulk" and hasattr(self, "bulk_editor_panel"):
+            self.right_workspace_stack.setCurrentWidget(self.bulk_editor_panel)
+        elif hasattr(self, "details_workspace"):
+            self.right_workspace_stack.setCurrentWidget(self.details_workspace)
+        self._update_sidebar_action_buttons()
+        self._update_sidebar_input_widths()
+        if hasattr(self, "tag_list_panel") and self.tag_list_panel.isVisible():
+            self._refresh_tag_list_rows_state()
+
+    def _active_tag_editor(self) -> QLineEdit:
+        if self._is_bulk_editor_active() and hasattr(self, "bulk_meta_tags"):
+            return self.bulk_meta_tags
+        return self.meta_tags
+
+    def _active_status_label(self) -> QLabel:
+        if self._is_bulk_editor_active() and hasattr(self, "bulk_status_lbl"):
+            return self.bulk_status_lbl
+        return self.meta_status_lbl
+
+    def _selected_paths_tag_summary(self) -> tuple[list[str], list[str]]:
+        from app.mediamanager.utils.pathing import normalize_windows_path
+
+        paths = [str(path or "").strip() for path in list(getattr(self, "_current_paths", []) or []) if str(path or "").strip()]
+        if not paths:
+            return [], []
+        unique_paths: list[str] = []
+        seen_paths: set[str] = set()
+        for path in paths:
+            normalized_path = normalize_windows_path(path)
+            key = normalized_path.casefold()
+            if key in seen_paths:
+                continue
+            seen_paths.add(key)
+            unique_paths.append(normalized_path)
+        placeholders = ",".join("?" for _ in unique_paths)
+        ordered_names: dict[str, str] = {}
+        counts: Counter[str] = Counter()
+        try:
+            rows = self.bridge.conn.execute(
+                f"""
+                SELECT t.name, COUNT(DISTINCT mi.id) AS usage_count
+                FROM media_items mi
+                JOIN media_tags mt ON mt.media_id = mi.id
+                JOIN tags t ON t.id = mt.tag_id
+                WHERE mi.path IN ({placeholders})
+                GROUP BY t.id, t.name
+                ORDER BY t.name COLLATE NOCASE
+                """,
+                unique_paths,
+            ).fetchall()
+        except Exception:
+            rows = []
+        for row in rows:
+            tag = str((row[0] if len(row) > 0 else "") or "").strip()
+            if not tag:
+                continue
+            key = tag.casefold()
+            ordered_names.setdefault(key, tag)
+            counts[key] = int(row[1] or 0)
+        total = max(1, len(unique_paths))
+        common = [ordered_names[key] for key, count in counts.items() if count == total]
+        uncommon = [ordered_names[key] for key, count in counts.items() if 0 < count < total]
+        return sorted(common, key=str.casefold), sorted(uncommon, key=str.casefold)
+
+    def _current_gallery_scope_paths(self) -> list[str]:
+        try:
+            entries = self.bridge._get_gallery_entries(
+                list(getattr(self.bridge, "_selected_folders", []) or []),
+                "none",
+                getattr(self.bridge, "_current_gallery_filter", "all"),
+                self._effective_gallery_scope_search(include_tag_scope=False),
+            )
+        except Exception:
+            entries = []
+        paths: list[str] = []
+        seen: set[str] = set()
+        for entry in entries or []:
+            if entry.get("is_folder"):
+                continue
+            path = str(entry.get("path") or "").strip()
+            if not path:
+                continue
+            key = path.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            paths.append(path)
+        return paths
+
+    def _bulk_tag_selection_states(self) -> tuple[set[str], set[str]]:
+        common, uncommon = self._selected_paths_tag_summary()
+        return {tag.casefold() for tag in common}, {tag.casefold() for tag in uncommon}
+
+    def _refresh_bulk_tag_editor_summary(self) -> None:
+        if not hasattr(self, "bulk_common_tags_text"):
+            return
+        common, uncommon = self._selected_paths_tag_summary()
+        self.bulk_common_tags_text.setPlainText(", ".join(common))
+        self.bulk_uncommon_tags_text.setPlainText(", ".join(uncommon))
+
     def _configure_tag_list_combo(self, combo: QComboBox) -> None:
         view = QListView(combo)
         view.setObjectName(f"{combo.objectName()}Popup")
@@ -10391,7 +10685,16 @@ class MainWindow(QMainWindow):
         combo.setItemDelegate(TagListComboDelegate(self.bridge, combo, view))
 
     def _selected_tag_names_from_editor(self) -> set[str]:
-        return {tag.casefold() for tag in self._normalize_tag_list(self.meta_tags.text())}
+        return {tag.casefold() for tag in self._normalize_tag_list(self._active_tag_editor().text())}
+
+    def _effective_gallery_scope_search(self, include_tag_scope: bool = True) -> str:
+        base_query = str(getattr(self.bridge, "_current_gallery_search", "") or "").strip()
+        if not include_tag_scope:
+            return base_query
+        tag_scope_query = str(getattr(self.bridge, "_current_gallery_tag_scope_search", "") or "").strip()
+        if not tag_scope_query:
+            return base_query
+        return f"{base_query} {tag_scope_query}".strip() if base_query else tag_scope_query
 
     def _current_scope_tag_counts(self) -> dict[str, int]:
         counts: Counter[str] = Counter()
@@ -10400,7 +10703,7 @@ class MainWindow(QMainWindow):
                 list(getattr(self.bridge, "_selected_folders", []) or []),
                 "none",
                 getattr(self.bridge, "_current_gallery_filter", "all"),
-                getattr(self.bridge, "_current_gallery_search", ""),
+                self._effective_gallery_scope_search(include_tag_scope=False),
             )
         except Exception:
             entries = []
@@ -10521,6 +10824,7 @@ class MainWindow(QMainWindow):
         self.tag_list_sort_select.setVisible(has_list)
         self.btn_add_tag_list_tag.setVisible(has_list)
         self.btn_import_tag_list_tags.setVisible(has_list)
+        self.btn_clear_tag_scope_filter.setVisible(has_list)
         self.tag_list_rows.setVisible(has_list)
 
         if not has_list:
@@ -10538,10 +10842,22 @@ class MainWindow(QMainWindow):
 
         scope_counts = self._current_scope_tag_counts()
         selected_tags = self._selected_tag_names_from_editor()
+        common_tags, uncommon_tags = self._bulk_tag_selection_states() if self._is_bulk_editor_active() else (set(), set())
+        active_filter_key = str(getattr(self, "_active_tag_scope_name", "") or "").casefold()
         entries = list_tag_list_entries(self.bridge.conn, tag_list_id)
         for entry in entries:
-            entry["scope_use_count"] = int(scope_counts.get(str(entry.get("name") or "").casefold(), 0))
-            entry["in_selected_tags"] = str(entry.get("name") or "").casefold() in selected_tags
+            key = str(entry.get("name") or "").casefold()
+            entry["scope_use_count"] = int(scope_counts.get(key, 0))
+            entry["filter_active"] = bool(active_filter_key and key == active_filter_key)
+            if self._is_bulk_editor_active():
+                if key in common_tags:
+                    entry["selection_state"] = "common"
+                elif key in uncommon_tags:
+                    entry["selection_state"] = "uncommon"
+                else:
+                    entry["selection_state"] = "none"
+            else:
+                entry["selection_state"] = "selected" if key in selected_tags else "none"
         entries = self._sort_tag_list_entries(entries, sort_mode)
         self.tag_list_rows.set_user_sort_enabled(sort_mode == "none")
 
@@ -10578,6 +10894,7 @@ class MainWindow(QMainWindow):
         text = Theme.get_text_color()
         text_muted = Theme.get_text_muted()
         accent_text = Theme.mix(text, accent, 0.78)
+        accent_text_muted = Theme.mix(text_muted, accent, 0.48)
         btn_bg = Theme.get_input_bg(accent)
         btn_hover = Theme.get_btn_save_hover(accent)
         btn_border = Theme.get_input_border(accent)
@@ -10589,6 +10906,7 @@ class MainWindow(QMainWindow):
                 row.apply_theme(
                     accent_color=accent.name(),
                     accent_text=accent_text,
+                    accent_text_muted=accent_text_muted,
                     text=text,
                     text_muted=text_muted,
                     btn_bg=btn_bg,
@@ -10627,13 +10945,56 @@ class MainWindow(QMainWindow):
         self._save_tag_list_panel_width()
 
     def _add_tag_to_current_editor(self, tag_name: str) -> None:
-        next_tags = self._merge_tag_lists(self._normalize_tag_list(self.meta_tags.text()), [tag_name])
-        self.meta_tags.setText(", ".join(next_tags))
+        if self._is_bulk_editor_active():
+            paths = list(getattr(self, "_current_paths", []) or [])
+            for path in paths:
+                try:
+                    self.bridge.attach_media_tags(path, [tag_name])
+                except Exception:
+                    pass
+            self.bulk_status_lbl.setText(f"✓ Added '{tag_name}' to {len(paths)} selected files")
+            QTimer.singleShot(3000, lambda: self.bulk_status_lbl.setText(""))
+            self._refresh_bulk_tag_editor_summary()
+            self._refresh_tag_list_scope_counts()
+            return
+        path = str(getattr(self, "_current_path", "") or "").strip()
+        if not path:
+            return
+        editor = self._active_tag_editor()
+        next_tags = self._merge_tag_lists(self._normalize_tag_list(editor.text()), [tag_name])
+        editor.setText(", ".join(next_tags))
+        try:
+            self.bridge.set_media_tags(path, next_tags)
+        except Exception:
+            pass
+        self.meta_status_lbl.setText(f"✓ Added '{tag_name}'")
+        QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
+        self._refresh_tag_list_scope_counts()
 
     def _remove_tag_from_current_editor(self, tag_name: str) -> None:
+        if self._is_bulk_editor_active():
+            from app.mediamanager.db.media_repo import get_media_by_path
+            from app.mediamanager.db.tags_repo import list_media_tags
+
+            remove_key = str(tag_name or "").casefold()
+            paths = list(getattr(self, "_current_paths", []) or [])
+            for path in paths:
+                try:
+                    media = get_media_by_path(self.bridge.conn, path)
+                    existing = list_media_tags(self.bridge.conn, int(media.get("id") or 0)) if media else []
+                    next_tags = [tag for tag in list(existing or []) if str(tag or "").strip() and str(tag).casefold() != remove_key]
+                    self.bridge.set_media_tags(path, next_tags)
+                except Exception:
+                    pass
+            self.bulk_status_lbl.setText(f"✓ Removed '{tag_name}' from {len(paths)} selected files")
+            QTimer.singleShot(3000, lambda: self.bulk_status_lbl.setText(""))
+            self._refresh_bulk_tag_editor_summary()
+            self._refresh_tag_list_scope_counts()
+            return
         remove_key = str(tag_name or "").casefold()
-        next_tags = [tag for tag in self._normalize_tag_list(self.meta_tags.text()) if tag.casefold() != remove_key]
-        self.meta_tags.setText(", ".join(next_tags))
+        editor = self._active_tag_editor()
+        next_tags = [tag for tag in self._normalize_tag_list(editor.text()) if tag.casefold() != remove_key]
+        editor.setText(", ".join(next_tags))
 
     def _remove_tag_from_active_list(self, tag_id: int, _tag_name: str) -> None:
         from app.mediamanager.db.tag_lists_repo import list_tag_list_entries, remove_tag_from_list
@@ -10650,20 +11011,24 @@ class MainWindow(QMainWindow):
 
     def _filter_gallery_by_tag(self, tag_name: str) -> None:
         query = f'tag:"{str(tag_name or "").replace(chr(34), r"\\\"")}"'
+        self._active_tag_scope_name = str(tag_name or "").strip()
         try:
             self.web.page().runJavaScript(
-                f"try{{ window.__mmx_applyTagScope && window.__mmx_applyTagScope({json.dumps(query)}); }}catch(e){{}}"
+                f"try{{ if(window.__mmx_applyTagScopeAndSelectAll){{ window.__mmx_applyTagScopeAndSelectAll({json.dumps(query)}); }}else if(window.__mmx_applyTagScope){{ window.__mmx_applyTagScope({json.dumps(query)}); if(window.selectAll) window.selectAll(); }} }}catch(e){{}}"
             )
         except Exception:
             pass
+        self._refresh_tag_list_rows_state()
 
     def _clear_tag_scope_filter(self) -> None:
+        self._active_tag_scope_name = ""
         try:
             self.web.page().runJavaScript(
                 "try{ window.__mmx_clearTagScope && window.__mmx_clearTagScope(); }catch(e){}"
             )
         except Exception:
             pass
+        self._refresh_tag_list_rows_state()
 
 
     def _clear_preview_media(self) -> None:
@@ -11076,7 +11441,7 @@ class MainWindow(QMainWindow):
             return
 
         is_bulk = len(paths) > 1
-        tags_str = self.meta_tags.text()
+        tags_str = self._active_tag_editor().text()
         tags = self._normalize_tag_list(tags_str)
 
         if not is_bulk:
@@ -11160,9 +11525,24 @@ class MainWindow(QMainWindow):
                 except Exception:
                     pass
 
+        status_label = self._active_status_label()
+        status_label.setText(f"✓ {'Tags' if is_bulk else 'Changes'} saved")
+        QTimer.singleShot(3000, lambda: status_label.setText(""))
+        self._refresh_tag_list_scope_counts()
+        return
+
         # --- Show confirmation then auto-clear after 3s ---
         self.meta_status_lbl.setText(f"✓ {'Tags' if is_bulk else 'Changes'} saved")
         QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
+        if hasattr(self, "bulk_status_lbl"):
+            self.bulk_status_lbl.setText(f"✓ Tags cleared for {len(paths)} items")
+            QTimer.singleShot(3000, lambda: self.bulk_status_lbl.setText(""))
+        if hasattr(self, "bulk_status_lbl"):
+            self.bulk_status_lbl.setText(f"✓ Tags cleared for {len(paths)} items")
+            QTimer.singleShot(3000, lambda: self.bulk_status_lbl.setText(""))
+        if is_bulk and hasattr(self, "bulk_status_lbl"):
+            self.bulk_status_lbl.setText("✓ Tags saved")
+            QTimer.singleShot(3000, lambda: self.bulk_status_lbl.setText(""))
         self._refresh_tag_list_scope_counts()
 
     def _harvest_universal_metadata(self, img) -> dict:
@@ -11931,15 +12311,20 @@ class MainWindow(QMainWindow):
                 message += f" ({skipped} skipped)"
             self.meta_status_lbl.setText(message)
             QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
+            if hasattr(self, "bulk_status_lbl"):
+                self.bulk_status_lbl.setText(message.replace("âœ“", "✓"))
+                QTimer.singleShot(3000, lambda: self.bulk_status_lbl.setText(""))
         elif skipped:
             self.meta_status_lbl.setText("No selected files support embedded tags.")
+            if hasattr(self, "bulk_status_lbl"):
+                self.bulk_status_lbl.setText("No selected files support embedded tags.")
 
     @Slot()
     def _save_to_exif_cmd(self) -> None:
         """Embed tags and comments from the 'Embedded' UI fields INTO the file."""
         paths = getattr(self, "_current_paths", [])
         if len(paths) > 1:
-            self._embed_bulk_tags_to_files(paths, self._normalize_tag_list(self.meta_tags.text()))
+            self._embed_bulk_tags_to_files(paths, self._normalize_tag_list(self._active_tag_editor().text()))
             return
         if not self._current_path: return
         p = Path(self._current_path)
@@ -12152,8 +12537,12 @@ class MainWindow(QMainWindow):
         self.meta_status_lbl.setText(f"✓ Tags cleared for {len(paths)} items")
         QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
         
+        if hasattr(self, "bulk_status_lbl"):
+            self.bulk_status_lbl.setText(f"✓ Tags cleared for {len(paths)} items")
+            QTimer.singleShot(3000, lambda: self.bulk_status_lbl.setText(""))
+
         # Clear the UI text box
-        self.meta_tags.setText("")
+        self._active_tag_editor().setText("")
         self._refresh_tag_list_scope_counts()
 
     def _save_native_tags(self) -> None:
@@ -12169,6 +12558,20 @@ class MainWindow(QMainWindow):
 
         is_bulk = len(paths) > 1
         primary_path = paths[0] if paths else None
+        if is_bulk:
+            self._current_paths = paths
+            self._current_path = None
+            self._current_metadata_kind = self._metadata_kind_for_path(primary_path)
+            self._refresh_preview_for_path(None)
+            self._configure_bulk_tag_editor(len(paths))
+            self.bulk_meta_tags.blockSignals(True)
+            self.bulk_meta_tags.setText("")
+            self.bulk_meta_tags.blockSignals(False)
+            self.bulk_status_lbl.setText("")
+            self._sync_tag_list_panel_visibility()
+            return
+
+        self._set_active_right_workspace("details")
         is_video = bool(primary_path and Path(primary_path).suffix.lower() in {".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"})
         self._set_metadata_empty_state(False)
         self._current_paths = paths # Store list for bulk save
@@ -13162,6 +13565,7 @@ class MainWindow(QMainWindow):
 
     def _clear_metadata_panel(self):
         """Reset all labels and hide/show them based on current settings."""
+        self._set_active_right_workspace("details")
         self._current_path = None
         self._current_paths = []
         kind = getattr(self, "_current_metadata_kind", "image")
@@ -13791,13 +14195,11 @@ class MainWindow(QMainWindow):
         text = Theme.get_text_color()
         text_muted = Theme.get_text_muted()
         is_light = Theme.get_is_light()
-        combo_arrow_fill = "#666666" if is_light else "#999999"
         combo_arrow_svg = (
-            "data:image/svg+xml;utf8,"
-            f"<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'>"
-            f"<path d='M3 4.5L6 7.5L9 4.5' fill='none' stroke='{combo_arrow_fill}' "
-            "stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>"
-        )
+            (Path(__file__).with_name("web") / "icons" / "chevron-down-light.svg")
+            if is_light
+            else (Path(__file__).with_name("web") / "icons" / "chevron-down-dark.svg")
+        ).as_posix()
         combo_bg = "#ffffff" if is_light else Theme.mix(Theme.get_control_bg(accent), "#000000", 0.12)
         combo_selected_text = Theme.mix(text, accent, 0.76)
         combo_hover_bg = Theme.mix(combo_bg, "#000000" if is_light else "#ffffff", 0.04 if is_light else 0.07)
@@ -14031,7 +14433,7 @@ class MainWindow(QMainWindow):
                     border: none;
                     font-weight: 700;
                 }}
-                QPushButton#btnCreateTagList, QPushButton#btnAddTagListTag, QPushButton#btnImportTagListTags {{
+                QPushButton#btnCreateTagList, QPushButton#btnAddTagListTag, QPushButton#btnImportTagListTags, QPushButton#btnClearTagScopeFilter {{
                     background-color: {Theme.get_btn_save_bg(accent)};
                     color: {text};
                     border: 1px solid {Theme.get_border(accent)};
@@ -14040,7 +14442,7 @@ class MainWindow(QMainWindow):
                     font-size: 11px;
                     font-weight: 500;
                 }}
-                QPushButton#btnCreateTagList:hover, QPushButton#btnAddTagListTag:hover, QPushButton#btnImportTagListTags:hover {{
+                QPushButton#btnCreateTagList:hover, QPushButton#btnAddTagListTag:hover, QPushButton#btnImportTagListTags:hover, QPushButton#btnClearTagScopeFilter:hover {{
                     background-color: {Theme.get_btn_save_hover(accent)};
                     color: {"#000" if is_light else "#fff"};
                     border-color: {accent_str};
@@ -14159,6 +14561,12 @@ class MainWindow(QMainWindow):
             QWidget#rightPanelScrollContainer {{ background-color: {sb_bg_str}; }}
             {scrollbar_style}
         """)
+        if hasattr(self, "bulk_scroll_area"):
+            self.bulk_scroll_area.setStyleSheet(f"""
+                QScrollArea {{ background-color: {sb_bg_str}; border: none; }}
+                QWidget#bulkTagEditorScrollContainer {{ background-color: {sb_bg_str}; }}
+                {scrollbar_style}
+            """)
         try:
             viewport = self.scroll_area.viewport()
             viewport.setStyleSheet(f"background-color: {sb_bg_str};")
@@ -14169,6 +14577,19 @@ class MainWindow(QMainWindow):
             viewport.setPalette(viewport_palette)
             viewport.update()
             viewport.repaint()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "bulk_scroll_area"):
+                bulk_viewport = self.bulk_scroll_area.viewport()
+                bulk_viewport.setStyleSheet(f"background-color: {sb_bg_str};")
+                bulk_viewport_palette = bulk_viewport.palette()
+                bulk_viewport_palette.setColor(QPalette.ColorRole.Window, QColor(sb_bg_str))
+                bulk_viewport_palette.setColor(QPalette.ColorRole.Base, QColor(sb_bg_str))
+                bulk_viewport.setAutoFillBackground(True)
+                bulk_viewport.setPalette(bulk_viewport_palette)
+                bulk_viewport.update()
+                bulk_viewport.repaint()
         except Exception:
             pass
 
@@ -14235,7 +14656,7 @@ class MainWindow(QMainWindow):
             QPushButton#btnPreviewOverlayPlay:pressed {{
                 background-color: {"rgba(255, 255, 255, 115)" if is_light else "rgba(0, 0, 0, 115)"};
             }}
-            QPushButton#btnSaveMeta, QPushButton#btnImportExif, QPushButton#btnMergeHiddenMeta, QPushButton#btnSaveToExif, QPushButton#btnOpenTagList {{
+            QPushButton#btnSaveMeta, QPushButton#btnImportExif, QPushButton#btnMergeHiddenMeta, QPushButton#btnSaveToExif, QPushButton#btnOpenTagList, QPushButton#metaEmptySelectAllButton {{
                 background-color: {Theme.get_btn_save_bg(accent)};
                 color: {text};
                 border: 1px solid {Theme.get_border(accent)};
@@ -14244,7 +14665,7 @@ class MainWindow(QMainWindow):
                 font-size: 11px;
                 font-weight: 500;
             }}
-            QPushButton#btnSaveMeta:hover, QPushButton#btnImportExif:hover, QPushButton#btnMergeHiddenMeta:hover, QPushButton#btnSaveToExif:hover, QPushButton#btnOpenTagList:hover {{
+            QPushButton#btnSaveMeta:hover, QPushButton#btnImportExif:hover, QPushButton#btnMergeHiddenMeta:hover, QPushButton#btnSaveToExif:hover, QPushButton#btnOpenTagList:hover, QPushButton#metaEmptySelectAllButton:hover {{
                 background-color: {Theme.get_btn_save_hover(accent)};
                 color: {"#000" if is_light else "#fff"};
                 border-color: {accent_str};
@@ -14267,6 +14688,54 @@ class MainWindow(QMainWindow):
                 min-width: 140px;
             }}
         """)
+        if hasattr(self, "bulk_scroll_container"):
+            self.bulk_scroll_container.setStyleSheet(f"""
+                QWidget#bulkTagEditorScrollContainer {{ background-color: {sb_bg_str}; color: {text}; }}
+                QLabel {{
+                    color: {text};
+                    background: transparent;
+                    border: none;
+                    padding: 0px;
+                    margin: 0px;
+                }}
+                QLabel#bulkTagEditorHeaderLabel {{
+                    color: {text};
+                    font-weight: 700;
+                    font-size: 14px;
+                }}
+                QLabel#bulkTagEditorTagsLabel, QLabel#bulkTagEditorCommonTagsLabel, QLabel#bulkTagEditorUncommonTagsLabel {{
+                    color: {text};
+                    font-weight: 700;
+                }}
+                QLabel#bulkTagEditorSelectionLabel, QLabel#bulkTagEditorStatusLabel {{
+                    color: {text_muted};
+                    font-weight: 500;
+                }}
+                QLineEdit#bulkTagEditorTagsEdit, QPlainTextEdit#bulkTagEditorCommonTagsText, QPlainTextEdit#bulkTagEditorUncommonTagsText {{
+                    background-color: {Theme.get_input_bg(accent)};
+                    border: 1px solid {Theme.get_input_border(accent)};
+                    border-radius: 4px;
+                    padding: 4px;
+                    color: {text};
+                }}
+                QPlainTextEdit#bulkTagEditorCommonTagsText, QPlainTextEdit#bulkTagEditorUncommonTagsText {{
+                    selection-background-color: {Theme.get_accent_soft(accent)};
+                }}
+                QPushButton#bulkBtnSelectAllGallery, QPushButton#bulkBtnClearTags, QPushButton#bulkBtnSaveMeta, QPushButton#bulkBtnSaveToExif {{
+                    background-color: {Theme.get_btn_save_bg(accent)};
+                    color: {text};
+                    border: 1px solid {Theme.get_border(accent)};
+                    border-radius: 4px;
+                    padding: 4px 8px;
+                    font-size: 11px;
+                    font-weight: 500;
+                }}
+                QPushButton#bulkBtnSelectAllGallery:hover, QPushButton#bulkBtnClearTags:hover, QPushButton#bulkBtnSaveMeta:hover, QPushButton#bulkBtnSaveToExif:hover {{
+                    background-color: {Theme.get_btn_save_hover(accent)};
+                    color: {"#000" if is_light else "#fff"};
+                    border-color: {accent_str};
+                }}
+            """)
         self._update_preview_play_button_icon()
         self._apply_tag_list_theme()
         
@@ -14665,11 +15134,12 @@ class MainWindow(QMainWindow):
                 # ONLY dismiss menus if the click is outside the web area.
                 self._dismiss_web_menus()
                 
-                # Deselect web items, UNLESS the click was in the right metadata/tags panel
+                # Deselect web items, UNLESS the click was in the full right-side host
+                # (Details, Bulk Tag Editor, or Tag List).
                 is_right_panel = False
-                if self.right_panel.isVisible():
-                    rp_pos = self.right_panel.mapFromGlobal(QCursor.pos())
-                    is_right_panel = self.right_panel.rect().contains(rp_pos)
+                if hasattr(self, "right_panel_host") and self.right_panel_host.isVisible():
+                    rp_pos = self.right_panel_host.mapFromGlobal(QCursor.pos())
+                    is_right_panel = self.right_panel_host.rect().contains(rp_pos)
 
                 is_bottom_panel = False
                 if hasattr(self, "bottom_panel") and self.bottom_panel.isVisible():

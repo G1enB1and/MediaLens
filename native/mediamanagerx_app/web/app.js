@@ -2,6 +2,7 @@
 // Globals for state
 let gSearchQuery = '';
 let gActiveTagScopeQuery = '';
+let gSelectAllAfterRefresh = false;
 let gPage = 0;
 const PAGE_SIZE = 100;
 let gTotal = 0;
@@ -1007,18 +1008,19 @@ function fetchFolderChildren(path) {
 
 function fetchMediaCount(folders, filterType, searchQuery) {
   if (!gBridge) return Promise.resolve(0);
+  const effectiveQuery = getEffectiveSearchQuery(searchQuery || '');
   if (gBridge.count_media_async) {
     return new Promise((resolve) => {
       const requestId = `count-${Date.now()}-${++gGalleryRequestSeq}`;
       gPendingMediaCountRequests.set(requestId, resolve);
-      gBridge.count_media_async(requestId, folders || [], filterType || 'all', searchQuery || '');
+      gBridge.count_media_async(requestId, folders || [], filterType || 'all', effectiveQuery);
     });
   }
   if (!gBridge.count_media) {
     return Promise.resolve(0);
   }
   return new Promise((resolve) => {
-    gBridge.count_media(folders || [], filterType || 'all', searchQuery || '', function (count) {
+    gBridge.count_media(folders || [], filterType || 'all', effectiveQuery, function (count) {
       resolve(Number(count || 0));
     });
   });
@@ -1889,11 +1891,12 @@ let gSelectedPaths = new Set();
 let gLastSelectionIdx = -1;
 let gIsCtxMenuClick = false; // Guard for context menu clicks
 
-function deselectAll() {
-  if (gIsCtxMenuClick) {
+function deselectAll(force = false) {
+  if (!force && gIsCtxMenuClick) {
     gIsCtxMenuClick = false;
     return;
   }
+  gIsCtxMenuClick = false;
   document.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected'));
   gSelectedPaths.clear();
   gLockedCard = null;
@@ -1921,6 +1924,7 @@ function selectAll() {
   syncMetadataToBridge();
 }
 window.selectAll = selectAll;
+window.__mmx_selectAllVisible = selectAll;
 
 function triggerRename() {
   let path = null;
@@ -2645,7 +2649,7 @@ function handleCardSelection(card, item, idx, e) {
       if (currentPath) gSelectedPaths.add(currentPath);
     }
   } else {
-    deselectAll();
+    deselectAll(true);
     card.classList.add('selected');
     gSelectedPaths.add(path);
     gLastSelectionIdx = idx;
@@ -5419,6 +5423,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (gBridge && gBridge.set_current_gallery_scope_state) {
       gBridge.set_current_gallery_scope_state(gFilter || 'all', gSearchQuery || '');
     }
+    if (gBridge && gBridge.set_current_gallery_tag_scope_state) {
+      gBridge.set_current_gallery_tag_scope_state(gActiveTagScopeQuery || '');
+    }
     if (gRenderScanToast) gRenderScanToast();
     if (isTextFilterActive()) {
       gTextProcessingPaused = false;
@@ -5764,6 +5771,11 @@ function renderPager() {
 function refreshFromBridge(bridge, resetPage = false) {
   if (!bridge) return;
   const refreshToken = ++gRefreshGeneration;
+  const consumeSelectAllAfterRefresh = function () {
+    if (!gSelectAllAfterRefresh) return;
+    gSelectAllAfterRefresh = false;
+    selectAll();
+  };
   bridge.get_selected_folders(function (folders) {
     if (refreshToken !== gRefreshGeneration) return;
     gSelectedFolders = folders || [];
@@ -5774,6 +5786,7 @@ function refreshFromBridge(bridge, resetPage = false) {
 
       if (gSelectedFolders.length === 0 && !gActiveCollection) {
         gTotal = 0;
+        gSelectAllAfterRefresh = false;
         updateGalleryCountChip(0);
         setGlobalLoading(false);
         renderMediaList([]);
@@ -5790,26 +5803,48 @@ function refreshFromBridge(bridge, resetPage = false) {
 
     // ── 1. Fast Path Reconcile (Hybrid Load) ─────────────────────────────
     // This loads the synthesized candidates from disk + DB without waiting for scan.
-      fetchMediaCount(gSelectedFolders, gFilter, gSearchQuery || '').then(function (count) {
-        if (refreshToken !== gRefreshGeneration) return;
-        gTotal = count || 0;
-        updateGalleryCountChip(gTotal);
-        const useInfinite = shouldUseInfiniteScrollMode();
-        const duplicateMode = isDuplicateModeActive();
-        const limit = duplicateMode
-          ? Math.max(PAGE_SIZE, gTotal || PAGE_SIZE)
-          : (useInfinite ? Math.max(PAGE_SIZE, gMedia.length || PAGE_SIZE) : PAGE_SIZE);
-        const offset = (useInfinite || duplicateMode) ? 0 : gPage * PAGE_SIZE;
-        fetchMediaList(gSelectedFolders, limit, offset, gSort, gFilter, gSearchQuery || '').then(function (items) {
+      const useInfinite = shouldUseInfiniteScrollMode();
+      const duplicateMode = isDuplicateModeActive();
+
+      if (duplicateMode) {
+        fetchMediaCount(gSelectedFolders, gFilter, gSearchQuery || '').then(function (count) {
           if (refreshToken !== gRefreshGeneration) return;
-          renderMediaList(items, !gPendingScrollAnchor);
+          const normalizedCount = count || 0;
+          gTotal = normalizedCount;
+          updateGalleryCountChip(gTotal);
+          const limit = Math.max(PAGE_SIZE, normalizedCount || PAGE_SIZE);
+          fetchMediaList(gSelectedFolders, limit, 0, gSort, gFilter, gSearchQuery || '').then(function (items) {
+            if (refreshToken !== gRefreshGeneration) return;
+            renderMediaList(items, !gPendingScrollAnchor);
+            consumeSelectAllAfterRefresh();
+            renderPager();
+            setGlobalLoading(false);
+            if (bridge.start_scan_paths) {
+              bridge.start_scan_paths((items || []).filter(item => !item.is_folder).map(item => item.path).filter(Boolean));
+            }
+          });
+        });
+        return;
+      }
+
+      const limit = useInfinite ? Math.max(PAGE_SIZE, gMedia.length || PAGE_SIZE) : PAGE_SIZE;
+      const offset = useInfinite ? 0 : gPage * PAGE_SIZE;
+      fetchMediaList(gSelectedFolders, limit, offset, gSort, gFilter, gSearchQuery || '').then(function (items) {
+        if (refreshToken !== gRefreshGeneration) return;
+        renderMediaList(items, !gPendingScrollAnchor);
+        consumeSelectAllAfterRefresh();
+        renderPager();
+        if (useInfinite) requestAnimationFrame(() => maybeLoadMoreInfiniteResults());
+        // Hide the "Starting..." or "Loading..." overlay once we have the first batch of results.
+        setGlobalLoading(false);
+        if (bridge.start_scan_paths) {
+          bridge.start_scan_paths((items || []).filter(item => !item.is_folder).map(item => item.path).filter(Boolean));
+        }
+        fetchMediaCount(gSelectedFolders, gFilter, gSearchQuery || '').then(function (count) {
+          if (refreshToken !== gRefreshGeneration) return;
+          gTotal = count || 0;
+          updateGalleryCountChip(gTotal);
           renderPager();
-          if (useInfinite) requestAnimationFrame(() => maybeLoadMoreInfiniteResults());
-          // Hide the "Starting..." or "Loading..." overlay once we have the first batch of results.
-          setGlobalLoading(false);
-          if (bridge.start_scan_paths) {
-            bridge.start_scan_paths((items || []).filter(item => !item.is_folder).map(item => item.path).filter(Boolean));
-          }
         });
       });
 
@@ -7151,6 +7186,9 @@ function setAdvancedSearchQuery(query, skipSync = false) {
   if (gBridge && gBridge.set_current_gallery_scope_state) {
     gBridge.set_current_gallery_scope_state(gFilter || 'all', gSearchQuery || '');
   }
+  if (gBridge && gBridge.set_current_gallery_tag_scope_state) {
+    gBridge.set_current_gallery_tag_scope_state(gActiveTagScopeQuery || '');
+  }
   if (!skipSync) syncAdvancedSearchControlsFromQuery(nextQuery);
   gPage = 0;
   refreshFromBridge(gBridge);
@@ -7555,6 +7593,19 @@ window.__mmx_setSearchQuery = function (query) {
 
 window.__mmx_applyTagScope = function (query) {
   gActiveTagScopeQuery = String(query || '').trim();
+  if (gBridge && gBridge.set_current_gallery_tag_scope_state) {
+    gBridge.set_current_gallery_tag_scope_state(gActiveTagScopeQuery || '');
+  }
+  gPage = 0;
+  refreshFromBridge(gBridge, true);
+};
+
+window.__mmx_applyTagScopeAndSelectAll = function (query) {
+  gActiveTagScopeQuery = String(query || '').trim();
+  if (gBridge && gBridge.set_current_gallery_tag_scope_state) {
+    gBridge.set_current_gallery_tag_scope_state(gActiveTagScopeQuery || '');
+  }
+  gSelectAllAfterRefresh = true;
   gPage = 0;
   refreshFromBridge(gBridge, true);
 };
@@ -7562,6 +7613,9 @@ window.__mmx_applyTagScope = function (query) {
 window.__mmx_clearTagScope = function () {
   if (!gActiveTagScopeQuery) return;
   gActiveTagScopeQuery = '';
+  if (gBridge && gBridge.set_current_gallery_tag_scope_state) {
+    gBridge.set_current_gallery_tag_scope_state('');
+  }
   gPage = 0;
   refreshFromBridge(gBridge, true);
 };
