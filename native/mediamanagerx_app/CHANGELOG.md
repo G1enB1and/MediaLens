@@ -1,6 +1,36 @@
 # Change Log
 
-## v1.1.13 (Current)
+## v1.1.14 (Current)
+
+### Summary
+
+This release makes tag-heavy cleanup much faster and easier to trust. MediaLens adds a full Tag List workspace, a rebuilt Bulk Tag Editor, and smoother multi-file tagging workflows that keep gallery filtering, selection, and tag feedback aligned.
+
+### Highlights
+
+- Tag List now gives you a dedicated panel for saved tag groups, quick tag filtering, drag sorting, and one-click tagging actions.
+- Bulk Tag Editor is now a true separate workspace with common tags, uncommon tags, and faster select-all workflows for editing many files at once.
+- Tag filtering, gallery counts, and selection behavior are now much more consistent, so you can move between parent tags and sub-tags without losing context.
+
+### Added
+
+- Added a resizable Tag List panel beside the right sidebar with saved tag lists, sorting modes, drag-and-drop ordering, import-from-file, and quick open and close controls.
+- Added tag count buttons and tag-row filtering so the gallery can be narrowed to files using a selected tag directly from the Tag List.
+- Added a dedicated Bulk Tag Editor workspace with its own tag input, common tags, uncommon tags, and select-all actions for the current gallery scope.
+- Added `View` menu actions for `Show Tag List` and `Bulk Tag Editor`.
+- Added empty-state and bulk-editor `Select All` buttons to speed up multi-file tagging workflows.
+
+### Changed
+
+- Reworked the right sidebar so Details, Bulk Tag Editor, and Tag List behave as separate workspaces while still sharing the same panel visibility and resize behavior.
+- Updated Tag List actions so adding tags writes to the database immediately in both single-file and bulk workflows.
+- Improved tag filtering so temporary tag scope does not overwrite the underlying gallery scope, making it much easier to switch between tags quickly.
+- Improved bulk tag feedback so common and uncommon tags stay aligned with the selected files and Tag List highlighting.
+- Refined selection behavior so gallery selections remain visible while working in Details, Tag List, and Bulk Tag Editor, and plain clicks return multi-selection back to a single selected file.
+
+---
+
+## v1.1.13
 
 ### Summary
 

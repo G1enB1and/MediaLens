@@ -1,21 +1,20 @@
-## MediaLens v1.1.13
+## MediaLens v1.1.14
 
 ### Summary
 
-This release makes large libraries easier to break down into focused cleanup tasks. MediaLens adds Smart Collections, stronger stackable filters, and more consistent AI detection so it is easier to find the files you want to review and trust the results.
+This release turns tagging into a much faster workflow. MediaLens now gives you a dedicated Tag List panel, a rebuilt Bulk Tag Editor, and smoother multi-file tagging with clearer feedback while you work.
 
 ### Highlights
 
-- Smart Collections now give you fast one-click views for recent files, missing metadata, and larger files that may need attention.
-- Filter By now supports AI / Non-AI, No Tags, No Descriptions, and None to clear all filters.
-- AI detection is more reliable across scanning, filtering, and details, and you can manually confirm AI status when automatic metadata is not enough.
+- Tag List now supports saved tag groups, quick gallery filtering, drag sorting, and one-click tagging actions.
+- Bulk Tag Editor now shows common and uncommon tags across large selections and works much better with select-all workflows.
 
 ### Notes
 
-- The details panel now supports editing and saving core AI metadata fields, including `AI Tool / Source`.
-- The native settings cog now uses a themed SVG icon, and the old unused `Start Collapsed in Details Panel` option has been removed.
+- Tag List actions now save added tags to the database immediately.
+- Gallery tag filtering, counts, and selection behavior were refined so switching between tag scopes is more predictable.
 
 ---
 
 Full Changelog:
-<https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md>
+https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md
