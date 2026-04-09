@@ -173,11 +173,13 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QTextEdit,
     QLineEdit,
+    QComboBox,
     QFrame,
     QScrollArea,
     QCheckBox,
     QGridLayout,
     QAbstractItemView,
+    QListView,
     QListWidget,
     QListWidgetItem,
     QStyledItemDelegate,
@@ -961,6 +963,7 @@ class CustomSplitterHandle(QSplitterHandle):
         super().__init__(orientation, parent)
         self.setMouseTracking(True)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+        self._last_global_pos: QPoint | None = None
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
@@ -989,6 +992,34 @@ class CustomSplitterHandle(QSplitterHandle):
     def leaveEvent(self, event: QEvent) -> None:
         self.update()
         super().leaveEvent(event)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        self._last_global_pos = event.globalPosition().toPoint()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        prev_global = self._last_global_pos
+        super().mouseMoveEvent(event)
+        current_global = event.globalPosition().toPoint()
+        if prev_global is not None:
+            delta = current_global - prev_global
+            try:
+                parent_splitter = self.parent()
+                window = parent_splitter.window() if parent_splitter is not None else None
+                if (
+                    isinstance(parent_splitter, QSplitter)
+                    and parent_splitter.objectName() == "rightSplitter"
+                    and window is not None
+                    and hasattr(window, "_handle_right_splitter_overflow_drag")
+                ):
+                    window._handle_right_splitter_overflow_drag(int(delta.x()))
+            except Exception:
+                pass
+        self._last_global_pos = current_global
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        self._last_global_pos = None
+        super().mouseReleaseEvent(event)
 
 
 class CustomSplitter(QSplitter):
@@ -1312,6 +1343,322 @@ class PinnedFolderListWidget(QListWidget):
         event.ignore()
 
 
+class ContextClickableLabel(QLabel):
+    rightClicked = Signal()
+
+    def contextMenuEvent(self, event) -> None:
+        self.rightClicked.emit()
+        event.accept()
+
+
+class TagListRowsWidget(QListWidget):
+    orderChanged = Signal()
+    backgroundClicked = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.setMouseTracking(True)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+    def set_user_sort_enabled(self, enabled: bool) -> None:
+        self.setDragEnabled(bool(enabled))
+        self.setAcceptDrops(bool(enabled))
+        self.setDropIndicatorShown(bool(enabled))
+        self.setDragDropMode(
+            QAbstractItemView.DragDropMode.InternalMove
+            if enabled else
+            QAbstractItemView.DragDropMode.NoDragDrop
+        )
+
+    def begin_drag_for_item(self, item: QListWidgetItem | None) -> None:
+        if item is None or self.dragDropMode() != QAbstractItemView.DragDropMode.InternalMove:
+            return
+        self.setCurrentItem(item)
+        self.startDrag(Qt.DropAction.MoveAction)
+
+    def startDrag(self, supportedActions) -> None:
+        item = self.currentItem()
+        row = self.itemWidget(item) if item is not None else None
+        if item is None or row is None:
+            super().startDrag(supportedActions)
+            return
+
+        drag = QDrag(self)
+        mime = self.mimeData(self.selectedItems())
+        if mime is None:
+            super().startDrag(supportedActions)
+            return
+        drag.setMimeData(mime)
+        item_rect = self.visualItemRect(item)
+        pixmap = row.create_drag_pixmap(item_rect) if isinstance(row, TagListTagRow) else row.grab()
+        if not pixmap.isNull():
+            drag.setPixmap(pixmap)
+            if isinstance(row, TagListTagRow):
+                drag.setHotSpot(row.drag_hotspot(item_rect))
+            else:
+                drag.setHotSpot(QPoint(max(0, pixmap.width() // 2), max(0, pixmap.height() // 2)))
+        drag.exec(Qt.DropAction.MoveAction)
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        super().dropEvent(event)
+        self.orderChanged.emit()
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        item = self.itemAt(event.position().toPoint())
+        if item is None and event.button() == Qt.MouseButton.LeftButton:
+            self.clearSelection()
+            self.backgroundClicked.emit()
+        super().mousePressEvent(event)
+
+
+class TagListTagRow(QWidget):
+    addToSelectionRequested = Signal(str)
+    removeFromSelectionRequested = Signal(str)
+    removeFromListRequested = Signal(int, str)
+    filterRequested = Signal(str)
+
+    def __init__(self, parent_list: TagListRowsWidget, item: QListWidgetItem, entry: dict, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._parent_list = parent_list
+        self._item = item
+        self._press_pos: QPoint | None = None
+        self._drag_started = False
+        self._tag_id = int(entry.get("tag_id") or 0)
+        self._tag_name = str(entry.get("name") or "")
+        self._scope_use_count = int(entry.get("scope_use_count") or 0)
+        self._global_use_count = int(entry.get("global_use_count") or 0)
+        self._in_selected_tags = bool(entry.get("in_selected_tags"))
+        self._drag_bg_color = QColor("#dbeafe")
+        self._drag_border_color = QColor("#8ab4f8")
+        self._drag_text_color = QColor("#111111")
+        self.setObjectName("tagListTagRow")
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(6, 2, 6, 2)
+        layout.setSpacing(6)
+
+        self.scope_btn = QPushButton(str(self._scope_use_count))
+        self.scope_btn.setObjectName("tagListScopeCountButton")
+        self.scope_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.scope_btn.setFixedHeight(24)
+        self.scope_btn.setMinimumWidth(28)
+        self.scope_btn.clicked.connect(lambda: self.filterRequested.emit(self._tag_name))
+        layout.addWidget(self.scope_btn, 0)
+
+        self.name_lbl = QLabel(self._tag_name)
+        self.name_lbl.setObjectName("tagListTagName")
+        self.name_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.name_lbl.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.name_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.name_lbl.customContextMenuRequested.connect(lambda _pos: self.filterRequested.emit(self._tag_name))
+        layout.addWidget(self.name_lbl, 1)
+
+        self.add_btn = QPushButton("→")
+        self.add_btn.setObjectName("tagListAddButton")
+        self.add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.add_btn.setFixedSize(26, 24)
+        self.add_btn.clicked.connect(lambda: self.addToSelectionRequested.emit(self._tag_name))
+        layout.addWidget(self.add_btn, 0)
+
+        self.remove_from_selection_btn = QPushButton("")
+        self.remove_from_selection_btn.setObjectName("tagListRemoveFromSelectionButton")
+        self.remove_from_selection_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.remove_from_selection_btn.setFixedSize(30, 28)
+        self.remove_from_selection_btn.setToolTip("Remove this tag from the selected file's Tags field")
+        self.remove_from_selection_btn.clicked.connect(lambda: self.removeFromSelectionRequested.emit(self._tag_name))
+        layout.addWidget(self.remove_from_selection_btn, 0)
+
+        self.remove_from_list_btn = QPushButton("X")
+        self.remove_from_list_btn.setObjectName("tagListRemoveFromListButton")
+        self.remove_from_list_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.remove_from_list_btn.setFixedSize(26, 24)
+        self.remove_from_list_btn.setToolTip("Remove this tag from the tag list")
+        self.remove_from_list_btn.clicked.connect(lambda: self.removeFromListRequested.emit(self._tag_id, self._tag_name))
+        layout.addWidget(self.remove_from_list_btn, 0)
+
+    @property
+    def tag_id(self) -> int:
+        return self._tag_id
+
+    @property
+    def tag_name(self) -> str:
+        return self._tag_name
+
+    def update_entry(self, entry: dict) -> None:
+        self._scope_use_count = int(entry.get("scope_use_count") or 0)
+        self._global_use_count = int(entry.get("global_use_count") or 0)
+        self._in_selected_tags = bool(entry.get("in_selected_tags"))
+        self.scope_btn.setText(str(self._scope_use_count))
+
+    def apply_theme(self, *, accent_color: str, accent_text: str, text: str, text_muted: str, btn_bg: str, btn_hover: str, btn_border: str, btn_border_hover: str, is_light: bool) -> None:
+        trash_svg_name = "trashcan.svg" if is_light else "trashcan-white.svg"
+        trash_svg = (Path(__file__).with_name("web") / "icons" / trash_svg_name).as_posix()
+        trash_red_svg = (Path(__file__).with_name("web") / "icons" / "trashcan-red.svg").as_posix()
+        trash_disabled_svg = (Path(__file__).with_name("web") / "icons" / "trashcan-gray.svg").as_posix()
+        self._drag_bg_color = QColor(Theme.get_accent_soft(QColor(accent_color)))
+        self._drag_border_color = QColor(accent_color)
+        self._drag_text_color = QColor(accent_text if self._in_selected_tags else text)
+
+        self.name_lbl.setStyleSheet(
+            f"color: {accent_text if self._in_selected_tags else text}; "
+            f"font-weight: {'700' if self._in_selected_tags else '400'}; background: transparent;"
+        )
+        button_qss = (
+            f"QPushButton {{ background-color: {btn_bg}; color: {text}; border: 1px solid {btn_border}; border-radius: 6px; padding: 2px 6px; }}"
+            f"QPushButton:hover {{ background-color: {btn_hover}; border-color: {btn_border_hover}; }}"
+        )
+        self.scope_btn.setStyleSheet(button_qss)
+        self.add_btn.setStyleSheet(button_qss)
+
+        can_remove_from_selection = self._in_selected_tags
+        self.remove_from_selection_btn.setEnabled(can_remove_from_selection)
+        self.remove_from_selection_btn.setStyleSheet(
+            f"""
+            QPushButton#tagListRemoveFromSelectionButton {{
+                background-color: {btn_bg};
+                border: 1px solid {btn_border};
+                border-radius: 8px;
+                padding: 6px;
+                image: url('{trash_svg}');
+            }}
+            QPushButton#tagListRemoveFromSelectionButton:hover {{
+                background-color: {btn_hover};
+                border-color: #d45a5a;
+                padding: 6px;
+                image: url('{trash_red_svg}');
+            }}
+            QPushButton#tagListRemoveFromSelectionButton:disabled {{
+                background-color: {btn_bg};
+                border-color: {btn_border};
+                padding: 6px;
+                image: url('{trash_disabled_svg}');
+            }}
+            """
+        )
+
+        can_remove_from_list = self._global_use_count <= 0
+        self.remove_from_list_btn.setEnabled(can_remove_from_list)
+        self.remove_from_list_btn.setCursor(Qt.CursorShape.PointingHandCursor if can_remove_from_list else Qt.CursorShape.ArrowCursor)
+        self.remove_from_list_btn.setStyleSheet(
+            f"""
+            QPushButton#tagListRemoveFromListButton {{
+                background-color: {btn_bg};
+                color: {text};
+                border: 1px solid {btn_border};
+                border-radius: 6px;
+                padding: 0px;
+                font-weight: 700;
+            }}
+            QPushButton#tagListRemoveFromListButton:hover {{
+                background-color: {btn_hover};
+                color: {accent_color};
+                border-color: {btn_border_hover};
+            }}
+            QPushButton#tagListRemoveFromListButton:disabled {{
+                background-color: {btn_bg};
+                color: {text_muted};
+                border-color: {btn_border};
+            }}
+            """
+        )
+
+    def create_drag_pixmap(self, item_rect: QRect | None = None) -> QPixmap:
+        text = self._tag_name
+        resolved_rect = item_rect if item_rect is not None and item_rect.isValid() else QRect(QPoint(0, 0), self.size())
+        width = max(120, int(resolved_rect.width() or 0))
+        height = max(32, int(resolved_rect.height() or 0))
+        dpr = max(1.0, float(self.devicePixelRatioF() or 1.0))
+        pixmap = QPixmap(int(width * dpr), int(height * dpr))
+        pixmap.fill(Qt.GlobalColor.transparent)
+        pixmap.setDevicePixelRatio(dpr)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        painter.setPen(QPen(self._drag_border_color, 1))
+        painter.setBrush(self._drag_bg_color)
+        logical_rect = QRectF(0.5, 0.5, width - 1.0, height - 1.0)
+        painter.drawRoundedRect(logical_rect, 8, 8)
+        painter.setPen(self._drag_text_color)
+        painter.setFont(self.name_lbl.font())
+        viewport = self._parent_list.viewport()
+        name_top_left = self.name_lbl.mapTo(viewport, QPoint(0, 0))
+        item_top_left = resolved_rect.topLeft()
+        name_left = max(10, int(name_top_left.x() - item_top_left.x()))
+        text_rect = QRect(
+            name_left,
+            0,
+            max(20, int(width - name_left - 10)),
+            height,
+        )
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
+        painter.end()
+        return pixmap
+
+    def drag_hotspot(self, item_rect: QRect | None = None) -> QPoint:
+        resolved_rect = item_rect if item_rect is not None and item_rect.isValid() else QRect(QPoint(0, 0), self.size())
+        fallback = QPoint(max(0, int(resolved_rect.width() * 0.5)), max(0, int(resolved_rect.height() * 0.5)))
+        if self._press_pos is None:
+            return fallback
+        viewport = self._parent_list.viewport()
+        row_top_left = self.mapTo(viewport, QPoint(0, 0))
+        item_top_left = resolved_rect.topLeft()
+        offset = row_top_left - item_top_left
+        return QPoint(
+            max(0, min(int(resolved_rect.width()) - 1, int(offset.x() + self._press_pos.x()))),
+            max(0, min(int(resolved_rect.height()) - 1, int(offset.y() + self._press_pos.y()))),
+        )
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._press_pos = event.position().toPoint()
+            self._drag_started = False
+            self._parent_list.setCurrentItem(self._item)
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if (
+            event.buttons() & Qt.MouseButton.LeftButton
+            and self._press_pos is not None
+            and (event.position().toPoint() - self._press_pos).manhattanLength() >= QApplication.startDragDistance()
+        ):
+            self._drag_started = True
+            self._parent_list.begin_drag_for_item(self._item)
+            self._press_pos = None
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and not self._drag_started:
+            child = self.childAt(event.position().toPoint())
+            if child not in {
+                self.scope_btn,
+                self.add_btn,
+                self.remove_from_selection_btn,
+                self.remove_from_list_btn,
+            }:
+                self.filterRequested.emit(self._tag_name)
+                event.accept()
+                self._press_pos = None
+                return
+        self._press_pos = None
+        self._drag_started = False
+        super().mouseReleaseEvent(event)
+
+    def contextMenuEvent(self, event) -> None:
+        self.filterRequested.emit(self._tag_name)
+        event.accept()
+
+
 class RootFilterProxyModel(QSortFilterProxyModel):
     """Filters a QFileSystemModel to only show a specific root folder and its children.
     
@@ -1474,6 +1821,50 @@ class AccentSelectionTreeDelegate(QStyledItemDelegate):
             opt.state &= ~QStyle.StateFlag.State_HasFocus
 
         super().paint(painter, opt, index)
+
+
+class TagListComboDelegate(QStyledItemDelegate):
+    """Paint combo popup rows with accent-selected text and extra vertical breathing room."""
+
+    def __init__(self, bridge: "Bridge", combo: QComboBox, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.bridge = bridge
+        self.combo = combo
+
+    def sizeHint(self, option, index):
+        size = super().sizeHint(option, index)
+        min_height = option.fontMetrics.height() + 10
+        size.setHeight(max(size.height(), min_height))
+        return size
+
+    def paint(self, painter: QPainter, option, index) -> None:
+        accent_str = str(self.bridge.settings.value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT)
+        accent = QColor(accent_str)
+        is_light = Theme.get_is_light()
+        text_color = QColor(Theme.get_text_color())
+        accent_text = QColor(Theme.mix(Theme.get_text_color(), accent, 0.76))
+        combo_bg = QColor("#ffffff" if is_light else Theme.mix(Theme.get_control_bg(accent), "#000000", 0.12))
+        hover_bg = QColor(Theme.mix(combo_bg.name(), "#000000" if is_light else "#ffffff", 0.04 if is_light else 0.07))
+        is_current_value = index.row() == self.combo.currentIndex()
+        is_hover = bool(option.state & QStyle.StateFlag.State_MouseOver)
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        painter.fillRect(option.rect, hover_bg if is_hover and not is_current_value else combo_bg)
+
+        font = option.font
+        font.setBold(is_current_value)
+        painter.setFont(font)
+        painter.setPen(accent_text if is_current_value else text_color)
+
+        text_rect = option.rect.adjusted(12, 5, -12, -5)
+        text = option.fontMetrics.elidedText(
+            str(index.data(Qt.ItemDataRole.DisplayRole) or ""),
+            Qt.TextElideMode.ElideRight,
+            max(0, text_rect.width()),
+        )
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
+        painter.restore()
 
 
 class CompareRevealViewer(QWidget):
@@ -2664,6 +3055,7 @@ class Bridge(QObject):
     childFoldersListed = Signal(str, list)  # request_id, folders
     mediaCounted = Signal(str, int)  # request_id, count
     mediaListed = Signal(str, list)  # request_id, items
+    galleryScopeChanged = Signal()
     textProcessingStarted = Signal(str, int)  # stage label, total items
     textProcessingProgress = Signal(str, int, int)  # stage label, current, total
     textProcessingFinished = Signal()
@@ -2770,6 +3162,8 @@ class Bridge(QObject):
         self._update_reply = None
         self._download_reply = None
         self._session_shuffle_seed = random.getrandbits(32)
+        self._current_gallery_filter: str = "all"
+        self._current_gallery_search: str = ""
         
         # Hybrid Fast-Load Cache
         self._disk_cache: dict[str, Path] = {}
@@ -3048,6 +3442,16 @@ class Bridge(QObject):
     @Slot(result=list)
     def get_selected_folders(self) -> list:
         return self._selected_folders
+
+    @Slot(str, str)
+    def set_current_gallery_scope_state(self, filter_type: str, search_query: str) -> None:
+        next_filter = str(filter_type or "all")
+        next_search = str(search_query or "")
+        if next_filter == self._current_gallery_filter and next_search == self._current_gallery_search:
+            return
+        self._current_gallery_filter = next_filter
+        self._current_gallery_search = next_search
+        self.galleryScopeChanged.emit()
 
     @Slot(result="QVariantMap")
     def get_navigation_state(self) -> dict:
@@ -7263,6 +7667,7 @@ class MainWindow(QMainWindow):
         self.bridge.refreshFolderRequested.connect(self._refresh_current_folder)
         self.bridge.openSettingsDialogRequested.connect(self.open_settings)
         self.bridge.accentColorChanged.connect(self._on_accent_changed)
+        self.bridge.galleryScopeChanged.connect(self._refresh_tag_list_scope_counts)
         self._current_accent = Theme.ACCENT_DEFAULT
         self._folder_history: list[str] = []
         self._folder_history_index: int = -1
@@ -7410,6 +7815,11 @@ class MainWindow(QMainWindow):
         self.act_toggle_right_panel.setChecked(bool(self.bridge.settings.value("ui/show_right_panel", True, type=bool)))
         self.act_toggle_right_panel.triggered.connect(lambda checked=False: self._toggle_panel_setting("ui/show_right_panel"))
         view_menu.addAction(self.act_toggle_right_panel)
+
+        self.act_toggle_tag_list_panel = QAction("Show Tag List", self)
+        self.act_toggle_tag_list_panel.setCheckable(True)
+        self.act_toggle_tag_list_panel.triggered.connect(self._toggle_tag_list_panel_from_menu)
+        view_menu.addAction(self.act_toggle_tag_list_panel)
 
         self.act_show_dismissed_progress_toasts = QAction("Show Hidden Progress Toasts", self)
         self.act_show_dismissed_progress_toasts.triggered.connect(self.bridge.reveal_progress_toasts)
@@ -7958,8 +8368,107 @@ class MainWindow(QMainWindow):
         wl_layout.addWidget(loading_center, 0, Qt.AlignmentFlag.AlignCenter)
         wl_layout.addStretch(1)
 
-        # Right: Metadata Panel
-        self.right_panel = QWidget(splitter)
+        # Right: Tag List + Metadata Panels
+        self.right_panel_host = QWidget(splitter)
+        self.right_panel_host.setObjectName("rightPanelHost")
+        right_host_layout = QVBoxLayout(self.right_panel_host)
+        right_host_layout.setContentsMargins(0, 0, 0, 0)
+        right_host_layout.setSpacing(0)
+
+        self.right_splitter = CustomSplitter(Qt.Orientation.Horizontal)
+        self.right_splitter.setObjectName("rightSplitter")
+        self.right_splitter.setHandleWidth(7)
+        self.right_splitter.setChildrenCollapsible(False)
+        right_host_layout.addWidget(self.right_splitter)
+
+        self.tag_list_panel = QWidget(self.right_splitter)
+        self.tag_list_panel.setObjectName("tagListPanel")
+        self.tag_list_panel.setMinimumWidth(220)
+        self.tag_list_panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        self.tag_list_panel_layout = QVBoxLayout(self.tag_list_panel)
+        self.tag_list_panel_layout.setContentsMargins(12, 12, 12, 12)
+        self.tag_list_panel_layout.setSpacing(8)
+        self.tag_list_panel_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        self.tag_list_header_row = QWidget(self.tag_list_panel)
+        self.tag_list_header_row.setObjectName("tagListHeaderRow")
+        tag_list_header_layout = QHBoxLayout(self.tag_list_header_row)
+        tag_list_header_layout.setContentsMargins(0, 0, 0, 0)
+        tag_list_header_layout.setSpacing(8)
+        self.tag_list_title_lbl = QLabel("Tag List")
+        self.tag_list_title_lbl.setObjectName("tagListTitleLabel")
+        tag_list_header_layout.addWidget(self.tag_list_title_lbl)
+        tag_list_header_layout.addStretch(1)
+        self.tag_list_close_btn = QPushButton("X")
+        self.tag_list_close_btn.setObjectName("tagListCloseButton")
+        self.tag_list_close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.tag_list_close_btn.setFixedSize(22, 22)
+        self.tag_list_close_btn.clicked.connect(self._close_tag_list_panel)
+        tag_list_header_layout.addWidget(self.tag_list_close_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.tag_list_panel_layout.addWidget(self.tag_list_header_row)
+
+        self.tag_list_select = QComboBox(self.tag_list_panel)
+        self.tag_list_select.setObjectName("tagListSelect")
+        self._configure_tag_list_combo(self.tag_list_select)
+        self.tag_list_select.currentIndexChanged.connect(self._on_tag_list_changed)
+        self.tag_list_panel_layout.addWidget(self.tag_list_select)
+
+        self.btn_create_tag_list = QPushButton("Create New List")
+        self.btn_create_tag_list.setObjectName("btnCreateTagList")
+        self.btn_create_tag_list.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_create_tag_list.clicked.connect(self._create_tag_list)
+        self.tag_list_panel_layout.addWidget(self.btn_create_tag_list)
+
+        self.active_tag_list_name_lbl = ContextClickableLabel("")
+        self.active_tag_list_name_lbl.setObjectName("activeTagListNameLabel")
+        self.active_tag_list_name_lbl.setVisible(False)
+        self.active_tag_list_name_lbl.rightClicked.connect(self._rename_active_tag_list)
+        self.tag_list_panel_layout.addWidget(self.active_tag_list_name_lbl)
+
+        self.tag_list_sort_lbl = QLabel("Sort By")
+        self.tag_list_sort_lbl.setObjectName("tagListSortLabel")
+        self.tag_list_sort_lbl.setVisible(False)
+        self.tag_list_panel_layout.addWidget(self.tag_list_sort_lbl)
+
+        self.tag_list_sort_select = QComboBox(self.tag_list_panel)
+        self.tag_list_sort_select.setObjectName("tagListSortSelect")
+        self._configure_tag_list_combo(self.tag_list_sort_select)
+        self.tag_list_sort_select.addItem("None", "none")
+        self.tag_list_sort_select.addItem("A-Z", "az")
+        self.tag_list_sort_select.addItem("Z-A", "za")
+        self.tag_list_sort_select.addItem("Most Used", "most_used")
+        self.tag_list_sort_select.addItem("Least Used", "least_used")
+        self.tag_list_sort_select.currentIndexChanged.connect(self._on_tag_list_sort_changed)
+        self.tag_list_sort_select.setVisible(False)
+        self.tag_list_panel_layout.addWidget(self.tag_list_sort_select)
+
+        self.btn_add_tag_list_tag = QPushButton("Add New Tag")
+        self.btn_add_tag_list_tag.setObjectName("btnAddTagListTag")
+        self.btn_add_tag_list_tag.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_add_tag_list_tag.clicked.connect(self._add_tag_to_active_list)
+        self.btn_add_tag_list_tag.setVisible(False)
+        self.tag_list_panel_layout.addWidget(self.btn_add_tag_list_tag)
+
+        self.btn_import_tag_list_tags = QPushButton("Import Tags from File")
+        self.btn_import_tag_list_tags.setObjectName("btnImportTagListTags")
+        self.btn_import_tag_list_tags.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_import_tag_list_tags.clicked.connect(self._import_tags_from_current_file_into_active_list)
+        self.btn_import_tag_list_tags.setVisible(False)
+        self.tag_list_panel_layout.addWidget(self.btn_import_tag_list_tags)
+
+        self.tag_list_rows = TagListRowsWidget(self.tag_list_panel)
+        self.tag_list_rows.setObjectName("tagListRows")
+        self.tag_list_rows.orderChanged.connect(self._persist_active_tag_list_order)
+        self.tag_list_rows.backgroundClicked.connect(self._clear_tag_scope_filter)
+        self.tag_list_panel_layout.addWidget(self.tag_list_rows, 1)
+
+        self.tag_list_empty_lbl = QLabel("Create or select a tag list.")
+        self.tag_list_empty_lbl.setObjectName("tagListEmptyLabel")
+        self.tag_list_empty_lbl.setWordWrap(True)
+        self.tag_list_empty_lbl.setVisible(True)
+        self.tag_list_panel_layout.addWidget(self.tag_list_empty_lbl)
+
+        self.right_panel = QWidget(self.right_splitter)
         self.right_panel.setObjectName("rightPanel")
         outer_right_layout = QVBoxLayout(self.right_panel)
         outer_right_layout.setContentsMargins(0, 0, 0, 0)
@@ -8308,6 +8817,20 @@ class MainWindow(QMainWindow):
         self.meta_tags = QLineEdit()
         self.meta_tags.setPlaceholderText("tag1, tag2...")
         self.meta_tags.editingFinished.connect(self._save_native_tags)
+        self.meta_tags.textChanged.connect(lambda _text: self._refresh_tag_list_rows_state())
+
+        self.tag_list_open_btn_row = QWidget()
+        self.tag_list_open_btn_row.setObjectName("tagListOpenButtonRow")
+        tag_list_open_btn_layout = QHBoxLayout(self.tag_list_open_btn_row)
+        tag_list_open_btn_layout.setContentsMargins(0, 0, 0, 0)
+        tag_list_open_btn_layout.setSpacing(0)
+        tag_list_open_btn_layout.addStretch(1)
+        self.btn_open_tag_list = QPushButton("Open Tag List")
+        self.btn_open_tag_list.setObjectName("btnOpenTagList")
+        self.btn_open_tag_list.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_open_tag_list.clicked.connect(self._toggle_tag_list_panel)
+        tag_list_open_btn_layout.addWidget(self.btn_open_tag_list, 0, Qt.AlignmentFlag.AlignCenter)
+        tag_list_open_btn_layout.addStretch(1)
 
         self.lbl_ai_prompt_cap = QLabel("AI Prompt:")
         self.lbl_ai_prompt_cap.setObjectName("metaAIPromptCaption")
@@ -8503,7 +9026,12 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.left_panel)
         splitter.addWidget(center_container)
 
-        splitter.addWidget(self.right_panel)
+        self.right_splitter.addWidget(self.tag_list_panel)
+        self.right_splitter.addWidget(self.right_panel)
+        self.right_splitter.setStretchFactor(0, 0)
+        self.right_splitter.setStretchFactor(1, 1)
+
+        splitter.addWidget(self.right_panel_host)
         splitter.setStretchFactor(1, 1)
         splitter.setObjectName("mainSplitter")
         splitter.setMouseTracking(True)
@@ -8511,9 +9039,11 @@ class MainWindow(QMainWindow):
 
         self._restore_main_splitter_sizes()
         self._restore_center_splitter_sizes()
+        self._restore_right_splitter_sizes()
 
         splitter.splitterMoved.connect(lambda *args: self._on_splitter_moved())
         center_splitter.splitterMoved.connect(lambda *args: self._on_splitter_moved())
+        self.right_splitter.splitterMoved.connect(lambda *args: self._on_right_splitter_moved())
 
         self.setCentralWidget(splitter)
 
@@ -8535,6 +9065,8 @@ class MainWindow(QMainWindow):
         # Initial clear/hide based on default settings
         # Must be at the very end to ensure all UI attributes (meta_desc, etc.) are initialized.
         self._setup_metadata_layout()
+        self._reload_tag_lists()
+        self._sync_tag_list_panel_visibility()
         self._update_preview_visibility()
         self._clear_metadata_panel()
         QTimer.singleShot(0, self._apply_initial_web_background)
@@ -8588,8 +9120,8 @@ class MainWindow(QMainWindow):
             sizes = self._current_splitter_sizes()
             if self.left_panel.isVisible() and sizes[0] > 0:
                 self.bridge.settings.setValue("ui/left_panel_width", int(sizes[0]))
-            if self.right_panel.isVisible() and sizes[2] > 0:
-                self.bridge.settings.setValue("ui/right_panel_width", int(sizes[2]))
+            if self.right_panel_host.isVisible():
+                self.bridge.settings.setValue("ui/right_panel_width", int(self._details_panel_width_without_tag_list()))
         except Exception:
             pass
 
@@ -8629,6 +9161,177 @@ class MainWindow(QMainWindow):
             self.center_splitter.setSizes(sizes)
         except Exception:
             pass
+
+    def _current_right_splitter_sizes(self) -> list[int]:
+        try:
+            sizes = [int(v) for v in self.right_splitter.sizes()]
+        except Exception:
+            sizes = []
+        if len(sizes) < 2:
+            return [0, self._DEFAULT_RIGHT_PANEL_WIDTH]
+        return sizes[:2]
+
+    def _save_tag_list_panel_width(self) -> None:
+        try:
+            sizes = self._current_right_splitter_sizes()
+            if self.tag_list_panel.isVisible() and sizes[0] > 0:
+                self.bridge.settings.setValue("ui/tag_list_panel_width", int(sizes[0]))
+        except Exception:
+            pass
+
+    def _restore_right_splitter_sizes(self) -> None:
+        try:
+            saved_details_width = max(240, int(self.bridge.settings.value("ui/tag_list_last_details_width", self._get_saved_panel_width("ui/right_panel_width", self._DEFAULT_RIGHT_PANEL_WIDTH), type=int) or self._get_saved_panel_width("ui/right_panel_width", self._DEFAULT_RIGHT_PANEL_WIDTH)))
+            details_width = saved_details_width
+            tag_width = self._get_saved_panel_width("ui/tag_list_panel_width", 280)
+            show_tag_list = bool(self.bridge.settings.value("ui/show_tag_list_panel", False, type=bool)) and self._can_show_tag_list_panel()
+            self.tag_list_panel.setVisible(show_tag_list)
+            if show_tag_list:
+                self.right_splitter.setSizes([tag_width, details_width])
+            else:
+                self.right_splitter.setSizes([0, details_width])
+        except Exception:
+            pass
+
+    def _details_panel_width_without_tag_list(self) -> int:
+        try:
+            if hasattr(self, "right_panel") and self.right_panel.width() > 0:
+                return max(240, int(self.right_panel.width()))
+            if hasattr(self, "right_splitter") and self.tag_list_panel.isVisible():
+                sizes = self._current_right_splitter_sizes()
+                if len(sizes) >= 2 and sizes[1] > 0:
+                    return max(240, int(sizes[1]))
+        except Exception:
+            pass
+        return max(240, int(self.right_panel_host.width() or self._get_saved_panel_width("ui/right_panel_width", self._DEFAULT_RIGHT_PANEL_WIDTH)))
+
+    def _resize_window_for_tag_list_visibility(self, show: bool) -> None:
+        if not hasattr(self, "splitter"):
+            return
+        sizes = self._current_splitter_sizes()
+        if len(sizes) < 3:
+            return
+        tag_width = self._get_saved_panel_width("ui/tag_list_panel_width", 280)
+        if show:
+            if not hasattr(self, "_tag_list_prev_main_sizes") or not isinstance(getattr(self, "_tag_list_prev_main_sizes", None), list):
+                self._tag_list_prev_main_sizes = [int(v) for v in sizes[:3]]
+
+            saved_hidden_details_width = self._get_saved_panel_width("ui/right_panel_width", self._DEFAULT_RIGHT_PANEL_WIDTH)
+            saved_tag_details_width = max(240, int(self.bridge.settings.value("ui/tag_list_last_details_width", saved_hidden_details_width, type=int) or saved_hidden_details_width))
+            current_details_width = max(240, self._details_panel_width_without_tag_list())
+            baseline_details_width = saved_tag_details_width if self.tag_list_panel.isVisible() else saved_hidden_details_width
+            details_width = max(baseline_details_width, current_details_width)
+            self.bridge.settings.setValue("ui/tag_list_last_details_width", details_width)
+            desired_right_width = details_width + tag_width
+            current_right_width = max(0, int(sizes[2]))
+            needed_extra = max(0, desired_right_width - current_right_width)
+            left_width = int(sizes[0])
+            center_width = int(sizes[1])
+            right_width = current_right_width + needed_extra
+            remaining_extra = needed_extra
+            if remaining_extra > 0:
+                center_shrink = min(max(0, center_width - 120), remaining_extra)
+                center_width -= center_shrink
+                remaining_extra -= center_shrink
+            if remaining_extra > 0:
+                left_shrink = min(max(0, left_width - 120), remaining_extra)
+                left_width -= left_shrink
+                remaining_extra -= left_shrink
+            if remaining_extra > 0:
+                right_width -= remaining_extra
+
+            self.splitter.setSizes([left_width, center_width, right_width])
+            self.tag_list_panel.setVisible(True)
+            self.right_splitter.setSizes([tag_width, details_width])
+            return
+
+        prev_main_sizes = getattr(self, "_tag_list_prev_main_sizes", None)
+        details_width = max(240, int(self.bridge.settings.value("ui/tag_list_last_details_width", self._DEFAULT_RIGHT_PANEL_WIDTH, type=int) or self._DEFAULT_RIGHT_PANEL_WIDTH))
+        if isinstance(prev_main_sizes, list) and len(prev_main_sizes) >= 3:
+            self.splitter.setSizes([int(prev_main_sizes[0]), int(prev_main_sizes[1]), int(prev_main_sizes[2])])
+        else:
+            current_sizes = self._current_splitter_sizes()
+            if len(current_sizes) >= 3:
+                left_width = int(current_sizes[0])
+                center_width = int(current_sizes[1])
+                right_width = int(current_sizes[2])
+                target_right_width = max(240, details_width)
+                released_width = max(0, right_width - target_right_width)
+                if released_width > 0:
+                    center_width += released_width
+                right_width = target_right_width
+                self.splitter.setSizes([left_width, center_width, right_width])
+        self.tag_list_panel.setVisible(False)
+        self.right_splitter.setSizes([0, details_width])
+        self._tag_list_prev_main_sizes = None
+
+    def _is_tag_list_panel_requested_visible(self) -> bool:
+        try:
+            return bool(self.bridge.settings.value("ui/show_tag_list_panel", False, type=bool))
+        except Exception:
+            return False
+
+    def _update_tag_list_toggle_controls(self, visible: bool | None = None) -> None:
+        is_visible = self.tag_list_panel.isVisible() if visible is None else bool(visible)
+        if hasattr(self, "btn_open_tag_list"):
+            self.btn_open_tag_list.setText("Close Tag List" if is_visible else "Open Tag List")
+            self.btn_open_tag_list.setEnabled(bool(hasattr(self, "tag_list_open_btn_row") and self.tag_list_open_btn_row.isVisible()))
+        if hasattr(self, "act_toggle_tag_list_panel"):
+            self.act_toggle_tag_list_panel.blockSignals(True)
+            self.act_toggle_tag_list_panel.setChecked(is_visible)
+            self.act_toggle_tag_list_panel.blockSignals(False)
+            self.act_toggle_tag_list_panel.setEnabled(True)
+
+    def _set_tag_list_panel_requested_visible(self, visible: bool) -> None:
+        self.bridge.settings.setValue("ui/show_tag_list_panel", bool(visible))
+        self._sync_tag_list_panel_visibility()
+
+    def _toggle_tag_list_panel(self) -> None:
+        self._set_tag_list_panel_requested_visible(not self.tag_list_panel.isVisible())
+
+    def _toggle_tag_list_panel_from_menu(self, checked: bool) -> None:
+        if checked and not bool(self.bridge.settings.value("ui/show_right_panel", True, type=bool)):
+            self.bridge.settings.setValue("ui/show_right_panel", True)
+            self.bridge.uiFlagChanged.emit("ui.show_right_panel", True)
+        self._set_tag_list_panel_requested_visible(bool(checked))
+
+    def _can_show_tag_list_panel(self) -> bool:
+        return bool(hasattr(self, "right_panel_host") and self.right_panel_host.isVisible())
+
+    def _sync_tag_list_panel_visibility(self) -> None:
+        if not hasattr(self, "tag_list_panel"):
+            return
+        should_show = self._is_tag_list_panel_requested_visible() and self._can_show_tag_list_panel()
+        if not should_show:
+            self._save_tag_list_panel_width()
+        was_visible = self.tag_list_panel.isVisible()
+        saved_hidden_details_width = self._get_saved_panel_width("ui/right_panel_width", self._DEFAULT_RIGHT_PANEL_WIDTH)
+        saved_tag_details_width = max(240, int(self.bridge.settings.value("ui/tag_list_last_details_width", saved_hidden_details_width, type=int) or saved_hidden_details_width))
+        tag_width = self._get_saved_panel_width("ui/tag_list_panel_width", 280)
+        desired_right_width = saved_tag_details_width + tag_width
+        current_right_width = max(0, int(self._current_splitter_sizes()[2] if hasattr(self, "splitter") else 0))
+        needs_outer_resize = should_show and current_right_width < max(240, desired_right_width - 2)
+        if should_show and (not was_visible or needs_outer_resize):
+            if not was_visible:
+                self.bridge.settings.setValue("ui/tag_list_last_details_width", max(saved_hidden_details_width, self._details_panel_width_without_tag_list()))
+            self._resize_window_for_tag_list_visibility(True)
+        elif not should_show and was_visible:
+            self._resize_window_for_tag_list_visibility(False)
+        self.tag_list_panel.setVisible(should_show)
+        if should_show:
+            self._restore_right_splitter_sizes()
+            self._refresh_tag_list_panel()
+        elif hasattr(self, "right_splitter"):
+            details_width = max(240, int(self.bridge.settings.value("ui/tag_list_last_details_width", self._DEFAULT_RIGHT_PANEL_WIDTH, type=int) or self._DEFAULT_RIGHT_PANEL_WIDTH))
+            self.right_splitter.setSizes([0, details_width])
+        self._update_tag_list_toggle_controls(should_show)
+
+    def _open_tag_list_panel(self) -> None:
+        self._set_tag_list_panel_requested_visible(True)
+
+    def _close_tag_list_panel(self) -> None:
+        self._save_tag_list_panel_width()
+        self._set_tag_list_panel_requested_visible(False)
 
     def _update_navigation_state(self) -> None:
         self.bridge._can_nav_back = self._folder_history_index > 0
@@ -9406,8 +10109,13 @@ class MainWindow(QMainWindow):
             elif key == "ui.show_right_panel":
                 if not bool(value):
                     self._save_main_panel_widths()
-                self.right_panel.setVisible(bool(value))
+                self.right_panel_host.setVisible(bool(value))
                 QTimer.singleShot(0, self._restore_main_splitter_sizes)
+                if bool(value):
+                    if self._is_tag_list_panel_requested_visible():
+                        QTimer.singleShot(0, self._sync_tag_list_panel_visibility)
+                    else:
+                        QTimer.singleShot(0, self._restore_right_splitter_sizes)
                 if hasattr(self, "act_toggle_right_panel"):
                     self.act_toggle_right_panel.setChecked(bool(value))
                 self._sync_menu_bar_controls()
@@ -9447,6 +10155,7 @@ class MainWindow(QMainWindow):
                 if hasattr(self, "right_layout"):
                     self.right_layout.activate()
                     self._update_sidebar_input_widths()
+                self._sync_tag_list_panel_visibility()
                 self._sync_sidebar_video_preview_controls()
             elif key == "player.autoplay_preview_animated_gifs":
                 if getattr(self, "_preview_movie", None) is not None:
@@ -9632,6 +10341,7 @@ class MainWindow(QMainWindow):
         self.lbl_tags_cap.setText("Tags (comma or semicolon separated):")
         self.lbl_tags_cap.setVisible(True)
         self.meta_tags.setVisible(True)
+        self.tag_list_open_btn_row.setVisible(False)
         self.meta_tags.setPlaceholderText("tag1, tag2, tag3")
         self.btn_save_meta.setVisible(True)
         self.btn_save_meta.setProperty("baseText", f"Save Tags to DB for {selection_count} Items")
@@ -9661,6 +10371,300 @@ class MainWindow(QMainWindow):
             seen.add(key)
             merged.append(normalized)
         return merged
+
+    def _active_tag_list_id(self) -> int:
+        if not hasattr(self, "tag_list_select"):
+            return 0
+        return int(self.tag_list_select.currentData() or 0)
+
+    def _configure_tag_list_combo(self, combo: QComboBox) -> None:
+        view = QListView(combo)
+        view.setObjectName(f"{combo.objectName()}Popup")
+        view.setFrameShape(QFrame.Shape.NoFrame)
+        view.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        view.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        view.setUniformItemSizes(False)
+        view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        view.setMouseTracking(True)
+        combo.setView(view)
+        combo.setItemDelegate(TagListComboDelegate(self.bridge, combo, view))
+
+    def _selected_tag_names_from_editor(self) -> set[str]:
+        return {tag.casefold() for tag in self._normalize_tag_list(self.meta_tags.text())}
+
+    def _current_scope_tag_counts(self) -> dict[str, int]:
+        counts: Counter[str] = Counter()
+        try:
+            entries = self.bridge._get_gallery_entries(
+                list(getattr(self.bridge, "_selected_folders", []) or []),
+                "none",
+                getattr(self.bridge, "_current_gallery_filter", "all"),
+                getattr(self.bridge, "_current_gallery_search", ""),
+            )
+        except Exception:
+            entries = []
+        for entry in entries or []:
+            if entry.get("is_folder"):
+                continue
+            tags = self._normalize_tag_list(entry.get("tags") or "")
+            seen: set[str] = set()
+            for tag in tags:
+                key = tag.casefold()
+                if key in seen:
+                    continue
+                seen.add(key)
+                counts[key] += 1
+        return dict(counts)
+
+    def _reload_tag_lists(self, preferred_id: int | None = None) -> None:
+        from app.mediamanager.db.tag_lists_repo import list_tag_lists
+
+        current_id = preferred_id if preferred_id is not None else self._active_tag_list_id()
+        rows = list_tag_lists(self.bridge.conn)
+        self.tag_list_select.blockSignals(True)
+        self.tag_list_select.clear()
+        for row in rows:
+            self.tag_list_select.addItem(str(row.get("name") or ""), int(row.get("id") or 0))
+        self.tag_list_select.blockSignals(False)
+
+        index = -1
+        for i, row in enumerate(rows):
+            if int(row.get("id") or 0) == int(current_id or 0):
+                index = i
+                break
+        if index < 0 and rows:
+            index = 0
+        if index >= 0:
+            self.tag_list_select.setCurrentIndex(index)
+        self._refresh_tag_list_panel()
+
+    def _create_tag_list(self) -> None:
+        from app.mediamanager.db.tag_lists_repo import create_tag_list
+
+        name, ok = QInputDialog.getText(self, "Create Tag List", "List name:")
+        if not ok or not str(name or "").strip():
+            return
+        created = create_tag_list(self.bridge.conn, name)
+        if not created:
+            QMessageBox.warning(self, "Create Tag List", "Unable to create that tag list.")
+            return
+        self._reload_tag_lists(int(created.get("id") or 0))
+        self._open_tag_list_panel()
+
+    def _rename_active_tag_list(self) -> None:
+        from app.mediamanager.db.tag_lists_repo import get_tag_list, rename_tag_list
+
+        tag_list_id = self._active_tag_list_id()
+        if tag_list_id <= 0:
+            return
+        current = get_tag_list(self.bridge.conn, tag_list_id) or {}
+        name, ok = QInputDialog.getText(self, "Rename Tag List", "List name:", text=str(current.get("name") or ""))
+        if not ok or not str(name or "").strip():
+            return
+        if not rename_tag_list(self.bridge.conn, tag_list_id, name):
+            QMessageBox.warning(self, "Rename Tag List", "That tag list name is already in use.")
+            return
+        self._reload_tag_lists(tag_list_id)
+
+    def _add_tag_to_active_list(self) -> None:
+        from app.mediamanager.db.tag_lists_repo import add_tag_to_list
+
+        tag_list_id = self._active_tag_list_id()
+        if tag_list_id <= 0:
+            return
+        tag_name, ok = QInputDialog.getText(self, "Add New Tag", "Tag:")
+        if not ok or not str(tag_name or "").strip():
+            return
+        add_tag_to_list(self.bridge.conn, tag_list_id, tag_name)
+        self._refresh_tag_list_panel()
+
+    def _import_tags_from_current_file_into_active_list(self) -> None:
+        from app.mediamanager.db.tag_lists_repo import add_tag_to_list
+
+        tag_list_id = self._active_tag_list_id()
+        if tag_list_id <= 0:
+            return
+        tags = self._normalize_tag_list(self.meta_tags.text())
+        if not tags:
+            self.meta_status_lbl.setText("No tags available to import")
+            QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
+            return
+        for tag in tags:
+            add_tag_to_list(self.bridge.conn, tag_list_id, tag)
+        self._refresh_tag_list_panel()
+
+    def _sort_tag_list_entries(self, entries: list[dict], sort_mode: str) -> list[dict]:
+        mode = str(sort_mode or "none")
+        if mode == "az":
+            return sorted(entries, key=lambda row: str(row.get("name") or "").casefold())
+        if mode == "za":
+            return sorted(entries, key=lambda row: str(row.get("name") or "").casefold(), reverse=True)
+        if mode == "most_used":
+            return sorted(entries, key=lambda row: (-int(row.get("global_use_count") or 0), str(row.get("name") or "").casefold()))
+        if mode == "least_used":
+            return sorted(entries, key=lambda row: (int(row.get("global_use_count") or 0), str(row.get("name") or "").casefold()))
+        return sorted(entries, key=lambda row: (int(row.get("sort_order") or 0), str(row.get("name") or "").casefold()))
+
+    def _refresh_tag_list_panel(self) -> None:
+        from app.mediamanager.db.tag_lists_repo import get_tag_list, list_tag_list_entries
+
+        if not hasattr(self, "tag_list_rows"):
+            return
+        tag_list_id = self._active_tag_list_id()
+        tag_list = get_tag_list(self.bridge.conn, tag_list_id) if tag_list_id > 0 else None
+
+        self.tag_list_rows.clear()
+        has_list = bool(tag_list)
+        self.active_tag_list_name_lbl.setVisible(has_list)
+        self.tag_list_sort_lbl.setVisible(has_list)
+        self.tag_list_sort_select.setVisible(has_list)
+        self.btn_add_tag_list_tag.setVisible(has_list)
+        self.btn_import_tag_list_tags.setVisible(has_list)
+        self.tag_list_rows.setVisible(has_list)
+
+        if not has_list:
+            self.active_tag_list_name_lbl.setText("")
+            self.tag_list_empty_lbl.setText("Create or select a tag list.")
+            self.tag_list_empty_lbl.setVisible(True)
+            return
+
+        self.active_tag_list_name_lbl.setText(str(tag_list.get("name") or ""))
+        sort_mode = str(tag_list.get("sort_mode") or "none")
+        sort_index = max(0, self.tag_list_sort_select.findData(sort_mode))
+        self.tag_list_sort_select.blockSignals(True)
+        self.tag_list_sort_select.setCurrentIndex(sort_index)
+        self.tag_list_sort_select.blockSignals(False)
+
+        scope_counts = self._current_scope_tag_counts()
+        selected_tags = self._selected_tag_names_from_editor()
+        entries = list_tag_list_entries(self.bridge.conn, tag_list_id)
+        for entry in entries:
+            entry["scope_use_count"] = int(scope_counts.get(str(entry.get("name") or "").casefold(), 0))
+            entry["in_selected_tags"] = str(entry.get("name") or "").casefold() in selected_tags
+        entries = self._sort_tag_list_entries(entries, sort_mode)
+        self.tag_list_rows.set_user_sort_enabled(sort_mode == "none")
+
+        for entry in entries:
+            item = QListWidgetItem()
+            item.setData(Qt.ItemDataRole.UserRole, int(entry.get("tag_id") or 0))
+            item.setSizeHint(QSize(0, 36))
+            self.tag_list_rows.addItem(item)
+            row = TagListTagRow(self.tag_list_rows, item, entry)
+            row.addToSelectionRequested.connect(self._add_tag_to_current_editor)
+            row.removeFromSelectionRequested.connect(self._remove_tag_from_current_editor)
+            row.removeFromListRequested.connect(self._remove_tag_from_active_list)
+            row.filterRequested.connect(self._filter_gallery_by_tag)
+            self.tag_list_rows.setItemWidget(item, row)
+
+        self.tag_list_empty_lbl.setText("No tags in this list yet." if not entries else "")
+        self.tag_list_empty_lbl.setVisible(not entries)
+        self._apply_tag_list_theme()
+
+    def _refresh_tag_list_scope_counts(self) -> None:
+        if not hasattr(self, "tag_list_panel") or not self.tag_list_panel.isVisible():
+            return
+        self._refresh_tag_list_panel()
+
+    def _refresh_tag_list_rows_state(self) -> None:
+        if not hasattr(self, "tag_list_panel") or not self.tag_list_panel.isVisible():
+            return
+        self._refresh_tag_list_panel()
+
+    def _apply_tag_list_theme(self) -> None:
+        if not hasattr(self, "tag_list_rows"):
+            return
+        accent = QColor(getattr(self, "_current_accent", Theme.ACCENT_DEFAULT))
+        text = Theme.get_text_color()
+        text_muted = Theme.get_text_muted()
+        accent_text = Theme.mix(text, accent, 0.78)
+        btn_bg = Theme.get_input_bg(accent)
+        btn_hover = Theme.get_btn_save_hover(accent)
+        btn_border = Theme.get_input_border(accent)
+        btn_border_hover = Theme.mix(Theme.get_border(accent), accent, 0.28)
+        for index in range(self.tag_list_rows.count()):
+            item = self.tag_list_rows.item(index)
+            row = self.tag_list_rows.itemWidget(item)
+            if isinstance(row, TagListTagRow):
+                row.apply_theme(
+                    accent_color=accent.name(),
+                    accent_text=accent_text,
+                    text=text,
+                    text_muted=text_muted,
+                    btn_bg=btn_bg,
+                    btn_hover=btn_hover,
+                    btn_border=btn_border,
+                    btn_border_hover=btn_border_hover,
+                    is_light=Theme.get_is_light(),
+                )
+
+    def _on_tag_list_changed(self, _index: int) -> None:
+        self._refresh_tag_list_panel()
+
+    def _on_tag_list_sort_changed(self, _index: int) -> None:
+        from app.mediamanager.db.tag_lists_repo import set_tag_list_sort_mode
+
+        tag_list_id = self._active_tag_list_id()
+        if tag_list_id <= 0:
+            return
+        sort_mode = str(self.tag_list_sort_select.currentData() or "none")
+        set_tag_list_sort_mode(self.bridge.conn, tag_list_id, sort_mode)
+        self._refresh_tag_list_panel()
+
+    def _persist_active_tag_list_order(self) -> None:
+        from app.mediamanager.db.tag_lists_repo import reorder_tag_list_entries
+
+        tag_list_id = self._active_tag_list_id()
+        if tag_list_id <= 0:
+            return
+        if str(self.tag_list_sort_select.currentData() or "none") != "none":
+            return
+        ordered_ids: list[int] = []
+        for index in range(self.tag_list_rows.count()):
+            item = self.tag_list_rows.item(index)
+            ordered_ids.append(int(item.data(Qt.ItemDataRole.UserRole) or 0))
+        reorder_tag_list_entries(self.bridge.conn, tag_list_id, ordered_ids)
+        self._save_tag_list_panel_width()
+
+    def _add_tag_to_current_editor(self, tag_name: str) -> None:
+        next_tags = self._merge_tag_lists(self._normalize_tag_list(self.meta_tags.text()), [tag_name])
+        self.meta_tags.setText(", ".join(next_tags))
+
+    def _remove_tag_from_current_editor(self, tag_name: str) -> None:
+        remove_key = str(tag_name or "").casefold()
+        next_tags = [tag for tag in self._normalize_tag_list(self.meta_tags.text()) if tag.casefold() != remove_key]
+        self.meta_tags.setText(", ".join(next_tags))
+
+    def _remove_tag_from_active_list(self, tag_id: int, _tag_name: str) -> None:
+        from app.mediamanager.db.tag_lists_repo import list_tag_list_entries, remove_tag_from_list
+
+        tag_list_id = self._active_tag_list_id()
+        if tag_list_id <= 0:
+            return
+        entries = list_tag_list_entries(self.bridge.conn, tag_list_id)
+        entry = next((row for row in entries if int(row.get("tag_id") or 0) == int(tag_id)), None)
+        if not entry or int(entry.get("global_use_count") or 0) > 0:
+            return
+        if remove_tag_from_list(self.bridge.conn, tag_list_id, tag_id):
+            self._refresh_tag_list_panel()
+
+    def _filter_gallery_by_tag(self, tag_name: str) -> None:
+        query = f'tag:"{str(tag_name or "").replace(chr(34), r"\\\"")}"'
+        try:
+            self.web.page().runJavaScript(
+                f"try{{ window.__mmx_applyTagScope && window.__mmx_applyTagScope({json.dumps(query)}); }}catch(e){{}}"
+            )
+        except Exception:
+            pass
+
+    def _clear_tag_scope_filter(self) -> None:
+        try:
+            self.web.page().runJavaScript(
+                "try{ window.__mmx_clearTagScope && window.__mmx_clearTagScope(); }catch(e){}"
+            )
+        except Exception:
+            pass
+
 
     def _clear_preview_media(self) -> None:
         overlay = getattr(self, "sidebar_video_overlay", None)
@@ -10159,6 +11163,7 @@ class MainWindow(QMainWindow):
         # --- Show confirmation then auto-clear after 3s ---
         self.meta_status_lbl.setText(f"✓ {'Tags' if is_bulk else 'Changes'} saved")
         QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
+        self._refresh_tag_list_scope_counts()
 
     def _harvest_universal_metadata(self, img) -> dict:
         """Systematically extract tags/comments from XMP, IPTC, and all EXIF IFDs."""
@@ -11149,6 +12154,7 @@ class MainWindow(QMainWindow):
         
         # Clear the UI text box
         self.meta_tags.setText("")
+        self._refresh_tag_list_scope_counts()
 
     def _save_native_tags(self) -> None:
         # We delegate to the main metadata saver to avoid logic duplication
@@ -11390,8 +12396,10 @@ class MainWindow(QMainWindow):
         self.lbl_notes_cap.setVisible(not is_bulk and show_notes)
         self.meta_notes.setVisible(not is_bulk and show_notes)
         
-        self.lbl_tags_cap.setVisible(not is_bulk and ("tags" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "tags", True)))
-        self.meta_tags.setVisible(not is_bulk and ("tags" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "tags", True)))
+        tags_visible = not is_bulk and ("tags" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "tags", True))
+        self.lbl_tags_cap.setVisible(tags_visible)
+        self.meta_tags.setVisible(tags_visible)
+        self.tag_list_open_btn_row.setVisible(tags_visible)
         self.btn_clear_bulk_tags.setVisible(is_bulk)
         
         self.meta_filename_edit.blockSignals(True)
@@ -11623,6 +12631,7 @@ class MainWindow(QMainWindow):
         self.meta_notes.blockSignals(False)
         self.meta_exif_date_taken_edit.blockSignals(False)
         self.meta_metadata_date_edit.blockSignals(False)
+        self._sync_tag_list_panel_visibility()
 
     def _clear_embedded_labels(self):
         self.meta_camera_lbl.setText("Camera: ")
@@ -12084,7 +13093,7 @@ class MainWindow(QMainWindow):
             "codec": [self.meta_codec_lbl],
             "audio": [self.meta_audio_lbl],
             "description": [self.lbl_desc_cap, self.meta_desc],
-            "tags": [self.lbl_tags_cap, self.meta_tags],
+            "tags": [self.lbl_tags_cap, self.meta_tags, self.tag_list_open_btn_row],
             "notes": [self.lbl_notes_cap, self.meta_notes],
             "camera": [self.meta_camera_lbl],
             "location": [self.meta_location_lbl],
@@ -12265,8 +13274,10 @@ class MainWindow(QMainWindow):
         
         self.meta_desc.setVisible("description" in active_fields and self._is_metadata_enabled_for_kind(kind, "description", True))
         self.lbl_desc_cap.setVisible("description" in active_fields and self._is_metadata_enabled_for_kind(kind, "description", True))
-        self.meta_tags.setVisible("tags" in active_fields and self._is_metadata_enabled_for_kind(kind, "tags", True))
-        self.lbl_tags_cap.setVisible("tags" in active_fields and self._is_metadata_enabled_for_kind(kind, "tags", True))
+        tags_visible = "tags" in active_fields and self._is_metadata_enabled_for_kind(kind, "tags", True)
+        self.meta_tags.setVisible(tags_visible)
+        self.lbl_tags_cap.setVisible(tags_visible)
+        self.tag_list_open_btn_row.setVisible(tags_visible)
         self.meta_notes.setVisible("notes" in active_fields and self._is_metadata_enabled_for_kind(kind, "notes", True))
         self.lbl_notes_cap.setVisible("notes" in active_fields and self._is_metadata_enabled_for_kind(kind, "notes", True))
         
@@ -12275,9 +13286,11 @@ class MainWindow(QMainWindow):
         self.meta_tags.setText("")
         self.meta_status_lbl.setText("")
         self._set_metadata_empty_state(True)
+        self._sync_tag_list_panel_visibility()
 
     def _on_splitter_moved(self) -> None:
         """Save splitter state and re-apply card selection if the resize caused a deselect."""
+        self._maintain_tag_list_width_on_main_resize()
         self._save_splitter_state()
         self._update_sidebar_action_buttons()
         self._update_sidebar_input_widths()
@@ -12292,6 +13305,72 @@ class MainWindow(QMainWindow):
                 f'    c.classList.add(\'selected\'); }}'
                 f'}})();'
             )
+
+    def _on_right_splitter_moved(self) -> None:
+        self._save_tag_list_panel_width()
+        if self.tag_list_panel.isVisible():
+            try:
+                self.bridge.settings.setValue("ui/tag_list_last_details_width", self._details_panel_width_without_tag_list())
+            except Exception:
+                pass
+        self._update_sidebar_action_buttons()
+        self._update_sidebar_input_widths()
+        self._update_preview_display()
+
+    def _handle_right_splitter_overflow_drag(self, delta_x: int) -> None:
+        if delta_x >= 0 or not self.tag_list_panel.isVisible():
+            return
+        try:
+            right_sizes = self._current_right_splitter_sizes()
+            if len(right_sizes) < 2:
+                return
+            min_tag_width = 220
+            tag_width = int(right_sizes[0])
+            if tag_width > (min_tag_width + 2):
+                return
+
+            extra = abs(int(delta_x))
+            main_sizes = self._current_splitter_sizes()
+            if len(main_sizes) < 3:
+                return
+            left_width = int(main_sizes[0])
+            center_width = int(main_sizes[1])
+            right_width = int(main_sizes[2])
+
+            center_shrink = min(max(0, center_width - 120), extra)
+            center_width -= center_shrink
+            extra -= center_shrink
+            if extra > 0:
+                left_shrink = min(max(0, left_width - 120), extra)
+                left_width -= left_shrink
+                extra -= left_shrink
+
+            grown_by = abs(int(delta_x)) - extra
+            if grown_by <= 0:
+                return
+
+            right_width += grown_by
+            self.splitter.setSizes([left_width, center_width, right_width])
+            next_details_width = max(240, right_width - min_tag_width)
+            self.right_splitter.setSizes([min_tag_width, next_details_width])
+            self.bridge.settings.setValue("ui/tag_list_panel_width", min_tag_width)
+            self.bridge.settings.setValue("ui/tag_list_last_details_width", next_details_width)
+        except Exception:
+            pass
+
+    def _maintain_tag_list_width_on_main_resize(self) -> None:
+        if not hasattr(self, "right_splitter") or not self.tag_list_panel.isVisible():
+            return
+        try:
+            details_width = max(240, int(self.bridge.settings.value("ui/tag_list_last_details_width", self._details_panel_width_without_tag_list(), type=int) or self._details_panel_width_without_tag_list()))
+            total_right_width = max(240, int(self.right_panel_host.width() or self._current_splitter_sizes()[2]))
+            min_tag_width = 220
+            next_tag_width = max(min_tag_width, total_right_width - details_width)
+            next_details_width = max(240, total_right_width - next_tag_width)
+            self.right_splitter.setSizes([next_tag_width, next_details_width])
+            self.bridge.settings.setValue("ui/tag_list_panel_width", int(next_tag_width))
+        except Exception:
+            pass
 
     def _on_tree_context_menu(self, pos: QPoint) -> None:
         idx = self.tree.indexAt(pos)
@@ -12573,6 +13652,8 @@ class MainWindow(QMainWindow):
         self.splitter.setHandleWidth(7)
         if hasattr(self, "center_splitter"):
             self.center_splitter.setHandleWidth(7)
+        if hasattr(self, "right_splitter"):
+            self.right_splitter.setHandleWidth(7)
         
         # We no longer need stylesheets or manual loops here because 
         # CustomSplitterHandle.paintEvent handles everything natively.
@@ -12584,6 +13665,12 @@ class MainWindow(QMainWindow):
         if hasattr(self, "center_splitter"):
             for i in range(self.center_splitter.count()):
                 h = self.center_splitter.handle(i)
+                if h:
+                    h.update()
+                    h.repaint()
+        if hasattr(self, "right_splitter"):
+            for i in range(self.right_splitter.count()):
+                h = self.right_splitter.handle(i)
                 if h:
                     h.update()
                     h.repaint()
@@ -12704,6 +13791,17 @@ class MainWindow(QMainWindow):
         text = Theme.get_text_color()
         text_muted = Theme.get_text_muted()
         is_light = Theme.get_is_light()
+        combo_arrow_fill = "#666666" if is_light else "#999999"
+        combo_arrow_svg = (
+            "data:image/svg+xml;utf8,"
+            f"<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'>"
+            f"<path d='M3 4.5L6 7.5L9 4.5' fill='none' stroke='{combo_arrow_fill}' "
+            "stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>"
+        )
+        combo_bg = "#ffffff" if is_light else Theme.mix(Theme.get_control_bg(accent), "#000000", 0.12)
+        combo_selected_text = Theme.mix(text, accent, 0.76)
+        combo_hover_bg = Theme.mix(combo_bg, "#000000" if is_light else "#ffffff", 0.04 if is_light else 0.07)
+        combo_hover_text = text if is_light else "#ffffff"
         
         # Only touch the native title bar after the top-level window is visible.
         # Forcing winId() during construction can create an early transient HWND
@@ -12835,7 +13933,142 @@ class MainWindow(QMainWindow):
         if hasattr(self, "pinned_folders_list"):
             self._reload_pinned_folders()
         
-        # Right Panel (Metadata) - Mirroring Left Panel Background precisely
+        # Right Panel (Tag List + Metadata)
+        if hasattr(self, "right_panel_host"):
+            self.right_panel_host.setStyleSheet(f"background-color: {sb_bg_str}; border-left: none;")
+        if hasattr(self, "tag_list_panel"):
+            self.tag_list_panel.setStyleSheet(f"""
+                QWidget#tagListPanel {{
+                    background-color: {sb_bg_str};
+                    border-right: 1px solid {Theme.get_border(accent)};
+                }}
+                QLabel#tagListTitleLabel, QLabel#activeTagListNameLabel, QLabel#tagListSortLabel {{
+                    color: {text};
+                    font-weight: 700;
+                    background: transparent;
+                }}
+                QLabel#tagListEmptyLabel {{
+                    color: {text_muted};
+                    background: transparent;
+                }}
+                QPushButton#tagListCloseButton {{
+                    background: transparent;
+                    border: none;
+                    border-radius: 4px;
+                    color: {text_muted};
+                    font-size: 14px;
+                    padding: 0px;
+                    margin: 0px;
+                }}
+                QPushButton#tagListCloseButton:hover {{
+                    background-color: {Theme.get_control_bg(accent)};
+                    color: {text};
+                }}
+                QComboBox#tagListSelect, QComboBox#tagListSortSelect {{
+                    background-color: {combo_bg};
+                    color: {text};
+                    border: 1px solid {Theme.get_input_border(accent)};
+                    border-radius: 4px;
+                    min-height: 34px;
+                    padding: 0px 32px 0px 12px;
+                }}
+                QComboBox#tagListSelect:hover, QComboBox#tagListSortSelect:hover,
+                QComboBox#tagListSelect:focus, QComboBox#tagListSortSelect:focus {{
+                    border-color: {accent_str};
+                }}
+                QComboBox#tagListSelect:on, QComboBox#tagListSortSelect:on {{
+                    border-color: {accent_str};
+                    border-bottom-color: transparent;
+                    border-radius: 4px 4px 0px 0px;
+                }}
+                QComboBox#tagListSelect::drop-down, QComboBox#tagListSortSelect::drop-down {{
+                    subcontrol-origin: padding;
+                    subcontrol-position: top right;
+                    width: 28px;
+                    border: none;
+                    background: transparent;
+                }}
+                QComboBox#tagListSelect::down-arrow, QComboBox#tagListSortSelect::down-arrow {{
+                    image: url("{combo_arrow_svg}");
+                    width: 12px;
+                    height: 12px;
+                }}
+                QComboBox#tagListSelect QAbstractItemView, QComboBox#tagListSortSelect QAbstractItemView {{
+                    background-color: {combo_bg};
+                    color: {text};
+                    border: 1px solid {Theme.get_input_border(accent)};
+                    border-top: none;
+                    border-radius: 0px 0px 4px 4px;
+                    outline: 0;
+                    selection-background-color: transparent;
+                    selection-color: {combo_selected_text};
+                    show-decoration-selected: 0;
+                    padding: 2px 0px;
+                }}
+                QListView#tagListSelectPopup, QListView#tagListSortSelectPopup {{
+                    background-color: {combo_bg};
+                    color: {text};
+                    border: 1px solid {Theme.get_input_border(accent)};
+                    border-top: none;
+                    border-radius: 0px 0px 4px 4px;
+                    outline: 0;
+                    padding: 2px 0px;
+                    show-decoration-selected: 0;
+                }}
+                QListView#tagListSelectPopup::item, QListView#tagListSortSelectPopup::item {{
+                    padding: 5px 12px;
+                    border: none;
+                    margin: 0px;
+                    min-height: 0px;
+                }}
+                QListView#tagListSelectPopup::item:hover, QListView#tagListSortSelectPopup::item:hover {{
+                    background-color: {combo_hover_bg};
+                    color: {combo_hover_text};
+                }}
+                QListView#tagListSelectPopup::item:selected, QListView#tagListSortSelectPopup::item:selected {{
+                    background-color: {combo_bg};
+                    color: {combo_selected_text};
+                    border: none;
+                    font-weight: 700;
+                }}
+                QPushButton#btnCreateTagList, QPushButton#btnAddTagListTag, QPushButton#btnImportTagListTags {{
+                    background-color: {Theme.get_btn_save_bg(accent)};
+                    color: {text};
+                    border: 1px solid {Theme.get_border(accent)};
+                    border-radius: 4px;
+                    padding: 4px 8px;
+                    font-size: 11px;
+                    font-weight: 500;
+                }}
+                QPushButton#btnCreateTagList:hover, QPushButton#btnAddTagListTag:hover, QPushButton#btnImportTagListTags:hover {{
+                    background-color: {Theme.get_btn_save_hover(accent)};
+                    color: {"#000" if is_light else "#fff"};
+                    border-color: {accent_str};
+                }}
+                QListWidget#tagListRows {{
+                    background-color: {Theme.get_control_bg(accent)};
+                    border: 1px solid {Theme.get_border(accent)};
+                    border-radius: 8px;
+                    color: {text};
+                    padding: 4px;
+                }}
+                QListWidget#tagListRows::item {{
+                    border: none;
+                    padding: 2px;
+                }}
+                QListWidget#tagListRows::item:selected {{
+                    background-color: {Theme.get_accent_soft(accent)};
+                    border: 1px solid {accent_str};
+                    border-radius: 8px;
+                }}
+                QWidget#tagListTagRow {{
+                    background: transparent;
+                }}
+                {scrollbar_style}
+            """)
+            self._apply_tag_list_theme()
+
+        # Metadata - Mirroring Left Panel Background precisely
         self.right_panel.setStyleSheet(f"background-color: {sb_bg_str}; border-left: none;")
         right_palette = self.right_panel.palette()
         right_palette.setColor(QPalette.ColorRole.Window, QColor(sb_bg_str))
@@ -13002,7 +14235,7 @@ class MainWindow(QMainWindow):
             QPushButton#btnPreviewOverlayPlay:pressed {{
                 background-color: {"rgba(255, 255, 255, 115)" if is_light else "rgba(0, 0, 0, 115)"};
             }}
-            QPushButton#btnSaveMeta, QPushButton#btnImportExif, QPushButton#btnMergeHiddenMeta, QPushButton#btnSaveToExif {{
+            QPushButton#btnSaveMeta, QPushButton#btnImportExif, QPushButton#btnMergeHiddenMeta, QPushButton#btnSaveToExif, QPushButton#btnOpenTagList {{
                 background-color: {Theme.get_btn_save_bg(accent)};
                 color: {text};
                 border: 1px solid {Theme.get_border(accent)};
@@ -13011,7 +14244,7 @@ class MainWindow(QMainWindow):
                 font-size: 11px;
                 font-weight: 500;
             }}
-            QPushButton#btnSaveMeta:hover, QPushButton#btnImportExif:hover, QPushButton#btnMergeHiddenMeta:hover, QPushButton#btnSaveToExif:hover {{
+            QPushButton#btnSaveMeta:hover, QPushButton#btnImportExif:hover, QPushButton#btnMergeHiddenMeta:hover, QPushButton#btnSaveToExif:hover, QPushButton#btnOpenTagList:hover {{
                 background-color: {Theme.get_btn_save_hover(accent)};
                 color: {"#000" if is_light else "#fff"};
                 border-color: {accent_str};
@@ -13030,8 +14263,12 @@ class MainWindow(QMainWindow):
                 color: {"#000" if is_light else "#fff"};
                 border-color: {accent_str};
             }}
+            QPushButton#btnOpenTagList {{
+                min-width: 140px;
+            }}
         """)
         self._update_preview_play_button_icon()
+        self._apply_tag_list_theme()
         
         self._update_app_style(accent)
 
@@ -13369,6 +14606,7 @@ class MainWindow(QMainWindow):
         try:
             self._save_main_panel_widths()
             self._save_bottom_panel_height()
+            self._save_tag_list_panel_width()
             if hasattr(self, "left_sections_splitter"):
                 self.bridge.settings.setValue("ui/left_sections_splitter_state_v3", self.left_sections_splitter.saveState())
         except Exception:

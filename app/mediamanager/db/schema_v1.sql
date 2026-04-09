@@ -184,6 +184,29 @@ CREATE TABLE IF NOT EXISTS media_tags (
 CREATE INDEX IF NOT EXISTS idx_media_tags_media ON media_tags(media_id);
 CREATE INDEX IF NOT EXISTS idx_media_tags_tag ON media_tags(tag_id);
 
+CREATE TABLE IF NOT EXISTS tag_lists (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  sort_mode TEXT NOT NULL DEFAULT 'none',
+  created_at_utc TEXT NOT NULL,
+  updated_at_utc TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_tag_lists_name ON tag_lists(name);
+
+CREATE TABLE IF NOT EXISTS tag_list_items (
+  tag_list_id INTEGER NOT NULL,
+  tag_id INTEGER NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at_utc TEXT NOT NULL,
+  PRIMARY KEY (tag_list_id, tag_id),
+  FOREIGN KEY(tag_list_id) REFERENCES tag_lists(id) ON DELETE CASCADE,
+  FOREIGN KEY(tag_id) REFERENCES tags(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_tag_list_items_list ON tag_list_items(tag_list_id, sort_order, tag_id);
+CREATE INDEX IF NOT EXISTS idx_tag_list_items_tag ON tag_list_items(tag_id);
+
 CREATE TABLE IF NOT EXISTS folder_nodes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   path TEXT NOT NULL UNIQUE,
