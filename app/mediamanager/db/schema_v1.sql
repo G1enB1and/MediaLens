@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS media_ai_metadata (
   ai_detection_reasons_json TEXT NOT NULL DEFAULT '[]',
   raw_paths_json TEXT NOT NULL DEFAULT '[]',
   unknown_fields_json TEXT NOT NULL DEFAULT '{}',
+  user_confirmed_ai INTEGER,
   updated_at_utc TEXT NOT NULL,
   FOREIGN KEY(media_id) REFERENCES media_items(id) ON DELETE CASCADE
 );

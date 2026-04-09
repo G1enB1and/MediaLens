@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-from app.mediamanager.db.ai_metadata_repo import PARSER_VERSION, delete_media_ai_metadata, replace_media_ai_metadata
+from app.mediamanager.db.ai_metadata_repo import PARSER_VERSION, replace_media_ai_metadata
 from app.mediamanager.db.media_repo import update_media_dates
 from app.mediamanager.db.metadata_repo import upsert_media_embedded_metadata
 from app.mediamanager.metadata.models import InspectionResult
@@ -200,32 +200,6 @@ def _extract_embedded_metadata_payload(inspection: InspectionResult) -> dict:
     return payload
 
 
-def _inspection_has_ai_metadata(inspection: InspectionResult) -> bool:
-    ai_detection_families = {"a1111_like", "comfyui", "c2pa", "sillytavern", "ai_likely"}
-    if any(hit.family in ai_detection_families for hit in inspection.detections):
-        return True
-    canonical = inspection.canonical
-    return any(
-        [
-            canonical.is_ai_detected,
-            canonical.tool_name_found,
-            canonical.tool_name_inferred,
-            canonical.ai_prompt,
-            canonical.ai_negative_prompt,
-            canonical.model_name,
-            canonical.checkpoint_name,
-            canonical.sampler,
-            canonical.scheduler,
-            canonical.loras,
-            canonical.workflows,
-            canonical.provenance,
-            canonical.character_cards,
-            canonical.metadata_families_detected,
-            canonical.ai_detection_reasons,
-        ]
-    )
-
-
 def inspect_and_persist_file(
     conn: sqlite3.Connection,
     media_id: int,
@@ -238,10 +212,9 @@ def inspect_and_persist_file(
         _extract_embedded_metadata_payload(inspection),
         parser_version=PARSER_VERSION,
     )
-    if _inspection_has_ai_metadata(inspection):
-        replace_media_ai_metadata(conn, media_id, inspection)
-    else:
-        delete_media_ai_metadata(conn, media_id)
+    # Persist a canonical AI decision for every inspected file so the UI can rely
+    # on one source of truth instead of inferring "non-AI" from missing rows.
+    replace_media_ai_metadata(conn, media_id, inspection)
     update_media_dates(
         conn,
         media_id,

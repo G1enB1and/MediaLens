@@ -775,11 +775,9 @@ class MetadataSettingsPage(SettingsPage):
         self.group_name_label = QLabel("Select a group")
         self.group_name_label.setObjectName("settingsFieldTitle")
         self.group_enabled_toggle = QCheckBox("Show this group in the details panel")
-        self.group_collapsed_toggle = QCheckBox("Start collapsed in the details panel")
         self.field_list = ReorderListWidget()
         fields_layout.addWidget(self.group_name_label)
         fields_layout.addWidget(self.group_enabled_toggle)
-        fields_layout.addWidget(self.group_collapsed_toggle)
         fields_layout.addWidget(QLabel("Fields"))
         fields_layout.addWidget(self.field_list, 1)
         content_layout.addWidget(fields_box, 2)
@@ -789,7 +787,6 @@ class MetadataSettingsPage(SettingsPage):
         self.group_list.itemChanged.connect(self._on_group_item_changed)
         self.group_list.orderChanged.connect(self._save_group_order)
         self.group_enabled_toggle.toggled.connect(self._commit_group_options)
-        self.group_collapsed_toggle.toggled.connect(self._commit_group_options)
         self.field_list.itemChanged.connect(self._on_field_item_changed)
         self.field_list.orderChanged.connect(self._save_field_order)
 
@@ -804,9 +801,6 @@ class MetadataSettingsPage(SettingsPage):
 
     def _group_enabled_key(self, group_key: str) -> str:
         return f"metadata.display.{self._current_mode}.groups.{group_key}"
-
-    def _group_collapsed_key(self, group_key: str) -> str:
-        return f"metadata.display.{self._current_mode}.groupcollapsed.{group_key}"
 
     def _field_enabled_key(self, field_key: str) -> str:
         return f"metadata.display.{self._current_mode}.{field_key}"
@@ -871,7 +865,6 @@ class MetadataSettingsPage(SettingsPage):
             self.field_list.clear()
             enabled = bool(group_key)
             self.group_enabled_toggle.setEnabled(enabled)
-            self.group_collapsed_toggle.setEnabled(enabled)
             self.field_list.setEnabled(enabled)
             if not group_key:
                 self.group_name_label.setText("Select a group")
@@ -880,11 +873,9 @@ class MetadataSettingsPage(SettingsPage):
             if not group_cfg:
                 self.group_name_label.setText("Select a group")
                 self.group_enabled_toggle.setChecked(False)
-                self.group_collapsed_toggle.setChecked(False)
                 return
             self.group_name_label.setText(group_cfg["label"])
             self.group_enabled_toggle.setChecked(bool(self.settings.value(self._group_enabled_key(group_key).replace(".", "/"), True, type=bool)))
-            self.group_collapsed_toggle.setChecked(bool(self.settings.value(self._group_collapsed_key(group_key).replace(".", "/"), False, type=bool)))
             field_map = {field_key: (label_text, default_enabled) for field_key, label_text, default_enabled in group_cfg["fields"]}
             for field_key in self._ordered_field_keys(group_key):
                 if field_key not in field_map:
@@ -923,7 +914,6 @@ class MetadataSettingsPage(SettingsPage):
         if not group_key:
             return
         self.dialog.set_setting_bool(self._group_enabled_key(group_key), self.group_enabled_toggle.isChecked())
-        self.dialog.set_setting_bool(self._group_collapsed_key(group_key), self.group_collapsed_toggle.isChecked())
         current = self.group_list.currentItem()
         if current is not None:
             with QSignalBlocker(self.group_list):

@@ -6,6 +6,17 @@ from typing import Any
 from app.mediamanager.metadata.models import ParsedMetadataResult, RawMetadataEnvelope
 
 
+def _looks_like_a1111_parameters(text: str) -> bool:
+    sample = str(text or "")
+    if not sample.strip():
+        return False
+    has_negative = bool(re.search(r"\bNegative prompt:", sample, re.IGNORECASE))
+    has_steps = bool(re.search(r"\bSteps:\s*\d+", sample, re.IGNORECASE))
+    has_sampler = bool(re.search(r"\bSampler:", sample, re.IGNORECASE))
+    has_model = bool(re.search(r"\bModel(?: hash)?:", sample, re.IGNORECASE))
+    return (has_negative and has_steps) or (has_steps and has_sampler and has_model)
+
+
 def _find_parameters_sources(raw: RawMetadataEnvelope) -> list[tuple[str, str]]:
     sources: list[tuple[str, str]] = []
     for entry in raw.png_text_entries:
@@ -13,7 +24,42 @@ def _find_parameters_sources(raw: RawMetadataEnvelope) -> list[tuple[str, str]]:
             sources.append((entry.path_descriptor, entry.text))
     if "parameters" in raw.pillow_info:
         sources.append(("pillow:info[parameters]", str(raw.pillow_info["parameters"])))
-    return sources
+    for key, value in (raw.exif or {}).items():
+        value_text = str(value or "")
+        if not value_text.strip():
+            continue
+        if _looks_like_a1111_parameters(value_text):
+            sources.append((f"exif:{key}", value_text))
+    for index, packet in enumerate(raw.xmp_packets or [], start=1):
+        packet_text = str(packet or "")
+        if not packet_text.strip():
+            continue
+        if _looks_like_a1111_parameters(packet_text):
+            sources.append((f"xmp:packet[{index}]", packet_text))
+            continue
+        if re.search(r"UserComment", packet_text, re.IGNORECASE):
+            match = re.search(r"<exif:UserComment[^>]*>(.*?)</exif:UserComment>", packet_text, re.IGNORECASE | re.DOTALL)
+            extracted = match.group(1) if match else packet_text
+            extracted = re.sub(r"<[^>]+>", " ", extracted)
+            extracted = " ".join(extracted.split())
+            if _looks_like_a1111_parameters(extracted):
+                sources.append((f"xmp:packet[{index}]:exif:UserComment", extracted))
+
+    def score_source(item: tuple[str, str]) -> tuple[int, int]:
+        _, text = item
+        sample = str(text or "")
+        score = 0
+        if re.search(r"\bNegative prompt:", sample, re.IGNORECASE):
+            score += 4
+        if re.search(r"\bSteps:\s*\d+", sample, re.IGNORECASE):
+            score += 3
+        if re.search(r"\bSampler:", sample, re.IGNORECASE):
+            score += 2
+        if re.search(r"\bModel(?: hash)?:", sample, re.IGNORECASE):
+            score += 1
+        return (score, len(sample))
+
+    return sorted(sources, key=score_source, reverse=True)
 
 
 def _split_parameters_blob(text: str) -> tuple[str, str, str]:

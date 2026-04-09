@@ -9,6 +9,21 @@ from PIL import ExifTags, Image
 def _decode_value(value: Any) -> Any:
     if isinstance(value, (bytes, bytearray)):
         raw = bytes(value)
+        if raw.startswith(b"UNICODE\x00"):
+            try:
+                return raw[8:].decode("utf-16le", errors="replace").rstrip("\x00")
+            except Exception:
+                pass
+        if raw.startswith(b"ASCII\x00\x00\x00"):
+            try:
+                return raw[8:].decode("ascii", errors="replace").rstrip("\x00")
+            except Exception:
+                pass
+        if len(raw) >= 4 and raw[1::2].count(0) >= max(1, len(raw[1::2]) // 2):
+            try:
+                return raw.decode("utf-16le", errors="replace").rstrip("\x00")
+            except Exception:
+                pass
         for encoding in ("utf-8", "utf-16le", "utf-16", "latin-1"):
             try:
                 return raw.decode(encoding).rstrip("\x00")

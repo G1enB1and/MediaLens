@@ -32,8 +32,23 @@ def detect_families(raw: RawMetadataEnvelope) -> list[DetectionHit]:
     hits: list[DetectionHit] = []
     keywords = {entry.keyword.lower(): entry for entry in raw.png_text_entries}
     info_keys = {key.lower() for key in raw.pillow_info}
+    exif_keys = {str(key).lower() for key in raw.exif}
 
-    if "parameters" in keywords or "parameters" in info_keys:
+    sample_texts = [entry.text for entry in raw.png_text_entries]
+    sample_texts.extend(str(value) for value in raw.pillow_info.values())
+    sample_texts.extend(str(value) for value in raw.exif.values())
+    sample_texts.extend(raw.xmp_packets)
+    sample_texts.extend(binary.printable_strings[0] for binary in raw.png_binary_entries if binary.printable_strings)
+    merged = "\n".join(sample_texts)
+
+    if (
+        "parameters" in keywords
+        or "parameters" in info_keys
+        or (
+            re.search(r"\bNegative prompt:", merged, re.IGNORECASE)
+            and re.search(r"\bSteps:\s*\d+", merged, re.IGNORECASE)
+        )
+    ):
         hits.append(DetectionHit("a1111_like", 0.98, ["Found parameters text payload"]))
     if "prompt" in keywords and "workflow" in keywords:
         hits.append(DetectionHit("comfyui", 0.99, ["Found prompt and workflow text chunks"]))
@@ -57,10 +72,6 @@ def detect_families(raw: RawMetadataEnvelope) -> list[DetectionHit]:
         hits.append(DetectionHit("generic_embedded", 0.55, generic_reasons))
 
     ai_hint_reasons: list[str] = []
-    sample_texts = [entry.text for entry in raw.png_text_entries]
-    sample_texts.extend(str(value) for value in raw.pillow_info.values())
-    sample_texts.extend(binary.printable_strings[0] for binary in raw.png_binary_entries if binary.printable_strings)
-    merged = "\n".join(sample_texts)
     for pattern, reason in (
         (r"\bNegative prompt:", "A1111-style negative prompt text"),
         (r"\bSampler:", "Sampler key present"),

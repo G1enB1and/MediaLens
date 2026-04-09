@@ -88,6 +88,16 @@ def _ensure_media_items_scan_columns(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _ensure_media_ai_columns(conn: sqlite3.Connection) -> None:
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    if "media_ai_metadata" not in tables:
+        return
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(media_ai_metadata)").fetchall()}
+    if "user_confirmed_ai" not in cols:
+        conn.execute("ALTER TABLE media_ai_metadata ADD COLUMN user_confirmed_ai INTEGER")
+        conn.commit()
+
+
 def add_media_item(
     conn: sqlite3.Connection,
     path: str,
@@ -455,6 +465,7 @@ def _list_media_with_where(
     offset: Optional[int] = None,
 ) -> list[dict]:
     _ensure_media_items_scan_columns(conn)
+    _ensure_media_ai_columns(conn)
     if limit is not None:
         limit_sql = f" LIMIT {limit} OFFSET {offset or 0}"
     else:
@@ -486,6 +497,9 @@ def _list_media_with_where(
             m.text_verified,
             m.text_verification_score,
             m.text_verification_version,
+            ai.is_ai_detected,
+            ai.is_ai_confidence,
+            ai.user_confirmed_ai,
             meta.title,
             meta.description,
             meta.notes,
@@ -557,25 +571,29 @@ def _media_row_to_dict(row) -> dict:
         "text_verified": None if row[21] is None else bool(row[21]),
         "text_verification_score": row[22],
         "text_verification_version": row[23],
-        "title": row[24],
-        "description": row[25],
-        "notes": row[26],
-        "ai_prompt": row[27],
-        "ai_negative_prompt": row[28],
-        "tool_name_found": row[29],
-        "tool_name_inferred": row[30],
-        "model_name": row[31],
-        "checkpoint_name": row[32],
-        "sampler": row[33],
-        "scheduler": row[34],
-        "cfg_scale": row[35],
-        "steps": row[36],
-        "seed": row[37],
-        "source_formats": row[38],
-        "metadata_families": row[39],
-        "ai_loras": row[40],
-        "tags": row[41],
-        "collection_names": row[42],
+        "is_ai_detected": None if row[24] is None else bool(row[24]),
+        "is_ai_confidence": row[25],
+        "user_confirmed_ai": None if row[26] is None else bool(row[26]),
+        "effective_is_ai": (bool(row[26]) if row[26] is not None else (None if row[24] is None else bool(row[24]))),
+        "title": row[27],
+        "description": row[28],
+        "notes": row[29],
+        "ai_prompt": row[30],
+        "ai_negative_prompt": row[31],
+        "tool_name_found": row[32],
+        "tool_name_inferred": row[33],
+        "model_name": row[34],
+        "checkpoint_name": row[35],
+        "sampler": row[36],
+        "scheduler": row[37],
+        "cfg_scale": row[38],
+        "steps": row[39],
+        "seed": row[40],
+        "source_formats": row[41],
+        "metadata_families": row[42],
+        "ai_loras": row[43],
+        "tags": row[44],
+        "collection_names": row[45],
     }
 
 

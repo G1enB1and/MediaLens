@@ -4450,6 +4450,42 @@ class Bridge(QObject):
             except Exception:
                 pass
 
+    def _backfill_scope_ai_decisions(self, entries: list[dict]) -> None:
+        from app.mediamanager.db.ai_metadata_repo import get_media_ai_metadata
+        from app.mediamanager.db.media_repo import add_media_item
+        from app.mediamanager.metadata.persistence import inspect_and_persist_if_supported
+
+        for entry in entries:
+            if entry.get("is_folder") or entry.get("is_ai_detected") is not None:
+                continue
+            path = str(entry.get("path") or "").strip()
+            if not path:
+                continue
+            try:
+                p = Path(path)
+                if not p.exists() or not p.is_file():
+                    continue
+                media_type = str(entry.get("media_type") or "")
+                if int(entry.get("id") or -1) < 0:
+                    real_path = str(entry.get("_real_path") or path)
+                    media_id = add_media_item(self.conn, real_path, media_type)
+                    entry["id"] = media_id
+                inspect_and_persist_if_supported(self.conn, int(entry["id"]), path, media_type)
+                ai_meta = get_media_ai_metadata(self.conn, int(entry["id"])) or {}
+                entry["is_ai_detected"] = bool(ai_meta.get("is_ai_detected")) if ai_meta else False
+                entry["is_ai_confidence"] = float(ai_meta.get("is_ai_confidence") or 0.0) if ai_meta else 0.0
+                entry["user_confirmed_ai"] = ai_meta.get("user_confirmed_ai")
+                entry["effective_is_ai"] = bool(ai_meta.get("user_confirmed_ai")) if ai_meta.get("user_confirmed_ai") is not None else bool(entry["is_ai_detected"])
+            except Exception as exc:
+                try:
+                    self._log(f"ai decision backfill failed for {path}: {exc}")
+                except Exception:
+                    pass
+                entry["is_ai_detected"] = False
+                entry["is_ai_confidence"] = 0.0
+                entry["user_confirmed_ai"] = None
+                entry["effective_is_ai"] = False
+
     def _similarity_config(self) -> tuple[int, int]:
         level = self._gallery_similarity_threshold()
         mapping = {
@@ -6017,6 +6053,43 @@ class Bridge(QObject):
         except Exception:
             pass
 
+    @Slot(str, "QVariantMap")
+    def update_media_ai_metadata(self, path: str, payload: dict) -> None:
+        from app.mediamanager.db.ai_metadata_repo import upsert_media_ai_selected_fields
+        from app.mediamanager.db.media_repo import get_media_by_path
+        try:
+            m = get_media_by_path(self.conn, path)
+            if not m:
+                return
+            data = dict(payload or {})
+            upsert_media_ai_selected_fields(
+                self.conn,
+                m["id"],
+                is_ai_detected=data.get("is_ai_detected"),
+                is_ai_confidence=data.get("is_ai_confidence"),
+                user_confirmed_ai=data.get("user_confirmed_ai", ""),
+                tool_name_found=data.get("tool_name_found"),
+                tool_name_inferred=data.get("tool_name_inferred"),
+                tool_name_confidence=data.get("tool_name_confidence"),
+                source_formats=data.get("source_formats"),
+                ai_prompt=data.get("ai_prompt"),
+                ai_negative_prompt=data.get("ai_negative_prompt"),
+                description=data.get("description"),
+                model_name=data.get("model_name"),
+                checkpoint_name=data.get("checkpoint_name"),
+                sampler=data.get("sampler"),
+                scheduler=data.get("scheduler"),
+                cfg_scale=data.get("cfg_scale"),
+                steps=data.get("steps"),
+                seed=data.get("seed"),
+                upscaler=data.get("upscaler"),
+                denoise_strength=data.get("denoise_strength"),
+                metadata_families_detected=data.get("metadata_families_detected"),
+                ai_detection_reasons=data.get("ai_detection_reasons"),
+            )
+        except Exception:
+            pass
+
     @Slot(str, list)
     def set_media_tags(self, path: str, tags: list) -> None:
         from app.mediamanager.db.media_repo import get_media_by_path
@@ -6356,7 +6429,7 @@ class Bridge(QObject):
         from app.mediamanager.utils.pathing import normalize_windows_path
         ALL_EXTS = IMAGE_EXTS | VIDEO_EXTS
         image_exts = IMAGE_EXTS
-        media_filter, _, meta_filter = self._parse_filter_groups(filter_type)
+        media_filter, _, meta_filter, ai_filter = self._parse_filter_groups(filter_type)
         if not folders: return []
         current_key = hashlib.sha1(",".join(sorted(folders)).encode()).hexdigest()
         if self._disk_cache and self._disk_cache_key == current_key: disk_files = self._disk_cache
@@ -6411,6 +6484,9 @@ class Bridge(QObject):
         elif media_filter == "animated":
             candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
         candidates = self._apply_metadata_filter(candidates, meta_filter)
+        if ai_filter != "all":
+            self._backfill_scope_ai_decisions(candidates)
+        candidates = self._apply_ai_filter(candidates, ai_filter)
         
         if search_query.strip():
             candidates = [r for r in candidates if self._matches_media_search(r, search_query)]
@@ -6420,7 +6496,7 @@ class Bridge(QObject):
         from app.mediamanager.db.media_repo import list_media_in_collection
         image_exts = IMAGE_EXTS
         show_hidden = self._show_hidden_enabled()
-        media_filter, _, meta_filter = self._parse_filter_groups(filter_type)
+        media_filter, _, meta_filter, ai_filter = self._parse_filter_groups(filter_type)
         
         raw_candidates = list_media_in_collection(self.conn, int(collection_id))
         candidates = []
@@ -6445,6 +6521,9 @@ class Bridge(QObject):
         elif media_filter == "animated":
             candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
         candidates = self._apply_metadata_filter(candidates, meta_filter)
+        if ai_filter != "all":
+            self._backfill_scope_ai_decisions(candidates)
+        candidates = self._apply_ai_filter(candidates, ai_filter)
             
         if search_query.strip():
             candidates = [r for r in candidates if self._matches_media_search(r, search_query)]
@@ -6457,7 +6536,7 @@ class Bridge(QObject):
             return []
         image_exts = IMAGE_EXTS
         show_hidden = self._show_hidden_enabled()
-        media_filter, _, meta_filter = self._parse_filter_groups(filter_type)
+        media_filter, _, meta_filter, ai_filter = self._parse_filter_groups(filter_type)
         cutoff_iso = self._smart_collection_cutoff_iso(int(definition.get("days") or 0))
         raw_candidates = list_media_in_smart_collection(self.conn, str(definition.get("field") or ""), cutoff_iso)
         candidates = []
@@ -6482,6 +6561,9 @@ class Bridge(QObject):
         elif media_filter == "animated":
             candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
         candidates = self._apply_metadata_filter(candidates, meta_filter)
+        if ai_filter != "all":
+            self._backfill_scope_ai_decisions(candidates)
+        candidates = self._apply_ai_filter(candidates, ai_filter)
 
         if search_query.strip():
             candidates = [r for r in candidates if self._matches_media_search(r, search_query)]
@@ -6496,28 +6578,40 @@ class Bridge(QObject):
             return [r for r in candidates if not str(r.get("description") or "").strip()]
         return candidates
 
+    @staticmethod
+    def _apply_ai_filter(candidates: list[dict], ai_filter: str) -> list[dict]:
+        mode = str(ai_filter or "all").strip().lower()
+        if mode == "ai_generated":
+            return [r for r in candidates if bool(r.get("effective_is_ai"))]
+        if mode == "non_ai":
+            return [r for r in candidates if r.get("effective_is_ai") is False]
+        return candidates
+
     def _matches_media_search(self, row: dict, search_query: str) -> bool:
         from app.mediamanager.search_query import matches_media_search
         return matches_media_search(row, search_query)
 
     @staticmethod
-    def _parse_filter_groups(filter_type: str) -> tuple[str, str, str]:
+    def _parse_filter_groups(filter_type: str) -> tuple[str, str, str, str]:
         raw = str(filter_type or "all").strip()
         media_filter = "all"
         text_filter = "all"
         meta_filter = "all"
+        ai_filter = "all"
         if not raw or raw == "all":
-            return media_filter, text_filter, meta_filter
+            return media_filter, text_filter, meta_filter, ai_filter
         if ":" not in raw:
             if raw in {"text_detected", "text_more_likely", "text_verified"}:
-                return media_filter, "text_detected", meta_filter
+                return media_filter, "text_detected", meta_filter, ai_filter
             if raw == "no_text_detected":
-                return media_filter, "no_text_detected", meta_filter
+                return media_filter, "no_text_detected", meta_filter, ai_filter
             if raw in {"no_tags", "no_description"}:
-                return media_filter, text_filter, raw
+                return media_filter, text_filter, raw, ai_filter
+            if raw in {"ai_generated", "non_ai"}:
+                return media_filter, text_filter, meta_filter, raw
             if raw in {"image", "svg", "video", "animated"}:
-                return raw, text_filter, meta_filter
-            return media_filter, text_filter, meta_filter
+                return raw, text_filter, meta_filter, ai_filter
+            return media_filter, text_filter, meta_filter, ai_filter
         for part in raw.split(";"):
             group, _, value = str(part or "").partition(":")
             group = group.strip().lower()
@@ -6531,7 +6625,9 @@ class Bridge(QObject):
                     text_filter = "no_text_detected"
             elif group == "meta" and value in {"no_tags", "no_description"}:
                 meta_filter = value
-        return media_filter, text_filter, meta_filter
+            elif group == "ai" and value in {"ai_generated", "non_ai"}:
+                ai_filter = value
+        return media_filter, text_filter, meta_filter, ai_filter
 
     @staticmethod
     def _iso_to_ns(value) -> int:
@@ -6708,7 +6804,7 @@ class Bridge(QObject):
         return media_type or ""
 
     def _get_gallery_entries(self, folders: list[str], sort_by: str = "none", filter_type: str = "all", search_query: str = "") -> list[dict]:
-        _, text_filter, _ = self._parse_filter_groups(filter_type)
+        _, text_filter, _, _ = self._parse_filter_groups(filter_type)
         if folders:
             entries = self._get_reconciled_candidates(folders, filter_type, search_query)
             if self._gallery_view_mode() not in {"masonry", "duplicates", "similar", "similar_only"} and self._review_group_mode() is None:
@@ -7175,6 +7271,7 @@ class MainWindow(QMainWindow):
         self._tree_root_path: str = ""
         self._pending_tree_sync_path: str = ""
         self._pending_tree_reroot: bool = False
+        self._suspend_tree_auto_reveal: bool = False
         self._tree_sync_timer = QTimer(self)
         self._tree_sync_timer.setSingleShot(True)
         self._tree_sync_timer.timeout.connect(self._apply_pending_tree_sync)
@@ -8076,11 +8173,18 @@ class MainWindow(QMainWindow):
         self.meta_ai_status_edit.setReadOnly(True)
         self.meta_ai_status_edit.setPlaceholderText("AI detection status...")
 
+        self.lbl_user_confirmed_ai_cap = QLabel("User Confirmed AI:")
+        self.lbl_user_confirmed_ai_cap.setObjectName("metaUserConfirmedAICaption")
+        self.meta_user_confirmed_ai_edit = QLineEdit()
+        self.meta_user_confirmed_ai_edit.setObjectName("metaUserConfirmedAIEdit")
+        self.meta_user_confirmed_ai_edit.setReadOnly(False)
+        self.meta_user_confirmed_ai_edit.setPlaceholderText("Yes, No, or blank")
+
         self.lbl_ai_source_cap = QLabel("AI Tool / Source:")
         self.lbl_ai_source_cap.setObjectName("metaAISourceCaption")
         self.meta_ai_source_edit = QTextEdit()
         self.meta_ai_source_edit.setObjectName("metaAISourceEdit")
-        self.meta_ai_source_edit.setReadOnly(True)
+        self.meta_ai_source_edit.setReadOnly(False)
         self.meta_ai_source_edit.setPlaceholderText("Tool and source metadata...")
         self.meta_ai_source_edit.setMaximumHeight(60)
 
@@ -8088,14 +8192,14 @@ class MainWindow(QMainWindow):
         self.lbl_ai_families_cap.setObjectName("metaAIFamiliesCaption")
         self.meta_ai_families_edit = QLineEdit()
         self.meta_ai_families_edit.setObjectName("metaAIFamiliesEdit")
-        self.meta_ai_families_edit.setReadOnly(True)
+        self.meta_ai_families_edit.setReadOnly(False)
         self.meta_ai_families_edit.setPlaceholderText("Detected metadata families...")
 
         self.lbl_ai_detection_reasons_cap = QLabel("AI Detection Reasons:")
         self.lbl_ai_detection_reasons_cap.setObjectName("metaAIDetectionReasonsCaption")
         self.meta_ai_detection_reasons_edit = QTextEdit()
         self.meta_ai_detection_reasons_edit.setObjectName("metaAIDetectionReasonsEdit")
-        self.meta_ai_detection_reasons_edit.setReadOnly(True)
+        self.meta_ai_detection_reasons_edit.setReadOnly(False)
         self.meta_ai_detection_reasons_edit.setPlaceholderText("Detection reasons...")
         self.meta_ai_detection_reasons_edit.setMaximumHeight(60)
 
@@ -8111,63 +8215,63 @@ class MainWindow(QMainWindow):
         self.lbl_ai_model_cap.setObjectName("metaAIModelCaption")
         self.meta_ai_model_edit = QLineEdit()
         self.meta_ai_model_edit.setObjectName("metaAIModelEdit")
-        self.meta_ai_model_edit.setReadOnly(True)
+        self.meta_ai_model_edit.setReadOnly(False)
         self.meta_ai_model_edit.setPlaceholderText("Model...")
 
         self.lbl_ai_checkpoint_cap = QLabel("AI Checkpoint:")
         self.lbl_ai_checkpoint_cap.setObjectName("metaAICheckpointCaption")
         self.meta_ai_checkpoint_edit = QLineEdit()
         self.meta_ai_checkpoint_edit.setObjectName("metaAICheckpointEdit")
-        self.meta_ai_checkpoint_edit.setReadOnly(True)
+        self.meta_ai_checkpoint_edit.setReadOnly(False)
         self.meta_ai_checkpoint_edit.setPlaceholderText("Checkpoint...")
 
         self.lbl_ai_sampler_cap = QLabel("AI Sampler:")
         self.lbl_ai_sampler_cap.setObjectName("metaAISamplerCaption")
         self.meta_ai_sampler_edit = QLineEdit()
         self.meta_ai_sampler_edit.setObjectName("metaAISamplerEdit")
-        self.meta_ai_sampler_edit.setReadOnly(True)
+        self.meta_ai_sampler_edit.setReadOnly(False)
         self.meta_ai_sampler_edit.setPlaceholderText("Sampler...")
 
         self.lbl_ai_scheduler_cap = QLabel("AI Scheduler:")
         self.lbl_ai_scheduler_cap.setObjectName("metaAISchedulerCaption")
         self.meta_ai_scheduler_edit = QLineEdit()
         self.meta_ai_scheduler_edit.setObjectName("metaAISchedulerEdit")
-        self.meta_ai_scheduler_edit.setReadOnly(True)
+        self.meta_ai_scheduler_edit.setReadOnly(False)
         self.meta_ai_scheduler_edit.setPlaceholderText("Scheduler...")
 
         self.lbl_ai_cfg_cap = QLabel("AI CFG:")
         self.lbl_ai_cfg_cap.setObjectName("metaAICFGCaption")
         self.meta_ai_cfg_edit = QLineEdit()
         self.meta_ai_cfg_edit.setObjectName("metaAICFGEdit")
-        self.meta_ai_cfg_edit.setReadOnly(True)
+        self.meta_ai_cfg_edit.setReadOnly(False)
         self.meta_ai_cfg_edit.setPlaceholderText("CFG...")
 
         self.lbl_ai_steps_cap = QLabel("AI Steps:")
         self.lbl_ai_steps_cap.setObjectName("metaAIStepsCaption")
         self.meta_ai_steps_edit = QLineEdit()
         self.meta_ai_steps_edit.setObjectName("metaAIStepsEdit")
-        self.meta_ai_steps_edit.setReadOnly(True)
+        self.meta_ai_steps_edit.setReadOnly(False)
         self.meta_ai_steps_edit.setPlaceholderText("Steps...")
 
         self.lbl_ai_seed_cap = QLabel("AI Seed:")
         self.lbl_ai_seed_cap.setObjectName("metaAISeedCaption")
         self.meta_ai_seed_edit = QLineEdit()
         self.meta_ai_seed_edit.setObjectName("metaAISeedEdit")
-        self.meta_ai_seed_edit.setReadOnly(True)
+        self.meta_ai_seed_edit.setReadOnly(False)
         self.meta_ai_seed_edit.setPlaceholderText("Seed...")
 
         self.lbl_ai_upscaler_cap = QLabel("AI Upscaler:")
         self.lbl_ai_upscaler_cap.setObjectName("metaAIUpscalerCaption")
         self.meta_ai_upscaler_edit = QLineEdit()
         self.meta_ai_upscaler_edit.setObjectName("metaAIUpscalerEdit")
-        self.meta_ai_upscaler_edit.setReadOnly(True)
+        self.meta_ai_upscaler_edit.setReadOnly(False)
         self.meta_ai_upscaler_edit.setPlaceholderText("Upscaler...")
 
         self.lbl_ai_denoise_cap = QLabel("AI Denoise:")
         self.lbl_ai_denoise_cap.setObjectName("metaAIDenoiseCaption")
         self.meta_ai_denoise_edit = QLineEdit()
         self.meta_ai_denoise_edit.setObjectName("metaAIDenoiseEdit")
-        self.meta_ai_denoise_edit.setReadOnly(True)
+        self.meta_ai_denoise_edit.setReadOnly(False)
         self.meta_ai_denoise_edit.setPlaceholderText("Denoise strength...")
 
         # --- Separators ---
@@ -8540,6 +8644,7 @@ class MainWindow(QMainWindow):
     def _queue_tree_sync(self, path_str: str, *, re_root_tree: bool = False) -> None:
         if not path_str:
             return
+        self._suspend_tree_auto_reveal = False
         self._pending_tree_sync_path = str(path_str)
         self._pending_tree_reroot = self._pending_tree_reroot or bool(re_root_tree)
         if not self.left_panel.isVisible():
@@ -8811,7 +8916,7 @@ class MainWindow(QMainWindow):
                 self.tree.expand(root_idx)
 
         current_path = self.bridge._selected_folders[0] if self.bridge._selected_folders else ""
-        if current_path:
+        if current_path and not self._suspend_tree_auto_reveal:
             try:
                 self._sync_tree_to_folder(current_path)
                 self.tree.viewport().update()
@@ -8821,6 +8926,7 @@ class MainWindow(QMainWindow):
     def _on_tree_selection(self, *_args) -> None:
         if self._suppress_tree_selection_history:
             return
+        self._suspend_tree_auto_reveal = False
         selection_model = self.tree.selectionModel()
         selected_indices = selection_model.selectedRows()
         
@@ -9084,6 +9190,7 @@ class MainWindow(QMainWindow):
         root_index = self.tree.rootIndex()
         if not root_index.isValid():
             return
+        self._suspend_tree_auto_reveal = False
         self.tree.expand(root_index)
         self._expand_tree_branch(root_index)
 
@@ -9091,6 +9198,10 @@ class MainWindow(QMainWindow):
         root_index = self.tree.rootIndex()
         if not root_index.isValid():
             return
+        self._suspend_tree_auto_reveal = True
+        self._pending_tree_sync_path = ""
+        self._pending_tree_reroot = False
+        self._tree_sync_timer.stop()
         self.tree.collapseAll()
         root_path = str(self._tree_root_path or "")
         if root_path:
@@ -9969,14 +10080,55 @@ class MainWindow(QMainWindow):
             ai_prompt = self.meta_ai_prompt_edit.toPlainText()
             ai_neg_prompt = self.meta_ai_negative_prompt_edit.toPlainText()
             ai_params = self.meta_ai_params_edit.toPlainText()
+            current_ai_meta = dict(getattr(self, "_current_ai_meta", {}) or {})
+            is_ai_detected = bool(current_ai_meta.get("is_ai_detected"))
+            is_ai_confidence = float(current_ai_meta.get("is_ai_confidence") or 0.0)
+            user_confirmed_ai = self._parse_user_confirmed_ai(self.meta_user_confirmed_ai_edit.text())
+            source_override = self._parse_ai_source_override(self.meta_ai_source_edit.toPlainText(), current_ai_meta)
+            ai_detection_reasons = self._parse_ai_text_list(self.meta_ai_detection_reasons_edit.toPlainText())
+            if user_confirmed_ai != current_ai_meta.get("user_confirmed_ai") and user_confirmed_ai is not None and not ai_detection_reasons:
+                ai_detection_reasons = ["Manual override from details panel"]
+            ai_payload = {
+                "is_ai_detected": is_ai_detected,
+                "is_ai_confidence": is_ai_confidence,
+                "user_confirmed_ai": user_confirmed_ai,
+                "tool_name_found": source_override.get("tool_name_found"),
+                "tool_name_inferred": source_override.get("tool_name_inferred"),
+                "tool_name_confidence": source_override.get("tool_name_confidence"),
+                "source_formats": source_override.get("source_formats"),
+                "ai_prompt": ai_prompt,
+                "ai_negative_prompt": ai_neg_prompt,
+                "description": desc,
+                "model_name": self.meta_ai_model_edit.text().strip(),
+                "checkpoint_name": self.meta_ai_checkpoint_edit.text().strip(),
+                "sampler": self.meta_ai_sampler_edit.text().strip(),
+                "scheduler": self.meta_ai_scheduler_edit.text().strip(),
+                "cfg_scale": self._parse_optional_float(self.meta_ai_cfg_edit.text()),
+                "steps": self._parse_optional_int(self.meta_ai_steps_edit.text()),
+                "seed": self.meta_ai_seed_edit.text().strip() or None,
+                "upscaler": self.meta_ai_upscaler_edit.text().strip(),
+                "denoise_strength": self._parse_optional_float(self.meta_ai_denoise_edit.text()),
+                "metadata_families_detected": self._parse_ai_text_list(self.meta_ai_families_edit.text()),
+                "ai_detection_reasons": ai_detection_reasons,
+            }
             exif_date_taken = self._normalize_metadata_datetime(self.meta_exif_date_taken_edit.text())
             metadata_date = self._normalize_metadata_datetime(self.meta_metadata_date_edit.text())
 
             try:
                 # Save Changes is DB-only. Embedded fields are file-only and should not be persisted here.
                 self.bridge.update_media_metadata(path, "", desc, notes, "", "", ai_prompt, ai_neg_prompt, ai_params)
+                self.bridge.update_media_ai_metadata(path, ai_payload)
                 self.bridge.update_media_dates(path, exif_date_taken, metadata_date)
                 self.bridge.set_media_tags(path, tags)
+                self._current_ai_meta = {
+                    "is_ai_detected": is_ai_detected,
+                    "is_ai_confidence": is_ai_confidence,
+                    "user_confirmed_ai": user_confirmed_ai,
+                    "tool_name_found": source_override.get("tool_name_found"),
+                    "tool_name_inferred": source_override.get("tool_name_inferred"),
+                    "tool_name_confidence": source_override.get("tool_name_confidence"),
+                    "source_formats": list(source_override.get("source_formats") or []),
+                }
             except Exception:
                 pass
         else:
@@ -11121,6 +11273,8 @@ class MainWindow(QMainWindow):
         self.lbl_embedded_metadata_cap.setVisible(not is_bulk and show_embedded_metadata)
         self.meta_ai_status_edit.setVisible(not is_bulk and show_ai_status)
         self.lbl_ai_status_cap.setVisible(not is_bulk and show_ai_status)
+        self.meta_user_confirmed_ai_edit.setVisible(not is_bulk and show_ai_status)
+        self.lbl_user_confirmed_ai_cap.setVisible(not is_bulk and show_ai_status)
         self.meta_ai_source_edit.setVisible(not is_bulk and show_ai_source)
         self.lbl_ai_source_cap.setVisible(not is_bulk and show_ai_source)
         self.meta_ai_families_edit.setVisible(not is_bulk and show_ai_families)
@@ -11190,7 +11344,9 @@ class MainWindow(QMainWindow):
         self.meta_embedded_metadata_edit.setPlainText("")
         # Clear the text edits
         self.meta_embedded_comments_edit.setPlainText("")
+        self._current_ai_meta = {}
         self.meta_ai_status_edit.setText("")
+        self.meta_user_confirmed_ai_edit.setText("")
         self.meta_ai_source_edit.setPlainText("")
         self.meta_ai_families_edit.setText("")
         self.meta_ai_detection_reasons_edit.setPlainText("")
@@ -11241,6 +11397,15 @@ class MainWindow(QMainWindow):
             # 1. Database Metadata (Load FIRST)
             try:
                 data = self.bridge.get_media_metadata(path)
+                self._current_ai_meta = {
+                    "is_ai_detected": bool(data.get("is_ai_detected")),
+                    "is_ai_confidence": float(data.get("is_ai_confidence") or 0.0),
+                    "user_confirmed_ai": data.get("user_confirmed_ai"),
+                    "tool_name_found": data.get("tool_name_found", "") or "",
+                    "tool_name_inferred": data.get("tool_name_inferred", "") or "",
+                    "tool_name_confidence": float(data.get("tool_name_confidence") or 0.0),
+                    "source_formats": list(data.get("source_formats") or []),
+                }
                 self.meta_desc.setPlainText(data.get("description", ""))
                 self.meta_notes.setPlainText(data.get("notes", ""))
                 
@@ -11254,19 +11419,20 @@ class MainWindow(QMainWindow):
                 if db_params: self.meta_ai_params_edit.setPlainText(db_params)
 
                 self.meta_ai_status_edit.setText(data.get("ai_status_summary", ""))
+                self.meta_user_confirmed_ai_edit.setText(data.get("user_confirmed_ai_summary", ""))
                 self.meta_ai_source_edit.setPlainText(data.get("ai_source_summary", ""))
-                self.meta_ai_families_edit.setText(data.get("ai_families_summary", ""))
-                self.meta_ai_detection_reasons_edit.setPlainText(data.get("ai_detection_reasons_summary", ""))
+                self.meta_ai_families_edit.setText(", ".join(data.get("metadata_families_detected", [])))
+                self.meta_ai_detection_reasons_edit.setPlainText("\n".join(data.get("ai_detection_reasons", [])))
                 self.meta_ai_loras_edit.setPlainText(data.get("ai_loras_summary", ""))
-                self.meta_ai_model_edit.setText(data.get("ai_model_summary", ""))
-                self.meta_ai_checkpoint_edit.setText(data.get("ai_checkpoint_summary", ""))
-                self.meta_ai_sampler_edit.setText(data.get("ai_sampler_summary", ""))
-                self.meta_ai_scheduler_edit.setText(data.get("ai_scheduler_summary", ""))
-                self.meta_ai_cfg_edit.setText(data.get("ai_cfg_summary", ""))
-                self.meta_ai_steps_edit.setText(data.get("ai_steps_summary", ""))
-                self.meta_ai_seed_edit.setText(data.get("ai_seed_summary", ""))
-                self.meta_ai_upscaler_edit.setText(data.get("ai_upscaler_summary", ""))
-                self.meta_ai_denoise_edit.setText(data.get("ai_denoise_summary", ""))
+                self.meta_ai_model_edit.setText(data.get("model_name", "") or data.get("ai_model_summary", ""))
+                self.meta_ai_checkpoint_edit.setText(data.get("checkpoint_name", "") or data.get("ai_checkpoint_summary", ""))
+                self.meta_ai_sampler_edit.setText(data.get("sampler", "") or data.get("ai_sampler_summary", ""))
+                self.meta_ai_scheduler_edit.setText(data.get("scheduler", "") or data.get("ai_scheduler_summary", ""))
+                self.meta_ai_cfg_edit.setText("" if data.get("cfg_scale") in (None, "") else str(data.get("cfg_scale")))
+                self.meta_ai_steps_edit.setText("" if data.get("steps") in (None, "") else str(data.get("steps")))
+                self.meta_ai_seed_edit.setText("" if data.get("seed") in (None, "") else str(data.get("seed")))
+                self.meta_ai_upscaler_edit.setText(data.get("upscaler", "") or data.get("ai_upscaler_summary", ""))
+                self.meta_ai_denoise_edit.setText("" if data.get("denoise_strength") in (None, "") else str(data.get("denoise_strength")))
                 self.meta_ai_workflows_edit.setPlainText(data.get("ai_workflows_summary", ""))
                 self.meta_ai_provenance_edit.setPlainText(data.get("ai_provenance_summary", ""))
                 self.meta_ai_character_cards_edit.setPlainText(data.get("ai_character_cards_summary", ""))
@@ -11453,6 +11619,7 @@ class MainWindow(QMainWindow):
         self.meta_embedded_tags_edit.setText("")
         self.meta_embedded_comments_edit.setPlainText("")
         self.meta_ai_status_edit.setText("")
+        self.meta_user_confirmed_ai_edit.setText("")
         self.meta_ai_source_edit.setPlainText("")
         self.meta_ai_families_edit.setText("")
         self.meta_ai_detection_reasons_edit.setPlainText("")
@@ -11666,6 +11833,124 @@ class MainWindow(QMainWindow):
             return ""
 
     @staticmethod
+    def _parse_ai_text_list(value: str | None) -> list[str]:
+        raw = str(value or "").replace("\r", "\n")
+        parts: list[str] = []
+        for chunk in raw.replace(",", "\n").split("\n"):
+            text = chunk.strip()
+            if text and text not in parts:
+                parts.append(text)
+        return parts
+
+    @staticmethod
+    def _parse_optional_float(value: str | None):
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            return float(text)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _parse_optional_int(value: str | None):
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            return int(float(text))
+        except Exception:
+            return None
+
+    @staticmethod
+    def _parse_ai_status_override(value: str | None, fallback_detected: bool, fallback_confidence: float) -> tuple[bool, float]:
+        text = str(value or "").strip()
+        if not text:
+            return bool(fallback_detected), float(fallback_confidence or 0.0)
+        lowered = text.lower()
+        detected = bool(fallback_detected)
+        if any(token in lowered for token in ("not detected", "non-ai", "non ai", "no ai", "false", "no")):
+            detected = False
+        elif any(token in lowered for token in ("detected", "ai generated", "true", "yes")):
+            detected = True
+
+        confidence = float(fallback_confidence or 0.0)
+        pct_match = re.search(r"(-?\d+(?:\.\d+)?)\s*%", text)
+        if pct_match:
+            confidence = max(0.0, min(1.0, float(pct_match.group(1)) / 100.0))
+        else:
+            num_match = re.search(r"(-?\d+(?:\.\d+)?)", text)
+            if num_match:
+                parsed = float(num_match.group(1))
+                confidence = max(0.0, min(1.0, parsed if parsed <= 1.0 else parsed / 100.0))
+            elif detected != bool(fallback_detected):
+                confidence = 1.0 if detected else 0.0
+        return detected, confidence
+
+    @classmethod
+    def _parse_ai_source_override(cls, value: str | None, fallback: dict | None = None) -> dict:
+        text = str(value or "").replace("\r", "\n").strip()
+        existing = dict(fallback or {})
+        tool_found = str(existing.get("tool_name_found") or "").strip()
+        tool_inferred = str(existing.get("tool_name_inferred") or "").strip()
+        tool_confidence = float(existing.get("tool_name_confidence") or 0.0)
+        source_formats = [str(item).strip() for item in (existing.get("source_formats") or []) if str(item).strip()]
+        if not text:
+            return {
+                "tool_name_found": tool_found,
+                "tool_name_inferred": tool_inferred,
+                "tool_name_confidence": tool_confidence,
+                "source_formats": source_formats,
+            }
+
+        freeform_lines: list[str] = []
+        for raw_line in text.split("\n"):
+            line = raw_line.strip()
+            if not line:
+                continue
+            lower = line.lower()
+            if lower.startswith("found:"):
+                tool_found = line.split(":", 1)[1].strip()
+                continue
+            if lower.startswith("inferred:"):
+                tool_inferred = line.split(":", 1)[1].strip()
+                continue
+            if lower.startswith("inference confidence:"):
+                parsed = cls._parse_ai_status_override(line, True, tool_confidence)[1]
+                tool_confidence = parsed
+                continue
+            if lower.startswith("formats:") or lower.startswith("source formats:"):
+                source_formats = cls._parse_ai_text_list(line.split(":", 1)[1])
+                continue
+            freeform_lines.append(line)
+
+        if freeform_lines:
+            if not tool_found and len(freeform_lines) == 1:
+                tool_found = freeform_lines[0]
+            elif not tool_found:
+                tool_found = freeform_lines[0]
+                for line in freeform_lines[1:]:
+                    if line not in source_formats:
+                        source_formats.append(line)
+        return {
+            "tool_name_found": tool_found,
+            "tool_name_inferred": tool_inferred,
+            "tool_name_confidence": tool_confidence,
+            "source_formats": source_formats,
+        }
+
+    @staticmethod
+    def _parse_user_confirmed_ai(value: str | None):
+        text = str(value or "").strip().lower()
+        if not text:
+            return None
+        if text in {"yes", "true", "1", "ai", "detected"}:
+            return True
+        if text in {"no", "false", "0", "non-ai", "non ai", "not detected"}:
+            return False
+        return None
+
+    @staticmethod
     def _format_duration_seconds(seconds: float | None) -> str:
         if not seconds or seconds <= 0:
             return ""
@@ -11795,7 +12080,7 @@ class MainWindow(QMainWindow):
             "embeddedtags": [self.lbl_embedded_tags_cap, self.meta_embedded_tags_edit],
             "embeddedcomments": [self.lbl_embedded_comments_cap, self.meta_embedded_comments_edit],
             "embeddedmetadata": [self.lbl_embedded_metadata_cap, self.meta_embedded_metadata_edit],
-            "aistatus": [self.lbl_ai_status_cap, self.meta_ai_status_edit],
+            "aistatus": [self.lbl_ai_status_cap, self.meta_ai_status_edit, self.lbl_user_confirmed_ai_cap, self.meta_user_confirmed_ai_edit],
             "aisource": [self.lbl_ai_source_cap, self.meta_ai_source_edit],
             "aifamilies": [self.lbl_ai_families_cap, self.meta_ai_families_edit],
             "aidetectionreasons": [self.lbl_ai_detection_reasons_cap, self.meta_ai_detection_reasons_edit],
@@ -11911,6 +12196,8 @@ class MainWindow(QMainWindow):
         self.lbl_embedded_metadata_cap.setVisible("embeddedmetadata" in active_fields and self._is_metadata_enabled_for_kind(kind, "embeddedmetadata", True))
         self.meta_ai_status_edit.setVisible("aistatus" in active_fields and self._is_metadata_enabled_for_kind(kind, "aistatus", True))
         self.lbl_ai_status_cap.setVisible("aistatus" in active_fields and self._is_metadata_enabled_for_kind(kind, "aistatus", True))
+        self.meta_user_confirmed_ai_edit.setVisible("aistatus" in active_fields and self._is_metadata_enabled_for_kind(kind, "aistatus", True))
+        self.lbl_user_confirmed_ai_cap.setVisible("aistatus" in active_fields and self._is_metadata_enabled_for_kind(kind, "aistatus", True))
         self.meta_ai_source_edit.setVisible("aisource" in active_fields and self._is_metadata_enabled_for_kind(kind, "aisource", True))
         self.lbl_ai_source_cap.setVisible("aisource" in active_fields and self._is_metadata_enabled_for_kind(kind, "aisource", True))
         self.meta_ai_families_edit.setVisible("aifamilies" in active_fields and self._is_metadata_enabled_for_kind(kind, "aifamilies", True))

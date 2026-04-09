@@ -9,7 +9,7 @@ def merge_results(detections: list[DetectionHit], parsed_results: list[ParsedMet
     canonical.metadata_families_detected = [hit.family for hit in detections if hit.family in ai_detection_families]
     canonical.ai_detection_reasons = [reason for hit in detections if hit.family in ai_detection_families for reason in hit.reasons]
     canonical.is_ai_confidence = max(
-        (hit.confidence for hit in detections if hit.family in {"a1111_like", "comfyui", "c2pa", "ai_likely"}),
+        (hit.confidence for hit in detections if hit.family in {"a1111_like", "comfyui", "c2pa", "sillytavern", "ai_likely"}),
         default=0.0,
     )
     canonical.is_ai_detected = canonical.is_ai_confidence >= 0.65

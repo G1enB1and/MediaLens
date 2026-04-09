@@ -14,7 +14,7 @@ let gPosterRequested = new Set();
 let gPosterObserver = null;
 let gSort = 'none';
 let gFilter = 'all';
-let gFilterGroups = { media: 'all', text: 'all', meta: 'all' };
+let gFilterGroups = { media: 'all', text: 'all', meta: 'all', ai: 'all' };
 let gCurrentTargetFolderName = '';
 let gCurrentDropFolderPath = '';
 let gCurrentDragPaths = [];
@@ -572,21 +572,29 @@ function normalizeMetaFilter(filterValue) {
   return ['no_tags', 'no_description'].includes(filterValue) ? filterValue : 'all';
 }
 
+function normalizeAiFilter(filterValue) {
+  return ['ai_generated', 'non_ai'].includes(filterValue) ? filterValue : 'all';
+}
+
 function normalizeFilterValue(filterValue) {
   const raw = String(filterValue || 'all').trim();
-  if (!raw || raw === 'all') return { media: 'all', text: 'all', meta: 'all' };
+  if (!raw || raw === 'all') return { media: 'all', text: 'all', meta: 'all', ai: 'all' };
   if (!raw.includes(':')) {
     const normalizedText = normalizeTextFilter(raw);
     if (normalizedText === 'text_detected' || normalizedText === 'no_text_detected') {
-      return { media: 'all', text: normalizedText, meta: 'all' };
+      return { media: 'all', text: normalizedText, meta: 'all', ai: 'all' };
     }
     const normalizedMeta = normalizeMetaFilter(raw);
     if (normalizedMeta !== 'all') {
-      return { media: 'all', text: 'all', meta: normalizedMeta };
+      return { media: 'all', text: 'all', meta: normalizedMeta, ai: 'all' };
     }
-    return { media: normalizeMediaFilter(raw), text: 'all', meta: 'all' };
+    const normalizedAi = normalizeAiFilter(raw);
+    if (normalizedAi !== 'all') {
+      return { media: 'all', text: 'all', meta: 'all', ai: normalizedAi };
+    }
+    return { media: normalizeMediaFilter(raw), text: 'all', meta: 'all', ai: 'all' };
   }
-  const groups = { media: 'all', text: 'all', meta: 'all' };
+  const groups = { media: 'all', text: 'all', meta: 'all', ai: 'all' };
   raw.split(';').forEach((part) => {
     const [groupRaw, valueRaw] = String(part || '').split(':');
     const group = String(groupRaw || '').trim();
@@ -594,6 +602,7 @@ function normalizeFilterValue(filterValue) {
     if (group === 'media') groups.media = normalizeMediaFilter(value);
     if (group === 'text') groups.text = normalizeTextFilter(value) === 'no_text_detected' ? 'no_text_detected' : (normalizeTextFilter(value) === 'text_detected' ? 'text_detected' : 'all');
     if (group === 'meta') groups.meta = normalizeMetaFilter(value);
+    if (group === 'ai') groups.ai = normalizeAiFilter(value);
   });
   return groups;
 }
@@ -603,10 +612,12 @@ function serializeFilterValue(groups) {
   const normalizedText = normalizeTextFilter(groups && groups.text);
   const text = normalizedText === 'text_detected' || normalizedText === 'no_text_detected' ? normalizedText : 'all';
   const meta = normalizeMetaFilter(groups && groups.meta);
+  const ai = normalizeAiFilter(groups && groups.ai);
   const parts = [];
   if (media !== 'all') parts.push(`media:${media}`);
   if (text !== 'all') parts.push(`text:${text}`);
   if (meta !== 'all') parts.push(`meta:${meta}`);
+  if (ai !== 'all') parts.push(`ai:${ai}`);
   return parts.length ? parts.join(';') : 'all';
 }
 
@@ -620,6 +631,8 @@ function getFilterTriggerText(groups) {
   else if (groups.text === 'no_text_detected') labels.push('No Text Detected');
   if (groups.meta === 'no_tags') labels.push('No Tags');
   else if (groups.meta === 'no_description') labels.push('No Description');
+  if (groups.ai === 'ai_generated') labels.push('AI Generated');
+  else if (groups.ai === 'non_ai') labels.push('Non-AI');
   return labels.length ? `Filter: ${labels.join(' | ')}` : 'Filter: None';
 }
 
@@ -5331,7 +5344,7 @@ document.addEventListener('DOMContentLoaded', () => {
       e.stopPropagation();
       const clearTarget = e.target.closest('[data-clear-filters]');
       if (clearTarget) {
-        render({ media: 'all', text: 'all', meta: 'all' });
+        render({ media: 'all', text: 'all', meta: 'all', ai: 'all' });
         onChange(gFilter);
         return;
       }
@@ -6156,10 +6169,6 @@ function metadataGroupEnabledKey(mode, groupKey) {
   return `metadata.display.${mode}.groups.${groupKey}`;
 }
 
-function metadataGroupCollapsedKey(mode, groupKey) {
-  return `metadata.display.${mode}.groupcollapsed.${groupKey}`;
-}
-
 function metadataFieldEnabledKey(mode, fieldKey) {
   return `metadata.display.${mode}.${fieldKey}`;
 }
@@ -6200,9 +6209,6 @@ function renderMetadataSettings(settings) {
     section.draggable = true;
     section.dataset.groupKey = groupKey;
 
-    const collapsed = !!(settings && settings[metadataGroupCollapsedKey(gActiveMetadataMode, groupKey)]);
-    if (collapsed) section.classList.add('collapsed');
-
     const header = document.createElement('div');
     header.className = 'metadata-group-header';
     header.innerHTML = `
@@ -6211,7 +6217,6 @@ function renderMetadataSettings(settings) {
         <input type="checkbox" class="metadata-group-toggle" ${((settings && settings[metadataGroupEnabledKey(gActiveMetadataMode, groupKey)]) !== false) ? 'checked' : ''} />
         <span class="metadata-group-title">${groupCfg.label}</span>
       </label>
-      <button class="collapse-btn" type="button">${collapsed ? '+' : '−'}</button>
     `;
     section.appendChild(header);
 
@@ -6289,18 +6294,6 @@ function wireMetadataSettings() {
     const fieldToggle = e.target.closest('.metadata-field-toggle');
     if (fieldToggle && gBridge && gBridge.set_setting_bool) {
       gBridge.set_setting_bool(metadataFieldEnabledKey(gActiveMetadataMode, fieldToggle.dataset.fieldKey), !!fieldToggle.checked, () => {});
-    }
-  });
-
-  mount.addEventListener('click', (e) => {
-    const btn = e.target.closest('.collapse-btn');
-    if (!btn) return;
-    const section = btn.closest('.metadata-group');
-    if (!section) return;
-    section.classList.toggle('collapsed');
-    btn.textContent = section.classList.contains('collapsed') ? '+' : '−';
-    if (gBridge && gBridge.set_setting_bool) {
-      gBridge.set_setting_bool(metadataGroupCollapsedKey(gActiveMetadataMode, section.dataset.groupKey), section.classList.contains('collapsed'), () => {});
     }
   });
 

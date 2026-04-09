@@ -14,6 +14,13 @@ PARSER_VERSION = "ai-metadata-pipeline-v3"
 NORMALIZED_SCHEMA_VERSION = "ai-metadata-schema-v3"
 
 
+def _ensure_ai_metadata_columns(conn: sqlite3.Connection) -> None:
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(media_ai_metadata)").fetchall()}
+    if "user_confirmed_ai" not in cols:
+        conn.execute("ALTER TABLE media_ai_metadata ADD COLUMN user_confirmed_ai INTEGER")
+        conn.commit()
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -133,8 +140,10 @@ def replace_media_ai_metadata(
     parser_version: str = PARSER_VERSION,
     normalized_schema_version: str = NORMALIZED_SCHEMA_VERSION,
 ) -> None:
+    _ensure_ai_metadata_columns(conn)
     now = _utc_now_iso()
     canonical = inspection.canonical
+    existing = get_media_ai_metadata(conn, media_id) or {}
     conn.execute(
         """
         INSERT INTO media_ai_metadata (
@@ -142,10 +151,10 @@ def replace_media_ai_metadata(
           tool_name_found, tool_name_inferred, tool_name_confidence, ai_prompt, ai_negative_prompt,
           description, model_name, model_hash, checkpoint_name, sampler, scheduler, cfg_scale,
           steps, seed, width, height, denoise_strength, upscaler, source_formats_json,
-          metadata_families_json, ai_detection_reasons_json, raw_paths_json, unknown_fields_json,
+          metadata_families_json, ai_detection_reasons_json, raw_paths_json, unknown_fields_json, user_confirmed_ai,
           updated_at_utc
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(media_id) DO UPDATE SET
           parser_version=excluded.parser_version,
           normalized_schema_version=excluded.normalized_schema_version,
@@ -174,6 +183,7 @@ def replace_media_ai_metadata(
           ai_detection_reasons_json=excluded.ai_detection_reasons_json,
           raw_paths_json=excluded.raw_paths_json,
           unknown_fields_json=excluded.unknown_fields_json,
+          user_confirmed_ai=excluded.user_confirmed_ai,
           updated_at_utc=excluded.updated_at_utc
         """,
         (
@@ -205,6 +215,7 @@ def replace_media_ai_metadata(
             _json_dumps(canonical.ai_detection_reasons),
             _json_dumps(canonical.raw_paths),
             _json_dumps(canonical.unknown_fields),
+            None if existing.get("user_confirmed_ai") is None else (1 if existing.get("user_confirmed_ai") else 0),
             now,
         ),
     )
@@ -306,9 +317,10 @@ def delete_media_ai_metadata(conn: sqlite3.Connection, media_id: int) -> None:
 
 
 def get_media_ai_metadata(conn: sqlite3.Connection, media_id: int) -> dict[str, Any] | None:
+    _ensure_ai_metadata_columns(conn)
     row = conn.execute(
         """
-        SELECT media_id, parser_version, normalized_schema_version, is_ai_detected, is_ai_confidence,
+        SELECT media_id, parser_version, normalized_schema_version, is_ai_detected, is_ai_confidence, user_confirmed_ai,
                tool_name_found, tool_name_inferred, tool_name_confidence, ai_prompt, ai_negative_prompt,
                description, model_name, model_hash, checkpoint_name, sampler, scheduler, cfg_scale,
                steps, seed, width, height, denoise_strength, upscaler, source_formats_json,
@@ -386,30 +398,31 @@ def get_media_ai_metadata(conn: sqlite3.Connection, media_id: int) -> dict[str, 
         "normalized_schema_version": row[2],
         "is_ai_detected": bool(row[3]),
         "is_ai_confidence": row[4],
-        "tool_name_found": row[5],
-        "tool_name_inferred": row[6],
-        "tool_name_confidence": row[7],
-        "ai_prompt": row[8],
-        "ai_negative_prompt": row[9],
-        "description": row[10],
-        "model_name": row[11],
-        "model_hash": row[12],
-        "checkpoint_name": row[13],
-        "sampler": row[14],
-        "scheduler": row[15],
-        "cfg_scale": row[16],
-        "steps": row[17],
-        "seed": row[18],
-        "width": row[19],
-        "height": row[20],
-        "denoise_strength": row[21],
-        "upscaler": row[22],
-        "source_formats": json.loads(row[23]),
-        "metadata_families_detected": json.loads(row[24]),
-        "ai_detection_reasons": json.loads(row[25]),
-        "raw_paths": json.loads(row[26]),
-        "unknown_fields": json.loads(row[27]),
-        "updated_at_utc": row[28],
+        "user_confirmed_ai": None if row[5] is None else bool(row[5]),
+        "tool_name_found": row[6],
+        "tool_name_inferred": row[7],
+        "tool_name_confidence": row[8],
+        "ai_prompt": row[9],
+        "ai_negative_prompt": row[10],
+        "description": row[11],
+        "model_name": row[12],
+        "model_hash": row[13],
+        "checkpoint_name": row[14],
+        "sampler": row[15],
+        "scheduler": row[16],
+        "cfg_scale": row[17],
+        "steps": row[18],
+        "seed": row[19],
+        "width": row[20],
+        "height": row[21],
+        "denoise_strength": row[22],
+        "upscaler": row[23],
+        "source_formats": json.loads(row[24]),
+        "metadata_families_detected": json.loads(row[25]),
+        "ai_detection_reasons": json.loads(row[26]),
+        "raw_paths": json.loads(row[27]),
+        "unknown_fields": json.loads(row[28]),
+        "updated_at_utc": row[29],
         "loras": loras,
         "raw_entries": raw_entries,
         "workflows": workflows,
@@ -422,12 +435,37 @@ def upsert_media_ai_selected_fields(
     conn: sqlite3.Connection,
     media_id: int,
     *,
+    is_ai_detected: bool | None = None,
+    is_ai_confidence: float | None = None,
+    user_confirmed_ai: bool | None | str = "",
+    tool_name_found: str | None = None,
+    tool_name_inferred: str | None = None,
+    tool_name_confidence: float | None = None,
+    source_formats: list[str] | None = None,
     ai_prompt: str | None = None,
     ai_negative_prompt: str | None = None,
     description: str | None = None,
+    model_name: str | None = None,
+    checkpoint_name: str | None = None,
+    sampler: str | None = None,
+    scheduler: str | None = None,
+    cfg_scale: float | int | str | None = None,
+    steps: int | str | None = None,
+    seed: str | int | None = None,
+    upscaler: str | None = None,
+    denoise_strength: float | int | str | None = None,
+    metadata_families_detected: list[str] | None = None,
+    ai_detection_reasons: list[str] | None = None,
 ) -> None:
+    _ensure_ai_metadata_columns(conn)
     now = _utc_now_iso()
     existing = get_media_ai_metadata(conn, media_id) or {}
+    if user_confirmed_ai == "":
+        user_confirmed_ai_db = None if existing.get("user_confirmed_ai") is None else (1 if existing.get("user_confirmed_ai") else 0)
+    elif user_confirmed_ai is None:
+        user_confirmed_ai_db = None
+    else:
+        user_confirmed_ai_db = 1 if bool(user_confirmed_ai) else 0
     conn.execute(
         """
         INSERT INTO media_ai_metadata (
@@ -435,45 +473,63 @@ def upsert_media_ai_selected_fields(
           tool_name_found, tool_name_inferred, tool_name_confidence, ai_prompt, ai_negative_prompt,
           description, model_name, model_hash, checkpoint_name, sampler, scheduler, cfg_scale,
           steps, seed, width, height, denoise_strength, upscaler, source_formats_json,
-          metadata_families_json, ai_detection_reasons_json, raw_paths_json, unknown_fields_json,
+          metadata_families_json, ai_detection_reasons_json, raw_paths_json, unknown_fields_json, user_confirmed_ai,
           updated_at_utc
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(media_id) DO UPDATE SET
+          is_ai_detected=excluded.is_ai_detected,
+          is_ai_confidence=excluded.is_ai_confidence,
+          tool_name_found=excluded.tool_name_found,
+          tool_name_inferred=excluded.tool_name_inferred,
+          tool_name_confidence=excluded.tool_name_confidence,
           ai_prompt=excluded.ai_prompt,
           ai_negative_prompt=excluded.ai_negative_prompt,
           description=excluded.description,
+          model_name=excluded.model_name,
+          checkpoint_name=excluded.checkpoint_name,
+          sampler=excluded.sampler,
+          scheduler=excluded.scheduler,
+          cfg_scale=excluded.cfg_scale,
+          steps=excluded.steps,
+          seed=excluded.seed,
+          upscaler=excluded.upscaler,
+          denoise_strength=excluded.denoise_strength,
+          metadata_families_json=excluded.metadata_families_json,
+          ai_detection_reasons_json=excluded.ai_detection_reasons_json,
+          user_confirmed_ai=excluded.user_confirmed_ai,
           updated_at_utc=excluded.updated_at_utc
         """,
         (
             media_id,
             existing.get("parser_version") or PARSER_VERSION,
             existing.get("normalized_schema_version") or NORMALIZED_SCHEMA_VERSION,
-            1 if existing.get("is_ai_detected") else 0,
-            float(existing.get("is_ai_confidence") or 0.0),
-            existing.get("tool_name_found") or None,
-            existing.get("tool_name_inferred") or None,
-            float(existing.get("tool_name_confidence") or 0.0),
+            1 if (existing.get("is_ai_detected") if is_ai_detected is None else is_ai_detected) else 0,
+            float(existing.get("is_ai_confidence") or 0.0) if is_ai_confidence is None else float(is_ai_confidence),
+            existing.get("tool_name_found") if tool_name_found is None else (tool_name_found or None),
+            existing.get("tool_name_inferred") if tool_name_inferred is None else (tool_name_inferred or None),
+            float(existing.get("tool_name_confidence") or 0.0) if tool_name_confidence is None else float(tool_name_confidence),
             ai_prompt if ai_prompt is not None else existing.get("ai_prompt"),
             ai_negative_prompt if ai_negative_prompt is not None else existing.get("ai_negative_prompt"),
             description if description is not None else existing.get("description"),
-            existing.get("model_name") or None,
+            existing.get("model_name") if model_name is None else (model_name or None),
             existing.get("model_hash") or None,
-            existing.get("checkpoint_name") or None,
-            existing.get("sampler") or None,
-            existing.get("scheduler") or None,
-            _as_float(existing.get("cfg_scale")),
-            _as_int(existing.get("steps")),
-            None if existing.get("seed") in (None, "") else str(existing.get("seed")),
+            existing.get("checkpoint_name") if checkpoint_name is None else (checkpoint_name or None),
+            existing.get("sampler") if sampler is None else (sampler or None),
+            existing.get("scheduler") if scheduler is None else (scheduler or None),
+            _as_float(existing.get("cfg_scale")) if cfg_scale is None else _as_float(cfg_scale),
+            _as_int(existing.get("steps")) if steps is None else _as_int(steps),
+            (None if existing.get("seed") in (None, "") else str(existing.get("seed"))) if seed is None else (None if seed in (None, "") else str(seed)),
             _as_int(existing.get("width")),
             _as_int(existing.get("height")),
-            _as_float(existing.get("denoise_strength")),
-            existing.get("upscaler") or None,
-            _json_dumps(existing.get("source_formats") or []),
-            _json_dumps(existing.get("metadata_families_detected") or []),
-            _json_dumps(existing.get("ai_detection_reasons") or []),
+            _as_float(existing.get("denoise_strength")) if denoise_strength is None else _as_float(denoise_strength),
+            existing.get("upscaler") if upscaler is None else (upscaler or None),
+            _json_dumps(existing.get("source_formats") or []) if source_formats is None else _json_dumps(source_formats),
+            _json_dumps(existing.get("metadata_families_detected") or []) if metadata_families_detected is None else _json_dumps(metadata_families_detected),
+            _json_dumps(existing.get("ai_detection_reasons") or []) if ai_detection_reasons is None else _json_dumps(ai_detection_reasons),
             _json_dumps(existing.get("raw_paths") or []),
             _json_dumps(existing.get("unknown_fields") or {}),
+            user_confirmed_ai_db,
             now,
         ),
     )
@@ -558,6 +614,8 @@ def build_media_ai_ui_fields(ai_meta: dict[str, Any] | None) -> dict[str, Any]:
         return {
             "is_ai_detected": False,
             "is_ai_confidence": 0.0,
+            "user_confirmed_ai": None,
+            "effective_is_ai": False,
             "tool_name_found": "",
             "tool_name_inferred": "",
             "tool_name_confidence": 0.0,
@@ -571,6 +629,8 @@ def build_media_ai_ui_fields(ai_meta: dict[str, Any] | None) -> dict[str, Any]:
             "raw_paths": [],
             "unknown_fields": {},
             "ai_status_summary": "",
+            "ai_effective_status_summary": "",
+            "user_confirmed_ai_summary": "",
             "ai_source_summary": "",
             "ai_families_summary": "",
             "ai_detection_reasons_summary": "",
@@ -593,6 +653,8 @@ def build_media_ai_ui_fields(ai_meta: dict[str, Any] | None) -> dict[str, Any]:
     payload = {
         "is_ai_detected": bool(ai_meta.get("is_ai_detected")),
         "is_ai_confidence": float(ai_meta.get("is_ai_confidence") or 0.0),
+        "user_confirmed_ai": ai_meta.get("user_confirmed_ai"),
+        "effective_is_ai": bool(ai_meta.get("user_confirmed_ai")) if ai_meta.get("user_confirmed_ai") is not None else bool(ai_meta.get("is_ai_detected")),
         "tool_name_found": ai_meta.get("tool_name_found") or "",
         "tool_name_inferred": ai_meta.get("tool_name_inferred") or "",
         "tool_name_confidence": float(ai_meta.get("tool_name_confidence") or 0.0),
@@ -623,6 +685,8 @@ def build_media_ai_sidebar_fields(ai_meta: dict[str, Any] | None) -> dict[str, s
     if not ai_meta:
         return {
             "ai_status_summary": "",
+            "ai_effective_status_summary": "",
+            "user_confirmed_ai_summary": "",
             "ai_source_summary": "",
             "ai_families_summary": "",
             "ai_detection_reasons_summary": "",
@@ -645,6 +709,13 @@ def build_media_ai_sidebar_fields(ai_meta: dict[str, Any] | None) -> dict[str, s
     status = "Detected" if ai_meta.get("is_ai_detected") else "Not detected"
     confidence = float(ai_meta.get("is_ai_confidence") or 0.0)
     status_summary = f"{status} ({confidence:.0%})" if confidence > 0 else status
+    user_confirmed_ai = ai_meta.get("user_confirmed_ai")
+    if user_confirmed_ai is True:
+        effective_status_summary = "Detected (User Confirmed)"
+    elif user_confirmed_ai is False:
+        effective_status_summary = "Not detected (User Confirmed)"
+    else:
+        effective_status_summary = status_summary
 
     source_lines: list[str] = []
     tool_found = str(ai_meta.get("tool_name_found") or "").strip()
@@ -712,6 +783,8 @@ def build_media_ai_sidebar_fields(ai_meta: dict[str, Any] | None) -> dict[str, s
 
     return {
         "ai_status_summary": status_summary,
+        "ai_effective_status_summary": effective_status_summary,
+        "user_confirmed_ai_summary": "" if user_confirmed_ai is None else ("Yes" if user_confirmed_ai else "No"),
         "ai_source_summary": "\n".join(source_lines),
         "ai_families_summary": ", ".join(families),
         "ai_detection_reasons_summary": "\n".join(reasons),
