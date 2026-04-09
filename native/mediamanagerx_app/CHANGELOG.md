@@ -1,6 +1,42 @@
 # Change Log
 
-## v1.1.12 (Current)
+## v1.1.13 (Current)
+
+### Summary
+
+This release makes large libraries easier to slice down into manageable work. MediaLens adds Smart Collections and better stackable filters for common cleanup cases, while also improving AI detection so you can trust automatic results or override them when needed.
+
+### Highlights
+
+- Smart Collections now give you one-click views for recent files, missing metadata, and larger files that are worth reviewing.
+- Filter By now supports AI / Non-AI, No Tags, No Descriptions, and None to clear all filters.
+- AI detection is more consistent across scanning, filtering, and details, and you can now manually confirm AI status when automatic metadata detection is not enough.
+
+### Added
+
+- Added Smart Collections for files acquired or modified in the last 7, 14, or 30 days.
+- Added Smart Collections for `No Tags`, `No Description`, and files larger than `3 MB`, `10 MB`, `25 MB`, `100 MB`, and `1 GB`.
+- Added stackable `No Tags` and `No Description` filters under `Filter By` so metadata cleanup can be scoped alongside other filters.
+- Added stackable `AI Generated` and `Non-AI` filters based on the stored AI detection decision.
+- Added a `User Confirmed AI` override in the details panel so manual AI decisions can take priority over automatic detection when needed.
+
+### Changed
+
+- Changed AI filtering to rely on one canonical stored AI decision instead of re-inferring AI state separately in multiple places.
+- Improved scanning and metadata persistence so supported files now get an explicit AI detection result saved instead of leaving the field blank.
+- Improved AI metadata parsing so SillyTavern-style metadata is recognized more reliably and user comments no longer count as AI evidence by themselves.
+- Updated the details panel so core AI metadata fields, including `AI Tool / Source`, can be edited and saved back to the database.
+- Replaced the native file-menu settings cog with a themed SVG icon that stays black in light mode and white in dark mode.
+- Simplified `Filter By` so a single `None` option clears all groups while empty groups continue to behave implicitly as no filter.
+- Fixed the file tree `Collapse All` action so it no longer instantly re-expands.
+
+### Removed
+
+- Removed the old `Start Collapsed in Details Panel` metadata setting, since the details panel no longer supports that behavior.
+
+---
+
+## v1.1.12
 
 ### Summary
 

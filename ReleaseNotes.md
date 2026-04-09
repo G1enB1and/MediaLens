@@ -1,20 +1,21 @@
-## MediaLens v1.1.12
+## MediaLens v1.1.13
 
 ### Summary
 
-This release makes duplicate cleanup more reliable, easier to review, and faster to act on. MediaLens now applies your duplicate rules more consistently, keeps comparison decisions in sync, and makes it clearer what is identical, what should be kept, and how much space you can reclaim.
+This release makes large libraries easier to break down into focused cleanup tasks. MediaLens adds Smart Collections, stronger stackable filters, and more consistent AI detection so it is easier to find the files you want to review and trust the results.
 
 ### Highlights
 
-- Duplicate and similar review now preselects Keep and Delete choices from your rules, cutting down manual cleanup work.
-- The comparison panel now matches duplicate review more closely with synced delete controls, clearer best-file labeling, and better handling for identical files.
+- Smart Collections now give you fast one-click views for recent files, missing metadata, and larger files that may need attention.
+- Filter By now supports AI / Non-AI, No Tags, No Descriptions, and None to clear all filters.
+- AI detection is more reliable across scanning, filtering, and details, and you can manually confirm AI status when automatic metadata is not enough.
 
 ### Notes
 
-- Live review stats now show Keep, Delete, and Potential Savings based on your current selections.
-- Advanced Search duration and file-size unit selectors were also corrected in this release.
+- The details panel now supports editing and saving core AI metadata fields, including `AI Tool / Source`.
+- The native settings cog now uses a themed SVG icon, and the old unused `Start Collapsed in Details Panel` option has been removed.
 
 ---
 
 Full Changelog:
-https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md
+<https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md>
