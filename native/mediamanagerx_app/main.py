@@ -7473,6 +7473,10 @@ class MainWindow(QMainWindow):
         suffix = "-black" if Theme.get_is_light() else ""
         return str(Path(__file__).with_name("web") / f"{base_name}{suffix}.png")
 
+    def _menu_bar_settings_icon_path(self) -> str:
+        icon_name = "settings-cog.svg" if Theme.get_is_light() else "settings-cog-white.svg"
+        return str(Path(__file__).with_name("web") / "icons" / icon_name)
+
     def _build_menu_bar_controls(self) -> None:
         menubar = self.menuBar()
         if menubar is None:
@@ -7516,7 +7520,7 @@ class MainWindow(QMainWindow):
         self.menu_btn_toggle_right.clicked.connect(lambda: self._toggle_panel_setting("ui/show_right_panel"))
         layout.addWidget(self.menu_btn_toggle_right)
 
-        self.menu_btn_settings = QPushButton("⚙", container)
+        self.menu_btn_settings = QPushButton(container)
         self.menu_btn_settings.setObjectName("menuBarSettingsButton")
         self.menu_btn_settings.setToolTip("Settings")
         self.menu_btn_settings.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -7537,7 +7541,19 @@ class MainWindow(QMainWindow):
             button.setText("")
         else:
             button.setIcon(QIcon())
-            button.setText("•")
+            button.setText("*")
+        button.setIconSize(QSize(18, 18))
+
+    def _set_menu_bar_settings_icon(self, button: QPushButton | None) -> None:
+        if button is None:
+            return
+        path = self._menu_bar_settings_icon_path()
+        if Path(path).exists():
+            button.setIcon(QIcon(path))
+            button.setText("")
+        else:
+            button.setIcon(QIcon())
+            button.setText("S")
         button.setIconSize(QSize(18, 18))
 
     def _sync_menu_bar_controls(self) -> None:
@@ -7562,6 +7578,7 @@ class MainWindow(QMainWindow):
                 bool(self.bridge.settings.value("ui/show_right_panel", True, type=bool)),
                 "right-sidebar",
             )
+            self._set_menu_bar_settings_icon(getattr(self, "menu_btn_settings", None))
         except Exception:
             pass
 
