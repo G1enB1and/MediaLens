@@ -2055,7 +2055,12 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 .gallery-duplicates .structured-card {
   grid-template-columns: 1fr;
   align-items: stretch;
-  padding: 12px;
+  gap: 10px;
+  padding: 10px;
+}
+
+.gallery-duplicates .card {
+  border-radius: 6px;
 }
 
 .folder-card.folder-drop-target {
@@ -2125,7 +2130,7 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   max-height: none;
   background: transparent;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 6px;
 }
 
 .structured-content {
@@ -2182,12 +2187,54 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   min-height: 0;
 }
 
+.duplicate-card-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 3px;
+  padding-bottom: 2px;
+}
+
+.duplicate-card-header-text {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.duplicate-card-footer {
+  gap: 6px;
+}
+
 .duplicate-card-controls {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 10px;
   padding-top: 2px;
+}
+
+.duplicate-card-bottom {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  margin-top: auto;
+  padding-top: 4px;
+}
+
+.duplicate-card-bottom-meta {
+  display: grid;
+  gap: 4px;
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.duplicate-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-left: auto;
+  flex: 0 0 auto;
 }
 
 .duplicate-keep-label {
@@ -2221,7 +2268,29 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   font-size: 15px;
   line-height: 1;
   padding: 0;
-  border-radius: 8px;
+  border-radius: 6px;
+}
+
+.duplicate-dismiss-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0;
+  border-radius: 6px;
+}
+
+.duplicate-dismiss-btn:hover {
+  color: #d45a5a;
+  border-color: #d45a5a;
+  background: color-mix(in srgb, #d45a5a, transparent 90%);
 }
 
 .duplicate-trash-icon {
@@ -2285,16 +2354,22 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 
 .duplicate-reason-list {
   display: grid;
-  gap: 6px;
-  margin-top: auto;
-  padding-top: 4px;
+  gap: 4px;
 }
 
-.duplicate-reason {
+.duplicate-reason-row {
   white-space: normal;
   line-height: 1.35;
   color: color-mix(in srgb, var(--accent), var(--fg) 24%);
   font-weight: 600;
+}
+
+.duplicate-reason-separator {
+  color: #ffffff;
+}
+
+.light-mode .duplicate-reason-separator {
+  color: #000000;
 }
 
 .duplicate-overall-best {

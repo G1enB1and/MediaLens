@@ -4,9 +4,29 @@ from pathlib import Path
 from unittest import mock
 
 from app.mediamanager.db.collections_repo import create_collection, add_media_paths_to_collection
-from app.mediamanager.db.media_repo import add_media_item, is_path_hidden, list_media_in_scope, set_folder_hidden
+from app.mediamanager.db.media_repo import (
+    add_media_item,
+    add_review_pair_exclusions,
+    is_path_hidden,
+    list_media_in_scope,
+    list_review_pair_exclusions,
+    set_folder_hidden,
+)
 from app.mediamanager.db.migrations import init_db
-from native.mediamanagerx_app.main import _load_media_metadata_payload
+from native.mediamanagerx_app.main import Bridge, _load_media_metadata_payload
+
+
+class _SettingsStub:
+    def value(self, _key, default=None, type=None):
+        return default
+
+
+def _build_test_bridge(conn: sqlite3.Connection) -> Bridge:
+    bridge = Bridge.__new__(Bridge)
+    bridge.conn = conn
+    bridge.settings = _SettingsStub()
+    bridge._annotate_group_color_variants = lambda entries: None
+    return bridge
 
 
 class TestMediaRepo(unittest.TestCase):
@@ -176,6 +196,148 @@ class TestMediaRepo(unittest.TestCase):
                     media_dir.rmdir()
             except Exception:
                 pass
+
+    def test_review_pair_exclusions_are_normalized_and_mode_scoped(self) -> None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("PRAGMA journal_mode=MEMORY;")
+            inserted = add_review_pair_exclusions(
+                conn,
+                r"C:\\Media\\Alpha\\A.JPG",
+                [r"C:\\Media\\Alpha\\B.JPG", r"C:\\Media\\Alpha\\B.JPG"],
+                "similar_only",
+            )
+            self.assertEqual(inserted, 1)
+            add_review_pair_exclusions(
+                conn,
+                r"C:\\Media\\Alpha\\A.JPG",
+                [r"C:\\Media\\Alpha\\C.JPG"],
+                "duplicates",
+            )
+
+            similar_pairs = list_review_pair_exclusions(
+                conn,
+                "similar",
+                paths=[r"C:\\Media\\Alpha\\A.JPG", r"C:\\Media\\Alpha\\B.JPG", r"C:\\Media\\Alpha\\C.JPG"],
+            )
+            duplicate_pairs = list_review_pair_exclusions(
+                conn,
+                "duplicates",
+                paths=[r"C:\\Media\\Alpha\\A.JPG", r"C:\\Media\\Alpha\\B.JPG", r"C:\\Media\\Alpha\\C.JPG"],
+            )
+
+        self.assertEqual(similar_pairs, {("c:/media/alpha/a.jpg", "c:/media/alpha/b.jpg")})
+        self.assertEqual(duplicate_pairs, {("c:/media/alpha/a.jpg", "c:/media/alpha/c.jpg")})
+
+    def test_duplicate_grouping_respects_persistent_review_exclusions(self) -> None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("PRAGMA journal_mode=MEMORY;")
+            add_review_pair_exclusions(
+                conn,
+                r"C:\\Media\\A.jpg",
+                [r"C:\\Media\\B.jpg", r"C:\\Media\\C.jpg"],
+                "duplicates",
+            )
+            bridge = _build_test_bridge(conn)
+            entries = [
+                {
+                    "path": "c:/media/a.jpg",
+                    "content_hash": "hash-1",
+                    "media_type": "image",
+                    "file_size": 100,
+                    "width": 100,
+                    "height": 100,
+                    "file_created_time": 1,
+                    "modified_time": 1,
+                    "preferred_date": 1,
+                },
+                {
+                    "path": "c:/media/b.jpg",
+                    "content_hash": "hash-1",
+                    "media_type": "image",
+                    "file_size": 120,
+                    "width": 100,
+                    "height": 100,
+                    "file_created_time": 1,
+                    "modified_time": 1,
+                    "preferred_date": 2,
+                },
+                {
+                    "path": "c:/media/c.jpg",
+                    "content_hash": "hash-1",
+                    "media_type": "image",
+                    "file_size": 130,
+                    "width": 100,
+                    "height": 100,
+                    "file_created_time": 1,
+                    "modified_time": 1,
+                    "preferred_date": 3,
+                },
+            ]
+
+            grouped = bridge._build_duplicate_entries(entries, "none")
+
+        self.assertEqual({entry["path"] for entry in grouped}, {"c:/media/b.jpg", "c:/media/c.jpg"})
+        self.assertEqual(len({entry["duplicate_group_key"] for entry in grouped}), 1)
+
+    def test_similar_grouping_respects_persistent_review_exclusions(self) -> None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("PRAGMA journal_mode=MEMORY;")
+            add_review_pair_exclusions(
+                conn,
+                r"C:\\Media\\A.jpg",
+                [r"C:\\Media\\B.jpg", r"C:\\Media\\C.jpg"],
+                "similar",
+            )
+            bridge = _build_test_bridge(conn)
+            entries = [
+                {
+                    "path": "c:/media/a.jpg",
+                    "content_hash": "",
+                    "phash": "0000000000000000",
+                    "media_type": "image",
+                    "file_size": 100,
+                    "width": 100,
+                    "height": 100,
+                    "file_created_time": 1,
+                    "modified_time": 1,
+                    "preferred_date": 1,
+                },
+                {
+                    "path": "c:/media/b.jpg",
+                    "content_hash": "",
+                    "phash": "0000000000000001",
+                    "media_type": "image",
+                    "file_size": 120,
+                    "width": 100,
+                    "height": 100,
+                    "file_created_time": 1,
+                    "modified_time": 1,
+                    "preferred_date": 2,
+                },
+                {
+                    "path": "c:/media/c.jpg",
+                    "content_hash": "",
+                    "phash": "0000000000000003",
+                    "media_type": "image",
+                    "file_size": 130,
+                    "width": 100,
+                    "height": 100,
+                    "file_created_time": 1,
+                    "modified_time": 1,
+                    "preferred_date": 3,
+                },
+            ]
+
+            grouped = bridge._build_similar_entries(
+                entries,
+                "none",
+                include_exact=True,
+                threshold=2,
+                bucket_prefix=15,
+            )
+
+        self.assertEqual({entry["path"] for entry in grouped}, {"c:/media/b.jpg", "c:/media/c.jpg"})
+        self.assertEqual(len({entry["duplicate_group_key"] for entry in grouped}), 1)
 
 
 if __name__ == '__main__':

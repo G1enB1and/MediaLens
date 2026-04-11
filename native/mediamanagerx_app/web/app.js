@@ -64,6 +64,7 @@ let gVideoLoopMode = 'short';
 let gVideoLoopCutoffSeconds = 90;
 let gScanActive = false;
 let gAwaitingScanResults = false;
+let gDismissedReviewPaths = new Set();
 let gSimilarityThreshold = 'low';
 let gTextProcessingDismissed = false;
 let gTextProcessingActive = false;
@@ -549,6 +550,42 @@ function isDuplicateModeActive() {
 
 function shouldShowScanWaitingEmptyState() {
   return isDuplicateModeActive() && (gScanActive || gAwaitingScanResults);
+}
+
+function clearDismissedReviewPaths() {
+  gDismissedReviewPaths = new Set();
+}
+
+function getReviewGroupPeerPaths(groupKey, path) {
+  const normalizedPath = normalizeMediaPath(path);
+  const normalizedGroupKey = String(groupKey || '').trim();
+  if (!normalizedPath || !normalizedGroupKey) return [];
+  return gMedia
+    .filter(item => !item.is_folder && String(item.duplicate_group_key || '').trim() === normalizedGroupKey)
+    .map(item => String(item.path || ''))
+    .filter(rawPath => {
+      const normalized = normalizeMediaPath(rawPath);
+      return normalized && normalized !== normalizedPath;
+    });
+}
+
+function dismissReviewPath(path) {
+  const normalized = normalizeMediaPath(path);
+  if (!normalized) return;
+  gDismissedReviewPaths.add(normalized);
+  renderMediaList(gMedia, false);
+  const groupKey = getDuplicateGroupKeyForPath(path);
+  const peerPaths = getReviewGroupPeerPaths(groupKey, path);
+  if (!gBridge || !gBridge.dismiss_review_pair || !peerPaths.length) return;
+  gBridge.dismiss_review_pair(path, peerPaths, getReviewMode(), function (ok) {
+    if (!ok) {
+      gDismissedReviewPaths.delete(normalized);
+      renderMediaList(gMedia, false);
+      return;
+    }
+    clearDismissedReviewPaths();
+    refreshFromBridge(gBridge, false);
+  });
 }
 
 function clearReviewResultsForPendingScan() {
@@ -2813,10 +2850,8 @@ function buildDuplicateGroups(items) {
   const reviewMode = getReviewMode();
   const baseLabel = reviewMode === 'duplicates' ? 'Duplicate Group' : 'Similar Group';
   const seen = new Map();
-  items.filter(item => !item.is_folder).forEach((item) => {
-    const key = String((reviewMode && reviewMode !== 'duplicates')
-      ? (item.duplicate_group_key || item.content_hash || '')
-      : (item.content_hash || item.duplicate_group_key || '')).trim();
+  items.filter(item => !item.is_folder && !gDismissedReviewPaths.has(normalizeMediaPath(item.path))).forEach((item) => {
+    const key = String(item.duplicate_group_key || item.content_hash || '').trim();
     if (!key) return;
     let group = seen.get(key);
     if (!group) {
@@ -3695,6 +3730,7 @@ function setReviewMode(mode) {
   if (!REVIEW_VIEW_MODES.has(gGalleryViewMode)) {
     gLastStandardViewMode = gGalleryViewMode;
   }
+  clearDismissedReviewPaths();
   applyGalleryViewMode(nextMode);
   updateCtxViewState();
   return nextMode;
@@ -3881,7 +3917,6 @@ function createStructuredCard(item, idx) {
   const thumbWrap = document.createElement('div');
   thumbWrap.className = 'structured-thumb';
   if (item.thumb_bg_hint) thumbWrap.setAttribute('data-thumb-bg-hint', item.thumb_bg_hint);
-  card.appendChild(thumbWrap);
 
   if (isFolder) {
     const folderThumb = document.createElement('div');
@@ -3945,18 +3980,39 @@ function createStructuredCard(item, idx) {
 
   const content = document.createElement('div');
   content.className = 'structured-content';
+  const duplicateHeader = duplicateMode && !isFolder ? document.createElement('div') : null;
+  if (duplicateHeader) duplicateHeader.className = 'structured-content duplicate-card-header';
+  if (duplicateHeader) content.classList.add('duplicate-card-footer');
+  const duplicateHeaderText = duplicateHeader ? document.createElement('div') : null;
+  if (duplicateHeaderText) duplicateHeaderText.className = 'duplicate-card-header-text';
+  const primaryContent = duplicateHeaderText || duplicateHeader || content;
 
   const title = document.createElement('div');
   title.className = 'entry-name';
   title.textContent = getItemName(item);
   title.title = item.path || getItemName(item);
-  content.appendChild(title);
+  primaryContent.appendChild(title);
 
   const folder = document.createElement('div');
   folder.className = 'entry-folder';
   folder.textContent = duplicateMode ? (getItemFolder(item) || item.path || '') : getItemFolderDisplay(item);
   folder.title = getItemFolder(item) || item.path || '';
-  content.appendChild(folder);
+  primaryContent.appendChild(folder);
+
+  if (duplicateHeader && duplicateHeaderText) {
+    duplicateHeader.appendChild(duplicateHeaderText);
+    const dismissBtn = document.createElement('button');
+    dismissBtn.type = 'button';
+    dismissBtn.className = 'duplicate-dismiss-btn';
+    dismissBtn.title = 'Exclude from this review group in future scans';
+    dismissBtn.setAttribute('aria-label', 'Exclude from this review group in future scans');
+    dismissBtn.textContent = '×';
+    dismissBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dismissReviewPath(item.path || '');
+    });
+    duplicateHeader.appendChild(dismissBtn);
+  }
 
   if (gGalleryViewMode === 'details') {
     const typeCell = document.createElement('div');
@@ -4059,6 +4115,58 @@ function createStructuredCard(item, idx) {
     }
     controls.appendChild(bestLabel);
 
+    content.appendChild(controls);
+
+    const bottomRow = document.createElement('div');
+    bottomRow.className = 'duplicate-card-bottom';
+    const bottomMeta = document.createElement('div');
+    bottomMeta.className = 'duplicate-card-bottom-meta';
+
+    const reasons = Array.isArray(item.duplicate_category_reasons) ? item.duplicate_category_reasons.filter(Boolean) : [];
+    if (reasons.length) {
+      const duplicateMeta = document.createElement('div');
+      duplicateMeta.className = 'entry-detail duplicate-reason-list';
+      for (let i = 0; i < reasons.length; i += 2) {
+        const row = document.createElement('div');
+        row.className = 'duplicate-reason-row';
+        row.textContent = reasons.slice(i, i + 2).join(' • ');
+        const rowReasons = reasons.slice(i, i + 2);
+        if (rowReasons.length > 1) {
+          row.textContent = '';
+          rowReasons.forEach((reason, reasonIndex) => {
+            const label = document.createElement('span');
+            label.className = 'duplicate-reason-label';
+            label.textContent = reason;
+            row.appendChild(label);
+            if (reasonIndex < rowReasons.length - 1) {
+              const separator = document.createElement('span');
+              separator.className = 'duplicate-reason-separator';
+              separator.textContent = ' • ';
+              row.appendChild(separator);
+            }
+          });
+        }
+        duplicateMeta.appendChild(row);
+      }
+      bottomMeta.appendChild(duplicateMeta);
+    }
+
+    if (item.duplicate_is_overall_best) {
+      const overallBest = document.createElement('div');
+      overallBest.className = 'entry-detail duplicate-overall-best';
+      overallBest.textContent = '★ Best overall';
+      overallBest.hidden = false;
+      bottomMeta.appendChild(overallBest);
+    } else {
+      const overallBest = document.createElement('div');
+      overallBest.className = 'entry-detail duplicate-overall-best';
+      overallBest.textContent = '★ Best overall';
+      overallBest.hidden = true;
+      bottomMeta.appendChild(overallBest);
+    }
+
+    const actionRow = document.createElement('div');
+    actionRow.className = 'duplicate-card-actions';
     const trashBtn = document.createElement('button');
     trashBtn.type = 'button';
     trashBtn.className = 'duplicate-trash-btn';
@@ -4069,37 +4177,16 @@ function createStructuredCard(item, idx) {
       e.stopPropagation();
       deleteDuplicateCard(item.path || '');
     });
-    controls.appendChild(trashBtn);
-    content.appendChild(controls);
-
-    const reasons = Array.isArray(item.duplicate_category_reasons) ? item.duplicate_category_reasons.filter(Boolean) : [];
-    if (reasons.length) {
-      const duplicateMeta = document.createElement('div');
-      duplicateMeta.className = 'entry-detail duplicate-reason-list';
-      reasons.forEach((reason) => {
-        const chip = document.createElement('div');
-        chip.className = 'duplicate-reason';
-        chip.textContent = reason;
-        duplicateMeta.appendChild(chip);
-      });
-      content.appendChild(duplicateMeta);
-    }
-
-    if (item.duplicate_is_overall_best) {
-      const overallBest = document.createElement('div');
-      overallBest.className = 'entry-detail duplicate-overall-best';
-      overallBest.textContent = '★ Best overall';
-      overallBest.hidden = false;
-      content.appendChild(overallBest);
-    } else {
-      const overallBest = document.createElement('div');
-      overallBest.className = 'entry-detail duplicate-overall-best';
-      overallBest.textContent = '★ Best overall';
-      overallBest.hidden = true;
-      content.appendChild(overallBest);
-    }
+    actionRow.appendChild(trashBtn);
+    bottomRow.appendChild(bottomMeta);
+    bottomRow.appendChild(actionRow);
+    content.appendChild(bottomRow);
   }
 
+  if (duplicateHeader) {
+    card.appendChild(duplicateHeader);
+  }
+  card.appendChild(thumbWrap);
   card.appendChild(content);
 
   card.addEventListener('click', (e) => handleCardSelection(card, item, mediaIdx, e));
@@ -8060,6 +8147,7 @@ async function main() {
         deselectAll();
         syncMetadataToBridge();
         gSelectedFolders = folders || [];
+        clearDismissedReviewPaths();
         gAwaitingScanResults = !!(folders && folders.length);
         gPage = 0;
         setGlobalLoading(true, isDuplicateModeActive() ? 'Scanning folder...' : 'Loading folder...', 10);

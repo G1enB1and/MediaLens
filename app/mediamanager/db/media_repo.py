@@ -98,6 +98,107 @@ def _ensure_media_ai_columns(conn: sqlite3.Connection) -> None:
         conn.commit()
 
 
+def _ensure_review_pair_exclusions_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS review_pair_exclusions (
+            left_path TEXT NOT NULL,
+            right_path TEXT NOT NULL,
+            review_mode TEXT NOT NULL,
+            created_at_utc TEXT NOT NULL,
+            PRIMARY KEY (left_path, right_path, review_mode)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_review_pair_exclusions_mode ON review_pair_exclusions(review_mode)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_review_pair_exclusions_left ON review_pair_exclusions(left_path, review_mode)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_review_pair_exclusions_right ON review_pair_exclusions(right_path, review_mode)")
+
+
+def _normalize_review_mode(review_mode: str) -> str:
+    value = str(review_mode or "").strip().casefold()
+    if value in {"similar", "similar_only"}:
+        return "similar"
+    if value == "duplicates":
+        return "duplicates"
+    return ""
+
+
+def _canonical_review_pair(path_a: str, path_b: str) -> tuple[str, str] | None:
+    left = normalize_windows_path(path_a)
+    right = normalize_windows_path(path_b)
+    if not left or not right or left == right:
+        return None
+    return (left, right) if left < right else (right, left)
+
+
+def add_review_pair_exclusions(
+    conn: sqlite3.Connection,
+    path: str,
+    related_paths: Iterable[str],
+    review_mode: str,
+) -> int:
+    mode = _normalize_review_mode(review_mode)
+    if not mode:
+        return 0
+    _ensure_review_pair_exclusions_table(conn)
+    pairs = sorted(
+        {
+            pair
+            for pair in (_canonical_review_pair(path, related_path) for related_path in related_paths)
+            if pair is not None
+        }
+    )
+    if not pairs:
+        return 0
+    now = _utc_now_iso()
+    conn.executemany(
+        """
+        INSERT OR IGNORE INTO review_pair_exclusions(left_path, right_path, review_mode, created_at_utc)
+        VALUES (?, ?, ?, ?)
+        """,
+        [(left, right, mode, now) for left, right in pairs],
+    )
+    conn.commit()
+    return len(pairs)
+
+
+def list_review_pair_exclusions(
+    conn: sqlite3.Connection,
+    review_mode: str,
+    *,
+    paths: Iterable[str] | None = None,
+) -> set[tuple[str, str]]:
+    mode = _normalize_review_mode(review_mode)
+    if not mode:
+        return set()
+    _ensure_review_pair_exclusions_table(conn)
+    where_parts = ["review_mode = ?"]
+    params: list[str] = [mode]
+    if paths is not None:
+        normalized_paths = sorted({normalize_windows_path(path) for path in paths if str(path or "").strip()})
+        if not normalized_paths:
+            return set()
+        placeholders = ", ".join("?" for _ in normalized_paths)
+        where_parts.append(f"left_path IN ({placeholders})")
+        where_parts.append(f"right_path IN ({placeholders})")
+        params.extend(normalized_paths)
+        params.extend(normalized_paths)
+    rows = conn.execute(
+        f"""
+        SELECT left_path, right_path
+        FROM review_pair_exclusions
+        WHERE {" AND ".join(where_parts)}
+        """,
+        params,
+    ).fetchall()
+    return {
+        (str(left_path or ""), str(right_path or ""))
+        for left_path, right_path in rows
+        if str(left_path or "") and str(right_path or "")
+    }
+
+
 def add_media_item(
     conn: sqlite3.Connection,
     path: str,

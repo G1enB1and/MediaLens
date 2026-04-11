@@ -3937,6 +3937,65 @@ class Bridge(QObject):
         return None
 
     @staticmethod
+    def _normalized_review_pair(path_a: str, path_b: str) -> tuple[str, str] | None:
+        from app.mediamanager.utils.pathing import normalize_windows_path
+
+        left = normalize_windows_path(path_a)
+        right = normalize_windows_path(path_b)
+        if not left or not right or left == right:
+            return None
+        return (left, right) if left < right else (right, left)
+
+    def _load_review_pair_exclusions(self, entries: list[dict], review_mode: str) -> set[tuple[str, str]]:
+        from app.mediamanager.db.media_repo import list_review_pair_exclusions
+
+        paths = [str(entry.get("path") or "").strip() for entry in entries if str(entry.get("path") or "").strip()]
+        if not paths:
+            return set()
+        return list_review_pair_exclusions(self.conn, review_mode, paths=paths)
+
+    def _is_review_pair_excluded(self, excluded_pairs: set[tuple[str, str]], left_path: str, right_path: str) -> bool:
+        pair = self._normalized_review_pair(left_path, right_path)
+        return bool(pair and pair in excluded_pairs)
+
+    def _split_duplicate_group_components(
+        self,
+        group_entries: list[dict],
+        excluded_pairs: set[tuple[str, str]],
+    ) -> list[list[dict]]:
+        if len(group_entries) < 2:
+            return []
+
+        parents = list(range(len(group_entries)))
+
+        def find(idx: int) -> int:
+            while parents[idx] != idx:
+                parents[idx] = parents[parents[idx]]
+                idx = parents[idx]
+            return idx
+
+        def union(left_idx: int, right_idx: int) -> None:
+            left_root = find(left_idx)
+            right_root = find(right_idx)
+            if left_root != right_root:
+                parents[right_root] = left_root
+
+        for left_idx, left_entry in enumerate(group_entries):
+            left_path = str(left_entry.get("path") or "")
+            if not left_path:
+                continue
+            for right_idx in range(left_idx + 1, len(group_entries)):
+                right_path = str(group_entries[right_idx].get("path") or "")
+                if not right_path or self._is_review_pair_excluded(excluded_pairs, left_path, right_path):
+                    continue
+                union(left_idx, right_idx)
+
+        components: dict[int, list[dict]] = {}
+        for index, entry in enumerate(group_entries):
+            components.setdefault(find(index), []).append(entry)
+        return [component for component in components.values() if len(component) > 1]
+
+    @staticmethod
     def _folder_depth_for_duplicate(entry: dict) -> int:
         try:
             parent = Path(str(entry.get("path", ""))).parent
@@ -4407,23 +4466,29 @@ class Bridge(QObject):
 
     def _build_duplicate_entries(self, entries: list[dict], sort_by: str) -> list[dict]:
         media_entries = [dict(entry) for entry in entries if not entry.get("is_folder")]
-        counts = Counter(
-            str(entry.get("content_hash") or "").strip()
-            for entry in media_entries
-            if str(entry.get("content_hash") or "").strip()
-        )
+        excluded_pairs = self._load_review_pair_exclusions(media_entries, "duplicates")
         duplicate_groups: dict[str, list[dict]] = {}
         for entry in media_entries:
             group_key = str(entry.get("content_hash") or "").strip()
-            if counts.get(group_key, 0) < 2:
+            if not group_key:
                 continue
             duplicate_groups.setdefault(group_key, []).append(entry)
 
-        if not duplicate_groups:
+        split_duplicate_groups: dict[str, list[dict]] = {}
+        for content_hash, group_entries in duplicate_groups.items():
+            if len(group_entries) < 2:
+                continue
+            for component_index, component_entries in enumerate(
+                self._split_duplicate_group_components(group_entries, excluded_pairs),
+                start=1,
+            ):
+                split_duplicate_groups[f"duplicate:{content_hash}:{component_index}"] = component_entries
+
+        if not split_duplicate_groups:
             return []
 
         group_rows: list[tuple[tuple, list[dict]]] = []
-        for group_key, group_entries in duplicate_groups.items():
+        for group_key, group_entries in split_duplicate_groups.items():
             sorted_group = self._rank_duplicate_group(group_entries)
             kept_size = int(sorted_group[0].get("file_size") or 0) if sorted_group else 0
             total_size = sum(int(entry.get("file_size") or 0) for entry in sorted_group)
@@ -4432,6 +4497,7 @@ class Bridge(QObject):
                 entry["duplicate_group_key"] = group_key
                 entry["duplicate_group_size"] = len(sorted_group)
                 entry["duplicate_space_savings"] = savings
+                entry["review_group_mode"] = "duplicates"
             best = sorted_group[0]
             name = Path(str(best.get("path", ""))).name.lower()
             if sort_by == "name_desc":
@@ -4483,6 +4549,7 @@ class Bridge(QObject):
             candidates = unique_candidates
         if len(candidates) < 2:
             return []
+        excluded_pairs = self._load_review_pair_exclusions(candidates, "similar")
 
         parents = list(range(len(candidates)))
 
@@ -4511,9 +4578,15 @@ class Bridge(QObject):
         for group_items in hash_groups.values():
             if len(group_items) < 2:
                 continue
-            anchor = group_items[0]
-            for other in group_items[1:]:
-                union(anchor, other)
+            for pos, left_idx in enumerate(group_items):
+                left_path = str(candidates[left_idx].get("path") or "")
+                if not left_path:
+                    continue
+                for right_idx in group_items[pos + 1:]:
+                    right_path = str(candidates[right_idx].get("path") or "")
+                    if not right_path or self._is_review_pair_excluded(excluded_pairs, left_path, right_path):
+                        continue
+                    union(left_idx, right_idx)
 
         for bucket_items in buckets.values():
             for pos, left_idx in enumerate(bucket_items):
@@ -4527,6 +4600,12 @@ class Bridge(QObject):
                         continue
                     right_hash = candidates[right_idx].get("phash") or ""
                     if not right_hash:
+                        continue
+                    if self._is_review_pair_excluded(
+                        excluded_pairs,
+                        str(candidates[left_idx].get("path") or ""),
+                        str(candidates[right_idx].get("path") or ""),
+                    ):
                         continue
                     distance = phash_distance(left_hash, right_hash)
                     if distance <= threshold and (include_exact or distance > 0):
@@ -6512,6 +6591,19 @@ class Bridge(QObject):
             self.closeVideoRequested.emit()
             return True
         except Exception:
+            return False
+
+    @Slot(str, list, str, result=bool)
+    def dismiss_review_pair(self, path: str, related_paths: list, review_mode: str) -> bool:
+        from app.mediamanager.db.media_repo import add_review_pair_exclusions
+
+        try:
+            return add_review_pair_exclusions(self.conn, path, related_paths or [], review_mode) > 0
+        except Exception as exc:
+            try:
+                self._log(f"Dismiss review pair failed for {path!r}: {exc}")
+            except Exception:
+                pass
             return False
 
     @Slot(str, result=dict)

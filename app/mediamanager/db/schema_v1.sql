@@ -244,3 +244,15 @@ CREATE TABLE IF NOT EXISTS collection_items (
 
 CREATE INDEX IF NOT EXISTS idx_collection_items_collection ON collection_items(collection_id);
 CREATE INDEX IF NOT EXISTS idx_collection_items_media ON collection_items(media_id);
+
+CREATE TABLE IF NOT EXISTS review_pair_exclusions (
+  left_path TEXT NOT NULL,
+  right_path TEXT NOT NULL,
+  review_mode TEXT NOT NULL,
+  created_at_utc TEXT NOT NULL,
+  PRIMARY KEY (left_path, right_path, review_mode)
+);
+
+CREATE INDEX IF NOT EXISTS idx_review_pair_exclusions_mode ON review_pair_exclusions(review_mode);
+CREATE INDEX IF NOT EXISTS idx_review_pair_exclusions_left ON review_pair_exclusions(left_path, review_mode);
+CREATE INDEX IF NOT EXISTS idx_review_pair_exclusions_right ON review_pair_exclusions(right_path, review_mode);
