@@ -4903,6 +4903,50 @@ function wireCtxMenu() {
       return Array.from(gSelectedPaths);
     };
 
+    const applyHiddenStateToTargets = (hidden) => {
+      if (!gBridge) return false;
+      const targetPaths = getTargetPaths();
+      if (!targetPaths.length) return false;
+
+      if (fromLb) closeLightbox();
+      setGlobalLoading(true, hidden ? 'Hiding...' : 'Unhiding...', 25);
+      hideCtx();
+
+      let pending = 0;
+      let anySuccess = false;
+
+      const finish = (success) => {
+        pending -= 1;
+        if (success) anySuccess = true;
+        if (pending > 0) return;
+
+        if (anySuccess) {
+          targetPaths.forEach((path) => {
+            const targetItem = gMedia.find(entry => entry.path === path);
+            if (targetItem) targetItem.is_hidden = hidden;
+          });
+          refreshFromBridge(gBridge);
+        } else {
+          setGlobalLoading(false);
+        }
+      };
+
+      targetPaths.forEach((path) => {
+        const targetItem = gMedia.find(entry => entry.path === path) || (item && item.path === path ? item : null);
+        if (!targetItem) return;
+        const hideFn = targetItem.is_folder ? gBridge.set_folder_hidden : gBridge.set_media_hidden;
+        if (!hideFn) return;
+        pending += 1;
+        hideFn.call(gBridge, path, hidden, finish);
+      });
+
+      if (pending === 0) {
+        setGlobalLoading(false);
+        return false;
+      }
+      return true;
+    };
+
     if (gBridge && gBridge.debug_log) {
       gBridge.debug_log(`ctx mousedown: id=${btn.id} path=${item ? item.path : 'null'}`);
     }
@@ -4998,31 +5042,10 @@ function wireCtxMenu() {
         hideCtx();
         break;
       case 'ctxHide':
-        if (item && item.path && gBridge && (item.is_folder ? gBridge.set_folder_hidden : gBridge.set_media_hidden)) {
-          if (fromLb) closeLightbox();
-          setGlobalLoading(true, 'Hiding…', 25);
-          const hideFn = item.is_folder ? gBridge.set_folder_hidden : gBridge.set_media_hidden;
-          hideFn.call(gBridge, item.path, true, (success) => {
-             if (success) {
-                 // Refresh or update local state
-                 item.is_hidden = true;
-                 refreshFromBridge(gBridge);
-             }
-          });
-        }
+        applyHiddenStateToTargets(true);
         break;
       case 'ctxUnhide':
-        if (item && item.path && gBridge && (item.is_folder ? gBridge.set_folder_hidden : gBridge.set_media_hidden)) {
-          if (fromLb) closeLightbox();
-          setGlobalLoading(true, 'Unhiding…', 25);
-          const unhideFn = item.is_folder ? gBridge.set_folder_hidden : gBridge.set_media_hidden;
-          unhideFn.call(gBridge, item.path, false, (success) => {
-             if (success) {
-                 item.is_hidden = false;
-                 refreshFromBridge(gBridge);
-             }
-          });
-        }
+        applyHiddenStateToTargets(false);
         break;
       case 'ctxPinFolder':
         if (item && item.path && item.is_folder && gBridge && gBridge.pin_folder) {

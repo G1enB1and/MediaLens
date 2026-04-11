@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest import mock
 
 from app.mediamanager.db.collections_repo import create_collection, add_media_paths_to_collection
-from app.mediamanager.db.media_repo import add_media_item, list_media_in_scope
+from app.mediamanager.db.media_repo import add_media_item, is_path_hidden, list_media_in_scope, set_folder_hidden
 from app.mediamanager.db.migrations import init_db
 from native.mediamanagerx_app.main import _load_media_metadata_payload
 
@@ -126,6 +126,21 @@ class TestMediaRepo(unittest.TestCase):
                     media_dir.rmdir()
             except Exception:
                 pass
+
+    def test_hidden_folder_marks_descendant_paths_hidden(self) -> None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("PRAGMA journal_mode=MEMORY;")
+            hidden_root = r"C:\\Media\\HiddenSet"
+            child_path = r"C:\\Media\\HiddenSet\\nested\\child.jpg"
+            set_folder_hidden(conn, hidden_root, True)
+            add_media_item(conn, child_path, "image")
+
+            self.assertTrue(is_path_hidden(conn, child_path))
+
+            scoped = list_media_in_scope(conn, [r"C:\\Media"])
+
+        self.assertEqual(len(scoped), 1)
+        self.assertTrue(scoped[0]["is_hidden"])
 
     def test_load_media_metadata_payload_keeps_core_dates_when_optional_metadata_lookup_fails(self) -> None:
         media_dir = self.tmp_dir / "metadata-fallback"

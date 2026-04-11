@@ -6928,10 +6928,17 @@ class Bridge(QObject):
                 folder_path = Path(folder)
                 if not folder_path.is_dir(): continue
                 try:
-                    for root_dir, _, files in os.walk(str(folder_path), followlinks=True):
+                    for root_dir, dir_names, files in os.walk(str(folder_path), followlinks=True):
                         curr_root = Path(root_dir)
+                        if not show_hidden:
+                            dir_names[:] = [
+                                name for name in dir_names
+                                if not self.repo.is_path_hidden(str(curr_root / name))
+                            ]
                         for f in files:
                             p = curr_root / f
+                            if not show_hidden and self.repo.is_path_hidden(str(p)):
+                                continue
                             if p.suffix.lower() in ALL_EXTS: disk_files[normalize_windows_path(str(p))] = p
                 except Exception: pass
             self._disk_cache, self._disk_cache_key = disk_files, current_key
@@ -6955,7 +6962,8 @@ class Bridge(QObject):
         
         for norm, p_obj in disk_files.items():
             if norm not in covered:
-                # Items only on disk are not hidden yet
+                if not show_hidden and self.repo.is_path_hidden(str(p_obj)):
+                    continue
                 surviving.append({"id": -1, "path": norm, "media_type": ("image" if p_obj.suffix.lower() in image_exts else "video"), "file_size": None, "modified_time": None, "duration": None, "_real_path": p_obj})
         
         candidates = surviving
@@ -12975,6 +12983,8 @@ class MainWindow(QMainWindow):
                 self.meta_codec_lbl.setText("Codec: ")
                 self.meta_audio_lbl.setText("Audio: ")
                 self._load_video_sidebar_metadata_async(path)
+            elif p.is_dir():
+                pass
             else:
 
                 # 3. Real-time Harvest (Update/Enrich Labels)

@@ -487,7 +487,16 @@ def _list_media_with_where(
             m.width,
             m.height,
             m.duration_ms,
-            m.is_hidden,
+            CASE
+                WHEN COALESCE(m.is_hidden, 0) != 0 THEN 1
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM folder_nodes fn
+                    WHERE COALESCE(fn.is_hidden, 0) != 0
+                      AND (m.path = fn.path OR m.path LIKE fn.path || '/%')
+                ) THEN 1
+                ELSE 0
+            END AS effective_is_hidden,
             m.text_detected,
             m.text_detection_score,
             m.text_detection_version,
@@ -719,7 +728,7 @@ def set_folder_hidden(conn: sqlite3.Connection, path: str, hidden: bool) -> bool
 
 
 def is_path_hidden(conn: sqlite3.Connection, path: str) -> bool:
-    """Check if a path is marked as hidden in the database (media or folder)."""
+    """Check if a path or any ancestor folder is marked hidden in the database."""
     normalized = normalize_windows_path(path)
     cursor = conn.cursor()
     # Check if it's a media item
@@ -727,9 +736,16 @@ def is_path_hidden(conn: sqlite3.Connection, path: str) -> bool:
     row = cursor.fetchone()
     if row and row[0]:
         return True
-    # Check if it's a folder
-    cursor.execute("SELECT is_hidden FROM folder_nodes WHERE path = ?", (normalized,))
+    # Check if the path itself or any ancestor folder is hidden.
+    cursor.execute(
+        """
+        SELECT 1
+        FROM folder_nodes
+        WHERE COALESCE(is_hidden, 0) != 0
+          AND (? = path OR ? LIKE path || '/%')
+        LIMIT 1
+        """,
+        (normalized, normalized),
+    )
     row = cursor.fetchone()
-    if row and row[0]:
-        return True
-    return False
+    return bool(row and row[0])
