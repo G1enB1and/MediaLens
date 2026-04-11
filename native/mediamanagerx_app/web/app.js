@@ -63,6 +63,7 @@ let gAutoplayPreviewAnimatedGifs = true;
 let gVideoLoopMode = 'short';
 let gVideoLoopCutoffSeconds = 90;
 let gScanActive = false;
+let gAwaitingScanResults = false;
 let gSimilarityThreshold = 'low';
 let gTextProcessingDismissed = false;
 let gTextProcessingActive = false;
@@ -544,6 +545,20 @@ function getReviewMode() {
 
 function isDuplicateModeActive() {
   return !!getReviewMode();
+}
+
+function shouldShowScanWaitingEmptyState() {
+  return isDuplicateModeActive() && (gScanActive || gAwaitingScanResults);
+}
+
+function clearReviewResultsForPendingScan() {
+  if (!isDuplicateModeActive()) return;
+  gMedia = [];
+  gTotal = 0;
+  gPage = 0;
+  updateGalleryCountChip(0);
+  renderMediaList([], true);
+  renderPager();
 }
 
 function isExactDuplicateReviewItem(item) {
@@ -4517,8 +4532,8 @@ function renderDuplicateMediaList(el, items) {
   const groupLabel = isSimilarReview ? 'Similar Group' : 'Duplicate Group';
   const summaryLabel = isSimilarReview ? 'Groups' : 'Duplicate Groups';
   const emptyLabel = isSimilarReview
-    ? (gScanActive ? 'No similar images found in the current scope yet. Still scanning...' : 'No similar images found in the current scope.')
-    : 'No duplicates found in the current scope.';
+    ? (shouldShowScanWaitingEmptyState() ? 'Scanning current folder. Wait for results to finish loading.' : 'No similar images found in the current scope.')
+    : (shouldShowScanWaitingEmptyState() ? 'Scanning current folder. Wait for results to finish loading.' : 'No duplicates found in the current scope.');
   if (!groups.length) {
     const div = document.createElement('div');
     div.className = 'empty';
@@ -5236,7 +5251,9 @@ function renderMediaList(items, scrollToTop = true) {
     const div = document.createElement('div');
     div.className = 'empty';
     div.textContent = isDuplicateModeActive()
-      ? ((getReviewMode() === 'similar' || getReviewMode() === 'similar_only') ? 'No similar images found in the current scope.' : 'No duplicates found in the current scope.')
+      ? (shouldShowScanWaitingEmptyState()
+        ? 'Scanning current folder. Wait for results to finish loading.'
+        : ((getReviewMode() === 'similar' || getReviewMode() === 'similar_only') ? 'No similar images found in the current scope.' : 'No duplicates found in the current scope.'))
       : 'No media discovered yet.';
     el.appendChild(div);
     renderTimelineRail([]);
@@ -5828,6 +5845,18 @@ function refreshFromBridge(bridge, resetPage = false) {
     // This loads the synthesized candidates from disk + DB without waiting for scan.
       const useInfinite = shouldUseInfiniteScrollMode();
       const duplicateMode = isDuplicateModeActive();
+
+      if (duplicateMode && shouldShowScanWaitingEmptyState()) {
+        gTotal = 0;
+        updateGalleryCountChip(0);
+        renderMediaList([], !gPendingScrollAnchor);
+        renderPager();
+        setGlobalLoading(true, 'Scanning folder...', 10);
+        if (gSelectedFolders.length > 0 && bridge.start_scan) {
+          bridge.start_scan(gSelectedFolders, gSearchQuery || '');
+        }
+        return;
+      }
 
       if (duplicateMode) {
         fetchMediaCount(gSelectedFolders, gFilter, gSearchQuery || '').then(function (count) {
@@ -7857,6 +7886,7 @@ async function main() {
     if (bridge.scanStarted) {
       bridge.scanStarted.connect(function (folder) {
         gScanActive = true;
+        gAwaitingScanResults = true;
         // Silent background scan now, non-blocking
       });
     }
@@ -7864,6 +7894,7 @@ async function main() {
     if (bridge.scanFinished) {
       bridge.scanFinished.connect(function (folder, count) {
         gScanActive = false;
+        gAwaitingScanResults = false;
         gTotal = count || 0;
         const tp = totalPages();
         if (gPage >= tp) gPage = Math.max(0, tp - 1);
@@ -8029,7 +8060,10 @@ async function main() {
         deselectAll();
         syncMetadataToBridge();
         gSelectedFolders = folders || [];
+        gAwaitingScanResults = !!(folders && folders.length);
         gPage = 0;
+        setGlobalLoading(true, isDuplicateModeActive() ? 'Scanning folder...' : 'Loading folder...', 10);
+        clearReviewResultsForPendingScan();
         refreshFromBridge(bridge);
       });
     }

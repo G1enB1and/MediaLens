@@ -7341,6 +7341,11 @@ class Bridge(QObject):
             return
         scan_key = hashlib.sha1(",".join(sorted(str(folder) for folder in folders)).encode()).hexdigest()
         if self._last_full_scan_key == scan_key:
+            primary = folders[0] if folders else ""
+            try:
+                self.scanFinished.emit(primary, len(self._get_reconciled_candidates(folders, "all", search_query)))
+            except Exception:
+                pass
             return
         self._cancel_text_processing()
         self._scan_abort = True
