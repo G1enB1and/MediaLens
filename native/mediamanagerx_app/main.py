@@ -6606,6 +6606,20 @@ class Bridge(QObject):
                 pass
             return False
 
+    @Slot(result=bool)
+    def reset_review_group_exclusions(self) -> bool:
+        from app.mediamanager.db.media_repo import clear_review_pair_exclusions
+
+        try:
+            clear_review_pair_exclusions(self.conn)
+            return True
+        except Exception as exc:
+            try:
+                self._log(f"Reset review group exclusions failed: {exc}")
+            except Exception:
+                pass
+            return False
+
     @Slot(str, result=dict)
     def get_media_metadata(self, path: str) -> dict:
         return _load_media_metadata_payload(self.conn, path, self._log)

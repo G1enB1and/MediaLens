@@ -6667,6 +6667,23 @@ function renderDuplicateSettings(settings) {
     </div>
   `;
   mount.appendChild(mergeSection);
+
+  const exclusionResetSection = document.createElement('section');
+  exclusionResetSection.className = 'metadata-group duplicate-settings-section';
+  exclusionResetSection.innerHTML = `
+    <div class="metadata-group-header">
+      <div class="metadata-group-title">Reset Group Exclusions</div>
+    </div>
+    <div class="metadata-group-body duplicate-exclusion-reset-body">
+      <div class="duplicate-exclusion-reset-copy">
+        When you click X on files in duplicate or similar groups MediaLens remembers that file should not be included in that group on future rescans. If you think you may have made mistakes excluding actual duplicates you can reset those exclusions below.
+      </div>
+      <div class="duplicate-exclusion-reset-actions">
+        <button type="button" class="tb-btn" id="resetReviewGroupExclusionsBtn">Reset Group Exclusions</button>
+      </div>
+    </div>
+  `;
+  mount.appendChild(exclusionResetSection);
 }
 
 function saveDuplicateSortableOrder(listId, settingKey) {
@@ -6716,6 +6733,23 @@ function wireDuplicateSettings() {
       gCachedSettings[mergeField.dataset.settingKey] = !!mergeField.checked;
       gBridge.set_setting_bool(mergeField.dataset.settingKey, !!mergeField.checked, () => {});
     }
+  });
+
+  mount.addEventListener('click', (e) => {
+    const resetExclusionsBtn = e.target.closest('#resetReviewGroupExclusionsBtn');
+    if (!resetExclusionsBtn || !gBridge || !gBridge.reset_review_group_exclusions) return;
+    if (typeof window !== 'undefined' && window.confirm && !window.confirm('Reset all saved duplicate and similar group exclusions?')) {
+      return;
+    }
+    resetExclusionsBtn.disabled = true;
+    gBridge.reset_review_group_exclusions(function (ok) {
+      resetExclusionsBtn.disabled = false;
+      if (!ok) return;
+      clearDismissedReviewPaths();
+      if (isDuplicateModeActive()) {
+        refreshFromBridge(gBridge, false);
+      }
+    });
   });
 
   let dragItem = null;

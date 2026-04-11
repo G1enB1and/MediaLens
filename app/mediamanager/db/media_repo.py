@@ -199,6 +199,13 @@ def list_review_pair_exclusions(
     }
 
 
+def clear_review_pair_exclusions(conn: sqlite3.Connection) -> int:
+    _ensure_review_pair_exclusions_table(conn)
+    cursor = conn.execute("DELETE FROM review_pair_exclusions")
+    conn.commit()
+    return int(cursor.rowcount or 0)
+
+
 def add_media_item(
     conn: sqlite3.Connection,
     path: str,

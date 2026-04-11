@@ -7,6 +7,7 @@ from app.mediamanager.db.collections_repo import create_collection, add_media_pa
 from app.mediamanager.db.media_repo import (
     add_media_item,
     add_review_pair_exclusions,
+    clear_review_pair_exclusions,
     is_path_hidden,
     list_media_in_scope,
     list_review_pair_exclusions,
@@ -227,6 +228,26 @@ class TestMediaRepo(unittest.TestCase):
 
         self.assertEqual(similar_pairs, {("c:/media/alpha/a.jpg", "c:/media/alpha/b.jpg")})
         self.assertEqual(duplicate_pairs, {("c:/media/alpha/a.jpg", "c:/media/alpha/c.jpg")})
+
+    def test_clear_review_pair_exclusions_removes_saved_pairs(self) -> None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("PRAGMA journal_mode=MEMORY;")
+            add_review_pair_exclusions(
+                conn,
+                r"C:\\Media\\Alpha\\A.JPG",
+                [r"C:\\Media\\Alpha\\B.JPG"],
+                "similar",
+            )
+
+            removed = clear_review_pair_exclusions(conn)
+            remaining = list_review_pair_exclusions(
+                conn,
+                "similar",
+                paths=[r"C:\\Media\\Alpha\\A.JPG", r"C:\\Media\\Alpha\\B.JPG"],
+            )
+
+        self.assertEqual(removed, 1)
+        self.assertEqual(remaining, set())
 
     def test_duplicate_grouping_respects_persistent_review_exclusions(self) -> None:
         with sqlite3.connect(self.db_path) as conn:

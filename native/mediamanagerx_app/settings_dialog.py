@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QColorDialog,
     QComboBox,
     QDialog,
-    QDialogButtonBox,
+    QFrame,
     QFormLayout,
     QGridLayout,
     QGroupBox,
@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QProxyStyle,
     QPushButton,
     QRadioButton,
+    QScrollArea,
     QSizePolicy,
     QSpinBox,
     QStyle,
@@ -253,7 +254,7 @@ DUPLICATE_MERGE_FIELDS = [
     ("duplicate.rules.merge.ai_prompts", "AI Prompts", True),
     ("duplicate.rules.merge.ai_parameters", "AI Parameters (can only keep 1)", True),
     ("duplicate.rules.merge.workflows", "Workflows (can only keep 1)", True),
-    ("duplicate.rules.merge.all", "All (includes more than listed above)", False),
+    ("duplicate.rules.merge.all", "All", False),
 ]
 DUPLICATE_PRIORITY_ORDER_DEFAULT = [
     "File Size",
@@ -421,7 +422,7 @@ class ReorderListWidget(QListWidget):
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
         self.setDragDropOverwriteMode(False)
-        self.setSpacing(4)
+        self.setSpacing(0)
         self.model().rowsMoved.connect(lambda *_args: self.orderChanged.emit())
 
     def dropEvent(self, event) -> None:
@@ -952,8 +953,6 @@ class MetadataSettingsPage(SettingsPage):
 
 
 class DuplicateSettingsPage(SettingsPage):
-    TAB_KEYS = [("rules", "Rules"), ("priorities", "Priorities")]
-
     def __init__(self, dialog: "SettingsDialog") -> None:
         super().__init__(dialog)
         self._loading = False
@@ -961,19 +960,15 @@ class DuplicateSettingsPage(SettingsPage):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
         layout.addWidget(_section_title("Similar File Rules"))
-        layout.addWidget(_description("Configure duplicate scoring, preferred formats, and metadata merge behavior."))
 
-        self.tabs = QTabBar()
-        for _key, title in self.TAB_KEYS:
-            self.tabs.addTab(title)
-        layout.addWidget(self.tabs)
-
-        self.stack = QStackedWidget()
-        layout.addWidget(self.stack, 1)
+        self.rules_scroll = QScrollArea()
+        self.rules_scroll.setWidgetResizable(True)
+        self.rules_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        layout.addWidget(self.rules_scroll, 1)
 
         self.rules_page = QWidget()
         rules_layout = QVBoxLayout(self.rules_page)
-        rules_layout.setContentsMargins(0, 0, 0, 0)
+        rules_layout.setContentsMargins(0, 0, 15, 6)
         rules_layout.setSpacing(12)
 
         rules_group = QGroupBox("Preference Rules")
@@ -988,12 +983,21 @@ class DuplicateSettingsPage(SettingsPage):
             self.rule_combos[key] = combo
         rules_layout.addWidget(rules_group)
 
-        format_group = QGroupBox("Preferred File Format Order")
+        format_group = QGroupBox("Prefered File Format Order (Drag and Drop to Sort)")
         format_layout = QVBoxLayout(format_group)
         self.format_list = ReorderListWidget()
+        self.format_list.setMinimumHeight(260)
         self.format_list.orderChanged.connect(self._save_format_order)
         format_layout.addWidget(self.format_list)
         rules_layout.addWidget(format_group, 1)
+
+        priorities_group = QGroupBox("Rule Priority Order (Drag and Drop to Sort)")
+        priorities_layout = QVBoxLayout(priorities_group)
+        self.priority_list = ReorderListWidget()
+        self.priority_list.setMinimumHeight(260)
+        self.priority_list.orderChanged.connect(self._save_priority_order)
+        priorities_layout.addWidget(self.priority_list)
+        rules_layout.addWidget(priorities_group)
 
         merge_group = QGroupBox("Metadata Merge")
         merge_layout = QVBoxLayout(merge_group)
@@ -1003,31 +1007,29 @@ class DuplicateSettingsPage(SettingsPage):
         self.merge_toggles: dict[str, QCheckBox] = {}
         for index, (key, label_text, _default) in enumerate(DUPLICATE_MERGE_FIELDS):
             checkbox = QCheckBox(label_text)
-            checkbox.toggled.connect(lambda checked, setting_key=key: self.dialog.set_setting_bool(setting_key, checked))
+            checkbox.toggled.connect(lambda checked, setting_key=key: self._on_merge_toggle_changed(setting_key, checked))
             merge_grid.addWidget(checkbox, index // 2, index % 2)
             self.merge_toggles[key] = checkbox
         merge_layout.addLayout(merge_grid)
         rules_layout.addWidget(merge_group)
 
-        self.priorities_page = QWidget()
-        priorities_layout = QVBoxLayout(self.priorities_page)
-        priorities_layout.setContentsMargins(0, 0, 0, 0)
-        priorities_layout.setSpacing(12)
-        priorities_layout.addWidget(_description("Drag to set the order of importance for duplicate scoring."))
-        self.priority_list = ReorderListWidget()
-        self.priority_list.orderChanged.connect(self._save_priority_order)
-        priorities_layout.addWidget(self.priority_list, 1)
-
-        self.stack.addWidget(self.rules_page)
-        self.stack.addWidget(self.priorities_page)
-
-        self.tabs.currentChanged.connect(self._on_tab_changed)
+        reset_group = QGroupBox("Reset Group Exclusions")
+        reset_layout = QVBoxLayout(reset_group)
+        reset_copy = QLabel(
+            "When you click X on files in duplicate or similar groups MediaLens remembers that file should not "
+            "be included in that group on future rescans. If you think you may have made mistakes excluding "
+            "actual duplicates you can reset those exclusions below."
+        )
+        reset_copy.setWordWrap(True)
+        reset_copy.setObjectName("settingsDescription")
+        reset_layout.addWidget(reset_copy)
+        self.reset_group_exclusions_btn = QPushButton("Reset Group Exclusions")
+        self.reset_group_exclusions_btn.clicked.connect(self._reset_group_exclusions)
+        reset_layout.addWidget(self.reset_group_exclusions_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        rules_layout.addWidget(reset_group)
+        rules_layout.addStretch(1)
+        self.rules_scroll.setWidget(self.rules_page)
         self.merge_before_delete_toggle.toggled.connect(lambda checked: self.dialog.set_setting_bool("duplicate.rules.merge_before_delete", checked))
-
-    def _on_tab_changed(self, index: int) -> None:
-        if 0 <= index < len(self.TAB_KEYS):
-            self.stack.setCurrentIndex(index)
-            self.dialog.set_setting_str("duplicate.settings.active_tab", self.TAB_KEYS[index][0])
 
     def _on_rule_changed(self, key: str, combo: QComboBox) -> None:
         if not self._loading:
@@ -1045,16 +1047,35 @@ class DuplicateSettingsPage(SettingsPage):
         order = [str(self.priority_list.item(index).data(Qt.ItemDataRole.UserRole) or "") for index in range(self.priority_list.count())]
         self.dialog.set_setting_str("duplicate.priorities.order", json.dumps(order))
 
+    def _on_merge_toggle_changed(self, key: str, checked: bool) -> None:
+        if self._loading:
+            return
+        all_key = "duplicate.rules.merge.all"
+        if key == all_key:
+            self.dialog.set_setting_bool(all_key, checked)
+            if checked:
+                for setting_key, toggle in self.merge_toggles.items():
+                    if setting_key == all_key:
+                        continue
+                    with QSignalBlocker(toggle):
+                        toggle.setChecked(True)
+                    self.dialog.set_setting_bool(setting_key, True)
+            return
+
+        self.dialog.set_setting_bool(key, checked)
+        if not checked:
+            all_toggle = self.merge_toggles.get(all_key)
+            if all_toggle is not None and all_toggle.isChecked():
+                with QSignalBlocker(all_toggle):
+                    all_toggle.setChecked(False)
+                self.dialog.set_setting_bool(all_key, False)
+
+    def _reset_group_exclusions(self) -> None:
+        self.dialog.reset_review_group_exclusions()
+
     def refresh(self) -> None:
         self._loading = True
         try:
-            tab_keys = [key for key, _title in self.TAB_KEYS]
-            active_tab = str(self.settings.value("duplicate/settings/active_tab", "rules", type=str) or "rules")
-            if active_tab not in tab_keys:
-                active_tab = "rules"
-            with QSignalBlocker(self.tabs):
-                self.tabs.setCurrentIndex(tab_keys.index(active_tab))
-            self.stack.setCurrentIndex(tab_keys.index(active_tab))
             for key, _label, options, default_value in DUPLICATE_RULE_POLICIES:
                 combo = self.rule_combos[key]
                 current_value = str(self.settings.value(key.replace(".", "/"), default_value, type=str) or default_value)
@@ -1156,15 +1177,6 @@ class SettingsDialog(QDialog):
         for title, page in self._page_defs:
             self.category_list.addItem(title)
             self.pages.addWidget(page)
-
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        close_button = buttons.button(QDialogButtonBox.StandardButton.Close)
-        if close_button is not None:
-            close_button.setText("Close")
-        buttons.rejected.connect(self.close)
-        buttons.accepted.connect(self.close)
-        root.addWidget(buttons)
-        self._button_box = buttons
 
         self.category_list.currentRowChanged.connect(self.pages.setCurrentIndex)
         self.category_list.setCurrentRow(0)
@@ -1311,8 +1323,8 @@ class SettingsDialog(QDialog):
                 background: transparent;
                 border: none;
                 border-radius: 5px;
-                padding: 8px 10px;
-                margin: 1px 0;
+                padding: 6px 10px;
+                margin: 0;
                 color: {text};
             }}
             QListWidget#settingsReorderList::item:hover {{
@@ -1466,3 +1478,17 @@ class SettingsDialog(QDialog):
         if not self.bridge.set_setting_str(key, str(value or "")):
             self.settings.setValue(key.replace(".", "/"), str(value or ""))
             self.settings.sync()
+
+    def reset_review_group_exclusions(self) -> bool:
+        try:
+            if hasattr(self.bridge, "reset_review_group_exclusions") and self.bridge.reset_review_group_exclusions():
+                return True
+        except Exception:
+            pass
+        try:
+            from app.mediamanager.db.media_repo import clear_review_pair_exclusions
+
+            clear_review_pair_exclusions(self.bridge.conn)
+            return True
+        except Exception:
+            return False

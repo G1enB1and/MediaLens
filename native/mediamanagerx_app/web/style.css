@@ -508,6 +508,21 @@ body.top-panel-hidden header {
   flex: 1;
 }
 
+.duplicate-exclusion-reset-body {
+  gap: 10px;
+}
+
+.duplicate-exclusion-reset-copy {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.duplicate-exclusion-reset-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
 .metadata-group {
   border: 1px solid var(--border);
   border-radius: 12px;
