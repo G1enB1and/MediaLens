@@ -136,7 +136,9 @@ Each group is analyzed and labeled with meaningful differences:
 - Never deletes files blindly. Decisions are always explainable and reviewable
 - Designed to prevent destructive mistakes in large libraries
 
-![Gallery](docs/Screenshots/Screenshot-Settings-Similar-Rules.png)
+![Gallery](docs/Screenshots/Screenshot-Similar-File-Settings-Top.png)
+
+![Gallery](docs/Screenshots/Screenshot-Similar-File-Settings-Bottom.png)
 
 ---
 
@@ -150,7 +152,7 @@ Evaluate two images in place without leaving your workflow.
 - Hold-to-isolate preview lets you instantly focus on one image at a time
 - Reuses similarity card design for a consistent, familiar experience
 
-![Gallery](docs/Screenshots/Screenshot-Similar-Comparison.png)
+![Gallery](docs/Screenshots/Screenshot-Image-Comparison-New.png)
 
 #### Smarter decisions, not just visual checks
 
