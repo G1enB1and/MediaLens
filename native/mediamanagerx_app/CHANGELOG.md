@@ -1,6 +1,47 @@
 # Change Log
 
-## v1.1.15 (Current)
+## v1.1.16 (Current)
+
+### ✨ Summary
+
+This release expands Similar File Rules with preferred folder ranking, giving you more control over how MediaLens decides what to keep. It also improves gallery responsiveness during resizing, panel changes, and grouping transitions.
+
+### 🔥 Highlights
+
+- **Preferred Folder Ranking**  
+    Rank folders directly instead of relying on depth-based assumptions when reviewing duplicates and similar files.
+- **Folder Priorities Section**  
+    A new drag-and-drop interface lets you choose which folders matter and how strongly they influence decisions.
+- **Smoother Gallery Updates**  
+    The gallery now redraws more proactively, reducing blank or stale areas during resizing, layout changes, and grouping transitions.
+
+### ➕ Added
+
+- Added a **Folder Priorities** section to Similar File Rules with:
+  - `Use Preferred Folders` toggle
+  - Available folder list based on active scope
+  - Drag-and-drop prioritized folder order
+- Added **Preferred Folders** to Rule Priorities so folder ranking can influence:
+  - Best Overall decisions
+  - Keep selections
+  - Delete selections
+- Added **All Other Folders** as a default grouping baseline, allowing:
+  - Important folders to rank above it
+  - Less important folders to be pushed below it
+
+### 🔄 Changed
+
+- Replaced folder-depth-based logic with **user-defined folder ranking** when evaluating file organization during duplicate and similar review.
+- Updated Similar File Rules to source folders dynamically from the active scope and manage them through a dedicated drag-and-drop workflow.
+- Improved gallery refresh behavior with a more proactive relayout system during:
+  - Window resizing
+  - Splitter adjustments
+  - Panel toggles
+  - `Group By` transitions
+
+---
+
+## v1.1.15
 
 ### Summary
 
