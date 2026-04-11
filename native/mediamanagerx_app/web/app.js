@@ -64,6 +64,7 @@ let gVideoLoopMode = 'short';
 let gVideoLoopCutoffSeconds = 90;
 let gScanActive = false;
 let gAwaitingScanResults = false;
+let gLastRequestedFullScanKey = '';
 let gDismissedReviewPaths = new Set();
 let gSimilarityThreshold = 'low';
 let gTextProcessingDismissed = false;
@@ -300,6 +301,25 @@ let gDetailsColumnWidths = Object.fromEntries(DETAILS_COLUMN_CONFIG.map(col => [
 
 function normalizeFolderPath(path) {
   return String(path || '').replace(/\//g, '\\').toLowerCase();
+}
+
+function currentFullScanKey(folders) {
+  return (Array.isArray(folders) ? folders : [])
+    .map(normalizeFolderPath)
+    .filter(Boolean)
+    .sort()
+    .join('|');
+}
+
+function ensureFullFolderScanRequested(bridge, folders, searchQuery) {
+  if (!bridge || !bridge.start_scan) return;
+  const scopeFolders = Array.isArray(folders) ? folders : [];
+  if (!scopeFolders.length) return;
+  const scanKey = currentFullScanKey(scopeFolders);
+  if (!scanKey) return;
+  if (gLastRequestedFullScanKey === scanKey && (gScanActive || !gAwaitingScanResults)) return;
+  gLastRequestedFullScanKey = scanKey;
+  bridge.start_scan(scopeFolders, searchQuery || '');
 }
 
 function syncPinnedFolders(nextFolders) {
@@ -5987,6 +6007,7 @@ function refreshFromBridge(bridge, resetPage = false) {
 
       if (gSelectedFolders.length === 0 && !gActiveCollection) {
         gTotal = 0;
+        gLastRequestedFullScanKey = '';
         gSelectAllAfterRefresh = false;
         updateGalleryCountChip(0);
         setGlobalLoading(false);
@@ -6013,9 +6034,7 @@ function refreshFromBridge(bridge, resetPage = false) {
         renderMediaList([], !gPendingScrollAnchor);
         renderPager();
         setGlobalLoading(true, 'Scanning folder...', 10);
-        if (gSelectedFolders.length > 0 && bridge.start_scan) {
-          bridge.start_scan(gSelectedFolders, gSearchQuery || '');
-        }
+        ensureFullFolderScanRequested(bridge, gSelectedFolders, gSearchQuery || '');
         return;
       }
 
@@ -6063,9 +6082,7 @@ function refreshFromBridge(bridge, resetPage = false) {
 
     // ── 2. Background Enrichment Scan ────────────────────────────────────
     // This fills in hashes and metadata in the DB.
-    if (gSelectedFolders.length > 0) {
-      bridge.start_scan(gSelectedFolders, gSearchQuery || '');
-    }
+    ensureFullFolderScanRequested(bridge, gSelectedFolders, gSearchQuery || '');
     });
   });
 }
@@ -8255,6 +8272,7 @@ async function main() {
         deselectAll();
         syncMetadataToBridge();
         gSelectedFolders = folders || [];
+        gLastRequestedFullScanKey = '';
         clearDismissedReviewPaths();
         gAwaitingScanResults = !!(folders && folders.length);
         gPage = 0;

@@ -7448,10 +7448,17 @@ class Bridge(QObject):
         scan_key = hashlib.sha1(",".join(sorted(str(folder) for folder in folders)).encode()).hexdigest()
         if self._last_full_scan_key == scan_key:
             primary = folders[0] if folders else ""
-            try:
-                self.scanFinished.emit(primary, len(self._get_reconciled_candidates(folders, "all", search_query)))
-            except Exception:
-                pass
+            def emit_cached_scan_finished() -> None:
+                try:
+                    count = len(self._get_reconciled_candidates(folders, "all", search_query))
+                except Exception:
+                    count = 0
+                try:
+                    self.scanFinished.emit(primary, int(count))
+                except Exception:
+                    pass
+
+            threading.Thread(target=emit_cached_scan_finished, daemon=True).start()
             return
         self._cancel_text_processing()
         self._scan_abort = True
