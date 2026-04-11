@@ -9235,6 +9235,13 @@ class MainWindow(QMainWindow):
         self.bulk_meta_tags.textChanged.connect(lambda _text: self._refresh_tag_list_rows_state())
         self.bulk_right_layout.addWidget(self.bulk_meta_tags)
 
+        self.bulk_btn_open_tag_list = QPushButton("Open Tag List")
+        self.bulk_btn_open_tag_list.setObjectName("bulkBtnOpenTagList")
+        self.bulk_btn_open_tag_list.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.bulk_btn_open_tag_list.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.bulk_btn_open_tag_list.clicked.connect(self._toggle_tag_list_panel)
+        self.bulk_right_layout.addWidget(self.bulk_btn_open_tag_list)
+
         self.bulk_common_tags_lbl = QLabel("Common Tags:")
         self.bulk_common_tags_lbl.setObjectName("bulkTagEditorCommonTagsLabel")
         self.bulk_right_layout.addWidget(self.bulk_common_tags_lbl)
@@ -9617,6 +9624,9 @@ class MainWindow(QMainWindow):
         if hasattr(self, "btn_open_tag_list"):
             self.btn_open_tag_list.setText("Close Tag List" if is_visible else "Open Tag List")
             self.btn_open_tag_list.setEnabled(bool(hasattr(self, "tag_list_open_btn_row") and self.tag_list_open_btn_row.isVisible()))
+        if hasattr(self, "bulk_btn_open_tag_list"):
+            self.bulk_btn_open_tag_list.setText("Close Tag List" if is_visible else "Open Tag List")
+            self.bulk_btn_open_tag_list.setEnabled(True)
         if hasattr(self, "act_toggle_tag_list_panel"):
             self.act_toggle_tag_list_panel.blockSignals(True)
             self.act_toggle_tag_list_panel.setChecked(is_visible)
@@ -14893,7 +14903,7 @@ class MainWindow(QMainWindow):
                 QPlainTextEdit#bulkTagEditorCommonTagsText, QPlainTextEdit#bulkTagEditorUncommonTagsText {{
                     selection-background-color: {Theme.get_accent_soft(accent)};
                 }}
-                QPushButton#bulkBtnSelectAllGallery, QPushButton#bulkBtnClearTags, QPushButton#bulkBtnSaveMeta, QPushButton#bulkBtnSaveToExif {{
+                QPushButton#bulkBtnSelectAllGallery, QPushButton#bulkBtnClearTags, QPushButton#bulkBtnSaveMeta, QPushButton#bulkBtnSaveToExif, QPushButton#bulkBtnOpenTagList {{
                     background-color: {Theme.get_btn_save_bg(accent)};
                     color: {text};
                     border: 1px solid {Theme.get_border(accent)};
@@ -14902,7 +14912,7 @@ class MainWindow(QMainWindow):
                     font-size: 11px;
                     font-weight: 500;
                 }}
-                QPushButton#bulkBtnSelectAllGallery:hover, QPushButton#bulkBtnClearTags:hover, QPushButton#bulkBtnSaveMeta:hover, QPushButton#bulkBtnSaveToExif:hover {{
+                QPushButton#bulkBtnSelectAllGallery:hover, QPushButton#bulkBtnClearTags:hover, QPushButton#bulkBtnSaveMeta:hover, QPushButton#bulkBtnSaveToExif:hover, QPushButton#bulkBtnOpenTagList:hover {{
                     background-color: {Theme.get_btn_save_hover(accent)};
                     color: {"#000" if is_light else "#fff"};
                     border-color: {accent_str};
