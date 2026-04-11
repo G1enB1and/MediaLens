@@ -3,9 +3,10 @@ from __future__ import annotations
 import ctypes
 import json
 import sys
+from pathlib import Path
 
-from PySide6.QtCore import QPointF, QSignalBlocker, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPalette, QPen
+from PySide6.QtCore import QMimeData, QPointF, QRect, QSignalBlocker, QSize, Qt, Signal, QTimer
+from PySide6.QtGui import QColor, QCursor, QDrag, QIcon, QPainter, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -15,9 +16,11 @@ from PySide6.QtWidgets import (
     QDialog,
     QFrame,
     QFormLayout,
+    QFrame,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
+    QFileIconProvider,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -29,8 +32,13 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSpinBox,
     QStyle,
+    QStyledItemDelegate,
+    QStyleOptionButton,
+    QStyleOptionViewItem,
     QStackedWidget,
     QTabBar,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -256,10 +264,16 @@ DUPLICATE_MERGE_FIELDS = [
     ("duplicate.rules.merge.workflows", "Workflows (can only keep 1)", True),
     ("duplicate.rules.merge.all", "All", False),
 ]
+DUPLICATE_PREFERRED_FOLDERS_SENTINEL = "All other Folders"
+DUPLICATE_PREFERRED_FOLDERS_MIME = "application/x-medialens-folder-priority"
+FOLDER_PRIORITY_ROLE_CENTERED = int(Qt.ItemDataRole.UserRole) + 1
+FOLDER_PRIORITY_ROLE_SENTINEL = int(Qt.ItemDataRole.UserRole) + 2
+FOLDER_PRIORITY_ROLE_EXTRA_TOP = int(Qt.ItemDataRole.UserRole) + 3
 DUPLICATE_PRIORITY_ORDER_DEFAULT = [
     "File Size",
     "Resolution",
     "File Format",
+    "Preferred Folders",
     "Compression",
     "Color / Grey Preference",
     "Text / No Text Preference",
@@ -428,6 +442,356 @@ class ReorderListWidget(QListWidget):
     def dropEvent(self, event) -> None:
         super().dropEvent(event)
         self.orderChanged.emit()
+
+
+class TransferListWidget(QListWidget):
+    itemsChanged = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("settingsReorderList")
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.setAlternatingRowColors(False)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDragDropOverwriteMode(False)
+        self.setSpacing(0)
+        self.model().rowsInserted.connect(lambda *_args: self.itemsChanged.emit())
+        self.model().rowsRemoved.connect(lambda *_args: self.itemsChanged.emit())
+        self.model().rowsMoved.connect(lambda *_args: self.itemsChanged.emit())
+
+    def dropEvent(self, event) -> None:
+        super().dropEvent(event)
+        self.itemsChanged.emit()
+
+
+class FolderSourceTreeWidget(QTreeWidget):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("settingsReorderList")
+        self.setHeaderHidden(True)
+        self.setIndentation(14)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(False)
+        self.setDropIndicatorShown(False)
+
+    def mimeTypes(self) -> list[str]:
+        return [DUPLICATE_PREFERRED_FOLDERS_MIME]
+
+    def mimeData(self, items) -> QMimeData:
+        mime = QMimeData()
+        paths = [
+            str(item.data(0, Qt.ItemDataRole.UserRole) or "").strip()
+            for item in items or []
+            if str(item.data(0, Qt.ItemDataRole.UserRole) or "").strip()
+        ]
+        mime.setData(DUPLICATE_PREFERRED_FOLDERS_MIME, json.dumps(paths).encode("utf-8"))
+        return mime
+
+
+class PrioritizedFolderItemDelegate(QStyledItemDelegate):
+    def __init__(self, page: "DuplicateSettingsPage", parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._page = page
+
+    def _remove_rect(self, option: QStyleOptionViewItem, is_sentinel: bool) -> QRect | None:
+        if is_sentinel:
+            return None
+        size = 22
+        x = option.rect.right() - 10 - size
+        y = option.rect.top() + max(0, (option.rect.height() - size) // 2)
+        return QRect(x, y, size, size)
+
+    def remove_rect_for_index(self, option: QStyleOptionViewItem, index) -> QRect | None:
+        return self._remove_rect(option, bool(index.data(FOLDER_PRIORITY_ROLE_SENTINEL)))
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
+        style = option.widget.style() if option.widget is not None else self._page.style()
+        base_opt = QStyleOptionViewItem(option)
+        self.initStyleOption(base_opt, index)
+        text = str(index.data(Qt.ItemDataRole.DisplayRole) or "")
+        is_sentinel = bool(index.data(FOLDER_PRIORITY_ROLE_SENTINEL))
+        centered = bool(index.data(FOLDER_PRIORITY_ROLE_CENTERED))
+        extra_top = int(index.data(FOLDER_PRIORITY_ROLE_EXTRA_TOP) or 0)
+        opt = QStyleOptionViewItem(base_opt)
+        opt.text = ""
+        if is_sentinel:
+            opt.icon = QIcon()
+            style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, option.widget)
+        else:
+            style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, option.widget)
+
+        painter.save()
+        is_light = bool(_theme_api().get_is_light())
+        text_color = opt.palette.color(QPalette.ColorRole.HighlightedText if opt.state & QStyle.StateFlag.State_Selected else QPalette.ColorRole.Text)
+        muted_color = opt.palette.color(QPalette.ColorRole.Mid)
+        divider_color = QColor("#2a2a2a" if is_light else "#d8d8d8")
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(QPen(text_color))
+
+        content_rect = option.rect.adjusted(10, 0, -6, 0)
+        if centered:
+            line_y_top = content_rect.center().y() - 18
+            line_y_bottom = content_rect.center().y() + 18
+            pen = QPen(divider_color, 2)
+            painter.setPen(pen)
+            painter.drawLine(content_rect.left(), line_y_top, content_rect.right(), line_y_top)
+            painter.drawLine(content_rect.left(), line_y_bottom, content_rect.right(), line_y_bottom)
+            painter.setPen(QPen(text_color))
+            text_rect = QRect(content_rect.left(), line_y_top + 8, content_rect.width(), line_y_bottom - line_y_top - 16)
+            painter.drawText(text_rect, int(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter), text)
+            painter.restore()
+            return
+
+        row_rect = content_rect.adjusted(0, extra_top, 0, 0)
+        if is_sentinel:
+            pen = QPen(divider_color, 2)
+            painter.setPen(pen)
+            top_y = row_rect.top() + 2
+            bottom_y = row_rect.bottom() - 2
+            painter.drawLine(row_rect.left(), top_y, row_rect.right(), top_y)
+            painter.drawLine(row_rect.left(), bottom_y, row_rect.right(), bottom_y)
+            painter.setPen(QPen(text_color))
+            text_rect = row_rect.adjusted(0, 8, 0, -8)
+            painter.drawText(text_rect, int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), text)
+            painter.restore()
+            return
+
+        remove_rect = self._remove_rect(option, is_sentinel)
+        icon_space = 0
+        if not base_opt.icon.isNull():
+            icon_space = int(base_opt.decorationSize.width()) + 8
+        text_rect = row_rect.adjusted(icon_space + 4, 0, -((remove_rect.width() + 12) if remove_rect is not None else 0), 0)
+        painter.setPen(QPen(text_color))
+        painter.drawText(text_rect, int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), text)
+        if remove_rect is not None:
+            hover = bool(option.state & QStyle.StateFlag.State_MouseOver) and remove_rect.contains(option.widget.mapFromGlobal(QCursor.pos())) if option.widget is not None else False
+            btn_opt = QStyleOptionButton()
+            btn_opt.rect = remove_rect
+            btn_opt.text = "×"
+            btn_opt.state = QStyle.StateFlag.State_Enabled
+            if hover:
+                btn_opt.state |= QStyle.StateFlag.State_MouseOver
+            btn_opt.palette = opt.palette
+            if is_light:
+                btn_opt.palette.setColor(QPalette.ColorRole.ButtonText, QColor("#000000"))
+            else:
+                btn_opt.palette.setColor(QPalette.ColorRole.ButtonText, QColor("#ffffff"))
+            style.drawControl(QStyle.ControlElement.CE_PushButtonBevel, btn_opt, painter, option.widget)
+            btn_font = painter.font()
+            btn_font.setBold(True)
+            btn_font.setPointSizeF(btn_font.pointSizeF() + 1.5)
+            painter.setFont(btn_font)
+            style.drawControl(QStyle.ControlElement.CE_PushButtonLabel, btn_opt, painter, option.widget)
+        painter.restore()
+
+
+class PrioritizedFolderListWidget(QListWidget):
+    orderChanged = Signal()
+    removeRequested = Signal(str)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("settingsReorderList")
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.setAlternatingRowColors(False)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDragDropOverwriteMode(False)
+        self.setSpacing(0)
+        self.model().rowsMoved.connect(lambda *_args: self.orderChanged.emit())
+
+    def _decode_folder_paths(self, mime: QMimeData) -> list[str]:
+        if not mime.hasFormat(DUPLICATE_PREFERRED_FOLDERS_MIME):
+            return []
+        try:
+            return [
+                str(item).strip()
+                for item in json.loads(bytes(mime.data(DUPLICATE_PREFERRED_FOLDERS_MIME)).decode("utf-8"))
+                if str(item).strip()
+            ]
+        except Exception:
+            return []
+
+    def _drop_row(self, pos) -> int:
+        if self.count() <= 0:
+            return 0
+        for index in range(self.count()):
+            rect = self.visualItemRect(self.item(index))
+            if pos.y() < rect.center().y():
+                return index
+        return self.count()
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasFormat(DUPLICATE_PREFERRED_FOLDERS_MIME):
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        if event.mimeData().hasFormat(DUPLICATE_PREFERRED_FOLDERS_MIME):
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def mimeTypes(self) -> list[str]:
+        return [DUPLICATE_PREFERRED_FOLDERS_MIME]
+
+    def mimeData(self, items) -> QMimeData:
+        mime = QMimeData()
+        paths = [
+            str(item.data(Qt.ItemDataRole.UserRole) or "").strip()
+            for item in items or []
+            if str(item.data(Qt.ItemDataRole.UserRole) or "").strip()
+        ]
+        mime.setData(DUPLICATE_PREFERRED_FOLDERS_MIME, json.dumps(paths).encode("utf-8"))
+        mime.setText(", ".join(paths))
+        return mime
+
+    def startDrag(self, supportedActions) -> None:
+        item = self.currentItem()
+        if item is None:
+            return
+        mime = self.mimeData([item])
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        index = self.indexFromItem(item)
+        delegate = self.itemDelegate()
+        if index.isValid() and delegate is not None:
+            rect = self.visualItemRect(item)
+            scale = max(1.5, float(self.devicePixelRatioF()))
+            pixmap = QPixmap(int(rect.width() * scale), int(rect.height() * scale))
+            pixmap.fill(Qt.GlobalColor.transparent)
+            pixmap.setDevicePixelRatio(scale)
+            painter = QPainter(pixmap)
+            try:
+                option = QStyleOptionViewItem()
+                option.initFrom(self.viewport())
+                option.rect = QRect(0, 0, rect.width(), rect.height())
+                option.state |= QStyle.StateFlag.State_Selected
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+                bg_rect = option.rect.adjusted(0, 0, -1, -1)
+                Theme = _theme_api()
+                settings_obj = getattr(self.window(), "settings", None)
+                accent_value = (
+                    str(settings_obj.value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT)
+                    if settings_obj is not None
+                    else Theme.ACCENT_DEFAULT
+                )
+                accent = QColor(accent_value)
+                bg_color = QColor(Theme.get_accent_soft(accent))
+                border_color = QColor(accent)
+                painter.setPen(QPen(border_color, 1))
+                painter.setBrush(bg_color)
+                painter.drawRoundedRect(bg_rect, 8, 8)
+                delegate.paint(painter, option, index)
+            finally:
+                painter.end()
+            drag.setPixmap(pixmap)
+            drag.setHotSpot(pixmap.rect().center())
+        drag.exec(Qt.DropAction.MoveAction)
+
+    def dropEvent(self, event) -> None:
+        folder_paths = self._decode_folder_paths(event.mimeData())
+        if folder_paths:
+            insert_row = self._drop_row(event.position().toPoint())
+            existing = [
+                str(self.item(index).data(Qt.ItemDataRole.UserRole) or "").strip()
+                for index in range(self.count())
+            ]
+            for folder_path in reversed(folder_paths):
+                if folder_path in existing:
+                    current_row = existing.index(folder_path)
+                    item = self.takeItem(current_row)
+                    existing.pop(current_row)
+                    if current_row < insert_row:
+                        insert_row -= 1
+                else:
+                    item = QListWidgetItem()
+                item.setData(Qt.ItemDataRole.UserRole, folder_path)
+                self.insertItem(insert_row, item)
+                insert_row += 1
+            event.acceptProposedAction()
+            self.orderChanged.emit()
+            return
+        super().dropEvent(event)
+        self.orderChanged.emit()
+
+    def mousePressEvent(self, event) -> None:
+        item = self.itemAt(event.position().toPoint())
+        delegate = self.itemDelegate()
+        if item is not None and isinstance(delegate, PrioritizedFolderItemDelegate):
+            index = self.indexFromItem(item)
+            option = QStyleOptionViewItem()
+            option.rect = self.visualItemRect(item)
+            option.widget = self.viewport()
+            remove_rect = delegate.remove_rect_for_index(option, index)
+            if remove_rect is not None and remove_rect.contains(event.position().toPoint()):
+                self.removeRequested.emit(str(item.data(Qt.ItemDataRole.UserRole) or ""))
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+
+class PrioritizedFolderRow(QWidget):
+    removeRequested = Signal(str)
+
+    def __init__(self, folder_path: str, label_text: str, removable: bool, centered: bool, icon_pixmap=None, is_sentinel: bool = False, extra_top_space: int = 0, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._folder_path = str(folder_path or "")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(6)
+        if centered:
+            outer.addStretch(1)
+        elif extra_top_space > 0:
+            outer.addSpacing(extra_top_space)
+        self.top_line = QFrame()
+        self.top_line.setObjectName("folderPriorityDivider")
+        self.top_line.setFrameShape(QFrame.Shape.HLine)
+        self.top_line.setVisible(is_sentinel)
+        outer.addWidget(self.top_line)
+        layout = QHBoxLayout()
+        layout.setContentsMargins(10, 0, 6, 0)
+        layout.setSpacing(8)
+        if centered:
+            layout.addStretch(1)
+        elif icon_pixmap is not None:
+            icon_label = QLabel()
+            icon_label.setPixmap(icon_pixmap)
+            layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.label = QLabel(label_text)
+        self.label.setObjectName("folderPriorityRowLabel")
+        self.label.setToolTip(label_text)
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter if centered else (Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter))
+        layout.addWidget(self.label, 1 if centered else 0)
+        if not centered:
+            layout.addStretch(1)
+        self.remove_btn = QPushButton("X")
+        self.remove_btn.setObjectName("folderPriorityRemoveButton")
+        self.remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.remove_btn.setFixedSize(QSize(22, 22))
+        self.remove_btn.setVisible(removable)
+        self.remove_btn.clicked.connect(lambda: self.removeRequested.emit(self._folder_path))
+        layout.addWidget(self.remove_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        if centered:
+            layout.addStretch(1)
+        outer.addLayout(layout)
+        self.bottom_line = QFrame()
+        self.bottom_line.setObjectName("folderPriorityDivider")
+        self.bottom_line.setFrameShape(QFrame.Shape.HLine)
+        self.bottom_line.setVisible(is_sentinel)
+        outer.addWidget(self.bottom_line)
+        if centered:
+            outer.addStretch(1)
 
 
 class SettingsPage(QWidget):
@@ -956,17 +1320,23 @@ class DuplicateSettingsPage(SettingsPage):
     def __init__(self, dialog: "SettingsDialog") -> None:
         super().__init__(dialog)
         self._loading = False
+        self._folder_priority_syncing = False
+        self._folder_icon_provider = QFileIconProvider()
+        self._folder_icon = self._folder_icon_provider.icon(QFileIconProvider.IconType.Folder)
+        self._folder_icon_pixmap = self._folder_icon.pixmap(QSize(16, 16))
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
         layout.addWidget(_section_title("Similar File Rules"))
 
         self.rules_scroll = QScrollArea()
+        self.rules_scroll.setObjectName("settingsPageScroll")
         self.rules_scroll.setWidgetResizable(True)
         self.rules_scroll.setFrameShape(QFrame.Shape.NoFrame)
         layout.addWidget(self.rules_scroll, 1)
 
         self.rules_page = QWidget()
+        self.rules_page.setObjectName("settingsScrollPage")
         rules_layout = QVBoxLayout(self.rules_page)
         rules_layout.setContentsMargins(0, 0, 15, 6)
         rules_layout.setSpacing(12)
@@ -990,6 +1360,48 @@ class DuplicateSettingsPage(SettingsPage):
         self.format_list.orderChanged.connect(self._save_format_order)
         format_layout.addWidget(self.format_list)
         rules_layout.addWidget(format_group, 1)
+
+        folders_group = QGroupBox("Folder Priorities")
+        folders_layout = QVBoxLayout(folders_group)
+        folders_layout.setSpacing(10)
+        self.use_preferred_folders_toggle = QCheckBox("Use Preferred Folders")
+        self.use_preferred_folders_toggle.toggled.connect(self._on_preferred_folders_toggled)
+        folders_layout.addWidget(self.use_preferred_folders_toggle)
+        self.folder_priority_panel = QWidget()
+        folder_priority_panel_layout = QVBoxLayout(self.folder_priority_panel)
+        folder_priority_panel_layout.setContentsMargins(0, 0, 0, 0)
+        folder_priority_panel_layout.setSpacing(8)
+        folder_priority_panel_layout.addWidget(
+            _description("Drag and Drop from Available folders on the left into your preferred order on the right")
+        )
+        lists_row = QHBoxLayout()
+        lists_row.setContentsMargins(0, 0, 0, 0)
+        lists_row.setSpacing(12)
+
+        available_layout = QVBoxLayout()
+        available_layout.setContentsMargins(0, 0, 0, 0)
+        available_layout.setSpacing(6)
+        available_layout.addWidget(QLabel("Available Folders"))
+        self.available_folders_tree = FolderSourceTreeWidget()
+        self.available_folders_tree.setMinimumHeight(260)
+        available_layout.addWidget(self.available_folders_tree)
+        lists_row.addLayout(available_layout, 1)
+
+        prioritized_layout = QVBoxLayout()
+        prioritized_layout.setContentsMargins(0, 0, 0, 0)
+        prioritized_layout.setSpacing(6)
+        prioritized_layout.addWidget(QLabel("Prioritized Folder Order"))
+        self.prioritized_folders_list = PrioritizedFolderListWidget()
+        self.prioritized_folders_list.setMinimumHeight(260)
+        self.prioritized_folders_list.setItemDelegate(PrioritizedFolderItemDelegate(self, self.prioritized_folders_list))
+        self.prioritized_folders_list.orderChanged.connect(self._sync_folder_priority_lists)
+        self.prioritized_folders_list.removeRequested.connect(self._remove_prioritized_folder)
+        prioritized_layout.addWidget(self.prioritized_folders_list)
+        lists_row.addLayout(prioritized_layout, 1)
+
+        folder_priority_panel_layout.addLayout(lists_row)
+        folders_layout.addWidget(self.folder_priority_panel)
+        rules_layout.addWidget(folders_group, 1)
 
         priorities_group = QGroupBox("Rule Priority Order (Drag and Drop to Sort)")
         priorities_layout = QVBoxLayout(priorities_group)
@@ -1047,6 +1459,226 @@ class DuplicateSettingsPage(SettingsPage):
         order = [str(self.priority_list.item(index).data(Qt.ItemDataRole.UserRole) or "") for index in range(self.priority_list.count())]
         self.dialog.set_setting_str("duplicate.priorities.order", json.dumps(order))
 
+    def _preferred_folder_order(self) -> list[str]:
+        order: list[str] = []
+        for index in range(self.prioritized_folders_list.count()):
+            value = str(self.prioritized_folders_list.item(index).data(Qt.ItemDataRole.UserRole) or "").strip()
+            if value:
+                order.append(value)
+        if DUPLICATE_PREFERRED_FOLDERS_SENTINEL not in order:
+            order.append(DUPLICATE_PREFERRED_FOLDERS_SENTINEL)
+        return order
+
+    @staticmethod
+    def _normalize_folder_priority_order(raw: object) -> list[str]:
+        from app.mediamanager.utils.pathing import normalize_windows_path
+
+        try:
+            parsed = json.loads(str(raw or "[]"))
+        except Exception:
+            parsed = []
+        order: list[str] = []
+        seen: set[str] = set()
+        for item in parsed if isinstance(parsed, list) else []:
+            text = str(item or "").strip()
+            if not text:
+                continue
+            if text == DUPLICATE_PREFERRED_FOLDERS_SENTINEL:
+                key = "__sentinel__"
+                normalized = DUPLICATE_PREFERRED_FOLDERS_SENTINEL
+            else:
+                normalized = normalize_windows_path(text).rstrip("/")
+                if not normalized:
+                    continue
+                key = normalized.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            order.append(normalized)
+        if DUPLICATE_PREFERRED_FOLDERS_SENTINEL not in order:
+            order.append(DUPLICATE_PREFERRED_FOLDERS_SENTINEL)
+        return order
+
+    @staticmethod
+    def _folder_item_text(folder_path: str) -> str:
+        return folder_path if folder_path == DUPLICATE_PREFERRED_FOLDERS_SENTINEL else folder_path.replace("/", "\\")
+
+    def _configure_prioritized_folder_item(self, item: QListWidgetItem, folder_path: str, *, centered: bool = False, extra_top_space: int = 0) -> None:
+        item.setText(self._folder_item_text(folder_path))
+        item.setIcon(QIcon() if folder_path == DUPLICATE_PREFERRED_FOLDERS_SENTINEL else self._folder_icon)
+        item.setData(Qt.ItemDataRole.UserRole, folder_path)
+        item.setToolTip("" if folder_path == DUPLICATE_PREFERRED_FOLDERS_SENTINEL else self._folder_item_text(folder_path))
+        item.setData(FOLDER_PRIORITY_ROLE_CENTERED, bool(centered))
+        item.setData(FOLDER_PRIORITY_ROLE_SENTINEL, folder_path == DUPLICATE_PREFERRED_FOLDERS_SENTINEL)
+        item.setData(FOLDER_PRIORITY_ROLE_EXTRA_TOP, int(extra_top_space))
+        item.setFlags(
+            Qt.ItemFlag.ItemIsEnabled
+            | Qt.ItemFlag.ItemIsSelectable
+            | Qt.ItemFlag.ItemIsDragEnabled
+        )
+
+    def _add_folder_list_item(self, target: QListWidget, folder_path: str, *, centered: bool = False, extra_top_space: int = 0) -> None:
+        item = QListWidgetItem()
+        self._configure_prioritized_folder_item(item, folder_path, centered=centered, extra_top_space=extra_top_space)
+        target.addItem(item)
+
+    def _rebuild_prioritized_folder_row_widgets(self) -> None:
+        count = self.prioritized_folders_list.count()
+        sentinel_only = count == 1 and str(self.prioritized_folders_list.item(0).data(Qt.ItemDataRole.UserRole) or "") == DUPLICATE_PREFERRED_FOLDERS_SENTINEL
+        viewport_height = max(0, self.prioritized_folders_list.viewport().height())
+        for index in range(count):
+            item = self.prioritized_folders_list.item(index)
+            folder_path = str(item.data(Qt.ItemDataRole.UserRole) or "")
+            is_sentinel = folder_path == DUPLICATE_PREFERRED_FOLDERS_SENTINEL
+            centered = sentinel_only and is_sentinel
+            extra_top_space = 34 if is_sentinel and not centered and index == 0 else 0
+            self._configure_prioritized_folder_item(item, folder_path, centered=centered, extra_top_space=extra_top_space)
+            item.setSizeHint(QSize(0, max(96, viewport_height - 8) if centered else (74 if is_sentinel and index == 0 else (40 if is_sentinel else 32))))
+        self.prioritized_folders_list.viewport().update()
+
+    def _remove_prioritized_folder(self, folder_path: str) -> None:
+        if self._loading or self._folder_priority_syncing:
+            return
+        if folder_path == DUPLICATE_PREFERRED_FOLDERS_SENTINEL:
+            return
+        for index in range(self.prioritized_folders_list.count()):
+            item = self.prioritized_folders_list.item(index)
+            if str(item.data(Qt.ItemDataRole.UserRole) or "") != folder_path:
+                continue
+            self.prioritized_folders_list.takeItem(index)
+            self._sync_folder_priority_lists()
+            return
+
+    def _scope_folder_paths(self) -> list[str]:
+        from app.mediamanager.utils.pathing import normalize_windows_path
+
+        selected_folders = list(getattr(self.bridge, "_selected_folders", []) or [])
+        scope_folders: list[str] = []
+        seen: set[str] = set()
+
+        for raw_path in selected_folders:
+            normalized = normalize_windows_path(str(raw_path or "")).rstrip("/")
+            if normalized and normalized.casefold() not in seen:
+                seen.add(normalized.casefold())
+                scope_folders.append(normalized)
+
+        for raw_root in selected_folders:
+            root = Path(str(raw_root or "").strip())
+            if not root.exists() or not root.is_dir():
+                continue
+            try:
+                for child in root.rglob("*"):
+                    if not child.is_dir():
+                        continue
+                    normalized = normalize_windows_path(str(child)).rstrip("/")
+                    key = normalized.casefold()
+                    if not normalized or key in seen:
+                        continue
+                    seen.add(key)
+                    scope_folders.append(normalized)
+            except Exception:
+                continue
+        return sorted(scope_folders, key=str.casefold)
+
+    def _populate_available_folder_tree(self, scope_folders: list[str]) -> None:
+        from app.mediamanager.utils.pathing import normalize_windows_path
+
+        self.available_folders_tree.clear()
+        selected_roots = []
+        seen_roots: set[str] = set()
+        for raw_root in list(getattr(self.bridge, "_selected_folders", []) or []):
+            normalized = normalize_windows_path(str(raw_root or "")).rstrip("/")
+            if not normalized or normalized.casefold() in seen_roots:
+                continue
+            seen_roots.add(normalized.casefold())
+            selected_roots.append(normalized)
+
+        children_by_parent: dict[str, list[str]] = {}
+        for folder_path in scope_folders:
+            parent = normalize_windows_path(str(Path(folder_path).parent)).rstrip("/")
+            children_by_parent.setdefault(parent, []).append(folder_path)
+
+        def add_node(parent_item: QTreeWidgetItem | None, folder_path: str) -> None:
+            label = Path(folder_path).name or folder_path
+            item = QTreeWidgetItem([label])
+            item.setData(0, Qt.ItemDataRole.UserRole, folder_path)
+            item.setToolTip(0, self._folder_item_text(folder_path))
+            item.setIcon(0, self._folder_icon)
+            if parent_item is None:
+                self.available_folders_tree.addTopLevelItem(item)
+            else:
+                parent_item.addChild(item)
+            for child_path in sorted(children_by_parent.get(folder_path, []), key=str.casefold):
+                add_node(item, child_path)
+
+        for root_path in selected_roots:
+            add_node(None, root_path)
+        self.available_folders_tree.expandAll()
+
+    def _save_preferred_folder_order(self) -> None:
+        if self._loading or self._folder_priority_syncing:
+            return
+        self.dialog.set_setting_str("duplicate.rules.preferred_folders_order", json.dumps(self._preferred_folder_order()))
+
+    def _apply_preferred_folder_sentinel_style(self) -> None:
+        self._rebuild_prioritized_folder_row_widgets()
+
+    def _schedule_preferred_folder_layout_refresh(self) -> None:
+        QTimer.singleShot(0, self._apply_preferred_folder_sentinel_style)
+
+    def _sync_folder_priority_lists(self) -> None:
+        if self._loading or self._folder_priority_syncing:
+            return
+        self._folder_priority_syncing = True
+        try:
+            scope_folders = self._scope_folder_paths()
+            scope_keys = {path.casefold(): path for path in scope_folders}
+            self._populate_available_folder_tree(scope_folders)
+            saved_order = self._preferred_folder_order()
+            normalized_order: list[str] = []
+            seen_order: set[str] = set()
+            for value in saved_order:
+                text = str(value or "").strip()
+                if not text:
+                    continue
+                if text == DUPLICATE_PREFERRED_FOLDERS_SENTINEL:
+                    key = "__sentinel__"
+                    normalized = DUPLICATE_PREFERRED_FOLDERS_SENTINEL
+                else:
+                    canonical = scope_keys.get(text.casefold())
+                    if not canonical:
+                        continue
+                    normalized = canonical
+                    key = canonical.casefold()
+                if key in seen_order:
+                    continue
+                seen_order.add(key)
+                normalized_order.append(normalized)
+            if DUPLICATE_PREFERRED_FOLDERS_SENTINEL not in normalized_order:
+                normalized_order.append(DUPLICATE_PREFERRED_FOLDERS_SENTINEL)
+
+            self.prioritized_folders_list.clear()
+            for path in normalized_order:
+                self._add_folder_list_item(self.prioritized_folders_list, path)
+            self._apply_preferred_folder_sentinel_style()
+        finally:
+            self._folder_priority_syncing = False
+        self._save_preferred_folder_order()
+
+    def _on_preferred_folders_toggled(self, checked: bool) -> None:
+        if self._loading:
+            return
+        self.folder_priority_panel.setVisible(bool(checked))
+        self.dialog.set_setting_bool("duplicate.rules.preferred_folders_enabled", checked)
+        if checked:
+            self._sync_folder_priority_lists()
+            self._schedule_preferred_folder_layout_refresh()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "prioritized_folders_list"):
+            self._schedule_preferred_folder_layout_refresh()
+
     def _on_merge_toggle_changed(self, key: str, checked: bool) -> None:
         if self._loading:
             return
@@ -1093,6 +1725,17 @@ class DuplicateSettingsPage(SettingsPage):
                 item.setData(Qt.ItemDataRole.UserRole, label_text)
                 item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsDragEnabled)
                 self.priority_list.addItem(item)
+            preferred_enabled = bool(self.settings.value("duplicate/rules/preferred_folders_enabled", False, type=bool))
+            with QSignalBlocker(self.use_preferred_folders_toggle):
+                self.use_preferred_folders_toggle.setChecked(preferred_enabled)
+            self.folder_priority_panel.setVisible(preferred_enabled)
+            self.available_folders_tree.clear()
+            self.prioritized_folders_list.clear()
+            for folder_path in self._normalize_folder_priority_order(
+                self.settings.value("duplicate/rules/preferred_folders_order", "[]", type=str)
+            ):
+                self._add_folder_list_item(self.prioritized_folders_list, folder_path)
+            self._sync_folder_priority_lists()
             with QSignalBlocker(self.merge_before_delete_toggle):
                 self.merge_before_delete_toggle.setChecked(bool(self.settings.value("duplicate/rules/merge_before_delete", False, type=bool)))
             for key, _label, default_value in DUPLICATE_MERGE_FIELDS:
@@ -1100,6 +1743,8 @@ class DuplicateSettingsPage(SettingsPage):
                     self.merge_toggles[key].setChecked(bool(self.settings.value(key.replace(".", "/"), default_value, type=bool)))
         finally:
             self._loading = False
+        self._sync_folder_priority_lists()
+        self._schedule_preferred_folder_layout_refresh()
 
 
 class AISettingsPage(SettingsPage):
@@ -1190,15 +1835,14 @@ class SettingsDialog(QDialog):
         self._apply_native_title_bar_theme()
 
     def open_dialog(self) -> None:
-        self.refresh_from_settings()
         if self.isVisible():
+            self.refresh_from_settings()
             self.raise_()
             self.activateWindow()
             return
         self.open()
         self.raise_()
         self.activateWindow()
-        self._apply_native_title_bar_theme()
 
     def refresh_from_settings(self) -> None:
         current_row = max(self.category_list.currentRow(), 0)
@@ -1211,6 +1855,7 @@ class SettingsDialog(QDialog):
     def _on_ui_flag_changed(self, key: str, _value: bool) -> None:
         if key == "ui.theme_mode":
             self.refresh_from_settings()
+            self._apply_native_title_bar_theme()
 
     def _apply_native_title_bar_theme(self) -> None:
         if sys.platform != "win32" or not self.isVisible():
@@ -1313,13 +1958,13 @@ class SettingsDialog(QDialog):
                 border: 1px solid {accent_str};
                 color: {text};
             }}
-            QListWidget#settingsReorderList {{
+            QListWidget#settingsReorderList, QTreeWidget#settingsReorderList {{
                 background-color: {control_bg};
                 border: 1px solid {border};
                 border-radius: 8px;
                 padding: 4px;
             }}
-            QListWidget#settingsReorderList::item {{
+            QListWidget#settingsReorderList::item, QTreeWidget#settingsReorderList::item {{
                 background: transparent;
                 border: none;
                 border-radius: 5px;
@@ -1327,13 +1972,40 @@ class SettingsDialog(QDialog):
                 margin: 0;
                 color: {text};
             }}
-            QListWidget#settingsReorderList::item:hover {{
+            QListWidget#settingsReorderList::item:hover, QTreeWidget#settingsReorderList::item:hover {{
                 background: {category_hover};
             }}
-            QListWidget#settingsReorderList::item:selected {{
+            QListWidget#settingsReorderList::item:selected, QTreeWidget#settingsReorderList::item:selected {{
                 background: {accent_soft};
                 border: 1px solid {accent_str};
                 color: {text};
+            }}
+            QTreeWidget#settingsReorderList {{
+                outline: none;
+            }}
+            QLabel#folderPriorityRowLabel {{
+                color: {text};
+                background: transparent;
+            }}
+            QFrame#folderPriorityDivider {{
+                color: {border};
+                background: {border};
+                min-height: 2px;
+                max-height: 2px;
+                border: none;
+            }}
+            QPushButton#folderPriorityRemoveButton {{
+                background: transparent;
+                color: {muted};
+                border: 1px solid transparent;
+                border-radius: 5px;
+                padding: 0;
+                font-weight: 700;
+            }}
+            QPushButton#folderPriorityRemoveButton:hover {{
+                background: {category_hover};
+                color: {text};
+                border-color: {border};
             }}
             QGroupBox {{
                 margin-top: 10px;
@@ -1341,6 +2013,9 @@ class SettingsDialog(QDialog):
                 background-color: {bg};
                 border: 1px solid {border};
                 border-radius: 8px;
+            }}
+            QScrollArea#settingsPageScroll, QWidget#settingsScrollPage {{
+                background-color: {bg};
             }}
             QGroupBox::title {{
                 subcontrol-origin: margin;
@@ -1467,7 +2142,6 @@ class SettingsDialog(QDialog):
             palette.setColor(QPalette.ColorRole.Highlight, accent)
             palette.setColor(QPalette.ColorRole.HighlightedText, QColor(selection_text))
             widget.setPalette(palette)
-        self._apply_native_title_bar_theme()
 
     def set_setting_bool(self, key: str, value: bool) -> None:
         if not self.bridge.set_setting_bool(key, bool(value)):

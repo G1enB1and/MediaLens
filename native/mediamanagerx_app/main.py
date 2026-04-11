@@ -4005,6 +4005,72 @@ class Bridge(QObject):
             return 0
 
     @staticmethod
+    def _duplicate_parent_folder(entry: dict) -> str:
+        from app.mediamanager.utils.pathing import normalize_windows_path
+
+        path = str(entry.get("path") or "").strip()
+        if not path:
+            return ""
+        try:
+            return normalize_windows_path(str(Path(path).parent)).rstrip("/")
+        except Exception:
+            return ""
+
+    def _preferred_folder_priority_state(self) -> tuple[bool, list[str], dict[str, int]]:
+        from app.mediamanager.utils.pathing import normalize_windows_path
+
+        enabled = bool(self.settings.value("duplicate/rules/preferred_folders_enabled", False, type=bool))
+        raw_value = str(self.settings.value("duplicate/rules/preferred_folders_order", "[]", type=str) or "[]")
+        sentinel = "All other Folders"
+        try:
+            parsed = json.loads(raw_value)
+        except Exception:
+            parsed = []
+        order: list[str] = []
+        seen: set[str] = set()
+        for item in parsed if isinstance(parsed, list) else []:
+            text = str(item or "").strip()
+            if not text:
+                continue
+            if text == sentinel:
+                key = "__sentinel__"
+                normalized = sentinel
+            else:
+                normalized = normalize_windows_path(text).rstrip("/")
+                if not normalized:
+                    continue
+                key = normalized.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            order.append(normalized)
+        if sentinel not in order:
+            order.append(sentinel)
+        sentinel_index = order.index(sentinel)
+        score_by_folder = {
+            folder: sentinel_index - index
+            for index, folder in enumerate(order)
+            if folder != sentinel
+        }
+        return enabled, order, score_by_folder
+
+    def _preferred_folder_score(self, entry: dict, *, enabled: bool, score_by_folder: dict[str, int]) -> int:
+        from app.mediamanager.utils.pathing import normalize_windows_path
+
+        if not enabled:
+            return 0
+        current = self._duplicate_parent_folder(entry)
+        while current:
+            score = score_by_folder.get(current)
+            if score is not None:
+                return int(score)
+            parent = normalize_windows_path(str(Path(current).parent)).rstrip("/")
+            if not parent or parent == current:
+                break
+            current = parent
+        return 0
+
+    @staticmethod
     def _duplicate_metadata_score(entry: dict) -> tuple[int, int]:
         tags = [tag.strip() for tag in str(entry.get("tags") or "").split(",") if tag.strip()]
         filled_fields = sum(
@@ -4138,11 +4204,13 @@ class Bridge(QObject):
                 "File Size",
                 "Resolution",
                 "File Format",
+                "Preferred Folders",
                 "Compression",
                 "Color / Grey Preference",
                 "Text / No Text Preference",
                 "Cropped / Full Preference",
             ]
+        preferred_folders_enabled, _preferred_folder_order, preferred_folder_scores = self._preferred_folder_priority_state()
 
         def _normalized_aspect_ratio(entry: dict) -> tuple[int, int] | None:
             width = int(entry.get("width") or 0)
@@ -4205,6 +4273,12 @@ class Bridge(QObject):
 
         for entry in ranked:
             entry["duplicate_folder_depth"] = self._folder_depth_for_duplicate(entry)
+            entry["duplicate_parent_folder"] = self._duplicate_parent_folder(entry)
+            entry["duplicate_preferred_folder_score"] = self._preferred_folder_score(
+                entry,
+                enabled=preferred_folders_enabled,
+                score_by_folder=preferred_folder_scores,
+            )
             entry["duplicate_file_format"] = _display_file_format(entry)
             original_time = _original_timestamp(entry)
             modified_time = _modified_timestamp(entry)
@@ -4317,6 +4391,11 @@ class Bridge(QObject):
                 "value": lambda entry: _format_score(entry),
                 "enabled": lambda values: max(values, default=0) > min(values, default=0) and max(values, default=0) > 0,
             },
+            "Preferred Folders": {
+                "label": "Preferred Folder",
+                "value": lambda entry: int(entry.get("duplicate_preferred_folder_score") or 0),
+                "enabled": lambda values: preferred_folders_enabled and max(values, default=0) > min(values, default=0),
+            },
             "Compression": {
                 "label": "Compression",
                 "value": lambda entry: 0,
@@ -4357,11 +4436,6 @@ class Bridge(QObject):
                 "enabled": lambda values: max(values, default=(0, 0)) > (0, 0),
             },
             {
-                "label": "Best folder organization",
-                "value": lambda entry: int(entry.get("duplicate_folder_depth") or 0),
-                "enabled": lambda values: max(values, default=0) > 1,
-            },
-            {
                 "label": "Newer edit",
                 "value": lambda entry: (entry.get("duplicate_modified_timestamp") or 0) if entry.get("duplicate_is_edit_variant") else 0,
                 "enabled": lambda values: max(values, default=0) > min(values, default=0) and max(values, default=0) > 0,
@@ -4399,6 +4473,8 @@ class Bridge(QObject):
                     priority_scores.append(int(entry.get("width") or 0) * int(entry.get("height") or 0))
                 elif name == "File Format":
                     priority_scores.append(_format_score(entry))
+                elif name == "Preferred Folders":
+                    priority_scores.append(int(entry.get("duplicate_preferred_folder_score") or 0))
                 elif name == "Compression":
                     priority_scores.append(0)
                 elif name == "Color / Grey Preference":
@@ -4420,17 +4496,17 @@ class Bridge(QObject):
             file_size = int(entry.get("file_size") or 0)
             file_size_fallback = -file_size if file_size_policy == "prefer_smallest" else file_size
             area = int(entry.get("width") or 0) * int(entry.get("height") or 0)
-            folder_depth = int(entry.get("duplicate_folder_depth") or 0)
+            preferred_folder_score = int(entry.get("duplicate_preferred_folder_score") or 0)
             tag_count, filled_fields = self._duplicate_metadata_score(entry)
             preferred_raw = entry.get("preferred_date")
             modified_time = preferred_raw if isinstance(preferred_raw, int) else self._preferred_date_ns(entry)
             return (
-                len(positive_reasons[idx]),
                 *priority_scores,
+                len(positive_reasons[idx]),
                 file_size_fallback,
                 area,
                 _format_score(entry),
-                folder_depth,
+                preferred_folder_score,
                 tag_count,
                 filled_fields,
                 modified_time,
@@ -5774,7 +5850,7 @@ class Bridge(QObject):
                 "ui.preview_above_details",
                 "updates.check_on_launch"
             )
-            if key not in allowed and key != "duplicate.rules.merge_before_delete" and not key.startswith("metadata.display.") and not key.startswith("duplicate.rules.merge"):
+            if key not in allowed and key not in {"duplicate.rules.merge_before_delete", "duplicate.rules.preferred_folders_enabled"} and not key.startswith("metadata.display.") and not key.startswith("duplicate.rules.merge"):
                 return False
             qkey = key.replace(".", "/")
             self.settings.setValue(qkey, bool(value))

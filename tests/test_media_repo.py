@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import unittest
 from pathlib import Path
@@ -18,14 +19,17 @@ from native.mediamanagerx_app.main import Bridge, _load_media_metadata_payload
 
 
 class _SettingsStub:
+    def __init__(self, values: dict[str, object] | None = None) -> None:
+        self._values = dict(values or {})
+
     def value(self, _key, default=None, type=None):
-        return default
+        return self._values.get(_key, default)
 
 
-def _build_test_bridge(conn: sqlite3.Connection) -> Bridge:
+def _build_test_bridge(conn: sqlite3.Connection, *, settings_values: dict[str, object] | None = None) -> Bridge:
     bridge = Bridge.__new__(Bridge)
     bridge.conn = conn
-    bridge.settings = _SettingsStub()
+    bridge.settings = _SettingsStub(settings_values)
     bridge._annotate_group_color_variants = lambda entries: None
     return bridge
 
@@ -359,6 +363,65 @@ class TestMediaRepo(unittest.TestCase):
 
         self.assertEqual({entry["path"] for entry in grouped}, {"c:/media/b.jpg", "c:/media/c.jpg"})
         self.assertEqual(len({entry["duplicate_group_key"] for entry in grouped}), 1)
+
+    def test_duplicate_ranking_prefers_configured_folder_order_over_folder_depth(self) -> None:
+        bridge = _build_test_bridge(
+            sqlite3.connect(":memory:"),
+            settings_values={
+                "duplicate/rules/preferred_folders_enabled": True,
+                "duplicate/rules/preferred_folders_order": json.dumps([
+                    "c:/media/client outbox",
+                    "All other Folders",
+                    "c:/media/tests",
+                ]),
+                "duplicate/priorities/order": json.dumps([
+                    "Preferred Folders",
+                    "File Size",
+                    "Resolution",
+                    "File Format",
+                    "Compression",
+                    "Color / Grey Preference",
+                    "Text / No Text Preference",
+                    "Cropped / Full Preference",
+                ]),
+            },
+        )
+        entries = [
+            {
+                "path": "c:/media/tests/nested/deeper/file-a.png",
+                "content_hash": "hash-1",
+                "media_type": "image",
+                "file_size": 500,
+                "width": 100,
+                "height": 100,
+                "preferred_date": 1,
+            },
+            {
+                "path": "c:/media/client outbox/file-b.png",
+                "content_hash": "hash-1",
+                "media_type": "image",
+                "file_size": 400,
+                "width": 100,
+                "height": 100,
+                "preferred_date": 1,
+            },
+            {
+                "path": "c:/media/misc/file-c.png",
+                "content_hash": "hash-1",
+                "media_type": "image",
+                "file_size": 450,
+                "width": 100,
+                "height": 100,
+                "preferred_date": 1,
+            },
+        ]
+
+        ranked = bridge._rank_duplicate_group(entries)
+
+        self.assertEqual(ranked[0]["path"], "c:/media/client outbox/file-b.png")
+        self.assertIn("Preferred Folder", ranked[0]["duplicate_category_reasons"])
+        self.assertEqual(ranked[1]["path"], "c:/media/misc/file-c.png")
+        self.assertEqual(ranked[2]["path"], "c:/media/tests/nested/deeper/file-a.png")
 
 
 if __name__ == '__main__':
