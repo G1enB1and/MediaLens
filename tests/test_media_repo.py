@@ -1,10 +1,12 @@
 import sqlite3
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from app.mediamanager.db.collections_repo import create_collection, add_media_paths_to_collection
 from app.mediamanager.db.media_repo import add_media_item, list_media_in_scope
 from app.mediamanager.db.migrations import init_db
+from native.mediamanagerx_app.main import _load_media_metadata_payload
 
 
 class TestMediaRepo(unittest.TestCase):
@@ -116,6 +118,41 @@ class TestMediaRepo(unittest.TestCase):
                 scoped = list_media_in_scope(conn, [str(media_dir)])
 
             self.assertEqual(scoped[0]["collection_names"], "Vacation Picks")
+        finally:
+            try:
+                if media_path.exists():
+                    media_path.unlink()
+                if media_dir.exists():
+                    media_dir.rmdir()
+            except Exception:
+                pass
+
+    def test_load_media_metadata_payload_keeps_core_dates_when_optional_metadata_lookup_fails(self) -> None:
+        media_dir = self.tmp_dir / "metadata-fallback"
+        media_dir.mkdir(exist_ok=True)
+        media_path = media_dir / "sample.jpg"
+        media_path.write_bytes(b"jpg")
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("PRAGMA journal_mode=MEMORY;")
+                add_media_item(conn, str(media_path), "image")
+
+                def raise_metadata_failure(_conn: sqlite3.Connection, _media_id: int):
+                    raise RuntimeError("metadata table failure")
+
+                with mock.patch(
+                    "app.mediamanager.db.metadata_repo.get_media_metadata",
+                    side_effect=raise_metadata_failure,
+                ):
+                    data = _load_media_metadata_payload(conn, str(media_path))
+
+            self.assertEqual(data["media_type"], "image")
+            self.assertEqual(data["tags"], [])
+            self.assertTrue(data["file_created_time"])
+            self.assertTrue(data["modified_time"])
+            self.assertTrue(data["original_file_date"])
+            self.assertEqual(data["exif_date_taken"], "")
+            self.assertEqual(data["metadata_date"], "")
         finally:
             try:
                 if media_path.exists():
