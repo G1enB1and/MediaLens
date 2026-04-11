@@ -4,7 +4,7 @@ try:
     with open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "VERSION"), "r") as f:
         __version__ = f.read().strip()
 except Exception:
-    __version__ = "v1.1.14"
+    __version__ = "v1.1.15"
 
 
 import sys
@@ -7954,6 +7954,13 @@ class MainWindow(QMainWindow):
         file_menu = menubar.addMenu("&File")
 
         edit_menu = menubar.addMenu("&Edit")
+        
+        self.act_open_bulk_tag_editor = QAction("Bulk Tag Editor", self)
+        self.act_open_bulk_tag_editor.triggered.connect(self._open_bulk_tag_editor_from_menu)
+        edit_menu.addAction(self.act_open_bulk_tag_editor)
+        
+        edit_menu.addSeparator()
+
         settings_action = QAction("&Settings", self)
         settings_action.triggered.connect(self.open_settings)
         edit_menu.addAction(settings_action)
@@ -8024,10 +8031,6 @@ class MainWindow(QMainWindow):
         self.act_toggle_tag_list_panel.setCheckable(True)
         self.act_toggle_tag_list_panel.triggered.connect(self._toggle_tag_list_panel_from_menu)
         view_menu.addAction(self.act_toggle_tag_list_panel)
-
-        self.act_open_bulk_tag_editor = QAction("Bulk Tag Editor", self)
-        self.act_open_bulk_tag_editor.triggered.connect(self._open_bulk_tag_editor_from_menu)
-        view_menu.addAction(self.act_open_bulk_tag_editor)
 
         self.act_show_dismissed_progress_toasts = QAction("Show Hidden Progress Toasts", self)
         self.act_show_dismissed_progress_toasts.triggered.connect(self.bridge.reveal_progress_toasts)

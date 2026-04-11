@@ -1,6 +1,40 @@
 # Change Log
 
-## v1.1.14 (Current)
+## v1.1.15 (Current)
+
+### Summary
+
+This release significantly improves the Duplicate and Similar files workflow with manual override capabilities and UI refinements, along with important bug fixes for file visibility and bulk tagging.
+
+### Highlights
+
+- Exclude false positives directly from Duplicate and Similar file groups with a new "X" button that remembers your choice on future scans.
+- Reorganized Similar File Rules into a streamlined single-page layout with a new button to reset group exclusions.
+- Added Open/Close Tag List toggle directly within the Bulk Tag Editor for quicker access to your tags.
+
+### Added
+
+- Added an "X" button to Duplicates and Similar file cards to exclude files from a group (remembers the override for future scans).
+- Added a "Reset Group Exclusions" button in Similar File Rules.
+- Added "Open/Close Tag List" toggle button within the Bulk Tag Editor.
+
+### Changed
+
+- Moved the Bulk Tag Editor action from the View menu to the Edit menu.
+- Reorganized Similar File Rules: Moved priorities from a separate tab to a single-page layout below file formats.
+- Improved UI design for similar file cards and Similar File Rules settings.
+- The "Group by similar" view now immediately clears the screen and informs you to wait for scanning when switching folders, rather than showing stale results.
+
+### Fixed
+
+- Fixed the "All" checkbox in metadata so it correctly toggles all checks.
+- Fixed a bug where dates were occasionally not returned properly from a scan.
+- Fixed multi-select hide/unhide logic so it correctly applies to all selected files at once.
+- Fixed an issue to ensure all files inside a hidden folder remain hidden when the "show hidden files" setting is disabled.
+
+---
+
+## v1.1.14
 
 ### Summary
 
@@ -285,8 +319,11 @@ This release introduces Image Comparison, a new workspace for evaluating two ima
 ### Highlights
 
 New Image Comparison panel with left and right image slots plus a central reveal slider for true in-place A/B review
+
 Load images using drag and drop, browse buttons, or gallery context menu actions such as Compare Images and Compare With Left/Right
+
 Synchronized zoom and pan keep both images aligned during close inspection, with hold-to-isolate preview on either side for quick single-image checks
+
 Comparison cards preserve keep/best actions and recalculate smart labels specifically for the current two-image decision instead of reusing broader group context
 
 ### Added
@@ -342,56 +379,31 @@ This release improves duplicate cleanup workflows and media playback control whi
 
 #### Duplicate Review Controls
 
-- Added a `Mark as Best` toggle, restored the `Keep Best` action, and introduced `Delete Unchecked Files`.  
+- Added a `Mark as Best` toggle, restored the `Keep Best` action, and introduced `Delete Unchecked Files`.  
 - Multiple files can now be marked as `Keep`, with a separate `Best` designation.
 
 #### Player Settings
 
 - Added a dedicated `Player` settings category with controls for default mute behavior, gallery GIF autoplay, details preview GIF autoplay, video loop mode, and loop cutoff length.
 
----
-
 ### Changed
 
-#### Animated GIF Behavior
-
-- Split autoplay behavior between the gallery and details preview.  
+- **Animated GIF Behavior** - Split autoplay behavior between the gallery and details preview.  
 - The gallery now uses still posters when autoplay is disabled.
-
-#### Preview & Video Reliability
-
-- Improved preview consistency by fixing GIF stretching and cropping in the preview-above-details area.  
+- **Preview & Video Reliability** - Improved preview consistency by fixing GIF stretching and cropping in the preview-above-details area.  
 - The preview player now consistently respects the mute-by-default setting.
-
-#### Pinned Folder Visibility
-
-- Pinned folders now follow the same hidden-folder logic as the file tree and gallery.
-
-#### File Tree Navigation
-
-- File tree now rebuilds and reselects correctly when navigating outside the current branch using Back or Up.
-
-#### Preview Toggle Placement
-
-- Removed the duplicate `Preview Image Above Details` entry from the native `View` menu.
-
----
+- **Pinned Folder Visibility** - Pinned folders now follow the same hidden-folder logic as the file tree and gallery.
+- **File Tree Navigation** - File tree now rebuilds and reselects correctly when navigating outside the current branch using Back or Up.
+- **Preview Toggle Placement** - Removed the duplicate `Preview Image Above Details` entry from the native `View` menu.
 
 ### Fixed
 
-#### FFmpeg Filename Crash
-
--Resolved crashes caused by special characters in filenames by using safe aliases for FFmpeg and FFprobe calls while preserving original filenames in the UI.
-
-#### Text Detection
-
-- Improved text detection speed and accuracy.
+- **FFmpeg Filename Crash** - Resolved crashes caused by special characters in filenames by using safe aliases for FFmpeg and FFprobe calls while preserving original filenames in the UI.
+- **Text Detection** - Improved text detection speed and accuracy.
 
 ### Removed
 
-#### View Menu Preview Toggle
-
-- Removed the duplicate `Preview Image Above Details` toggle from the native `View` menu.
+- **View Menu Preview Toggle** - Removed the duplicate `Preview Image Above Details` toggle from the native `View` menu.
 
 ---
 
@@ -413,21 +425,15 @@ This update also introduces pinned folders and several UI refinements that impro
 
 ### Added
 
-- **Recycle Bin Delete Workflow**  
-    Added recycle-bin delete as the default behavior, a `Shift+Delete` permanent delete shortcut with confirmation, and a new setting to control recycle-bin usage.
-- **Pinned Folders Sidebar**  
-    Added pinned folders in the left sidebar with right-click add/remove actions and drag-and-drop support.
+- **Recycle Bin Delete Workflow** - Added recycle-bin delete as the default behavior, a `Shift+Delete` permanent delete shortcut with confirmation, and a new setting to control recycle-bin usage.
+- **Pinned Folders Sidebar** - Added pinned folders in the left sidebar with right-click add/remove actions and drag-and-drop support.
 
 ### Changed
 
-- **Video Preview Reliability**  
-    Rebuilt the preview-above-details video pipeline to restore metadata, static posters, explicit in-place playback, lightbox double-click, and stable delete behavior without the earlier crashes.
-- **Accent Contrast**  
-    Improved accent-color readability in lower-contrast situations by dynamically increasing contrast where needed.
-- **File Tree Visual Polish**  
-    Refined tree and pinned-folder styling so selected folders use bold accent text without tinting icons, and chevrons only render when folders actually have children.
-- **Header Branding**  
-    Replaced the header logo.
+- **Video Preview Reliability** - Rebuilt the preview-above-details video pipeline to restore metadata, static posters, explicit in-place playback, lightbox double-click, and stable delete behavior without the earlier crashes.
+- **Accent Contrast** - Improved accent-color readability in lower-contrast situations by dynamically increasing contrast where needed.
+- **File Tree Visual Polish** - Refined tree and pinned-folder styling so selected folders use bold accent text without tinting icons, and chevrons only render when folders actually have children.
+- **Header Branding** - Replaced the header logo.
 
 ---
 
@@ -435,23 +441,16 @@ This update also introduces pinned folders and several UI refinements that impro
 
 ### Added
 
-- **Sidebar Video Player**  
-    In-place video playback directly above the metadata panel.
-- **Text Detection Filter**  
-    3-stage text detection system (Likely, More Likely, Verified) powered by OpenCV and OCR.
+- **Sidebar Video Player** - In-place video playback directly above the metadata panel.
+- **Text Detection Filter** - 3-stage text detection system (Likely, More Likely, Verified) powered by OpenCV and OCR.
 
 ### Changed
 
-- **Video Playback Stability**  
-    Improved async teardown of video pipelines to prevent UI freezes and crashes during navigation.
-- **Preview Toggle UX**  
-    Moved preview toggle beside the header using a dedicated outline icon, keeping the header consistently visible.
-- **Video Controls UI**  
-    Refined controls with clean borders, frosted glass backgrounds, and high-contrast white icons.
-- **Documentation**  
-    Updated README and screenshots to reflect duplicate grouping, resolution workflows, and settings.
-- **Branding**  
-    Updated app icon and logo.
+- **Video Playback Stability** - Improved async teardown of video pipelines to prevent UI freezes and crashes during navigation.
+- **Preview Toggle UX** - Moved preview toggle beside the header using a dedicated outline icon, keeping the header consistently visible.
+- **Video Controls UI** - Refined controls with clean borders, frosted glass backgrounds, and high-contrast white icons.
+- **Documentation** - Updated README and screenshots to reflect duplicate grouping, resolution workflows, and settings.
+- **Branding** - Updated app icon and logo.
 
 ---
 
@@ -778,12 +777,12 @@ This update also introduces pinned folders and several UI refinements that impro
 
 - **Cursor Feedback**: Cursor now changes to a hand pointer when hovering over clickable folders and files.
 - **Conflict Dialog Improvements**:
-  - Fixed SVG rendering for the **â€œApply to allâ€** checkbox so the checkmark displays correctly in all themes.
-  - Improved button hover effects for clearer interaction feedback.
-  - Fixed vertical clipping of long filenames.
+  - Fixed SVG rendering for the **Apply to all** checkbox so the checkmark displays correctly in all themes.
+  - Improved button hover effects for clearer interaction feedback.
+  - Fixed vertical clipping of long filenames.
 - **Drag & Drop Refinements**:
-  - Improved handling of multi-file transfers between the gallery and file tree.
-  - Adjusted tooltip offset and event handling to suppress duplicate Windows tooltips.
+  - Improved handling of multi-file transfers between the gallery and file tree.
+  - Adjusted tooltip offset and event handling to suppress duplicate Windows tooltips.
 - **Gallery Context Menu**: Right-clicking empty gallery space now correctly opens the application menu.
 
 ---
@@ -793,27 +792,27 @@ This update also introduces pinned folders and several UI refinements that impro
 ### Added in v1.0.3
 
 - **Keyboard Shortcuts**:
-  - **Ctrl+C / Ctrl+X / Ctrl+V** â€” Copy, Cut, Paste files and folders
-  - **Delete** â€” Delete selected items with confirmation
-  - **F2** â€” Rename selected items (inline for folders, dialog for gallery)
-  - **Ctrl+A** â€” Select all gallery items
+  - **Ctrl+C / Ctrl+X / Ctrl+V** - Copy, Cut, Paste files and folders
+  - **Delete** - Delete selected items with confirmation
+  - **F2** - Rename selected items (inline for folders, dialog for gallery)
+  - **Ctrl+A** - Select all gallery items
 
 ### Changed in v1.0.3
 
 - **Drag & Drop Improvements**:
-  - Move or copy multiple selections simultaneously
-  - Default action is **Move**, hold **Ctrl** to **Copy**
-  - Dynamic tooltips showing destination folder
-  - Drag thumbnails offset from cursor for better visibility
+  - Move or copy multiple selections simultaneously
+  - Default action is **Move**, hold **Ctrl** to **Copy**
+  - Dynamic tooltips showing destination folder
+  - Drag thumbnails offset from cursor for better visibility
 - **Selection & UI Stability**:
-  - Fixed gallery items deselecting when opening context menus
-  - Gallery now refreshes immediately after deletion
-  - Keyboard shortcuts no longer trigger while typing in Tags or Description fields
+  - Fixed gallery items deselecting when opening context menus
+  - Gallery now refreshes immediately after deletion
+  - Keyboard shortcuts no longer trigger while typing in Tags or Description fields
 - **Metadata Compatibility**: Fixed tag and comment embedding so metadata appears correctly in Windows File Properties.
 - **Persistent Layout**: Sidebar widths are now remembered across sessions.
 - **UI Improvements**:
-  - Fixed inconsistent theme colors in metadata and bulk tagging sidebars
-  - Adjusted scrollbar hover effects for better visual consistency
+  - Fixed inconsistent theme colors in metadata and bulk tagging sidebars
+  - Adjusted scrollbar hover effects for better visual consistency
 - **Bug Fix**: Resolved `AttributeError` in native shortcut handlers.
 
 ---
@@ -823,7 +822,7 @@ This update also introduces pinned folders and several UI refinements that impro
 ### Added in v1.0.2
 
 - **Auto-Update System**: App now checks GitHub for updates on launch (manual check available).
-- **Help Dialogs**: Added **Terms of Service** and **Whatâ€™s New** windows in the Help menu.
+- **Help Dialogs**: Added **Terms of Service** and **What's New** windows in the Help menu.
 
 ### Changed in v1.0.2
 
@@ -831,9 +830,9 @@ This update also introduces pinned folders and several UI refinements that impro
 - **Navigation Fix**: Scroll position now resets correctly when switching pages or search results.
 - **Performance Optimization**: Removed real-time GIF pausing in the lightbox to reduce overhead.
 - **UI Improvements**:
-  - Help dialogs now use themed backgrounds matching light and dark modes
-  - Fixed button contrast issues in light mode
-  - Added native Markdown rendering for informational documents
+  - Help dialogs now use themed backgrounds matching light and dark modes
+  - Fixed button contrast issues in light mode
+  - Added native Markdown rendering for informational documents
 - **About Window**: Expanded version and author information.
 - **Masonry Layout Stability**: Prevented layout shifts by reserving space using correct aspect ratios.
 

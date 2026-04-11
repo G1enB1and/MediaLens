@@ -1,20 +1,23 @@
-## MediaLens v1.1.14
+## MediaLens v1.1.15
 
-### Summary
+### ✨ Summary
 
-This release turns tagging into a much faster workflow. MediaLens now gives you a dedicated Tag List panel, a rebuilt Bulk Tag Editor, and smoother multi-file tagging with clearer feedback while you work.
+This release significantly improves the Duplicate and Similar files workflow with manual override capabilities and UI refinements, along with important bug fixes for file visibility and bulk tagging.
 
-### Highlights
+### 🔥 Highlights
 
-- Tag List now supports saved tag groups, quick gallery filtering, drag sorting, and one-click tagging actions.
-- Bulk Tag Editor now shows common and uncommon tags across large selections and works much better with select-all workflows.
+- Exclude false positives directly from Duplicate and Similar file groups with a new "X" button that remembers your choice on future scans.
+- Reorganized Similar File Rules into a streamlined single-page layout with a new button to reset group exclusions.
+- Added Open/Close Tag List toggle directly within the Bulk Tag Editor for quicker access to your tags.
 
-### Notes
+### 🐛 Fixes & Improvements
 
-- Tag List actions now save added tags to the database immediately.
-- Gallery tag filtering, counts, and selection behavior were refined so switching between tag scopes is more predictable.
+- Added manual override exclusions for Duplicate and Similar file groups.
+- Restyled Similar File Rules to be more readable with a single-page list styling and added a "Reset Group Exclusions" option.
+- Re-categorized the Bulk Tag Editor into the Edit menu and included an integrated Tag List toggle.
+- Addressed various bugs regarding metadata "All" selections, file timestamps, and hidden file logic.
 
 ---
 
-Full Changelog:
+📄 Full Changelog:
 https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md
