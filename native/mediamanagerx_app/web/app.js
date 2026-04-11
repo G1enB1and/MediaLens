@@ -2941,6 +2941,80 @@ function scrollToGroup(groupKey) {
   target.scrollIntoView({ block: 'start', behavior: gTimelineScrubActive ? 'auto' : 'smooth' });
 }
 
+function getReviewGroupsForNavigation() {
+  if (!isDuplicateModeActive()) return [];
+  return buildDuplicateGroups(gMedia);
+}
+
+function getCurrentReviewGroupKeyForNavigation() {
+  const comparePaths = getCompareActivePaths();
+  const compareGroupKeys = Array.from(new Set(comparePaths.map(getDuplicateGroupKeyForPath).filter(Boolean)));
+  if (compareGroupKeys.length === 1) return compareGroupKeys[0];
+
+  const main = document.querySelector('main');
+  const sections = Array.from(document.querySelectorAll('.gallery-group[data-group-key]'));
+  if (!main || !sections.length) return '';
+
+  const mainRect = main.getBoundingClientRect();
+  let closest = null;
+  sections.forEach((section) => {
+    const rect = section.getBoundingClientRect();
+    const distance = Math.abs(rect.top - mainRect.top);
+    if (!closest || distance < closest.distance) {
+      closest = { key: String(section.dataset.groupKey || ''), distance };
+    }
+  });
+  return closest ? closest.key : '';
+}
+
+function focusReviewGroup(groupKey) {
+  const targetKey = String(groupKey || '').trim();
+  if (!targetKey || !gBridge) return false;
+  const group = getReviewGroupsForNavigation().find(entry => String(entry.key || '') === targetKey);
+  if (!group || !Array.isArray(group.items) || group.items.length < 2) return false;
+
+  const comparePaths = group.items
+    .slice(0, 2)
+    .map(item => String(item && item.path || ''))
+    .filter(Boolean);
+  if (comparePaths.length < 2) return false;
+
+  toggleGroupCollapsed(targetKey, false);
+  if (gBridge.compare_paths) {
+    gBridge.compare_paths(comparePaths);
+  } else if (gBridge.set_compare_path) {
+    gBridge.set_compare_path('left', comparePaths[0]);
+    gBridge.set_compare_path('right', comparePaths[1]);
+  }
+
+  const keepPaths = getDuplicateKeepPaths(targetKey).slice().sort();
+  const deletePaths = getDuplicateDeletePaths(targetKey).slice().sort();
+  const bestPath = getDuplicateBestPath(targetKey);
+  window.setTimeout(() => {
+    syncCompareStateFromReviewGroup(targetKey, keepPaths, deletePaths, bestPath);
+    scrollToGroup(targetKey);
+  }, 0);
+  return true;
+}
+
+function jumpReviewGroup(direction) {
+  const groups = getReviewGroupsForNavigation();
+  if (!groups.length) return false;
+
+  const step = Number(direction) < 0 ? -1 : 1;
+  const currentKey = getCurrentReviewGroupKeyForNavigation();
+  const currentIndex = groups.findIndex(group => String(group.key || '') === currentKey);
+  const targetIndex = currentIndex < 0
+    ? (step > 0 ? 0 : groups.length - 1)
+    : currentIndex + step;
+  if (targetIndex < 0 || targetIndex >= groups.length) return false;
+  return focusReviewGroup(groups[targetIndex].key);
+}
+
+window.__mmx_jumpReviewGroup = function (direction) {
+  return jumpReviewGroup(direction);
+};
+
 function captureCurrentGroupScrollAnchor() {
   const main = document.querySelector('main');
   if (!main) return null;

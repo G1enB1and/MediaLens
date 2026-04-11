@@ -9348,6 +9348,13 @@ class MainWindow(QMainWindow):
         bottom_panel_header_layout = QHBoxLayout(self.bottom_panel_header_row)
         bottom_panel_header_layout.setContentsMargins(0, 0, 0, 0)
         bottom_panel_header_layout.setSpacing(8)
+
+        self.bottom_panel_prev_group_btn = QPushButton("←Previous Group")
+        self.bottom_panel_prev_group_btn.setObjectName("bottomPanelGroupNavButton")
+        self.bottom_panel_prev_group_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.bottom_panel_prev_group_btn.setToolTip("Jump to Previous Group")
+        self.bottom_panel_prev_group_btn.clicked.connect(lambda: self._jump_review_group(-1))
+        bottom_panel_header_layout.addWidget(self.bottom_panel_prev_group_btn, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         bottom_panel_header_layout.addStretch(1)
 
         self.bottom_panel_header = QLabel("Image Comparison")
@@ -9355,6 +9362,13 @@ class MainWindow(QMainWindow):
         self.bottom_panel_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
         bottom_panel_header_layout.addWidget(self.bottom_panel_header, 0, Qt.AlignmentFlag.AlignCenter)
         bottom_panel_header_layout.addStretch(1)
+
+        self.bottom_panel_next_group_btn = QPushButton("Next Group→")
+        self.bottom_panel_next_group_btn.setObjectName("bottomPanelGroupNavButton")
+        self.bottom_panel_next_group_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.bottom_panel_next_group_btn.setToolTip("Jump to Next Group")
+        self.bottom_panel_next_group_btn.clicked.connect(lambda: self._jump_review_group(1))
+        bottom_panel_header_layout.addWidget(self.bottom_panel_next_group_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         self.bottom_panel_close_btn = QPushButton("X")
         self.bottom_panel_close_btn.setObjectName("bottomPanelCloseButton")
@@ -10706,6 +10720,15 @@ class MainWindow(QMainWindow):
         try:
             self.web.page().runJavaScript(
                 "try{ if(window.__mmx_selectAllVisible){ window.__mmx_selectAllVisible(); } else if(window.selectAll){ window.selectAll(); } }catch(e){}"
+            )
+        except Exception:
+            pass
+
+    def _jump_review_group(self, direction: int) -> None:
+        step = -1 if int(direction or 0) < 0 else 1
+        try:
+            self.web.page().runJavaScript(
+                f"try{{ window.__mmx_jumpReviewGroup && window.__mmx_jumpReviewGroup({step}); }}catch(e){{}}"
             )
         except Exception:
             pass
