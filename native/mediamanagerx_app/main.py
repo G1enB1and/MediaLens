@@ -9517,7 +9517,12 @@ class MainWindow(QMainWindow):
         self._sync_tag_list_panel_visibility()
         self._update_preview_visibility()
         self._clear_metadata_panel()
+        self._gallery_relayout_timer = QTimer(self)
+        self._gallery_relayout_timer.setSingleShot(True)
+        self._gallery_relayout_timer.setInterval(90)
+        self._gallery_relayout_timer.timeout.connect(self._notify_gallery_container_resized)
         QTimer.singleShot(0, self._apply_initial_web_background)
+        QTimer.singleShot(0, self._schedule_gallery_container_relayout)
 
     def _apply_initial_web_background(self) -> None:
         # Some Windows installs abort inside Qt WebEngine if this runs during
@@ -9532,6 +9537,23 @@ class MainWindow(QMainWindow):
             self.bridge._log("Web background applied")
         except Exception as exc:
             self.bridge._log(f"Web background apply failed: {exc}")
+
+    def _schedule_gallery_container_relayout(self, delay_ms: int = 90) -> None:
+        timer = getattr(self, "_gallery_relayout_timer", None)
+        if timer is None:
+            return
+        try:
+            timer.start(max(0, int(delay_ms or 0)))
+        except Exception:
+            pass
+
+    def _notify_gallery_container_resized(self) -> None:
+        try:
+            self.web.page().runJavaScript(
+                "try{ window.__mmx_scheduleGalleryRelayout && window.__mmx_scheduleGalleryRelayout('qt'); }catch(e){}"
+            )
+        except Exception:
+            pass
 
     def _set_selected_folders(self, folder_paths: list[str]) -> None:
         self.bridge.set_selected_folders(folder_paths)
@@ -10541,6 +10563,12 @@ class MainWindow(QMainWindow):
 
     def _apply_ui_flag(self, key: str, value: bool) -> None:
         try:
+            schedule_gallery_relayout = key in {
+                "ui.show_top_panel",
+                "ui.show_left_panel",
+                "ui.show_right_panel",
+                "ui.show_bottom_panel",
+            }
             if key == "gallery.view_mode":
                 self._sync_gallery_view_actions()
             elif key == "ui.show_top_panel":
@@ -10650,6 +10678,8 @@ class MainWindow(QMainWindow):
                     self._reload_pinned_folders()
             if key == "ui.show_left_panel" and hasattr(self, "act_toggle_left_panel"):
                 self.act_toggle_left_panel.setChecked(bool(value))
+            if schedule_gallery_relayout:
+                QTimer.singleShot(0, lambda: self._schedule_gallery_container_relayout(120))
         except Exception:
             pass
 
@@ -14000,6 +14030,7 @@ class MainWindow(QMainWindow):
                 f'    c.classList.add(\'selected\'); }}'
                 f'}})();'
             )
+        self._schedule_gallery_container_relayout(120)
 
     def _on_right_splitter_moved(self) -> None:
         self._save_tag_list_panel_width()
@@ -14011,6 +14042,7 @@ class MainWindow(QMainWindow):
         self._update_sidebar_action_buttons()
         self._update_sidebar_input_widths()
         self._update_preview_display()
+        self._schedule_gallery_container_relayout(120)
 
     def _handle_right_splitter_overflow_drag(self, delta_x: int) -> None:
         if delta_x >= 0 or not self.tag_list_panel.isVisible():
@@ -15488,6 +15520,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "preview_image_lbl"):
             self._update_preview_display()
         self._position_sidebar_preview_play_button()
+        self._schedule_gallery_container_relayout(120)
 
     def about(self) -> None:
         st = self.bridge.get_tools_status()

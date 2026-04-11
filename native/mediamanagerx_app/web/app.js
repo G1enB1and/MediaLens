@@ -50,6 +50,11 @@ let gTimelineNavigationActiveUntil = 0;
 let gTimelineHeaderObserver = null;
 let gTimelineVisibleGroupKeys = new Set();
 let gTimelineActiveGroupKey = '';
+let gGalleryRelayoutTimer = 0;
+let gGalleryRelayoutRaf = 0;
+let gGalleryResizeObserver = null;
+let gGalleryLastLayoutWidth = 0;
+let gGalleryLastLayoutHeight = 0;
 let gDuplicateKeepOverrides = new Map();
 let gDuplicateDeleteOverrides = new Map();
 let gDuplicateBestOverrides = new Map();
@@ -3138,6 +3143,82 @@ function rerenderCurrentMediaPreservingScroll() {
   renderMediaList(gMedia, false);
 }
 
+function getGalleryLayoutMetrics() {
+  const main = document.querySelector('main');
+  const mediaList = document.getElementById('mediaList');
+  return {
+    main,
+    mediaList,
+    width: Math.round((main && main.clientWidth) || (mediaList && mediaList.clientWidth) || window.innerWidth || 0),
+    height: Math.round((main && main.clientHeight) || (mediaList && mediaList.clientHeight) || window.innerHeight || 0),
+  };
+}
+
+function runGalleryRelayout(reason = '') {
+  const metrics = getGalleryLayoutMetrics();
+  const { mediaList, width, height } = metrics;
+  if (!mediaList) return;
+  gGalleryLastLayoutWidth = width;
+  gGalleryLastLayoutHeight = height;
+
+  if (mediaList.classList.contains('gallery-details')) {
+    applyDetailsColumnWidths(mediaList);
+  }
+
+  if (Array.isArray(gMedia) && gMedia.length > 0) {
+    rerenderCurrentMediaPreservingScroll();
+  }
+
+  syncTimelineViewportBox();
+  layoutTimelinePoints();
+  refreshVisibleTimelineAnchors();
+  scheduleTimelineScrollTargetRefresh();
+  if (shouldUseInfiniteScrollMode()) {
+    requestAnimationFrame(() => maybeLoadMoreInfiniteResults());
+  }
+}
+
+function scheduleGalleryRelayout(reason = '') {
+  const metrics = getGalleryLayoutMetrics();
+  if (!metrics.mediaList) return;
+  const widthChanged = Math.abs(metrics.width - gGalleryLastLayoutWidth) > 1;
+  const heightChanged = Math.abs(metrics.height - gGalleryLastLayoutHeight) > 1;
+  if (!widthChanged && !heightChanged && reason !== 'force') {
+    return;
+  }
+
+  if (gGalleryRelayoutTimer) {
+    clearTimeout(gGalleryRelayoutTimer);
+    gGalleryRelayoutTimer = 0;
+  }
+  gGalleryRelayoutTimer = window.setTimeout(() => {
+    gGalleryRelayoutTimer = 0;
+    if (gGalleryRelayoutRaf) {
+      cancelAnimationFrame(gGalleryRelayoutRaf);
+      gGalleryRelayoutRaf = 0;
+    }
+    gGalleryRelayoutRaf = requestAnimationFrame(() => {
+      gGalleryRelayoutRaf = 0;
+      runGalleryRelayout(reason);
+    });
+  }, 90);
+}
+
+function initGalleryResizeObserver() {
+  if (gGalleryResizeObserver || typeof ResizeObserver === 'undefined') return;
+  const { main, width, height } = getGalleryLayoutMetrics();
+  gGalleryLastLayoutWidth = width;
+  gGalleryLastLayoutHeight = height;
+  gGalleryResizeObserver = new ResizeObserver(() => {
+    scheduleGalleryRelayout('observer');
+  });
+  if (main) gGalleryResizeObserver.observe(main);
+}
+
+window.__mmx_scheduleGalleryRelayout = function (reason) {
+  scheduleGalleryRelayout(reason || 'qt');
+};
+
 function shouldUseInfiniteDateScroll() {
   return gGroupBy === 'date' && gGalleryViewMode !== 'masonry';
 }
@@ -5672,6 +5753,10 @@ document.addEventListener('DOMContentLoaded', () => {
       clearReviewMode();
     }
     syncGroupByUi();
+    setGlobalLoading(true, REVIEW_VIEW_MODES.has(gGroupBy) ? 'Scanning folder...' : 'Loading gallery...', 10);
+    if (Array.isArray(gMedia) && gMedia.length > 0) {
+      rerenderCurrentMediaPreservingScroll();
+    }
     if (gBridge && gBridge.set_setting_str) {
       gBridge.set_setting_str('gallery.group_by', gGroupBy, function () {
         gBridge.set_setting_str('gallery.view_mode', gGalleryViewMode, function () {
@@ -7885,14 +7970,7 @@ window.__mmx_clearTagScope = function () {
 };
 
 window.addEventListener('resize', () => {
-  const mediaList = document.getElementById('mediaList');
-  if (mediaList && mediaList.classList.contains('gallery-details')) {
-    applyDetailsColumnWidths(mediaList);
-  }
-  syncTimelineViewportBox();
-  layoutTimelinePoints();
-  refreshVisibleTimelineAnchors();
-  scheduleTimelineScrollTargetRefresh();
+  scheduleGalleryRelayout('window');
 });
 
 async function main() {
@@ -7901,6 +7979,7 @@ async function main() {
   wireSearch();
   wireAdvancedSearch();
   wireSidebarToggles();
+  initGalleryResizeObserver();
 
 
   // Show immediately on first paint (prevents "nothing then overlay" behavior)
@@ -8383,19 +8462,23 @@ async function main() {
       bridge.uiFlagChanged.connect(function (key, value) {
         if (key === 'ui.show_left_panel') {
           updateSidebarButtonIcons('left', !!value);
+          scheduleGalleryRelayout('ui.show_left_panel');
           return;
         }
         if (key === 'ui.show_top_panel') {
           applyTopPanelVisibility(!!value);
           updateSidebarButtonIcons('top', !!value);
+          scheduleGalleryRelayout('ui.show_top_panel');
           return;
         }
         if (key === 'ui.show_bottom_panel') {
           updateSidebarButtonIcons('bottom', !!value);
+          scheduleGalleryRelayout('ui.show_bottom_panel');
           return;
         }
         if (key === 'ui.show_right_panel') {
           updateSidebarButtonIcons('right', !!value);
+          scheduleGalleryRelayout('ui.show_right_panel');
           return;
         }
         if (key === 'ui.theme_mode') {
