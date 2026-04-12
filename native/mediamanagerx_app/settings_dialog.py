@@ -274,6 +274,7 @@ DUPLICATE_PRIORITY_ORDER_DEFAULT = [
     "Resolution",
     "File Format",
     "Preferred Folders",
+    "Most metadata",
     "Compression",
     "Color / Grey Preference",
     "Text / No Text Preference",
@@ -1425,6 +1426,7 @@ class DuplicateSettingsPage(SettingsPage):
         super().__init__(dialog)
         self._loading = False
         self._folder_priority_syncing = False
+        self._saved_preferred_folder_order: list[str] = [DUPLICATE_PREFERRED_FOLDERS_SENTINEL]
         self._folder_icon_provider = QFileIconProvider()
         self._folder_icon = self._folder_icon_provider.icon(QFileIconProvider.IconType.Folder)
         self._folder_icon_pixmap = self._folder_icon.pixmap(QSize(16, 16))
@@ -1577,10 +1579,13 @@ class DuplicateSettingsPage(SettingsPage):
     def _normalize_folder_priority_order(raw: object) -> list[str]:
         from app.mediamanager.utils.pathing import normalize_windows_path
 
-        try:
-            parsed = json.loads(str(raw or "[]"))
-        except Exception:
-            parsed = []
+        if isinstance(raw, list):
+            parsed = raw
+        else:
+            try:
+                parsed = json.loads(str(raw or "[]"))
+            except Exception:
+                parsed = []
         order: list[str] = []
         seen: set[str] = set()
         for item in parsed if isinstance(parsed, list) else []:
@@ -1722,7 +1727,14 @@ class DuplicateSettingsPage(SettingsPage):
     def _save_preferred_folder_order(self) -> None:
         if self._loading or self._folder_priority_syncing:
             return
-        self.dialog.set_setting_str("duplicate.rules.preferred_folders_order", json.dumps(self._preferred_folder_order()))
+        self._saved_preferred_folder_order = self._normalize_folder_priority_order(self._preferred_folder_order())
+        raw_value = json.dumps(self._saved_preferred_folder_order)
+        self.bridge.settings.setValue("duplicate/rules/preferred_folders_order", raw_value)
+        self.bridge.settings.sync()
+        try:
+            self.bridge.uiFlagChanged.emit("duplicate.rules.preferred_folders_order", True)
+        except Exception:
+            pass
 
     def _apply_preferred_folder_sentinel_style(self) -> None:
         self._rebuild_prioritized_folder_row_widgets()
@@ -1736,33 +1748,14 @@ class DuplicateSettingsPage(SettingsPage):
         self._folder_priority_syncing = True
         try:
             scope_folders = self._scope_folder_paths()
-            scope_keys = {path.casefold(): path for path in scope_folders}
             self._populate_available_folder_tree(scope_folders)
-            saved_order = self._preferred_folder_order()
-            normalized_order: list[str] = []
-            seen_order: set[str] = set()
-            for value in saved_order:
-                text = str(value or "").strip()
-                if not text:
-                    continue
-                if text == DUPLICATE_PREFERRED_FOLDERS_SENTINEL:
-                    key = "__sentinel__"
-                    normalized = DUPLICATE_PREFERRED_FOLDERS_SENTINEL
-                else:
-                    canonical = scope_keys.get(text.casefold())
-                    if not canonical:
-                        continue
-                    normalized = canonical
-                    key = canonical.casefold()
-                if key in seen_order:
-                    continue
-                seen_order.add(key)
-                normalized_order.append(normalized)
-            if DUPLICATE_PREFERRED_FOLDERS_SENTINEL not in normalized_order:
-                normalized_order.append(DUPLICATE_PREFERRED_FOLDERS_SENTINEL)
+            current_order = self._preferred_folder_order()
+            source_order = current_order if current_order else self._saved_preferred_folder_order
+            normalized_order = self._normalize_folder_priority_order(source_order)
+            self._saved_preferred_folder_order = list(normalized_order)
 
             self.prioritized_folders_list.clear()
-            for path in normalized_order:
+            for path in self._saved_preferred_folder_order:
                 self._add_folder_list_item(self.prioritized_folders_list, path)
             self._apply_preferred_folder_sentinel_style()
         finally:
@@ -1773,7 +1766,12 @@ class DuplicateSettingsPage(SettingsPage):
         if self._loading:
             return
         self.folder_priority_panel.setVisible(bool(checked))
-        self.dialog.set_setting_bool("duplicate.rules.preferred_folders_enabled", checked)
+        self.bridge.settings.setValue("duplicate/rules/preferred_folders_enabled", bool(checked))
+        self.bridge.settings.sync()
+        try:
+            self.bridge.uiFlagChanged.emit("duplicate.rules.preferred_folders_enabled", bool(checked))
+        except Exception:
+            pass
         if checked:
             self._sync_folder_priority_lists()
             self._schedule_preferred_folder_layout_refresh()
@@ -1835,9 +1833,10 @@ class DuplicateSettingsPage(SettingsPage):
             self.folder_priority_panel.setVisible(preferred_enabled)
             self.available_folders_tree.clear()
             self.prioritized_folders_list.clear()
-            for folder_path in self._normalize_folder_priority_order(
+            self._saved_preferred_folder_order = self._normalize_folder_priority_order(
                 self.settings.value("duplicate/rules/preferred_folders_order", "[]", type=str)
-            ):
+            )
+            for folder_path in self._saved_preferred_folder_order:
                 self._add_folder_list_item(self.prioritized_folders_list, folder_path)
             self._sync_folder_priority_lists()
             with QSignalBlocker(self.merge_before_delete_toggle):
@@ -2260,14 +2259,20 @@ class SettingsDialog(QDialog):
             widget.setPalette(palette)
 
     def set_setting_bool(self, key: str, value: bool) -> None:
-        if not self.bridge.set_setting_bool(key, bool(value)):
-            self.settings.setValue(key.replace(".", "/"), bool(value))
-            self.settings.sync()
+        try:
+            self.bridge.set_setting_bool(key, bool(value))
+        except Exception:
+            pass
+        self.settings.setValue(key.replace(".", "/"), bool(value))
+        self.settings.sync()
 
     def set_setting_str(self, key: str, value: str) -> None:
-        if not self.bridge.set_setting_str(key, str(value or "")):
-            self.settings.setValue(key.replace(".", "/"), str(value or ""))
-            self.settings.sync()
+        try:
+            self.bridge.set_setting_str(key, str(value or ""))
+        except Exception:
+            pass
+        self.settings.setValue(key.replace(".", "/"), str(value or ""))
+        self.settings.sync()
 
     def reset_review_group_exclusions(self) -> bool:
         try:

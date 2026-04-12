@@ -5,6 +5,7 @@ let gActiveTagScopeQuery = '';
 let gSelectAllAfterRefresh = false;
 let gPage = 0;
 const PAGE_SIZE = 100;
+const MAX_GALLERY_FETCH_LIMIT = 2147483647;
 let gTotal = 0;
 let gMedia = []; // Current page items
 let gSelectedFolders = [];
@@ -941,6 +942,8 @@ const DUPLICATE_PRIORITY_ORDER_DEFAULT = [
   'File Size',
   'Resolution',
   'File Format',
+  'Preferred Folders',
+  'Most metadata',
   'Compression',
   'Color / Grey Preference',
   'Text / No Text Preference',
@@ -1779,6 +1782,30 @@ function beginReviewLoading(text, pct = 10) {
   return gReviewLoadingGeneration;
 }
 
+function getReviewBuildStageText(stage = 'loading') {
+  const mode = isDuplicateModeActive()
+    ? String(gGroupBy || '').trim().toLowerCase()
+    : '';
+  const duplicateMode = mode === 'duplicates';
+  const similarMode = mode === 'similar' || mode === 'similar_only';
+  switch (stage) {
+    case 'scan':
+      return 'Scanning folder...';
+    case 'group':
+      if (duplicateMode) return 'Grouping duplicate files...';
+      if (similarMode) return 'Finding similar files...';
+      return 'Preparing review results...';
+    case 'prepare':
+      if (duplicateMode) return 'Preparing duplicate review cards...';
+      if (similarMode) return 'Preparing similar review cards...';
+      return 'Preparing review cards...';
+    case 'render':
+      return 'Rendering review results...';
+    default:
+      return 'Loading review results...';
+  }
+}
+
 function updateReviewLoadingProgress(pct, text = null) {
   if (!gReviewLoadingActive) return;
   const nextPct = Math.max(gReviewLoadingProgress, Math.max(0, Math.min(100, Number(pct) || 0)));
@@ -1969,7 +1996,10 @@ function wireScanIndicator() {
       file.textContent = fileName;
       bar.style.width = `${percent}%`;
       if (gReviewLoadingActive && isDuplicateModeActive()) {
-        updateReviewLoadingProgress(10 + Math.round((Math.max(0, Math.min(100, Number(percent) || 0)) * 0.8)), gReviewLoadingMessage);
+        updateReviewLoadingProgress(
+          10 + Math.round((Math.max(0, Math.min(100, Number(percent) || 0)) * 0.6)),
+          getReviewBuildStageText('scan')
+        );
       }
       render();
     });
@@ -2502,6 +2532,25 @@ function getDuplicateGroupItems(groupKey) {
     .filter(item => String(item.duplicate_group_key || '') === String(groupKey || ''))
     .slice()
     .sort((a, b) => Number(a.duplicate_group_position || 0) - Number(b.duplicate_group_position || 0));
+}
+
+function getDisplayDuplicateReasons(item) {
+  const reasons = Array.isArray(item && item.duplicate_category_reasons)
+    ? item.duplicate_category_reasons.filter(Boolean)
+    : [];
+  if (!item || reasons.includes('Preferred Folder')) return reasons;
+  const groupKey = String(item.duplicate_group_key || '').trim();
+  if (!groupKey) return reasons;
+  const groupItems = getDuplicateGroupItems(groupKey);
+  if (!groupItems.length) return reasons;
+  const scores = groupItems.map(entry => Number(entry.duplicate_preferred_folder_score) || 0);
+  const maxScore = Math.max(...scores);
+  const minScore = Math.min(...scores);
+  const itemScore = Number(item.duplicate_preferred_folder_score) || 0;
+  if (maxScore > 0 && maxScore > minScore && itemScore === maxScore) {
+    reasons.push('Preferred Folder');
+  }
+  return reasons;
 }
 
 function getDuplicateReviewSummaryTotals() {
@@ -4522,7 +4571,7 @@ function createStructuredCard(item, idx) {
     const bottomMeta = document.createElement('div');
     bottomMeta.className = 'duplicate-card-bottom-meta';
 
-    const reasons = Array.isArray(item.duplicate_category_reasons) ? item.duplicate_category_reasons.filter(Boolean) : [];
+    const reasons = getDisplayDuplicateReasons(item);
     if (reasons.length) {
       const duplicateMeta = document.createElement('div');
       duplicateMeta.className = 'entry-detail duplicate-reason-list';
@@ -6394,58 +6443,52 @@ function refreshFromBridge(bridge, resetPage = false) {
         updateGalleryCountChip(0);
         renderMediaList([], !gPendingScrollAnchor);
         renderPager();
-        if (gReviewLoadingActive) updateReviewLoadingProgress(15, gReviewLoadingMessage);
+        if (gReviewLoadingActive) updateReviewLoadingProgress(15, getReviewBuildStageText('scan'));
         else setGlobalLoading(true, 'Scanning folder...', 10);
         ensureFullFolderScanRequested(bridge, gSelectedFolders, gSearchQuery || '');
         return;
       }
 
       if (duplicateMode) {
-        if (gReviewLoadingActive) updateReviewLoadingProgress(20, gReviewLoadingMessage);
-        fetchMediaCount(gSelectedFolders, gFilter, gSearchQuery || '').then(function (count) {
+        if (gReviewLoadingActive) updateReviewLoadingProgress(76, getReviewBuildStageText('group'));
+        fetchMediaList(gSelectedFolders, MAX_GALLERY_FETCH_LIMIT, 0, gSort, gFilter, gSearchQuery || '').then(function (items) {
           if (refreshToken !== gRefreshGeneration) return;
-          const normalizedCount = count || 0;
-          gTotal = normalizedCount;
+          const reviewSignature = computeReviewRenderSignature(items);
+          if (gReviewLoadingActive && shouldShowScanWaitingEmptyState() && !currentReviewSignature) {
+            updateReviewLoadingProgress(76, getReviewBuildStageText('group'));
+            return;
+          }
+          gTotal = Array.isArray(items) ? items.length : 0;
           updateGalleryCountChip(gTotal);
-          if (gReviewLoadingActive) updateReviewLoadingProgress(35, gReviewLoadingMessage);
-          const limit = Math.max(PAGE_SIZE, normalizedCount || PAGE_SIZE);
-          fetchMediaList(gSelectedFolders, limit, 0, gSort, gFilter, gSearchQuery || '').then(function (items) {
-            if (refreshToken !== gRefreshGeneration) return;
-            const reviewSignature = computeReviewRenderSignature(items);
-            if (gReviewLoadingActive && shouldShowScanWaitingEmptyState() && !currentReviewSignature) {
-              updateReviewLoadingProgress(85, gReviewLoadingMessage);
-              return;
-            }
-            if (!gReviewLoadingActive && reviewSignature && reviewSignature === gLastRenderedReviewSignature) {
-              consumeSelectAllAfterRefresh();
-              renderPager();
-              setGlobalLoading(false);
-              return;
-            }
-            if (gReviewLoadingActive) updateReviewLoadingProgress(80, gReviewLoadingMessage);
-            renderMediaList(items, !gPendingScrollAnchor);
+          if (!gReviewLoadingActive && reviewSignature && reviewSignature === gLastRenderedReviewSignature) {
             consumeSelectAllAfterRefresh();
             renderPager();
-            const reviewLoadingGeneration = gReviewLoadingGeneration;
-            requestAnimationFrame(() => {
+            setGlobalLoading(false);
+            return;
+          }
+          if (gReviewLoadingActive) updateReviewLoadingProgress(90, getReviewBuildStageText('prepare'));
+          renderMediaList(items, !gPendingScrollAnchor);
+          consumeSelectAllAfterRefresh();
+          renderPager();
+          const reviewLoadingGeneration = gReviewLoadingGeneration;
+          requestAnimationFrame(() => {
+            if (refreshToken !== gRefreshGeneration) return;
+            const mediaList = document.getElementById('mediaList');
+            prioritizeVisibleMediaLoads(mediaList);
+            if (gReviewLoadingActive) updateReviewLoadingProgress(96, getReviewBuildStageText('render'));
+            waitForInitialReviewCards(mediaList, reviewLoadingGeneration).then(() => {
               if (refreshToken !== gRefreshGeneration) return;
-              const mediaList = document.getElementById('mediaList');
-              prioritizeVisibleMediaLoads(mediaList);
-              if (gReviewLoadingActive) updateReviewLoadingProgress(92, gReviewLoadingMessage);
-              waitForInitialReviewCards(mediaList, reviewLoadingGeneration).then(() => {
-                if (refreshToken !== gRefreshGeneration) return;
-                if (gReviewLoadingActive) {
-                  updateReviewLoadingProgress(100, gReviewLoadingMessage);
-                  endReviewLoading(reviewLoadingGeneration);
-                } else {
-                  setGlobalLoading(false);
-                }
-              });
+              if (gReviewLoadingActive) {
+                updateReviewLoadingProgress(100, getReviewBuildStageText('render'));
+                endReviewLoading(reviewLoadingGeneration);
+              } else {
+                setGlobalLoading(false);
+              }
             });
-            if (bridge.start_scan_paths) {
-              bridge.start_scan_paths((items || []).filter(item => !item.is_folder).map(item => item.path).filter(Boolean));
-            }
           });
+          if (bridge.start_scan_paths) {
+            bridge.start_scan_paths((items || []).filter(item => !item.is_folder).map(item => item.path).filter(Boolean));
+          }
         });
         return;
       }
@@ -8515,7 +8558,7 @@ async function main() {
           return;
         }
         if (gReviewLoadingActive && isDuplicateModeActive()) {
-          updateReviewLoadingProgress(95, gReviewLoadingMessage);
+          updateReviewLoadingProgress(76, getReviewBuildStageText('group'));
         }
         gScanActive = false;
         gAwaitingScanResults = false;

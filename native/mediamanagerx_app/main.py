@@ -3325,6 +3325,8 @@ class Bridge(QObject):
         self._disk_cache: dict[str, Path] = {}
         self._disk_cache_key: str = "" # Hash of selected folders list
         self._last_full_scan_key: str = ""
+        self._disk_cache_by_scope: dict[str, dict[str, Path]] = {}
+        self._warm_scan_keys: set[str] = set()
         self._text_processing_generation: int = 0
         self._text_processing_paused: bool = False
         self._text_processing_active: bool = False
@@ -4426,23 +4428,29 @@ class Bridge(QObject):
         return completed
 
     def _backfill_scope_content_hashes(self, entries: list[dict]) -> None:
-        from app.mediamanager.utils.hashing import calculate_file_hash
+        from app.mediamanager.utils.hashing import calculate_media_content_hash
 
         updates: list[tuple[str, str]] = []
         for entry in entries:
-            if entry.get("is_folder") or str(entry.get("content_hash") or "").strip():
+            if entry.get("is_folder"):
                 continue
             path = str(entry.get("path") or "").strip()
             if not path:
+                continue
+            media_type = str(entry.get("media_type") or "").strip().lower()
+            existing_hash = str(entry.get("content_hash") or "").strip()
+            if existing_hash and media_type != "image":
                 continue
             try:
                 p = Path(path)
                 if not p.exists() or not p.is_file():
                     continue
-                content_hash = calculate_file_hash(p)
+                content_hash = calculate_media_content_hash(p)
             except Exception:
                 content_hash = ""
             if not content_hash:
+                continue
+            if content_hash == existing_hash:
                 continue
             entry["content_hash"] = content_hash
             updates.append((content_hash, path))
@@ -4683,7 +4691,7 @@ class Bridge(QObject):
         return get_media_by_path(self.conn, clean) or {}
 
     def _build_compare_entry(self, path: str) -> dict:
-        from app.mediamanager.utils.hashing import calculate_file_hash
+        from app.mediamanager.utils.hashing import calculate_media_content_hash
         from app.mediamanager.db.metadata_repo import get_media_metadata
         from app.mediamanager.db.ai_metadata_repo import get_media_ai_metadata
         from app.mediamanager.db.tags_repo import list_media_tags
@@ -4724,9 +4732,9 @@ class Bridge(QObject):
         if original_file_date <= 0:
             original_file_date = self._normalized_file_date_ns(file_created_time, modified_time)
         content_hash = str(media.get("content_hash") or "").strip()
-        if not content_hash:
+        if not content_hash or str(media.get("media_type") or "") == "image":
             try:
-                content_hash = calculate_file_hash(p)
+                content_hash = calculate_media_content_hash(p)
             except Exception:
                 content_hash = ""
             if content_hash:
@@ -4815,6 +4823,19 @@ class Bridge(QObject):
             if entry:
                 ranked_entries.append(dict(entry))
         ranked = self._rank_duplicate_group(ranked_entries) if ranked_entries else []
+        if ranked:
+            preferred_scores = [int(entry.get("duplicate_preferred_folder_score") or 0) for entry in ranked]
+            max_preferred_score = max(preferred_scores, default=0)
+            min_preferred_score = min(preferred_scores, default=0)
+            if max_preferred_score > 0 and max_preferred_score > min_preferred_score:
+                for entry in ranked:
+                    if int(entry.get("duplicate_preferred_folder_score") or 0) != max_preferred_score:
+                        continue
+                    reasons = list(entry.get("duplicate_category_reasons") or [])
+                    if "Preferred Folder" not in reasons:
+                        reasons.append("Preferred Folder")
+                    entry["duplicate_category_reasons"] = reasons
+                    entry["duplicate_best_reason"] = " • ".join(reasons)
         ranked_by_path = {str(entry.get("path") or ""): entry for entry in ranked}
         active_paths = {str(entry.get("path") or "") for entry in slot_entries.values() if entry}
         active_entries = [entry for entry in slot_entries.values() if entry]
@@ -5450,8 +5471,7 @@ class Bridge(QObject):
             try: newp = self._hide_by_renaming_dot(old)
             except Exception: pass
             self.fileOpFinished.emit("hide", bool(newp), old, newp)
-            self._disk_cache = {}
-            self._disk_cache_key = ""
+            self._invalidate_scan_caches()
         threading.Thread(target=work, daemon=True).start()
         return True
 
@@ -5475,8 +5495,7 @@ class Bridge(QObject):
             try: newp = self._unhide_by_renaming_dot(old)
             except Exception: pass
             self.fileOpFinished.emit("unhide", bool(newp), old, newp)
-            self._disk_cache = {}
-            self._disk_cache_key = ""
+            self._invalidate_scan_caches()
         threading.Thread(target=work, daemon=True).start()
         return True
 
@@ -5508,8 +5527,7 @@ class Bridge(QObject):
                     except Exception: pass
             except Exception: pass
             self.fileOpFinished.emit("rename", ok, old, newp)
-            self._disk_cache = {}
-            self._disk_cache_key = ""
+            self._invalidate_scan_caches()
         threading.Thread(target=work, daemon=True).start()
         return True
 
@@ -5550,7 +5568,8 @@ class Bridge(QObject):
             return
 
         def work():
-            from app.mediamanager.db.media_repo import rename_media_path, move_directory_in_db, add_media_item
+            from app.mediamanager.db.media_repo import rename_media_path, move_directory_in_db, add_media_item, get_media_by_path
+            from app.mediamanager.db.tags_repo import attach_tags, list_media_tags
             
             
             is_move = op_type in ("move", "paste_move")
@@ -5623,7 +5642,13 @@ class Bridge(QObject):
                             
                             ext = final_dst.suffix.lower()
                             mtype = "image" if ext in IMAGE_EXTS else "video"
-                            add_media_item(self.conn, str(final_dst), mtype)
+                            new_media_id = add_media_item(self.conn, str(final_dst), mtype)
+                            if src.is_file():
+                                src_media = get_media_by_path(self.conn, str(src))
+                                if src_media:
+                                    src_tags = list_media_tags(self.conn, int(src_media["id"]))
+                                    if src_tags:
+                                        attach_tags(self.conn, int(new_media_id), src_tags)
                         
                         any_ok = True
                     except Exception as e:
@@ -5634,7 +5659,7 @@ class Bridge(QObject):
             except Exception as e:
                 self.fileOpFinished.emit(op_type, False, "", "")
             
-            self._disk_cache = {}; self._disk_cache_key = ""
+            self._invalidate_scan_caches()
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -5747,8 +5772,7 @@ class Bridge(QObject):
             from app.mediamanager.utils.pathing import normalize_windows_path
             self.conn.execute("DELETE FROM media_items WHERE path = ?", (normalize_windows_path(path_str),))
             self.conn.commit()
-            self._disk_cache = {}
-            self._disk_cache_key = ""
+            self._invalidate_scan_caches()
             self.collectionsChanged.emit()
             self.fileOpFinished.emit("delete", True, path_str, "")
             return True
@@ -5775,8 +5799,7 @@ class Bridge(QObject):
             from app.mediamanager.utils.pathing import normalize_windows_path
             self.conn.execute("DELETE FROM media_items WHERE path = ?", (normalize_windows_path(path_str),))
             self.conn.commit()
-            self._disk_cache = {}
-            self._disk_cache_key = ""
+            self._invalidate_scan_caches()
             self.fileOpFinished.emit("delete", True, path_str, "")
             return True
         except Exception:
@@ -6293,6 +6316,7 @@ class Bridge(QObject):
                             "duplicate_group_position": -1,
                             "duplicate_keep_suggestion": False,
                             "duplicate_space_savings": 0,
+                            "duplicate_preferred_folder_score": 0,
                             "duplicate_category_reasons": [],
                             "duplicate_is_overall_best": False,
                             "color_variant": "",
@@ -6349,6 +6373,7 @@ class Bridge(QObject):
                     "duplicate_group_position": int(r.get("duplicate_group_position") or 0),
                     "duplicate_keep_suggestion": bool(r.get("duplicate_keep_suggestion")),
                     "duplicate_space_savings": int(r.get("duplicate_space_savings") or 0),
+                    "duplicate_preferred_folder_score": int(r.get("duplicate_preferred_folder_score") or 0),
                     "duplicate_category_reasons": list(r.get("duplicate_category_reasons") or []),
                     "duplicate_best_reason": r.get("duplicate_best_reason") or "",
                     "duplicate_is_overall_best": bool(r.get("duplicate_is_overall_best")),
@@ -6418,7 +6443,11 @@ class Bridge(QObject):
         if not folders: return []
         show_hidden = self._show_hidden_enabled()
         current_key = hashlib.sha1(",".join(sorted(folders)).encode()).hexdigest()
-        if self._disk_cache and self._disk_cache_key == current_key: disk_files = self._disk_cache
+        cached_scope = self._disk_cache_by_scope.get(current_key)
+        if cached_scope is not None:
+            disk_files = cached_scope
+            self._disk_cache = disk_files
+            self._disk_cache_key = current_key
         else:
             disk_files = {}
             for folder in folders:
@@ -6438,6 +6467,7 @@ class Bridge(QObject):
                                 continue
                             if p.suffix.lower() in ALL_EXTS: disk_files[normalize_windows_path(str(p))] = p
                 except Exception: pass
+            self._disk_cache_by_scope[current_key] = disk_files
             self._disk_cache, self._disk_cache_key = disk_files, current_key
         db_candidates = list_media_in_scope(self.conn, folders)
         surviving, covered = [], set()
@@ -6831,12 +6861,51 @@ class Bridge(QObject):
             return self._build_duplicate_entries(entries, sort_by)
         return self._sort_gallery_entries(entries, sort_by)
 
+    def _scope_scan_is_warm(self, entries: list[dict]) -> bool:
+        media_entries = [entry for entry in entries if not entry.get("is_folder")]
+        if not media_entries:
+            return True
+        for entry in media_entries:
+            path = str(entry.get("path") or "").strip()
+            if not path:
+                return False
+            try:
+                p = Path(path)
+                if not p.exists() or not p.is_file():
+                    return False
+                stat = p.stat()
+                current_mtime = datetime.fromtimestamp(
+                    stat.st_mtime,
+                    tz=timezone.utc,
+                ).replace(microsecond=0).isoformat()
+            except Exception:
+                return False
+            if int(entry.get("file_size") or 0) != int(stat.st_size):
+                return False
+            if str(entry.get("modified_time") or "") != current_mtime:
+                return False
+            if not str(entry.get("content_hash") or "").strip():
+                return False
+            if not (entry.get("width") and entry.get("height")):
+                return False
+            if str(entry.get("media_type") or "") == "image" and Path(path).suffix.lower() != ".svg":
+                if not str(entry.get("phash") or "").strip():
+                    return False
+        return True
+
+    def _invalidate_scan_caches(self) -> None:
+        self._disk_cache = {}
+        self._disk_cache_key = ""
+        self._disk_cache_by_scope.clear()
+        self._last_full_scan_key = ""
+        self._warm_scan_keys.clear()
+
     @Slot(list, str)
     def start_scan(self, folders: list, search_query: str = "") -> None:
         if not folders:
             return
         scan_key = hashlib.sha1(",".join(sorted(str(folder) for folder in folders)).encode()).hexdigest()
-        if self._last_full_scan_key == scan_key:
+        if self._last_full_scan_key == scan_key or scan_key in self._warm_scan_keys:
             primary = folders[0] if folders else ""
             def emit_cached_scan_finished() -> None:
                 try:
@@ -6861,10 +6930,16 @@ class Bridge(QObject):
                 with self._scan_lock:
                     # Always refresh the reconciled scope first so a newly selected root
                     # cannot accidentally inherit stale paths from a previous disk cache.
-                    self._get_reconciled_candidates(folders, "all", search_query)
+                    reconciled = self._get_reconciled_candidates(folders, "all", search_query)
+                    if self._scope_scan_is_warm(reconciled):
+                        self._last_full_scan_key = scan_key
+                        self._warm_scan_keys.add(scan_key)
+                        self.scanFinished.emit(primary, len(reconciled))
+                        return
                     paths = list(self._disk_cache.values())
                     self._do_full_scan(paths, self.conn, emit_progress=True)
                     self._last_full_scan_key = scan_key
+                    self._warm_scan_keys.add(scan_key)
                     self.scanFinished.emit(primary, len(self._get_reconciled_candidates(folders, "all", search_query)))
                 self._ensure_background_text_processing(list(folders), None)
             except Exception as exc:
@@ -6893,7 +6968,7 @@ class Bridge(QObject):
     def _do_full_scan(self, paths: list[Path], conn, emit_progress: bool = True) -> int:
         from app.mediamanager.db.media_repo import get_media_by_path, upsert_media_item
         from app.mediamanager.metadata.persistence import inspect_and_persist_if_supported
-        from app.mediamanager.utils.hashing import calculate_file_hash, calculate_image_phash
+        from app.mediamanager.utils.hashing import calculate_media_content_hash, calculate_image_phash
         from datetime import datetime, timezone
         total, count = len(paths), 0
         for i, p in enumerate(paths):
@@ -6943,7 +7018,7 @@ class Bridge(QObject):
                         conn,
                         str(p),
                         mtype,
-                        calculate_file_hash(p),
+                        calculate_media_content_hash(p),
                         phash=phash,
                         width=width,
                         height=height,
@@ -9396,8 +9471,7 @@ class MainWindow(QMainWindow):
         self._navigate_to_folder(str(parent), record_history=True)
 
     def _refresh_current_folder(self) -> None:
-        self.bridge._disk_cache = {}
-        self.bridge._disk_cache_key = ""
+        self.bridge._invalidate_scan_caches()
         current_path = self.bridge._selected_folders[0] if self.bridge._selected_folders else ""
         if not current_path:
             self._update_navigation_state()

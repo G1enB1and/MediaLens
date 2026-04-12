@@ -226,12 +226,15 @@ def sort_duplicate_group(
     largest_file_size = max(file_sizes, default=0)
     smallest_file_size = min(file_sizes, default=0)
     best_modified = max(modified_times, default=0)
+    preferred_folder_scores = [int(entry.get("duplicate_preferred_folder_score") or 0) for entry in ranked]
+    best_preferred_folder_score = max(preferred_folder_scores, default=0)
     has_color_variants = "color" in color_modes and "grayscale" in color_modes
     unique_best_metadata = metadata_scores.count(best_metadata) == 1 and best_metadata > (0, 0)
     unique_best_folder = folder_depths.count(best_folder_depth) == 1 and best_folder_depth > 1
     unique_largest_file = file_sizes.count(largest_file_size) == 1 and largest_file_size > smallest_file_size
     unique_smallest_file = file_sizes.count(smallest_file_size) == 1 and largest_file_size > smallest_file_size
     unique_best_modified = modified_times.count(best_modified) == 1 and best_modified > 0
+    preferred_folder_winner_exists = best_preferred_folder_score > 0
     for index, entry in enumerate(ranked):
         entry["duplicate_keep_suggestion"] = index == 0
         entry["duplicate_group_position"] = index
@@ -246,6 +249,8 @@ def sort_duplicate_group(
             reasons.append("Most metadata")
         if unique_best_folder and folder_depth_for_duplicate(entry) == best_folder_depth:
             reasons.append("Best folder organization")
+        if preferred_folder_winner_exists and int(entry.get("duplicate_preferred_folder_score") or 0) == best_preferred_folder_score:
+            reasons.append("Preferred Folder")
         if unique_largest_file and int(entry.get("file_size") or 0) == largest_file_size:
             reasons.append("Largest file size")
         if unique_smallest_file and int(entry.get("file_size") or 0) == smallest_file_size:
@@ -286,17 +291,25 @@ def rank_duplicate_group(
         configured_priorities = [str(item).strip() for item in json.loads(priorities_raw or "[]") if str(item).strip()]
     except Exception:
         configured_priorities = []
+    default_priorities = [
+        "File Size",
+        "Resolution",
+        "File Format",
+        "Preferred Folders",
+        "Most metadata",
+        "Compression",
+        "Color / Grey Preference",
+        "Text / No Text Preference",
+        "Cropped / Full Preference",
+    ]
     if not configured_priorities:
-        configured_priorities = [
-            "File Size",
-            "Resolution",
-            "File Format",
-            "Preferred Folders",
-            "Compression",
-            "Color / Grey Preference",
-            "Text / No Text Preference",
-            "Cropped / Full Preference",
-        ]
+        configured_priorities = list(default_priorities)
+    else:
+        seen_priorities = {item.casefold() for item in configured_priorities}
+        for item in default_priorities:
+            if item.casefold() not in seen_priorities:
+                configured_priorities.append(item)
+                seen_priorities.add(item.casefold())
     preferred_folders_enabled, _preferred_folder_order, preferred_folder_scores = preferred_folder_priority_state(settings)
 
     def _normalized_aspect_ratio(entry: dict) -> tuple[int, int] | None:
@@ -456,6 +469,13 @@ def rank_duplicate_group(
         if preferred_small and largest_file_size > smallest_file_size:
             candidate_indices = preferred_small
 
+    preferred_folder_scores = [int(entry.get("duplicate_preferred_folder_score") or 0) for entry in ranked]
+    best_preferred_folder_score = max(preferred_folder_scores, default=0)
+    if preferred_folders_enabled and best_preferred_folder_score > 0:
+        for idx, score in enumerate(preferred_folder_scores):
+            if score == best_preferred_folder_score and "Preferred Folder" not in informative_reasons[idx]:
+                informative_reasons[idx].append("Preferred Folder")
+
     format_scores = [_format_score(entry) for entry in ranked]
     best_format_score = max(format_scores, default=0)
     if best_format_score > 0 and format_scores.count(best_format_score) == 1:
@@ -482,6 +502,11 @@ def rank_duplicate_group(
             "label": "Preferred Folder",
             "value": lambda entry: int(entry.get("duplicate_preferred_folder_score") or 0),
             "enabled": lambda values: preferred_folders_enabled and max(values, default=0) > min(values, default=0),
+        },
+        "Most metadata": {
+            "label": "Most metadata",
+            "value": lambda entry: duplicate_metadata_score(entry),
+            "enabled": lambda values: max(values, default=(0, 0)) > (0, 0),
         },
         "Compression": {
             "label": "Compression",
@@ -517,11 +542,6 @@ def rank_duplicate_group(
         resolution_idx = next((i for i, cat in enumerate(positive_categories) if cat["label"] == "Highest resolution"), len(positive_categories))
         positive_categories[resolution_idx:resolution_idx] = list(extra_positive_categories)
     positive_categories.extend([
-        {
-            "label": "Most metadata",
-            "value": lambda entry: duplicate_metadata_score(entry),
-            "enabled": lambda values: max(values, default=(0, 0)) > (0, 0),
-        },
         {
             "label": "Newer edit",
             "value": lambda entry: (entry.get("duplicate_modified_timestamp") or 0) if entry.get("duplicate_is_edit_variant") else 0,
@@ -593,9 +613,6 @@ def rank_duplicate_group(
             file_size_fallback,
             area,
             _format_score(entry),
-            preferred_folder_score_value,
-            tag_count,
-            filled_fields,
             modified_time,
         )
 

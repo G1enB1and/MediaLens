@@ -33,6 +33,34 @@ def calculate_file_hash(path: str | Path, block_size: int = 65536) -> str:
     return hasher.hexdigest()
 
 
+def calculate_image_content_hash(path: str | Path) -> str:
+    """Hash decoded image content so metadata-only edits do not change identity."""
+    try:
+        hasher = hashlib.sha256()
+        with Image.open(path) as img:
+            normalized = img.convert("RGBA")
+            hasher.update(str(normalized.width).encode("utf-8"))
+            hasher.update(b"x")
+            hasher.update(str(normalized.height).encode("utf-8"))
+            hasher.update(b":RGBA:")
+            hasher.update(normalized.tobytes())
+        return hasher.hexdigest()
+    except Exception:
+        return calculate_file_hash(path)
+
+
+def calculate_media_content_hash(path: str | Path) -> str:
+    """Return a duplicate-identity hash, ignoring image metadata-only changes."""
+    candidate = Path(path)
+    if candidate.suffix.lower() in {
+        ".jpg", ".jpeg", ".jpe", ".jfif", ".png", ".webp", ".bmp", ".gif",
+        ".tif", ".tiff", ".heic", ".heif", ".avif", ".raw", ".dng", ".cr2",
+        ".cr3", ".nef", ".arw", ".orf", ".rw2", ".raf", ".srw",
+    }:
+        return calculate_image_content_hash(candidate)
+    return calculate_file_hash(candidate)
+
+
 def calculate_image_phash(path: str | Path) -> str:
     """Calculate a perceptual hash for visually similar image detection."""
     try:
