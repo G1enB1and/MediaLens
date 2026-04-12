@@ -1750,6 +1750,7 @@ let gReviewLoadingActive = false;
 let gReviewLoadingGeneration = 0;
 let gReviewLoadingMessage = 'Loading review results...';
 let gReviewLoadingProgress = 0;
+let gLastRenderedReviewSignature = '';
 
 function setReviewResultsHidden(hidden) {
   const mediaList = document.getElementById('mediaList');
@@ -1759,6 +1760,13 @@ function setReviewResultsHidden(hidden) {
   } else {
     mediaList.classList.remove('review-results-hidden');
   }
+}
+
+function computeReviewRenderSignature(items) {
+  return (Array.isArray(items) ? items : [])
+    .filter(item => item && !item.is_folder)
+    .map(item => `${String(item.duplicate_group_key || '').trim()}::${String(item.path || '').trim()}::${Number(item.duplicate_group_position || 0)}`)
+    .join('|');
 }
 
 function beginReviewLoading(text, pct = 10) {
@@ -2286,12 +2294,19 @@ function getDuplicateBestPath(groupKey) {
   return keepItem && keepItem.path ? keepItem.path : '';
 }
 
+function storeDuplicateKeepPaths(groupKey, paths) {
+  const key = String(groupKey || '');
+  if (!key) return;
+  const nextPaths = Array.from(new Set((Array.isArray(paths) ? paths : [paths]).map(v => String(v || '')).filter(Boolean)));
+  gDuplicateKeepOverrides.set(key, new Set(nextPaths));
+}
+
 function setDuplicateKeepPaths(groupKey, paths) {
   const key = String(groupKey || '');
   if (!key) return;
   const nextPaths = Array.from(new Set((Array.isArray(paths) ? paths : [paths]).map(v => String(v || '')).filter(Boolean)));
   const normalizedNextPaths = new Set(nextPaths.map(normalizeMediaPath).filter(Boolean));
-  gDuplicateKeepOverrides.set(key, new Set(nextPaths));
+  storeDuplicateKeepPaths(key, nextPaths);
   document.querySelectorAll(`.card[data-duplicate-group-key="${CSS.escape(key)}"]`).forEach((card) => {
     const checked = normalizedNextPaths.has(normalizeMediaPath(card.getAttribute('data-path') || ''));
     card.setAttribute('data-duplicate-keep', checked ? 'true' : 'false');
@@ -2301,12 +2316,19 @@ function setDuplicateKeepPaths(groupKey, paths) {
   updateDuplicateReviewSummary();
 }
 
+function storeDuplicateDeletePaths(groupKey, paths) {
+  const key = String(groupKey || '');
+  if (!key) return;
+  const nextPaths = Array.from(new Set((Array.isArray(paths) ? paths : [paths]).map(v => String(v || '')).filter(Boolean)));
+  gDuplicateDeleteOverrides.set(key, new Set(nextPaths));
+}
+
 function setDuplicateDeletePaths(groupKey, paths) {
   const key = String(groupKey || '');
   if (!key) return;
   const nextPaths = Array.from(new Set((Array.isArray(paths) ? paths : [paths]).map(v => String(v || '')).filter(Boolean)));
   const normalizedNextPaths = new Set(nextPaths.map(normalizeMediaPath).filter(Boolean));
-  gDuplicateDeleteOverrides.set(key, new Set(nextPaths));
+  storeDuplicateDeletePaths(key, nextPaths);
   document.querySelectorAll(`.card[data-duplicate-group-key="${CSS.escape(key)}"]`).forEach((card) => {
     const checked = normalizedNextPaths.has(normalizeMediaPath(card.getAttribute('data-path') || ''));
     card.setAttribute('data-duplicate-delete', checked ? 'true' : 'false');
@@ -2316,12 +2338,19 @@ function setDuplicateDeletePaths(groupKey, paths) {
   updateDuplicateReviewSummary();
 }
 
-function setDuplicateBestPath(groupKey, path) {
+function storeDuplicateBestPath(groupKey, path) {
   const key = String(groupKey || '');
   const nextPath = String(path || '');
   if (!key) return;
   if (nextPath) gDuplicateBestOverrides.set(key, nextPath);
   else gDuplicateBestOverrides.delete(key);
+}
+
+function setDuplicateBestPath(groupKey, path) {
+  const key = String(groupKey || '');
+  const nextPath = String(path || '');
+  if (!key) return;
+  storeDuplicateBestPath(key, nextPath);
   const normalizedNextPath = normalizeMediaPath(nextPath);
   if (normalizedNextPath) {
     const keepPaths = new Set(getDuplicateKeepPaths(key));
@@ -2500,14 +2529,19 @@ function getDuplicateReviewSummaryTotals() {
   return { keepCount, deleteCount, savings };
 }
 
-function updateDuplicateReviewSummary() {
+function applyDuplicateReviewSummaryToRoot(root) {
+  if (!root) return;
   const totals = getDuplicateReviewSummaryTotals();
-  const keepEl = document.querySelector('.duplicate-review-keep .duplicate-summary-value');
-  const deleteEl = document.querySelector('.duplicate-review-delete .duplicate-summary-value');
-  const saveEl = document.querySelector('.duplicate-review-save .duplicate-summary-value');
+  const keepEl = root.querySelector('.duplicate-review-keep .duplicate-summary-value');
+  const deleteEl = root.querySelector('.duplicate-review-delete .duplicate-summary-value');
+  const saveEl = root.querySelector('.duplicate-review-save .duplicate-summary-value');
   if (keepEl) keepEl.textContent = `${totals.keepCount}`;
   if (deleteEl) deleteEl.textContent = `${totals.deleteCount}`;
   if (saveEl) saveEl.textContent = `${formatFileSize(totals.savings) || '0 B'}`;
+}
+
+function updateDuplicateReviewSummary() {
+  applyDuplicateReviewSummaryToRoot(document);
 }
 
 function computeAutoResolveKeepPaths(groupKey, settings = {}) {
@@ -3340,7 +3374,7 @@ function runGalleryRelayout(reason = '') {
     applyDetailsColumnWidths(mediaList);
   }
 
-  if (Array.isArray(gMedia) && gMedia.length > 0) {
+  if (Array.isArray(gMedia) && gMedia.length > 0 && !isDuplicateModeActive()) {
     rerenderCurrentMediaPreservingScroll();
   }
 
@@ -4990,6 +5024,10 @@ function renderGroupedMediaList(el, items) {
 }
 
 function finalizeDuplicateMediaList(el, groups) {
+  if (groups && groups.length) {
+    gAwaitingScanResults = false;
+  }
+  gLastRenderedReviewSignature = computeReviewRenderSignature(gMedia);
   renderTimelineRail([]);
   restoreGroupScrollAnchor();
   groups.forEach((group) => {
@@ -4998,7 +5036,7 @@ function finalizeDuplicateMediaList(el, groups) {
     const bestPath = getDuplicateBestPath(group.key);
     if (bestPath) setDuplicateBestPath(group.key, bestPath);
   });
-  updateDuplicateReviewSummary();
+  applyDuplicateReviewSummaryToRoot(el);
   syncDuplicateGroupFromCompareSelection(
     String(gCompareState && gCompareState.best_path || ''),
     Array.isArray(gCompareState && gCompareState.keep_paths) ? gCompareState.keep_paths : [],
@@ -5022,6 +5060,34 @@ function finalizeDuplicateMediaList(el, groups) {
     }
   });
   scheduleBackgroundDrain();
+}
+
+function seedDuplicateGroupState(group) {
+  const existingKeepPaths = getDuplicateKeepPaths(group.key);
+  const hasDeleteOverride = gDuplicateDeleteOverrides.has(group.key);
+  const existingDeletePaths = getDuplicateDeletePaths(group.key);
+  const existingBestPath = getDuplicateBestPath(group.key);
+  const groupPaths = new Set(group.items.map(item => item.path).filter(Boolean));
+  const validKeepPaths = existingKeepPaths.filter(path => groupPaths.has(path));
+  const validDeletePaths = existingDeletePaths.filter(path => groupPaths.has(path));
+  const defaultKeepPaths = getDefaultDuplicateKeepPaths(group.key).filter(path => groupPaths.has(path));
+  const defaultKeepSet = new Set(defaultKeepPaths.map(normalizeMediaPath).filter(Boolean));
+  if (!validKeepPaths.length) {
+    storeDuplicateKeepPaths(group.key, defaultKeepPaths);
+  } else if (validKeepPaths.length !== existingKeepPaths.length) {
+    storeDuplicateKeepPaths(group.key, validKeepPaths);
+  }
+  if (!validDeletePaths.length && !hasDeleteOverride) {
+    storeDuplicateDeletePaths(group.key, group.items.map(item => item.path).filter(path => path && !defaultKeepSet.has(normalizeMediaPath(path))));
+  } else if (validDeletePaths.length !== existingDeletePaths.length) {
+    storeDuplicateDeletePaths(group.key, validDeletePaths);
+  }
+  if (!existingBestPath || !groupPaths.has(existingBestPath)) {
+    storeDuplicateBestPath(
+      group.key,
+      (group.keepItem && group.keepItem.path) ? group.keepItem.path : ((group.items[0] && group.items[0].path) || '')
+    );
+  }
 }
 
 function renderDuplicateMediaList(el, items, options = {}) {
@@ -5094,31 +5160,7 @@ function renderDuplicateMediaList(el, items, options = {}) {
   el.appendChild(summary);
 
   groups.forEach((group) => {
-    const existingKeepPaths = getDuplicateKeepPaths(group.key);
-    const hasDeleteOverride = gDuplicateDeleteOverrides.has(group.key);
-    const existingDeletePaths = getDuplicateDeletePaths(group.key);
-    const existingBestPath = getDuplicateBestPath(group.key);
-    const groupPaths = new Set(group.items.map(item => item.path).filter(Boolean));
-    const validKeepPaths = existingKeepPaths.filter(path => groupPaths.has(path));
-    const validDeletePaths = existingDeletePaths.filter(path => groupPaths.has(path));
-    const defaultKeepPaths = getDefaultDuplicateKeepPaths(group.key).filter(path => groupPaths.has(path));
-    const defaultKeepSet = new Set(defaultKeepPaths.map(normalizeMediaPath).filter(Boolean));
-    if (!validKeepPaths.length) {
-      setDuplicateKeepPaths(group.key, defaultKeepPaths);
-    } else if (validKeepPaths.length !== existingKeepPaths.length) {
-      setDuplicateKeepPaths(group.key, validKeepPaths);
-    }
-    if (!validDeletePaths.length && !hasDeleteOverride) {
-      setDuplicateDeletePaths(group.key, group.items.map(item => item.path).filter(path => path && !defaultKeepSet.has(normalizeMediaPath(path))));
-    } else if (validDeletePaths.length !== existingDeletePaths.length) {
-      setDuplicateDeletePaths(group.key, validDeletePaths);
-    }
-    if (!existingBestPath || !groupPaths.has(existingBestPath)) {
-      setDuplicateBestPath(
-        group.key,
-        (group.keepItem && group.keepItem.path) ? group.keepItem.path : ((group.items[0] && group.items[0].path) || '')
-      );
-    }
+    seedDuplicateGroupState(group);
     const section = document.createElement('section');
     section.className = 'gallery-group duplicate-group';
     section.dataset.groupKey = group.key;
@@ -5183,6 +5225,8 @@ function renderDuplicateMediaList(el, items, options = {}) {
     el.appendChild(section);
     toggleGroupCollapsed(group.key, gCollapsedGroupKeys.has(group.key));
   });
+
+  applyDuplicateReviewSummaryToRoot(el);
 
   if (!deferFinalize) {
     requestAnimationFrame(() => finalizeDuplicateMediaList(el, groups));
@@ -5753,7 +5797,7 @@ function renderMediaList(items, scrollToTop = true) {
       waitForInitialReviewCards(staging, reviewLoadingGeneration).then(() => {
         if (!gReviewLoadingActive || reviewLoadingGeneration !== gReviewLoadingGeneration) return;
         el.replaceChildren(...Array.from(staging.childNodes));
-        requestAnimationFrame(() => finalizeDuplicateMediaList(el, groups));
+        finalizeDuplicateMediaList(el, groups);
       });
     } else {
       renderDuplicateMediaList(el, viewItems);
@@ -6344,7 +6388,8 @@ function refreshFromBridge(bridge, resetPage = false) {
       const useInfinite = shouldUseInfiniteScrollMode();
       const duplicateMode = isDuplicateModeActive();
 
-      if (duplicateMode && shouldShowScanWaitingEmptyState()) {
+      const currentReviewSignature = duplicateMode ? computeReviewRenderSignature(gMedia) : '';
+      if (duplicateMode && shouldShowScanWaitingEmptyState() && !currentReviewSignature) {
         gTotal = 0;
         updateGalleryCountChip(0);
         renderMediaList([], !gPendingScrollAnchor);
@@ -6366,8 +6411,15 @@ function refreshFromBridge(bridge, resetPage = false) {
           const limit = Math.max(PAGE_SIZE, normalizedCount || PAGE_SIZE);
           fetchMediaList(gSelectedFolders, limit, 0, gSort, gFilter, gSearchQuery || '').then(function (items) {
             if (refreshToken !== gRefreshGeneration) return;
-            if (gReviewLoadingActive && shouldShowScanWaitingEmptyState()) {
+            const reviewSignature = computeReviewRenderSignature(items);
+            if (gReviewLoadingActive && shouldShowScanWaitingEmptyState() && !currentReviewSignature) {
               updateReviewLoadingProgress(85, gReviewLoadingMessage);
+              return;
+            }
+            if (!gReviewLoadingActive && reviewSignature && reviewSignature === gLastRenderedReviewSignature) {
+              consumeSelectAllAfterRefresh();
+              renderPager();
+              setGlobalLoading(false);
               return;
             }
             if (gReviewLoadingActive) updateReviewLoadingProgress(80, gReviewLoadingMessage);
@@ -8442,6 +8494,14 @@ async function main() {
         const selectedFolders = currentSelectedFolderSet();
         const matchesCurrentSelection = !normalizedFinishedFolder || selectedFolders.size === 0 || selectedFolders.has(normalizedFinishedFolder);
         if (!matchesCurrentSelection) {
+          return;
+        }
+        const currentReviewSignature = isDuplicateModeActive() ? computeReviewRenderSignature(gMedia) : '';
+        if (isDuplicateModeActive() && currentReviewSignature) {
+          gScanActive = false;
+          gAwaitingScanResults = false;
+          gTotal = count || gTotal || 0;
+          updateGalleryCountChip(gTotal);
           return;
         }
         if (isDuplicateModeActive() && gReviewLoadingActive && !gAwaitingScanResults) {
