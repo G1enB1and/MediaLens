@@ -461,6 +461,9 @@ function syncDuplicateGroupFromCompareSelection(bestPath, keepPaths, deletePaths
         nextKeepPaths.push(rawPath);
       } else if (normalizedDeletePaths.has(normalizedPath)) {
         nextDeletePaths.push(rawPath);
+      } else {
+        if (normalizedExistingKeepPaths.has(normalizedPath)) nextKeepPaths.push(rawPath);
+        if (normalizedExistingDeletePaths.has(normalizedPath)) nextDeletePaths.push(rawPath);
       }
       return;
     }
@@ -479,6 +482,33 @@ function syncDuplicateGroupFromCompareSelection(bestPath, keepPaths, deletePaths
   }
   if (!normalizedBestPath && normalizedComparePaths.has(normalizedCurrentBestPath)) {
     setDuplicateBestPath(groupKey, '');
+  }
+}
+
+function handleDuplicateRuleSettingsChanged(settings) {
+  gCachedSettings = settings || {};
+  if (isDuplicateModeActive()) {
+    gPendingScrollAnchor = captureCurrentGroupScrollAnchor();
+    gDuplicateKeepOverrides.clear();
+    gDuplicateDeleteOverrides.clear();
+    gDuplicateBestOverrides.clear();
+    gLastCompareSeedKey = '';
+    gMedia = [];
+    gTotalOnPage = 0;
+    gLoadedOnPage = 0;
+    const mediaList = document.getElementById('mediaList');
+    if (mediaList) {
+      mediaList.innerHTML = '';
+    }
+    renderTimelineRail([]);
+    setGlobalLoading(true, 'Recalculating changed preferences, please wait.', null);
+    if (gBridge) {
+      refreshFromBridge(gBridge, false);
+    }
+  }
+  const duplicateSettingsMount = document.getElementById('duplicateSettingsMount');
+  if (duplicateSettingsMount && !duplicateSettingsMount.hidden) {
+    renderDuplicateSettings(gCachedSettings);
   }
 }
 
@@ -4079,14 +4109,29 @@ function createStructuredCard(item, idx) {
   const usesThumbnails = viewUsesThumbnails();
   const supportsInlinePlayback = !isFolder && item.media_type === 'video' && viewSupportsInlineVideoPlayback();
   const duplicateMode = isDuplicateModeActive();
+  const duplicateGroupKey = String(item.duplicate_group_key || '');
+  const normalizedItemPath = normalizeMediaPath(item.path || '');
+  const duplicateKeepPathSet = duplicateMode && !isFolder
+    ? new Set(getDuplicateKeepPaths(duplicateGroupKey).map(normalizeMediaPath).filter(Boolean))
+    : null;
+  const duplicateDeletePathSet = duplicateMode && !isFolder
+    ? new Set(getDuplicateDeletePaths(duplicateGroupKey).map(normalizeMediaPath).filter(Boolean))
+    : null;
+  const normalizedDuplicateBestPath = duplicateMode && !isFolder
+    ? normalizeMediaPath(getDuplicateBestPath(duplicateGroupKey))
+    : '';
+  const duplicateKeepChecked = !!(duplicateKeepPathSet && normalizedItemPath && duplicateKeepPathSet.has(normalizedItemPath));
+  const duplicateDeleteChecked = !!(duplicateDeletePathSet && normalizedItemPath && duplicateDeletePathSet.has(normalizedItemPath));
+  const duplicateBestChecked = !!(normalizedDuplicateBestPath && normalizedItemPath && normalizedDuplicateBestPath === normalizedItemPath);
   card.className = `card structured-card${isFolder ? ' folder-card ready' : ' loading'}`;
   if (duplicateMode && !isFolder) card.classList.add('duplicate-card');
   card.tabIndex = 0;
   card.setAttribute('data-path', item.path || '');
   card.setAttribute('data-is-folder', isFolder ? 'true' : 'false');
   if (duplicateMode && !isFolder) {
-    card.setAttribute('data-duplicate-group-key', item.duplicate_group_key || '');
-    card.setAttribute('data-duplicate-keep', 'false');
+    card.setAttribute('data-duplicate-group-key', duplicateGroupKey);
+    card.setAttribute('data-duplicate-keep', duplicateKeepChecked ? 'true' : 'false');
+    card.setAttribute('data-duplicate-delete', duplicateDeleteChecked ? 'true' : 'false');
   }
 
   const thumbWrap = document.createElement('div');
@@ -4227,7 +4272,7 @@ function createStructuredCard(item, idx) {
     const keepToggle = document.createElement('input');
     keepToggle.type = 'checkbox';
     keepToggle.className = 'duplicate-keep-toggle';
-    keepToggle.checked = false;
+    keepToggle.checked = duplicateKeepChecked;
     keepToggle.addEventListener('click', (e) => {
       e.stopPropagation();
     });
@@ -4246,7 +4291,7 @@ function createStructuredCard(item, idx) {
     const deleteToggle = document.createElement('input');
     deleteToggle.type = 'checkbox';
     deleteToggle.className = 'duplicate-keep-toggle duplicate-delete-toggle';
-    deleteToggle.checked = false;
+    deleteToggle.checked = duplicateDeleteChecked;
     deleteToggle.addEventListener('click', (e) => {
       e.stopPropagation();
     });
@@ -4271,7 +4316,7 @@ function createStructuredCard(item, idx) {
       const bestToggle = document.createElement('input');
       bestToggle.type = 'checkbox';
       bestToggle.className = 'duplicate-best-toggle';
-      bestToggle.checked = false;
+      bestToggle.checked = duplicateBestChecked;
       bestToggle.addEventListener('click', (e) => {
         e.stopPropagation();
       });
@@ -8533,6 +8578,15 @@ async function main() {
             return;
           }
           refreshFromBridge(bridge, false);
+          return;
+        }
+        if ((key && key.startsWith('duplicate.rules.')) || key === 'duplicate.priorities.order') {
+          if (bridge.get_settings) {
+            bridge.get_settings(function (s) {
+              handleDuplicateRuleSettingsChanged(s || {});
+            });
+          }
+          return;
         }
       });
     }
