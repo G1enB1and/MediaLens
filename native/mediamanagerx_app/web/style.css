@@ -2078,6 +2078,22 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   border-radius: 6px;
 }
 
+.gallery-duplicates .card.review-card-pending {
+  opacity: 0;
+  transform: translateY(6px);
+  pointer-events: none;
+}
+
+.gallery-duplicates .card.review-card-visible {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+
+#mediaList.review-results-hidden {
+  visibility: hidden;
+}
+
 .folder-card.folder-drop-target {
   border-color: var(--accent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent), white 18%);

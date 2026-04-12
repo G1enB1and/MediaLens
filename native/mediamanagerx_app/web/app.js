@@ -308,6 +308,10 @@ function normalizeFolderPath(path) {
   return String(path || '').replace(/\//g, '\\').toLowerCase();
 }
 
+function currentSelectedFolderSet() {
+  return new Set((Array.isArray(gSelectedFolders) ? gSelectedFolders : []).map(normalizeFolderPath).filter(Boolean));
+}
+
 function currentFullScanKey(folders) {
   return (Array.isArray(folders) ? folders : [])
     .map(normalizeFolderPath)
@@ -501,7 +505,7 @@ function handleDuplicateRuleSettingsChanged(settings) {
       mediaList.innerHTML = '';
     }
     renderTimelineRail([]);
-    setGlobalLoading(true, 'Recalculating changed preferences, please wait.', null);
+    beginReviewLoading('Recalculating changed preferences, please wait.', 10);
     if (gBridge) {
       refreshFromBridge(gBridge, false);
     }
@@ -1610,6 +1614,8 @@ function flushBackgroundQueue() {
     const item = gBackgroundQueue.shift();
     if (item.type === 'image') {
       loadImage(item.el, item.imgSrc);
+    } else if (item.type === 'poster') {
+      loadStillPoster(item.el, item.path);
     } else if (item.type === 'video') {
       loadVideoPoster(item.el, item.path);
       if (gBridge && gBridge.preload_video) {
@@ -1640,13 +1646,13 @@ function loadImage(el, imgSrc) {
     gLoadedOnPage++;
     el.style.opacity = '1';
     const card = el.closest('.card');
-    if (card) { card.classList.remove('loading'); card.classList.add('ready'); }
+    if (card) markCardMediaReady(card);
   };
   el.onerror = () => {
     gLoadedOnPage++;
     el.style.opacity = '1';
     const card = el.closest('.card');
-    if (card) { card.classList.remove('loading'); card.classList.add('ready'); }
+    if (card) markCardMediaReady(card);
   };
   el.style.opacity = '0';
   el.src = imgSrc;
@@ -1668,20 +1674,20 @@ function loadVideoPoster(el, path) {
           gLoadedOnPage++;
           // Push opacity change one frame out so the CSS transition fires
           requestAnimationFrame(() => { el.style.opacity = '1'; });
-          if (card) { card.classList.remove('loading'); card.classList.add('ready'); }
+          if (card) markCardMediaReady(card);
         };
         tempImg.onerror = () => {
           el.removeAttribute('src');
           gLoadedOnPage++;
           requestAnimationFrame(() => { el.style.opacity = '1'; });
-          if (card) { card.classList.remove('loading'); card.classList.add('ready'); }
+          if (card) markCardMediaReady(card);
         };
         tempImg.src = posterUrl;
       } else {
         el.removeAttribute('src');
         gLoadedOnPage++;
         requestAnimationFrame(() => { el.style.opacity = '1'; });
-        if (card) { card.classList.remove('loading'); card.classList.add('ready'); }
+        if (card) markCardMediaReady(card);
       }
     });
   }
@@ -1740,6 +1746,48 @@ let gLoadingShownAt = 0;
 const MIN_LOADING_MS = 1000;
 
 let gLoadingHideTimer = null;
+let gReviewLoadingActive = false;
+let gReviewLoadingGeneration = 0;
+let gReviewLoadingMessage = 'Loading review results...';
+let gReviewLoadingProgress = 0;
+
+function setReviewResultsHidden(hidden) {
+  const mediaList = document.getElementById('mediaList');
+  if (!mediaList) return;
+  if (hidden) {
+    mediaList.classList.add('review-results-hidden');
+  } else {
+    mediaList.classList.remove('review-results-hidden');
+  }
+}
+
+function beginReviewLoading(text, pct = 10) {
+  gReviewLoadingActive = true;
+  gReviewLoadingGeneration += 1;
+  gReviewLoadingMessage = text || 'Loading review results...';
+  gReviewLoadingProgress = Math.max(0, Math.min(100, Number(pct) || 0));
+  if (isDuplicateModeActive()) setReviewResultsHidden(true);
+  setGlobalLoading(true, gReviewLoadingMessage, gReviewLoadingProgress);
+  return gReviewLoadingGeneration;
+}
+
+function updateReviewLoadingProgress(pct, text = null) {
+  if (!gReviewLoadingActive) return;
+  const nextPct = Math.max(gReviewLoadingProgress, Math.max(0, Math.min(100, Number(pct) || 0)));
+  gReviewLoadingProgress = nextPct;
+  if (text) gReviewLoadingMessage = text;
+  setGlobalLoading(true, gReviewLoadingMessage, gReviewLoadingProgress);
+}
+
+function endReviewLoading(generation = null) {
+  if (!gReviewLoadingActive) return;
+  if (generation != null && generation !== gReviewLoadingGeneration) return;
+  gReviewLoadingActive = false;
+  gReviewLoadingMessage = 'Loading review results...';
+  gReviewLoadingProgress = 0;
+  setReviewResultsHidden(false);
+  setGlobalLoading(false);
+}
 
 function setGlobalLoading(on, text = 'Loading…', pct = null) {
   const gl = document.getElementById('globalLoading');
@@ -1777,6 +1825,100 @@ function setGlobalLoading(on, text = 'Loading…', pct = null) {
   }, wait);
 }
 
+function isElementLikelyVisibleSoon(el) {
+  if (!el) return false;
+  const rect = el.getBoundingClientRect();
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+  return rect.bottom >= -120 && rect.top <= viewportHeight + 240;
+}
+
+function triggerMediaElementLoad(el) {
+  if (!el || gPosterRequested.has(el)) return false;
+  const imgSrc = el.getAttribute('data-src');
+  const posterPath = el.getAttribute('data-poster-path');
+  const path = el.getAttribute('data-video-path');
+  if (!imgSrc && !posterPath && !path) return false;
+  if (gPosterObserver) gPosterObserver.unobserve(el);
+  gTotalOnPage++;
+  if (imgSrc) {
+    loadImage(el, imgSrc);
+  } else if (posterPath) {
+    loadStillPoster(el, posterPath);
+  } else if (path) {
+    loadVideoPoster(el, path);
+    if (gBridge && gBridge.preload_video) {
+      const item = gMedia.find(m => m.path === path);
+      if (item) gBridge.preload_video(path, item.width || 0, item.height || 0);
+    }
+  }
+  return true;
+}
+
+function prioritizeVisibleMediaLoads(root) {
+  if (!root) return;
+  const candidates = Array.from(root.querySelectorAll('img[data-src]:not([src]), img[data-poster-path]:not([src]), img[data-video-path]:not([src])'));
+  if (!candidates.length) return;
+  const prioritized = candidates
+    .map((el, index) => ({ el, index, visible: isElementLikelyVisibleSoon(el) }))
+    .sort((a, b) => {
+      if (a.visible !== b.visible) return a.visible ? -1 : 1;
+      return a.index - b.index;
+    });
+  prioritized.slice(0, 18).forEach(({ el }) => {
+    triggerMediaElementLoad(el);
+  });
+}
+
+function markCardMediaReady(card) {
+  if (!card) return;
+  card.classList.remove('loading');
+  card.classList.add('ready');
+  if (card.classList.contains('review-card-pending')) {
+    requestAnimationFrame(() => {
+      card.classList.add('review-card-visible');
+      card.classList.remove('review-card-pending');
+    });
+  }
+}
+
+function waitForInitialReviewCards(root, generation) {
+  return new Promise((resolve) => {
+    if (!root || !gReviewLoadingActive || generation !== gReviewLoadingGeneration) {
+      resolve();
+      return;
+    }
+    const step = () => {
+      if (!gReviewLoadingActive || generation !== gReviewLoadingGeneration) {
+        resolve();
+        return;
+      }
+      if (root.querySelector('.empty')) {
+        resolve();
+        return;
+      }
+      const reviewCards = Array.from(root.querySelectorAll('.gallery-duplicates-root .card'));
+      if (!reviewCards.length) {
+        requestAnimationFrame(step);
+        return;
+      }
+      const visibleCards = reviewCards.filter(card => isElementLikelyVisibleSoon(card));
+      if (!visibleCards.length) {
+        requestAnimationFrame(step);
+        return;
+      }
+      const pendingVisible = visibleCards.filter((card) => {
+        if (card.classList.contains('review-card-pending')) return true;
+        return !!card.querySelector('img[data-src]:not([src]), img[data-poster-path]:not([src]), img[data-video-path]:not([src])');
+      });
+      if (!pendingVisible.length) {
+        resolve();
+        return;
+      }
+      requestAnimationFrame(step);
+    };
+    step();
+  });
+}
 
 // Enable clicking to hide the loading overlay if it gets stuck
 document.addEventListener('DOMContentLoaded', () => {
@@ -1818,6 +1960,9 @@ function wireScanIndicator() {
     gBridge.scanProgress.connect((fileName, percent) => {
       file.textContent = fileName;
       bar.style.width = `${percent}%`;
+      if (gReviewLoadingActive && isDuplicateModeActive()) {
+        updateReviewLoadingProgress(10 + Math.round((Math.max(0, Math.min(100, Number(percent) || 0)) * 0.8)), gReviewLoadingMessage);
+      }
       render();
     });
   }
@@ -1856,20 +2001,20 @@ function loadStillPoster(el, path) {
           el.src = posterUrl;
           gLoadedOnPage++;
           requestAnimationFrame(() => { el.style.opacity = '1'; });
-          if (card) { card.classList.remove('loading'); card.classList.add('ready'); }
+          if (card) markCardMediaReady(card);
         };
         tempImg.onerror = () => {
           el.removeAttribute('src');
           gLoadedOnPage++;
           requestAnimationFrame(() => { el.style.opacity = '1'; });
-          if (card) { card.classList.remove('loading'); card.classList.add('ready'); }
+          if (card) markCardMediaReady(card);
         };
         tempImg.src = posterUrl;
       } else {
         el.removeAttribute('src');
         gLoadedOnPage++;
         requestAnimationFrame(() => { el.style.opacity = '1'; });
-        if (card) { card.classList.remove('loading'); card.classList.add('ready'); }
+        if (card) markCardMediaReady(card);
       }
     });
   }
@@ -4125,6 +4270,7 @@ function createStructuredCard(item, idx) {
   const duplicateBestChecked = !!(normalizedDuplicateBestPath && normalizedItemPath && normalizedDuplicateBestPath === normalizedItemPath);
   card.className = `card structured-card${isFolder ? ' folder-card ready' : ' loading'}`;
   if (duplicateMode && !isFolder) card.classList.add('duplicate-card');
+  if (duplicateMode && !isFolder) card.classList.add('review-card-pending');
   card.tabIndex = 0;
   card.setAttribute('data-path', item.path || '');
   card.setAttribute('data-is-folder', isFolder ? 'true' : 'false');
@@ -4147,7 +4293,7 @@ function createStructuredCard(item, idx) {
     const icon = document.createElement('div');
     icon.className = `media-icon ${item.media_type === 'video' ? 'video-icon' : 'image-icon'}`;
     thumbWrap.appendChild(icon);
-    card.classList.add('ready');
+    markCardMediaReady(card);
   } else if (item.media_type === 'image') {
     const img = document.createElement('img');
     img.className = 'thumb';
@@ -4408,6 +4554,9 @@ function createStructuredCard(item, idx) {
   }
   card.appendChild(thumbWrap);
   card.appendChild(content);
+  if (isFolder) {
+    markCardMediaReady(card);
+  }
 
   card.addEventListener('click', (e) => handleCardSelection(card, item, mediaIdx, e));
   card.addEventListener('dblclick', () => {
@@ -4735,14 +4884,18 @@ function renderStructuredMediaList(el, items, options = {}) {
   });
 
   requestAnimationFrame(() => {
-    const unobserved = el.querySelectorAll('img[data-src]:not([src]), img[data-video-path]:not([src])');
+    prioritizeVisibleMediaLoads(el);
+    const unobserved = el.querySelectorAll('img[data-src]:not([src]), img[data-poster-path]:not([src]), img[data-video-path]:not([src])');
     unobserved.forEach(img => {
       if (gPosterRequested.has(img)) return;
       const imgSrc = img.getAttribute('data-src');
+      const posterPath = img.getAttribute('data-poster-path');
       const path = img.getAttribute('data-video-path');
       const item = gMedia.find(m => m.path === path || m.url === imgSrc);
       if (imgSrc) {
         gBackgroundQueue.push({ type: 'image', el: img, imgSrc });
+      } else if (posterPath) {
+        gBackgroundQueue.push({ type: 'poster', el: img, path: posterPath });
       } else if (path && item) {
         gBackgroundQueue.push({ type: 'video', el: img, path, width: item.width, height: item.height });
       }
@@ -4816,14 +4969,18 @@ function renderGroupedMediaList(el, items) {
   requestAnimationFrame(() => {
     restoreGroupScrollAnchor();
     scheduleTimelineScrollTargetRefresh();
-    const unobserved = el.querySelectorAll('img[data-src]:not([src]), img[data-video-path]:not([src])');
+    prioritizeVisibleMediaLoads(el);
+    const unobserved = el.querySelectorAll('img[data-src]:not([src]), img[data-poster-path]:not([src]), img[data-video-path]:not([src])');
     unobserved.forEach(img => {
       if (gPosterRequested.has(img)) return;
       const imgSrc = img.getAttribute('data-src');
+      const posterPath = img.getAttribute('data-poster-path');
       const path = img.getAttribute('data-video-path');
       const item = gMedia.find(m => m.path === path || m.url === imgSrc);
       if (imgSrc) {
         gBackgroundQueue.push({ type: 'image', el: img, imgSrc });
+      } else if (posterPath) {
+        gBackgroundQueue.push({ type: 'poster', el: img, path: posterPath });
       } else if (path && item) {
         gBackgroundQueue.push({ type: 'video', el: img, path, width: item.width, height: item.height });
       }
@@ -4832,7 +4989,43 @@ function renderGroupedMediaList(el, items) {
   });
 }
 
-function renderDuplicateMediaList(el, items) {
+function finalizeDuplicateMediaList(el, groups) {
+  renderTimelineRail([]);
+  restoreGroupScrollAnchor();
+  groups.forEach((group) => {
+    setDuplicateKeepPaths(group.key, getDuplicateKeepPaths(group.key));
+    setDuplicateDeletePaths(group.key, getDuplicateDeletePaths(group.key));
+    const bestPath = getDuplicateBestPath(group.key);
+    if (bestPath) setDuplicateBestPath(group.key, bestPath);
+  });
+  updateDuplicateReviewSummary();
+  syncDuplicateGroupFromCompareSelection(
+    String(gCompareState && gCompareState.best_path || ''),
+    Array.isArray(gCompareState && gCompareState.keep_paths) ? gCompareState.keep_paths : [],
+    Array.isArray(gCompareState && gCompareState.delete_paths) ? gCompareState.delete_paths : []
+  );
+  maybeSeedCompareStateFromReview();
+  prioritizeVisibleMediaLoads(el);
+  const unobserved = el.querySelectorAll('img[data-src]:not([src]), img[data-poster-path]:not([src]), img[data-video-path]:not([src])');
+  unobserved.forEach(img => {
+    if (gPosterRequested.has(img)) return;
+    const imgSrc = img.getAttribute('data-src');
+    const posterPath = img.getAttribute('data-poster-path');
+    const path = img.getAttribute('data-video-path');
+    const item = gMedia.find(m => m.path === path || m.url === imgSrc);
+    if (imgSrc) {
+      gBackgroundQueue.push({ type: 'image', el: img, imgSrc });
+    } else if (posterPath) {
+      gBackgroundQueue.push({ type: 'poster', el: img, path: posterPath });
+    } else if (path && item) {
+      gBackgroundQueue.push({ type: 'video', el: img, path, width: item.width, height: item.height });
+    }
+  });
+  scheduleBackgroundDrain();
+}
+
+function renderDuplicateMediaList(el, items, options = {}) {
+  const { deferFinalize = false } = options;
   const groups = buildDuplicateGroups(items);
   const reviewMode = getReviewMode();
   const isSimilarReview = reviewMode === 'similar' || reviewMode === 'similar_only';
@@ -4991,36 +5184,10 @@ function renderDuplicateMediaList(el, items) {
     toggleGroupCollapsed(group.key, gCollapsedGroupKeys.has(group.key));
   });
 
-  renderTimelineRail([]);
-  requestAnimationFrame(() => {
-    restoreGroupScrollAnchor();
-    groups.forEach((group) => {
-      setDuplicateKeepPaths(group.key, getDuplicateKeepPaths(group.key));
-      setDuplicateDeletePaths(group.key, getDuplicateDeletePaths(group.key));
-      const bestPath = getDuplicateBestPath(group.key);
-      if (bestPath) setDuplicateBestPath(group.key, bestPath);
-    });
-    updateDuplicateReviewSummary();
-    syncDuplicateGroupFromCompareSelection(
-      String(gCompareState && gCompareState.best_path || ''),
-      Array.isArray(gCompareState && gCompareState.keep_paths) ? gCompareState.keep_paths : [],
-      Array.isArray(gCompareState && gCompareState.delete_paths) ? gCompareState.delete_paths : []
-    );
-    maybeSeedCompareStateFromReview();
-    const unobserved = el.querySelectorAll('img[data-src]:not([src]), img[data-video-path]:not([src])');
-    unobserved.forEach(img => {
-      if (gPosterRequested.has(img)) return;
-      const imgSrc = img.getAttribute('data-src');
-      const path = img.getAttribute('data-video-path');
-      const item = gMedia.find(m => m.path === path || m.url === imgSrc);
-      if (imgSrc) {
-        gBackgroundQueue.push({ type: 'image', el: img, imgSrc });
-      } else if (path && item) {
-        gBackgroundQueue.push({ type: 'video', el: img, path, width: item.width, height: item.height });
-      }
-    });
-    scheduleBackgroundDrain();
-  });
+  if (!deferFinalize) {
+    requestAnimationFrame(() => finalizeDuplicateMediaList(el, groups));
+  }
+  return groups;
 }
 
 function showCtx(x, y, item, idx, fromLightbox = false) {
@@ -5577,7 +5744,20 @@ function renderMediaList(items, scrollToTop = true) {
   }
 
   if (isDuplicateModeActive()) {
-    renderDuplicateMediaList(el, viewItems);
+    if (gReviewLoadingActive) {
+      const staging = document.createElement('div');
+      const groups = renderDuplicateMediaList(staging, viewItems, { deferFinalize: true });
+      staging.classList.forEach((cls) => el.classList.add(cls));
+      const reviewLoadingGeneration = gReviewLoadingGeneration;
+      prioritizeVisibleMediaLoads(staging);
+      waitForInitialReviewCards(staging, reviewLoadingGeneration).then(() => {
+        if (!gReviewLoadingActive || reviewLoadingGeneration !== gReviewLoadingGeneration) return;
+        el.replaceChildren(...Array.from(staging.childNodes));
+        requestAnimationFrame(() => finalizeDuplicateMediaList(el, groups));
+      });
+    } else {
+      renderDuplicateMediaList(el, viewItems);
+    }
     return;
   }
 
@@ -5601,14 +5781,18 @@ function renderMediaList(items, scrollToTop = true) {
   // first if the user scrolls near them; the background queue will handle
   // anything that hasn't been touched yet once the browser is idle.
   requestAnimationFrame(() => {
-    const unobserved = el.querySelectorAll('img[data-src]:not([src]), img[data-video-path]:not([src])');
+    prioritizeVisibleMediaLoads(el);
+    const unobserved = el.querySelectorAll('img[data-src]:not([src]), img[data-poster-path]:not([src]), img[data-video-path]:not([src])');
     unobserved.forEach(img => {
       if (gPosterRequested.has(img)) return;
       const imgSrc = img.getAttribute('data-src');
+      const posterPath = img.getAttribute('data-poster-path');
       const path = img.getAttribute('data-video-path');
       const item = gMedia.find(m => m.path === path || m.url === imgSrc); // Find the original item to get width/height
       if (imgSrc) {
         gBackgroundQueue.push({ type: 'image', el: img, imgSrc });
+      } else if (posterPath) {
+        gBackgroundQueue.push({ type: 'poster', el: img, path: posterPath });
       } else if (path && item) {
         gBackgroundQueue.push({ type: 'video', el: img, path, width: item.width, height: item.height });
       }
@@ -5798,7 +5982,8 @@ document.addEventListener('DOMContentLoaded', () => {
       clearReviewMode();
     }
     syncGroupByUi();
-    setGlobalLoading(true, REVIEW_VIEW_MODES.has(gGroupBy) ? 'Scanning folder...' : 'Loading gallery...', 10);
+    if (REVIEW_VIEW_MODES.has(gGroupBy)) beginReviewLoading('Scanning folder...', 10);
+    else setGlobalLoading(true, 'Loading gallery...', 10);
     if (Array.isArray(gMedia) && gMedia.length > 0) {
       rerenderCurrentMediaPreservingScroll();
     }
@@ -6140,7 +6325,8 @@ function refreshFromBridge(bridge, resetPage = false) {
         gLastRequestedFullScanKey = '';
         gSelectAllAfterRefresh = false;
         updateGalleryCountChip(0);
-        setGlobalLoading(false);
+        if (gReviewLoadingActive) endReviewLoading();
+        else setGlobalLoading(false);
         renderMediaList([]);
         renderPager();
         return;
@@ -6163,24 +6349,47 @@ function refreshFromBridge(bridge, resetPage = false) {
         updateGalleryCountChip(0);
         renderMediaList([], !gPendingScrollAnchor);
         renderPager();
-        setGlobalLoading(true, 'Scanning folder...', 10);
+        if (gReviewLoadingActive) updateReviewLoadingProgress(15, gReviewLoadingMessage);
+        else setGlobalLoading(true, 'Scanning folder...', 10);
         ensureFullFolderScanRequested(bridge, gSelectedFolders, gSearchQuery || '');
         return;
       }
 
       if (duplicateMode) {
+        if (gReviewLoadingActive) updateReviewLoadingProgress(20, gReviewLoadingMessage);
         fetchMediaCount(gSelectedFolders, gFilter, gSearchQuery || '').then(function (count) {
           if (refreshToken !== gRefreshGeneration) return;
           const normalizedCount = count || 0;
           gTotal = normalizedCount;
           updateGalleryCountChip(gTotal);
+          if (gReviewLoadingActive) updateReviewLoadingProgress(35, gReviewLoadingMessage);
           const limit = Math.max(PAGE_SIZE, normalizedCount || PAGE_SIZE);
           fetchMediaList(gSelectedFolders, limit, 0, gSort, gFilter, gSearchQuery || '').then(function (items) {
             if (refreshToken !== gRefreshGeneration) return;
+            if (gReviewLoadingActive && shouldShowScanWaitingEmptyState()) {
+              updateReviewLoadingProgress(85, gReviewLoadingMessage);
+              return;
+            }
+            if (gReviewLoadingActive) updateReviewLoadingProgress(80, gReviewLoadingMessage);
             renderMediaList(items, !gPendingScrollAnchor);
             consumeSelectAllAfterRefresh();
             renderPager();
-            setGlobalLoading(false);
+            const reviewLoadingGeneration = gReviewLoadingGeneration;
+            requestAnimationFrame(() => {
+              if (refreshToken !== gRefreshGeneration) return;
+              const mediaList = document.getElementById('mediaList');
+              prioritizeVisibleMediaLoads(mediaList);
+              if (gReviewLoadingActive) updateReviewLoadingProgress(92, gReviewLoadingMessage);
+              waitForInitialReviewCards(mediaList, reviewLoadingGeneration).then(() => {
+                if (refreshToken !== gRefreshGeneration) return;
+                if (gReviewLoadingActive) {
+                  updateReviewLoadingProgress(100, gReviewLoadingMessage);
+                  endReviewLoading(reviewLoadingGeneration);
+                } else {
+                  setGlobalLoading(false);
+                }
+              });
+            });
             if (bridge.start_scan_paths) {
               bridge.start_scan_paths((items || []).filter(item => !item.is_folder).map(item => item.path).filter(Boolean));
             }
@@ -8229,6 +8438,25 @@ async function main() {
 
     if (bridge.scanFinished) {
       bridge.scanFinished.connect(function (folder, count) {
+        const normalizedFinishedFolder = normalizeFolderPath(folder || '');
+        const selectedFolders = currentSelectedFolderSet();
+        const matchesCurrentSelection = !normalizedFinishedFolder || selectedFolders.size === 0 || selectedFolders.has(normalizedFinishedFolder);
+        if (!matchesCurrentSelection) {
+          return;
+        }
+        if (isDuplicateModeActive() && gReviewLoadingActive && !gAwaitingScanResults) {
+          gScanActive = false;
+          return;
+        }
+        if (isDuplicateModeActive() && !gReviewLoadingActive && !gAwaitingScanResults && Array.isArray(gMedia) && gMedia.length > 0) {
+          gScanActive = false;
+          gTotal = count || gTotal || 0;
+          updateGalleryCountChip(gTotal);
+          return;
+        }
+        if (gReviewLoadingActive && isDuplicateModeActive()) {
+          updateReviewLoadingProgress(95, gReviewLoadingMessage);
+        }
         gScanActive = false;
         gAwaitingScanResults = false;
         gTotal = count || 0;
@@ -8400,7 +8628,8 @@ async function main() {
         clearDismissedReviewPaths();
         gAwaitingScanResults = !!(folders && folders.length);
         gPage = 0;
-        setGlobalLoading(true, isDuplicateModeActive() ? 'Scanning folder...' : 'Loading folder...', 10);
+        if (isDuplicateModeActive()) beginReviewLoading('Scanning folder...', 10);
+        else setGlobalLoading(true, 'Loading folder...', 10);
         clearReviewResultsForPendingScan();
         refreshFromBridge(bridge);
       });
