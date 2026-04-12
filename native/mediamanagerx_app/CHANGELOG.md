@@ -1,6 +1,39 @@
 # Change Log
 
-## v1.1.16 (Current)
+## v1.1.17 (Current)
+
+### Summary
+
+This release makes duplicate cleanup easier to trust. MediaLens now keeps your review decisions consistent, improves how duplicate matches are identified, and introduces a built-in retention system for safer file cleanup and recovery.
+
+### Highlights
+
+- Duplicate and similar review now loads more smoothly, with clearer progress stages and more stable rendering.
+- Selections, folder priorities, and copied tags now behave more consistently during cleanup.
+- Exact image duplicates continue matching even after metadata-only edits.
+- New built-in retention system gives you a safer alternative to the Recycle Bin, with restore and cleanup controls.
+
+### Added
+
+- Added a built-in MediaLens retention system as an alternative to the Windows Recycle Bin, with configurable retention, review, restore, and delete options.
+- Added `Most metadata` to the duplicate priority order so metadata preference can be explicitly ranked alongside folder, format, and size rules.
+- Added tag inheritance when copying files inside MediaLens so copied files keep the source file's app tags.
+
+### Changed
+
+- Moved duplicate and similar grouping, ranking, and rule logic out of `main.py` into `review_groups.py` for a cleaner review pipeline.
+- Reworked duplicate and similar review rendering to build offscreen first, then reveal cards in a more stable, staged way.
+- Improved duplicate and similar progress messaging so folder scanning, grouping, and rendering stages are easier to understand.
+- Updated preferred folder persistence so folder priority order is retained more consistently across settings changes and scope changes.
+- Changed image duplicate identity to use decoded image content instead of raw file bytes, so metadata-only image edits do not break exact duplicate grouping.
+
+### Removed
+
+- Removed the old in-class duplicate and similar logic copies from `main.py` after the extracted review module became the live implementation.
+
+---
+
+## v1.1.16
 
 ### ✨ Summary
 
