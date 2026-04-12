@@ -794,6 +794,24 @@ class PrioritizedFolderRow(QWidget):
             outer.addStretch(1)
 
 
+class ToolTipWrapper(QWidget):
+    def __init__(self, widget: QWidget) -> None:
+        super().__init__()
+        l = QHBoxLayout(self)
+        l.setContentsMargins(0, 0, 0, 0)
+        l.addWidget(widget)
+        self.wrapped = widget
+
+    def sync_state(self, enabled: bool, tooltip: str = "") -> None:
+        self.wrapped.setEnabled(enabled)
+        if not enabled:
+            self.setToolTip(tooltip)
+            self.setCursor(Qt.CursorShape.ForbiddenCursor)
+        else:
+            self.setToolTip("")
+            self.unsetCursor()
+
+
 class SettingsPage(QWidget):
     def __init__(self, dialog: "SettingsDialog") -> None:
         super().__init__(dialog)
@@ -821,28 +839,59 @@ class GeneralSettingsPage(SettingsPage):
         self.randomize_toggle = QCheckBox("Randomize gallery order")
         self.restore_last_toggle = QCheckBox("Restore previous folder on launch")
         self.show_hidden_toggle = QCheckBox("Show hidden files and folders")
-        self.use_recycle_bin_toggle = QCheckBox("Use Recycle Bin for deletes (Shift+Del for permanent)")
         startup_layout.addWidget(self.randomize_toggle)
         startup_layout.addWidget(self.restore_last_toggle)
         startup_layout.addWidget(self.show_hidden_toggle)
-        startup_layout.addWidget(self.use_recycle_bin_toggle)
 
         startup_layout.addWidget(QLabel("Starting folder"))
         folder_row = QHBoxLayout()
         folder_row.setContentsMargins(0, 0, 0, 0)
         self.start_folder_edit = QLineEdit()
         self.start_folder_browse_btn = QPushButton("Browse...")
+        self.load_now_btn = QPushButton("Load Now")
         folder_row.addWidget(self.start_folder_edit, 1)
         folder_row.addWidget(self.start_folder_browse_btn)
+        folder_row.addWidget(self.load_now_btn)
         startup_layout.addLayout(folder_row)
-
-        load_row = QHBoxLayout()
-        load_row.setContentsMargins(0, 0, 0, 0)
-        load_row.addStretch(1)
-        self.load_now_btn = QPushButton("Load Now")
-        load_row.addWidget(self.load_now_btn)
-        startup_layout.addLayout(load_row)
         layout.addWidget(startup_group)
+
+        retention_group = QGroupBox("Delete Retention")
+        retention_layout = QVBoxLayout(retention_group)
+        retention_layout.setSpacing(10)
+
+        self.use_recycle_bin_toggle = QCheckBox("Use System Recycle Bin for deletes (Shift+Del for permanent)")
+        self.use_medialens_retention_toggle = QCheckBox("Use MediaLens separate retention system")
+
+        retention_layout.addWidget(self.use_recycle_bin_toggle)
+        retention_layout.addWidget(self.use_medialens_retention_toggle)
+
+        self.retention_days_layout = QHBoxLayout()
+        self.retention_days_layout.setContentsMargins(24, 0, 0, 0)
+        self.retention_days_label = QLabel("Keep for")
+        self.retention_days_input = QSpinBox()
+        self.retention_days_input.setRange(1, 3650)
+        self.retention_days_input.setSuffix(" days")
+        self.retention_days_wrapper = ToolTipWrapper(self.retention_days_input)
+        self.retention_days_layout.addWidget(self.retention_days_label)
+        self.retention_days_layout.addWidget(self.retention_days_wrapper)
+        self.retention_days_layout.addStretch(1)
+        retention_layout.addLayout(self.retention_days_layout)
+
+        self.retention_actions_layout = QHBoxLayout()
+        self.retention_actions_layout.setContentsMargins(24, 0, 0, 0)
+        self.retention_view_btn = QPushButton("View")
+        self.retention_restore_all_btn = QPushButton("Restore All")
+        self.retention_empty_now_btn = QPushButton("Empty Now")
+        self.retention_view_wrapper = ToolTipWrapper(self.retention_view_btn)
+        self.retention_restore_wrapper = ToolTipWrapper(self.retention_restore_all_btn)
+        self.retention_empty_wrapper = ToolTipWrapper(self.retention_empty_now_btn)
+        self.retention_actions_layout.addWidget(self.retention_view_wrapper)
+        self.retention_actions_layout.addWidget(self.retention_restore_wrapper)
+        self.retention_actions_layout.addWidget(self.retention_empty_wrapper)
+        self.retention_actions_layout.addStretch(1)
+        retention_layout.addLayout(self.retention_actions_layout)
+        
+        layout.addWidget(retention_group)
 
         updates_group = QGroupBox("Updates")
         updates_layout = QVBoxLayout(updates_group)
@@ -863,7 +912,12 @@ class GeneralSettingsPage(SettingsPage):
         self.randomize_toggle.toggled.connect(self._on_randomize_changed)
         self.restore_last_toggle.toggled.connect(self._on_restore_last_changed)
         self.show_hidden_toggle.toggled.connect(self._on_show_hidden_changed)
-        self.use_recycle_bin_toggle.toggled.connect(lambda checked: self.dialog.set_setting_bool("gallery.use_recycle_bin", checked))
+        self.use_recycle_bin_toggle.toggled.connect(self._on_recycle_bin_changed)
+        self.use_medialens_retention_toggle.toggled.connect(self._on_medialens_retention_changed)
+        self.retention_days_input.valueChanged.connect(lambda val: self.dialog.set_setting_str("gallery.medialens_retention_days", str(val)))
+        self.retention_view_btn.clicked.connect(self._view_recycle_bin)
+        self.retention_restore_all_btn.clicked.connect(self._restore_all_recycle_bin)
+        self.retention_empty_now_btn.clicked.connect(self._empty_recycle_bin)
         self.start_folder_browse_btn.clicked.connect(self._browse_start_folder)
         self.start_folder_edit.editingFinished.connect(self._commit_start_folder)
         self.load_now_btn.clicked.connect(self._load_start_folder_now)
@@ -876,6 +930,47 @@ class GeneralSettingsPage(SettingsPage):
         enabled = not self.restore_last_toggle.isChecked()
         self.start_folder_edit.setEnabled(enabled)
         self.start_folder_browse_btn.setEnabled(enabled)
+
+    def _sync_retention_enabled(self) -> None:
+        enabled = self.use_medialens_retention_toggle.isChecked()
+        self.retention_days_label.setEnabled(enabled)
+        self.retention_days_wrapper.sync_state(enabled, "Enable First")
+        self.retention_view_wrapper.sync_state(enabled, "Enable First")
+        self.retention_restore_wrapper.sync_state(enabled, "Enable First")
+        self.retention_empty_wrapper.sync_state(enabled, "Enable First")
+
+    def _on_recycle_bin_changed(self, checked: bool) -> None:
+        self.dialog.set_setting_bool("gallery.use_recycle_bin", checked)
+        if checked:
+            with QSignalBlocker(self.use_medialens_retention_toggle):
+                self.use_medialens_retention_toggle.setChecked(False)
+            self.dialog.set_setting_bool("gallery.use_medialens_retention", False)
+            self._sync_retention_enabled()
+
+    def _on_medialens_retention_changed(self, checked: bool) -> None:
+        self.dialog.set_setting_bool("gallery.use_medialens_retention", checked)
+        if checked:
+            with QSignalBlocker(self.use_recycle_bin_toggle):
+                self.use_recycle_bin_toggle.setChecked(False)
+            self.dialog.set_setting_bool("gallery.use_recycle_bin", False)
+        self._sync_retention_enabled()
+
+    def _view_recycle_bin(self) -> None:
+        if hasattr(self.main_window, "show_recycle_bin_viewer"):
+            self.dialog.close() # Close settings when opening recycle bin
+            self.main_window.show_recycle_bin_viewer()
+
+    def _restore_all_recycle_bin(self) -> None:
+        if hasattr(self.bridge, "restore_all_recycle_bin"):
+            reply = QMessageBox.question(self, "Restore All", "Are you sure you want to restore all files from the MediaLens format recycle bin to their original locations?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if reply == QMessageBox.StandardButton.Yes:
+                self.bridge.restore_all_recycle_bin()
+
+    def _empty_recycle_bin(self) -> None:
+        if hasattr(self.bridge, "empty_recycle_bin"):
+            reply = QMessageBox.question(self, "Empty Now", "Are you sure you want to permanently delete all files in the MediaLens recycle bin?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if reply == QMessageBox.StandardButton.Yes:
+                self.bridge.empty_recycle_bin()
 
     def _on_randomize_changed(self, checked: bool) -> None:
         self.dialog.set_setting_bool("gallery.randomize", checked)
@@ -926,11 +1021,20 @@ class GeneralSettingsPage(SettingsPage):
             self.show_hidden_toggle.setChecked(bool(state.get("gallery.show_hidden", False)))
         with QSignalBlocker(self.use_recycle_bin_toggle):
             self.use_recycle_bin_toggle.setChecked(bool(self.settings.value("gallery/use_recycle_bin", True, type=bool)))
+        with QSignalBlocker(self.use_medialens_retention_toggle):
+            self.use_medialens_retention_toggle.setChecked(bool(self.settings.value("gallery/use_medialens_retention", False, type=bool)))
+        with QSignalBlocker(self.retention_days_input):
+            try:
+                val = int(self.settings.value("gallery/medialens_retention_days", 30))
+            except (TypeError, ValueError):
+                val = 30
+            self.retention_days_input.setValue(val)
         with QSignalBlocker(self.auto_update_toggle):
             self.auto_update_toggle.setChecked(bool(state.get("updates.check_on_launch", True)))
         with QSignalBlocker(self.start_folder_edit):
             self.start_folder_edit.setText(str(state.get("gallery.start_folder", "") or ""))
         self._sync_start_folder_enabled()
+        self._sync_retention_enabled()
         self.version_label.setText(f"Current version: {self.bridge.get_app_version()}")
 
 
@@ -1905,6 +2009,10 @@ class SettingsDialog(QDialog):
         popup_hover = Theme.mix(popup_bg, accent, 0.12 if Theme.get_is_light() else 0.16)
         close_bg = Theme.get_btn_save_bg(accent)
         close_hover = Theme.get_btn_save_hover(accent)
+        
+        for btn in self.findChildren(QPushButton):
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            
         self.setStyleSheet(
             f"""
             QDialog {{
@@ -1913,6 +2021,9 @@ class SettingsDialog(QDialog):
             }}
             QLabel {{
                 color: {text};
+            }}
+            QLabel:disabled {{
+                color: {muted};
             }}
             QLabel#settingsSectionTitle {{
                 font-size: 16px;
@@ -2070,6 +2181,11 @@ class SettingsDialog(QDialog):
             QPushButton:hover {{
                 background-color: {close_hover};
                 border-color: {accent_str};
+            }}
+            QPushButton:disabled, QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled {{
+                background-color: transparent;
+                color: {muted};
+                border: 1px solid {border};
             }}
             QCheckBox, QRadioButton {{
                 color: {text};

@@ -81,8 +81,7 @@ Formatting rules for all generated changelog and release-note content:
         https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md
         ```
 
-    * Do not leave a trailing separator at the end of `ReleaseNotes.md`; use only the single separator above the Full Changelog link.
-
+    * Do not leave a trailing separator at the end of `ReleaseNotes.md`
     * When appropriate, prefer friendly headings and labels such as:
         * `🚀 New Features`
         * `⚡ Improvements`

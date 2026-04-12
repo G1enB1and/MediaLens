@@ -5696,6 +5696,18 @@ class Bridge(QObject):
         try: return QApplication.clipboard().mimeData().hasUrls()
         except Exception: return False
 
+    @Slot()
+    def empty_recycle_bin(self) -> None:
+        from native.mediamanagerx_app.recycle_bin import empty_all
+        empty_all()
+        self.collectionsChanged.emit()
+
+    @Slot()
+    def restore_all_recycle_bin(self) -> None:
+        from native.mediamanagerx_app.recycle_bin import restore_all
+        restore_all()
+        self.collectionsChanged.emit()
+
     @Slot(str, result=bool)
     def delete_path(self, path_str: str) -> bool:
         try:
@@ -5707,8 +5719,19 @@ class Bridge(QObject):
             self.close_native_video()
             QApplication.processEvents()
 
+            use_medialens_retention = bool(self.settings.value("gallery/use_medialens_retention", False, type=bool))
             use_recycle = bool(self.settings.value("gallery/use_recycle_bin", True, type=bool))
-            if use_recycle:
+            
+            if use_medialens_retention:
+                from native.mediamanagerx_app.recycle_bin import move_to_recycle_bin
+                days = int(self.settings.value("gallery/medialens_retention_days", 30, type=int))
+                deleted = move_to_recycle_bin(path_str, days)
+                if not deleted and p.exists():
+                    if p.is_dir():
+                        shutil.rmtree(p)
+                    else:
+                        p.unlink()
+            elif use_recycle:
                 deleted = send_to_recycle_bin(path_str)
                 if not deleted and p.exists():
                     if p.is_dir():
@@ -6393,6 +6416,7 @@ class Bridge(QObject):
         image_exts = IMAGE_EXTS
         media_filter, _, meta_filter, ai_filter = self._parse_filter_groups(filter_type)
         if not folders: return []
+        show_hidden = self._show_hidden_enabled()
         current_key = hashlib.sha1(",".join(sorted(folders)).encode()).hexdigest()
         if self._disk_cache and self._disk_cache_key == current_key: disk_files = self._disk_cache
         else:
@@ -6417,7 +6441,6 @@ class Bridge(QObject):
             self._disk_cache, self._disk_cache_key = disk_files, current_key
         db_candidates = list_media_in_scope(self.conn, folders)
         surviving, covered = [], set()
-        show_hidden = self._show_hidden_enabled()
         
         for r in db_candidates:
             norm = normalize_windows_path(r["path"])
@@ -7225,6 +7248,11 @@ class MainWindow(QMainWindow):
             self.setWindowIcon(QIcon(str(icon_path)))
 
         self.bridge = Bridge(self)
+        try:
+            from native.mediamanagerx_app.recycle_bin import auto_purge_recycle_bin
+            auto_purge_recycle_bin()
+        except Exception:
+            pass
         self.bridge.openVideoRequested.connect(self._open_video_overlay)
         self.bridge.openVideoInPlaceRequested.connect(self._open_video_inplace)
         self.bridge.updateVideoRectRequested.connect(self._update_video_inplace_rect)
@@ -7649,7 +7677,8 @@ class MainWindow(QMainWindow):
         if not paths: return
         
         use_recycle = bool(self.bridge.settings.value("gallery/use_recycle_bin", True, type=bool))
-        if use_recycle:
+        use_retention = bool(self.bridge.settings.value("gallery/use_medialens_retention", False, type=bool))
+        if use_recycle or use_retention:
             for p in paths:
                 self.bridge.delete_path(p)
         else:
@@ -9327,6 +9356,16 @@ class MainWindow(QMainWindow):
             self.bridge.set_drag_paths([])
             self.bridge.nativeDragFinished.emit()
 
+    def show_recycle_bin_viewer(self):
+        try:
+            from native.mediamanagerx_app.recycle_bin import RecycleBinViewerWindow
+            self.recycle_bin_viewer = RecycleBinViewerWindow(self)
+            self.recycle_bin_viewer.show()
+            self.recycle_bin_viewer.raise_()
+            self.recycle_bin_viewer.activateWindow()
+        except Exception as e:
+            print("Failed to open recycle bin viewer:", e)
+
     def _on_navigate_to_folder_requested(self, folder_path: str) -> None:
         self._navigate_to_folder(folder_path, record_history=True, re_root_tree=False)
 
@@ -9357,6 +9396,8 @@ class MainWindow(QMainWindow):
         self._navigate_to_folder(str(parent), record_history=True)
 
     def _refresh_current_folder(self) -> None:
+        self.bridge._disk_cache = {}
+        self.bridge._disk_cache_key = ""
         current_path = self.bridge._selected_folders[0] if self.bridge._selected_folders else ""
         if not current_path:
             self._update_navigation_state()
@@ -13502,9 +13543,12 @@ class MainWindow(QMainWindow):
         modifiers = QApplication.keyboardModifiers()
         is_shift_down = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
         
-        use_recycle = not is_shift_down and bool(self.bridge.settings.value("gallery/use_recycle_bin", True, type=bool))
+        use_recycle = bool(self.bridge.settings.value("gallery/use_recycle_bin", True, type=bool))
+        use_retention = bool(self.bridge.settings.value("gallery/use_medialens_retention", False, type=bool))
         
-        if use_recycle:
+        safe_delete = not is_shift_down and (use_recycle or use_retention)
+        
+        if safe_delete:
             self.bridge.delete_path(path_str)
         else:
             if p.is_dir():
