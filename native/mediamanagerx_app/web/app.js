@@ -17,7 +17,7 @@ let gPosterRequested = new Set();
 let gPosterObserver = null;
 let gSort = 'none';
 let gFilter = 'all';
-let gFilterGroups = { media: 'all', text: 'all', meta: 'all', ai: 'all' };
+let gFilterGroups = { media: 'all', text: 'all', tags: 'all', desc: 'all', ai: 'all' };
 let gCurrentTargetFolderName = '';
 let gCurrentDropFolderPath = '';
 let gCurrentDragPaths = [];
@@ -682,8 +682,12 @@ function normalizeMediaFilter(filterValue) {
   return ['image', 'svg', 'video', 'animated'].includes(filterValue) ? filterValue : 'all';
 }
 
-function normalizeMetaFilter(filterValue) {
-  return ['no_tags', 'no_description'].includes(filterValue) ? filterValue : 'all';
+function normalizeTagsFilter(filterValue) {
+  return ['has_tags', 'no_tags'].includes(filterValue) ? filterValue : 'all';
+}
+
+function normalizeDescFilter(filterValue) {
+  return ['has_description', 'no_description'].includes(filterValue) ? filterValue : 'all';
 }
 
 function normalizeAiFilter(filterValue) {
@@ -692,30 +696,39 @@ function normalizeAiFilter(filterValue) {
 
 function normalizeFilterValue(filterValue) {
   const raw = String(filterValue || 'all').trim();
-  if (!raw || raw === 'all') return { media: 'all', text: 'all', meta: 'all', ai: 'all' };
+  if (!raw || raw === 'all') return { media: 'all', text: 'all', tags: 'all', desc: 'all', ai: 'all' };
   if (!raw.includes(':')) {
     const normalizedText = normalizeTextFilter(raw);
     if (normalizedText === 'text_detected' || normalizedText === 'no_text_detected') {
-      return { media: 'all', text: normalizedText, meta: 'all', ai: 'all' };
+      return { media: 'all', text: normalizedText, tags: 'all', desc: 'all', ai: 'all' };
     }
-    const normalizedMeta = normalizeMetaFilter(raw);
-    if (normalizedMeta !== 'all') {
-      return { media: 'all', text: 'all', meta: normalizedMeta, ai: 'all' };
+    const normalizedTags = normalizeTagsFilter(raw);
+    if (normalizedTags !== 'all') {
+      return { media: 'all', text: 'all', tags: normalizedTags, desc: 'all', ai: 'all' };
+    }
+    const normalizedDesc = normalizeDescFilter(raw);
+    if (normalizedDesc !== 'all') {
+      return { media: 'all', text: 'all', tags: 'all', desc: normalizedDesc, ai: 'all' };
     }
     const normalizedAi = normalizeAiFilter(raw);
     if (normalizedAi !== 'all') {
-      return { media: 'all', text: 'all', meta: 'all', ai: normalizedAi };
+      return { media: 'all', text: 'all', tags: 'all', desc: 'all', ai: normalizedAi };
     }
-    return { media: normalizeMediaFilter(raw), text: 'all', meta: 'all', ai: 'all' };
+    return { media: normalizeMediaFilter(raw), text: 'all', tags: 'all', desc: 'all', ai: 'all' };
   }
-  const groups = { media: 'all', text: 'all', meta: 'all', ai: 'all' };
+  const groups = { media: 'all', text: 'all', tags: 'all', desc: 'all', ai: 'all' };
   raw.split(';').forEach((part) => {
     const [groupRaw, valueRaw] = String(part || '').split(':');
     const group = String(groupRaw || '').trim();
     const value = String(valueRaw || '').trim();
     if (group === 'media') groups.media = normalizeMediaFilter(value);
     if (group === 'text') groups.text = normalizeTextFilter(value) === 'no_text_detected' ? 'no_text_detected' : (normalizeTextFilter(value) === 'text_detected' ? 'text_detected' : 'all');
-    if (group === 'meta') groups.meta = normalizeMetaFilter(value);
+    if (group === 'tags') groups.tags = normalizeTagsFilter(value);
+    if (group === 'desc') groups.desc = normalizeDescFilter(value);
+    if (group === 'meta') {
+      if (value === 'no_tags') groups.tags = 'no_tags';
+      if (value === 'no_description') groups.desc = 'no_description';
+    }
     if (group === 'ai') groups.ai = normalizeAiFilter(value);
   });
   return groups;
@@ -725,12 +738,14 @@ function serializeFilterValue(groups) {
   const media = normalizeMediaFilter(groups && groups.media);
   const normalizedText = normalizeTextFilter(groups && groups.text);
   const text = normalizedText === 'text_detected' || normalizedText === 'no_text_detected' ? normalizedText : 'all';
-  const meta = normalizeMetaFilter(groups && groups.meta);
+  const tags = normalizeTagsFilter(groups && groups.tags);
+  const desc = normalizeDescFilter(groups && groups.desc);
   const ai = normalizeAiFilter(groups && groups.ai);
   const parts = [];
   if (media !== 'all') parts.push(`media:${media}`);
   if (text !== 'all') parts.push(`text:${text}`);
-  if (meta !== 'all') parts.push(`meta:${meta}`);
+  if (tags !== 'all') parts.push(`tags:${tags}`);
+  if (desc !== 'all') parts.push(`desc:${desc}`);
   if (ai !== 'all') parts.push(`ai:${ai}`);
   return parts.length ? parts.join(';') : 'all';
 }
@@ -743,8 +758,10 @@ function getFilterTriggerText(groups) {
   else if (groups.media === 'animated') labels.push('Animated GIFs');
   if (groups.text === 'text_detected') labels.push('Text Detected');
   else if (groups.text === 'no_text_detected') labels.push('No Text Detected');
-  if (groups.meta === 'no_tags') labels.push('No Tags');
-  else if (groups.meta === 'no_description') labels.push('No Description');
+  if (groups.tags === 'has_tags') labels.push('Has Tags');
+  else if (groups.tags === 'no_tags') labels.push('No Tags');
+  if (groups.desc === 'has_description') labels.push('Has Description');
+  else if (groups.desc === 'no_description') labels.push('No Description');
   if (groups.ai === 'ai_generated') labels.push('AI Generated');
   else if (groups.ai === 'non_ai') labels.push('Non-AI');
   return labels.length ? `Filter: ${labels.join(' | ')}` : 'Filter: None';

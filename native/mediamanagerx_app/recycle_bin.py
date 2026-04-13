@@ -12,6 +12,11 @@ from PySide6.QtWidgets import (
     QPushButton, QScrollArea, QGridLayout, QMessageBox, QFrame, QSizePolicy
 )
 
+APP_NAME = "MediaLens"
+LEGACY_APP_NAME = "MediaManagerX"
+LEGACY_APP_ORGANIZATION = "G1enB1and"
+
+
 # Shared with main, keeping it identical
 def _appdata_runtime_dir() -> Path:
     base = os.getenv("APPDATA")
@@ -19,7 +24,24 @@ def _appdata_runtime_dir() -> Path:
         root = Path(base)
     else:
         root = Path.home() / "AppData" / "Roaming"
-    out = root / "G1enB1and" / "MediaManagerX"
+    out = root / APP_NAME
+    legacy_candidates = [
+        root / LEGACY_APP_ORGANIZATION / APP_NAME,
+        root / LEGACY_APP_ORGANIZATION / LEGACY_APP_NAME,
+    ]
+    if not out.exists():
+        for legacy in legacy_candidates:
+            if not legacy.exists():
+                continue
+            try:
+                shutil.move(str(legacy), str(out))
+                break
+            except Exception:
+                try:
+                    shutil.copytree(legacy, out, dirs_exist_ok=True)
+                    break
+                except Exception:
+                    pass
     out.mkdir(parents=True, exist_ok=True)
     return out
 
@@ -176,7 +198,7 @@ from native.mediamanagerx_app.main import Theme
 from PySide6.QtCore import QSettings
 
 def _get_accent() -> QColor:
-    s = QSettings("G1enB1and", "MediaManagerX")
+    s = QSettings(str(_appdata_runtime_dir() / "settings.ini"), QSettings.Format.IniFormat)
     return QColor(str(s.value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT))
 
 class RecycleBinItemWidget(QFrame):

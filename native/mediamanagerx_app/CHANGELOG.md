@@ -1,6 +1,36 @@
 # Change Log
 
-## v1.1.17 (Current)
+## v1.1.18 (Current)
+
+### Summary
+
+This release makes installed Windows builds more dependable. MediaLens now uses a cleaner per-user app-data location and applies safer gallery rendering defaults on systems where the embedded gallery could appear black or fail to paint correctly.
+
+### Highlights
+
+- Fixed installed builds that could show a black gallery surface even while items were still clickable underneath.
+- MediaLens now stores logs, settings, and database files under `%APPDATA%\MediaLens\` instead of the old legacy app-data naming.
+- Existing installs migrate forward automatically so users keep their settings and library data.
+
+### Added
+
+- Added automatic migration from legacy `G1enB1and\MediaManagerX` and `G1enB1and\MediaLens` app-data folders into `%APPDATA%\MediaLens\`.
+- Added automatic migration from the legacy `mediamanagerx.db` filename to `medialens.db`.
+- Added extra WebEngine diagnostics to the app log so renderer failures and page-load issues are easier to diagnose on customer machines.
+
+### Changed
+
+- Changed runtime settings storage to use `%APPDATA%\MediaLens\settings.ini` so the installed app no longer depends on a publisher-name subfolder.
+- Changed Windows frozen builds to prefer a safer software-rendered WebEngine path when needed, reducing black or non-painted gallery surfaces on affected systems.
+- Updated theme and runtime helpers across the main window, recycle bin, and video overlay so all runtime components read from the same MediaLens app-data location.
+
+### Removed
+
+- Removed active use of the legacy `MediaManagerX` app-data namespace for new MediaLens runtime storage.
+
+---
+
+## v1.1.17
 
 ### Summary
 

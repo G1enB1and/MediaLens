@@ -4,7 +4,7 @@ try:
     with open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "VERSION"), "r") as f:
         __version__ = f.read().strip()
 except Exception:
-    __version__ = "v1.1.17"
+    __version__ = "v1.1.18"
 
 
 import sys
@@ -26,6 +26,61 @@ from datetime import datetime, timezone, timedelta
 from math import gcd
 from packaging.version import Version
 from pathlib import Path
+
+APP_NAME = "MediaLens"
+LEGACY_APP_NAME = "MediaManagerX"
+LEGACY_APP_ORGANIZATION = "G1enB1and"
+
+
+def _append_env_flag(name: str, flag: str) -> None:
+    current = str(os.environ.get(name, "") or "").strip()
+    parts = [part for part in current.split() if part]
+    if flag in parts:
+        return
+    parts.append(flag)
+    os.environ[name] = " ".join(parts)
+
+
+def _configure_windows_webengine_runtime() -> dict[str, object]:
+    runtime = {
+        "enabled": False,
+        "reason": "",
+        "qt_opengl": str(os.environ.get("QT_OPENGL", "") or ""),
+        "chromium_flags": str(os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "") or ""),
+    }
+    if os.name != "nt":
+        return runtime
+
+    safe_mode = str(os.environ.get("MEDIALENS_WEBENGINE_SAFE_MODE", "") or "").strip().lower()
+    if safe_mode in {"0", "false", "no", "off"}:
+        runtime["reason"] = "disabled-by-env"
+        return runtime
+
+    frozen_build = bool(getattr(sys, "frozen", False))
+    if safe_mode not in {"1", "true", "yes", "on"} and not frozen_build:
+        runtime["reason"] = "dev-default"
+        return runtime
+
+    # Some installed Windows systems keep the WebEngine surface interactive
+    # but fail to paint it reliably. Prefer software paths in frozen builds,
+    # while still allowing an env override for troubleshooting.
+    os.environ.setdefault("QT_OPENGL", "software")
+    for flag in (
+        "--disable-gpu",
+        "--disable-gpu-compositing",
+        "--disable-direct-composition",
+    ):
+        _append_env_flag("QTWEBENGINE_CHROMIUM_FLAGS", flag)
+
+    runtime["enabled"] = True
+    runtime["reason"] = "forced-by-env" if safe_mode in {"1", "true", "yes", "on"} else "frozen-default"
+    runtime["qt_opengl"] = str(os.environ.get("QT_OPENGL", "") or "")
+    runtime["chromium_flags"] = str(os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "") or "")
+    return runtime
+
+
+_WINDOWS_WEBENGINE_RUNTIME = _configure_windows_webengine_runtime()
+
 
 def send_to_recycle_bin(path: str) -> bool:
     try:
@@ -488,6 +543,7 @@ def _run_hidden_subprocess(cmd: list[str], **kwargs):
 
 
 _FAULT_HANDLER_STREAM = None
+_SETTINGS_MIGRATED = False
 
 
 def _appdata_runtime_dir() -> Path:
@@ -496,9 +552,73 @@ def _appdata_runtime_dir() -> Path:
         root = Path(base)
     else:
         root = Path.home() / "AppData" / "Roaming"
-    out = root / "G1enB1and" / "MediaManagerX"
+    out = root / APP_NAME
+    legacy_candidates = [
+        root / LEGACY_APP_ORGANIZATION / APP_NAME,
+        root / LEGACY_APP_ORGANIZATION / LEGACY_APP_NAME,
+    ]
+    if not out.exists():
+        for legacy in legacy_candidates:
+            if not legacy.exists():
+                continue
+            try:
+                shutil.move(str(legacy), str(out))
+                break
+            except Exception:
+                try:
+                    shutil.copytree(legacy, out, dirs_exist_ok=True)
+                    break
+                except Exception:
+                    pass
     out.mkdir(parents=True, exist_ok=True)
     return out
+
+
+def _runtime_db_path(appdata_dir: Path | None = None) -> Path:
+    root = appdata_dir or _appdata_runtime_dir()
+    legacy = root / "mediamanagerx.db"
+    current = root / "medialens.db"
+    if not current.exists() and legacy.exists():
+        try:
+            shutil.move(str(legacy), str(current))
+        except Exception:
+            try:
+                shutil.copy2(str(legacy), str(current))
+            except Exception:
+                pass
+    return current
+
+
+def app_settings() -> QSettings:
+    global _SETTINGS_MIGRATED
+    settings_path = _appdata_runtime_dir() / "settings.ini"
+    settings = QSettings(str(settings_path), QSettings.Format.IniFormat)
+    if _SETTINGS_MIGRATED:
+        return settings
+
+    try:
+        migrated = bool(settings.value("app/settings_migrated_from_legacy", False, type=bool))
+    except Exception:
+        migrated = False
+    if migrated:
+        _SETTINGS_MIGRATED = True
+        return settings
+
+    try:
+        legacy_sources = [
+            QSettings(LEGACY_APP_ORGANIZATION, APP_NAME),
+            QSettings(LEGACY_APP_ORGANIZATION, LEGACY_APP_NAME),
+        ]
+        for legacy in legacy_sources:
+            for key in legacy.allKeys():
+                if not settings.contains(key):
+                    settings.setValue(key, legacy.value(key))
+        settings.setValue("app/settings_migrated_from_legacy", True)
+        settings.sync()
+    except Exception:
+        pass
+    _SETTINGS_MIGRATED = True
+    return settings
 
 
 def _write_crash_report(kind: str, exc_type=None, exc_value=None, exc_tb=None) -> Path | None:
@@ -596,7 +716,7 @@ class Theme:
     def get_is_light() -> bool:
         if Theme._theme_mode_override in {"light", "dark"}:
             return Theme._theme_mode_override == "light"
-        settings = QSettings("G1enB1and", "MediaManagerX")
+        settings = app_settings()
         val = settings.value("ui/theme_mode", "dark")
         # Ensure we handle both string and potential type-wrapped values cleanly
         return str(val).lower() == "light"
@@ -3246,9 +3366,7 @@ class Bridge(QObject):
         self._can_nav_back = False
         self._can_nav_forward = False
         
-        appdata = Path(
-            QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
-        )
+        appdata = _appdata_runtime_dir()
         self._thumb_dir = appdata / "thumbs"
         self._thumb_dir.mkdir(parents=True, exist_ok=True)
         
@@ -3261,10 +3379,18 @@ class Bridge(QObject):
             except Exception: pass
         self._log = _log
         self._log(f"Bridge: Initializing (Version: {__version__})...")
+        if os.name == "nt":
+            self._log(
+                "WebEngine runtime: "
+                f"enabled={bool(_WINDOWS_WEBENGINE_RUNTIME.get('enabled'))} "
+                f"reason={_WINDOWS_WEBENGINE_RUNTIME.get('reason') or 'n/a'} "
+                f"QT_OPENGL={_WINDOWS_WEBENGINE_RUNTIME.get('qt_opengl') or '<unset>'} "
+                f"QTWEBENGINE_CHROMIUM_FLAGS={_WINDOWS_WEBENGINE_RUNTIME.get('chromium_flags') or '<unset>'}"
+            )
         
         # Initialize Database
         from app.mediamanager.db.connect import connect_db
-        self.db_path = appdata / "mediamanagerx.db"
+        self.db_path = _runtime_db_path(appdata)
         self._log(f"DB Path = {self.db_path}")
         self.conn = connect_db(str(self.db_path))
         from app.mediamanager.db.repository import MediaRepository
@@ -3310,7 +3436,7 @@ class Bridge(QObject):
         except Exception as e:
             print(f"Migration Error: {e}")
 
-        self.settings = QSettings("G1enB1and", "MediaManagerX")
+        self.settings = app_settings()
         Theme.set_theme_mode(str(self.settings.value("ui/theme_mode", "dark", type=str) or "dark"))
         self.nam = QNetworkAccessManager(self)
         self.nam.setRedirectPolicy(QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy)
@@ -3464,7 +3590,7 @@ class Bridge(QObject):
             self._active_smart_collection_name = ""
         try:
             # Persistent settings
-            settings = QSettings("G1enB1and", "MediaManagerX")
+            settings = app_settings()
             primary = folders[0] if folders else ""
             settings.setValue("gallery/last_folder", primary)
         except Exception:
@@ -6439,7 +6565,7 @@ class Bridge(QObject):
         from app.mediamanager.utils.pathing import normalize_windows_path
         ALL_EXTS = IMAGE_EXTS | VIDEO_EXTS
         image_exts = IMAGE_EXTS
-        media_filter, _, meta_filter, ai_filter = self._parse_filter_groups(filter_type)
+        media_filter, _, tags_filter, desc_filter, ai_filter = self._parse_filter_groups(filter_type)
         if not folders: return []
         show_hidden = self._show_hidden_enabled()
         current_key = hashlib.sha1(",".join(sorted(folders)).encode()).hexdigest()
@@ -6506,7 +6632,8 @@ class Bridge(QObject):
             candidates = [r for r in candidates if Path(r["path"]).suffix.lower() not in image_exts]
         elif media_filter == "animated":
             candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
-        candidates = self._apply_metadata_filter(candidates, meta_filter)
+        candidates = self._apply_tags_filter(candidates, tags_filter)
+        candidates = self._apply_desc_filter(candidates, desc_filter)
         if ai_filter != "all":
             self._backfill_scope_ai_decisions(candidates)
         candidates = self._apply_ai_filter(candidates, ai_filter)
@@ -6519,7 +6646,7 @@ class Bridge(QObject):
         from app.mediamanager.db.media_repo import list_media_in_collection
         image_exts = IMAGE_EXTS
         show_hidden = self._show_hidden_enabled()
-        media_filter, _, meta_filter, ai_filter = self._parse_filter_groups(filter_type)
+        media_filter, _, tags_filter, desc_filter, ai_filter = self._parse_filter_groups(filter_type)
         
         raw_candidates = list_media_in_collection(self.conn, int(collection_id))
         candidates = []
@@ -6543,7 +6670,8 @@ class Bridge(QObject):
             candidates = [r for r in candidates if Path(r["path"]).suffix.lower() not in image_exts]
         elif media_filter == "animated":
             candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
-        candidates = self._apply_metadata_filter(candidates, meta_filter)
+        candidates = self._apply_tags_filter(candidates, tags_filter)
+        candidates = self._apply_desc_filter(candidates, desc_filter)
         if ai_filter != "all":
             self._backfill_scope_ai_decisions(candidates)
         candidates = self._apply_ai_filter(candidates, ai_filter)
@@ -6559,7 +6687,7 @@ class Bridge(QObject):
             return []
         image_exts = IMAGE_EXTS
         show_hidden = self._show_hidden_enabled()
-        media_filter, _, meta_filter, ai_filter = self._parse_filter_groups(filter_type)
+        media_filter, _, tags_filter, desc_filter, ai_filter = self._parse_filter_groups(filter_type)
         cutoff_iso = self._smart_collection_cutoff_iso(int(definition.get("days") or 0))
         raw_candidates = list_media_in_smart_collection(self.conn, str(definition.get("field") or ""), cutoff_iso)
         candidates = []
@@ -6583,7 +6711,8 @@ class Bridge(QObject):
             candidates = [r for r in candidates if Path(r["path"]).suffix.lower() not in image_exts]
         elif media_filter == "animated":
             candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
-        candidates = self._apply_metadata_filter(candidates, meta_filter)
+        candidates = self._apply_tags_filter(candidates, tags_filter)
+        candidates = self._apply_desc_filter(candidates, desc_filter)
         if ai_filter != "all":
             self._backfill_scope_ai_decisions(candidates)
         candidates = self._apply_ai_filter(candidates, ai_filter)
@@ -6593,10 +6722,19 @@ class Bridge(QObject):
         return candidates
 
     @staticmethod
-    def _apply_metadata_filter(candidates: list[dict], meta_filter: str) -> list[dict]:
-        mode = str(meta_filter or "all").strip().lower()
+    def _apply_tags_filter(candidates: list[dict], tags_filter: str) -> list[dict]:
+        mode = str(tags_filter or "all").strip().lower()
+        if mode == "has_tags":
+            return [r for r in candidates if str(r.get("tags") or "").strip()]
         if mode == "no_tags":
             return [r for r in candidates if not str(r.get("tags") or "").strip()]
+        return candidates
+
+    @staticmethod
+    def _apply_desc_filter(candidates: list[dict], desc_filter: str) -> list[dict]:
+        mode = str(desc_filter or "all").strip().lower()
+        if mode == "has_description":
+            return [r for r in candidates if str(r.get("description") or "").strip()]
         if mode == "no_description":
             return [r for r in candidates if not str(r.get("description") or "").strip()]
         return candidates
@@ -6615,26 +6753,29 @@ class Bridge(QObject):
         return matches_media_search(row, search_query)
 
     @staticmethod
-    def _parse_filter_groups(filter_type: str) -> tuple[str, str, str, str]:
+    def _parse_filter_groups(filter_type: str) -> tuple[str, str, str, str, str]:
         raw = str(filter_type or "all").strip()
         media_filter = "all"
         text_filter = "all"
-        meta_filter = "all"
+        tags_filter = "all"
+        desc_filter = "all"
         ai_filter = "all"
         if not raw or raw == "all":
-            return media_filter, text_filter, meta_filter, ai_filter
+            return media_filter, text_filter, tags_filter, desc_filter, ai_filter
         if ":" not in raw:
             if raw in {"text_detected", "text_more_likely", "text_verified"}:
-                return media_filter, "text_detected", meta_filter, ai_filter
+                return media_filter, "text_detected", tags_filter, desc_filter, ai_filter
             if raw == "no_text_detected":
-                return media_filter, "no_text_detected", meta_filter, ai_filter
-            if raw in {"no_tags", "no_description"}:
-                return media_filter, text_filter, raw, ai_filter
+                return media_filter, "no_text_detected", tags_filter, desc_filter, ai_filter
+            if raw in {"has_tags", "no_tags"}:
+                return media_filter, text_filter, raw, desc_filter, ai_filter
+            if raw in {"has_description", "no_description"}:
+                return media_filter, text_filter, tags_filter, raw, ai_filter
             if raw in {"ai_generated", "non_ai"}:
-                return media_filter, text_filter, meta_filter, raw
+                return media_filter, text_filter, tags_filter, desc_filter, raw
             if raw in {"image", "svg", "video", "animated"}:
-                return raw, text_filter, meta_filter, ai_filter
-            return media_filter, text_filter, meta_filter, ai_filter
+                return raw, text_filter, tags_filter, desc_filter, ai_filter
+            return media_filter, text_filter, tags_filter, desc_filter, ai_filter
         for part in raw.split(";"):
             group, _, value = str(part or "").partition(":")
             group = group.strip().lower()
@@ -6646,11 +6787,18 @@ class Bridge(QObject):
                     text_filter = "text_detected"
                 elif value == "no_text_detected":
                     text_filter = "no_text_detected"
+            elif group == "tags" and value in {"has_tags", "no_tags"}:
+                tags_filter = value
+            elif group == "desc" and value in {"has_description", "no_description"}:
+                desc_filter = value
             elif group == "meta" and value in {"no_tags", "no_description"}:
-                meta_filter = value
+                if value == "no_tags":
+                    tags_filter = "no_tags"
+                elif value == "no_description":
+                    desc_filter = "no_description"
             elif group == "ai" and value in {"ai_generated", "non_ai"}:
                 ai_filter = value
-        return media_filter, text_filter, meta_filter, ai_filter
+        return media_filter, text_filter, tags_filter, desc_filter, ai_filter
 
     @staticmethod
     def _iso_to_ns(value) -> int:
@@ -6827,7 +6975,7 @@ class Bridge(QObject):
         return media_type or ""
 
     def _get_gallery_entries(self, folders: list[str], sort_by: str = "none", filter_type: str = "all", search_query: str = "") -> list[dict]:
-        _, text_filter, _, _ = self._parse_filter_groups(filter_type)
+        _, text_filter, _, _, _ = self._parse_filter_groups(filter_type)
         if folders:
             entries = self._get_reconciled_candidates(folders, filter_type, search_query)
             if self._gallery_view_mode() not in {"masonry", "duplicates", "similar", "similar_only"} and self._review_group_mode() is None:
@@ -7284,6 +7432,24 @@ class GalleryView(QWebEngineView):
         super().dropEvent(event)
 
 
+class GalleryWebPage(QWebEnginePage):
+    """Logs WebEngine console and renderer failures into the app log."""
+
+    def javaScriptConsoleMessage(self, level, message, line_number, source_id) -> None:
+        main_win = self.window()
+        bridge = getattr(main_win, "bridge", None)
+        if bridge:
+            try:
+                bridge._log(
+                    "Web console: "
+                    f"level={level} source={source_id or '<inline>'} "
+                    f"line={int(line_number)} message={message}"
+                )
+            except Exception:
+                pass
+        super().javaScriptConsoleMessage(level, message, line_number, source_id)
+
+
 class MainWindow(QMainWindow):
     _DEFAULT_LEFT_PANEL_WIDTH = 200
     _DEFAULT_CENTER_WIDTH = 700
@@ -7297,7 +7463,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("MediaLens")
         self.resize(1200, 800)
 
-        startup_settings = QSettings("G1enB1and", "MediaManagerX")
+        startup_settings = app_settings()
         startup_theme = str(startup_settings.value("ui/theme_mode", "dark", type=str) or "dark")
         startup_accent = str(startup_settings.value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT)
         Theme.set_theme_mode(startup_theme)
@@ -8015,6 +8181,7 @@ class MainWindow(QMainWindow):
         center_layout.setContentsMargins(0, 0, 0, 0)
 
         self.web = GalleryView(center)
+        self.web.setPage(GalleryWebPage(self.web))
         center_layout.addWidget(self.web)
 
         # Native loading overlay shown while the WebEngine page itself is loading.
@@ -8802,6 +8969,14 @@ class MainWindow(QMainWindow):
         self.channel = QWebChannel(self.web.page())
         self.channel.registerObject("bridge", self.bridge)
         self.web.page().setWebChannel(self.channel)
+        try:
+            self.web.page().renderProcessTerminated.connect(
+                lambda status, exit_code: self.bridge._log(
+                    f"Web render process terminated: status={status} exit_code={int(exit_code)}"
+                )
+            )
+        except Exception:
+            pass
 
         index_path = Path(__file__).with_name("web") / "index.html"
 
@@ -8811,6 +8986,11 @@ class MainWindow(QMainWindow):
         self.web.loadStarted.connect(lambda: self._set_web_loading(True))
         self.web.loadProgress.connect(self._on_web_load_progress)
         self.web.loadFinished.connect(lambda _ok: self._set_web_loading(False))
+        self.web.loadFinished.connect(
+            lambda ok: self.bridge._log(
+                f"Web load finished: ok={bool(ok)} url={self.web.url().toString()}"
+            )
+        )
 
         self.web.setUrl(QUrl.fromLocalFile(str(index_path.resolve())))
 
@@ -15161,13 +15341,15 @@ def _create_startup_splash(app: QApplication, startup_bg: QColor) -> QSplashScre
 
 
 def main() -> None:
+    if os.name == "nt" and bool(_WINDOWS_WEBENGINE_RUNTIME.get("enabled")):
+        QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseSoftwareOpenGL, True)
     app = QApplication(sys.argv)
 
-    # Ensure QStandardPaths.AppDataLocation resolves to a stable, app-specific dir.
-    app.setOrganizationName("G1enB1and")
-    app.setApplicationName("MediaLens")
+    # Keep the visible Qt app name aligned with the installed product name.
+    app.setOrganizationName(APP_NAME)
+    app.setApplicationName(APP_NAME)
 
-    startup_settings = QSettings("G1enB1and", "MediaManagerX")
+    startup_settings = app_settings()
     startup_theme = str(startup_settings.value("ui/theme_mode", "dark", type=str) or "dark")
     startup_accent = str(startup_settings.value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT)
     show_splash = bool(startup_settings.value("ui/show_splash_screen", True, type=bool))

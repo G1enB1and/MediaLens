@@ -31,6 +31,13 @@ class VideoRequest:
     height: int = 0
 
 
+def _settings_ini_path() -> str:
+    base = os.getenv("APPDATA")
+    if base:
+        return str(Path(base) / "MediaLens" / "settings.ini")
+    return str(Path.home() / "AppData" / "Roaming" / "MediaLens" / "settings.ini")
+
+
 class VideoFrameWidget(QWidget):
     """Paints video frames from a QVideoSink.
 
@@ -304,13 +311,13 @@ class LightboxVideoOverlay(QWidget):
 
     def _is_light(self) -> bool:
         from PySide6.QtCore import QSettings
-        settings = QSettings("G1enB1and", "MediaManagerX")
+        settings = QSettings(_settings_ini_path(), QSettings.Format.IniFormat)
         val = settings.value("ui/theme_mode", "dark")
         return str(val).lower() == "light"
 
     def _apply_theme(self) -> None:
         from PySide6.QtCore import QSettings
-        settings = QSettings("G1enB1and", "MediaManagerX")
+        settings = QSettings(_settings_ini_path(), QSettings.Format.IniFormat)
         accent_hex = str(settings.value("ui/accent_color", "#8ab4f8"))
         if not accent_hex.startswith("#"):
             accent_hex = "#8ab4f8"

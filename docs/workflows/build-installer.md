@@ -4,6 +4,8 @@ description: How to build the MediaLens setup installer
 
 This workflow describes how to build the standalone executable and the Windows setup installer for MediaLens.
 
+Canonical human-facing copy: `docs/workflows/build-installer.md`
+
 // turbo
 
 1. Run the build script, which uses the project `.venv` PyInstaller and then compiles the installer:
