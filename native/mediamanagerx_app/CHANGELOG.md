@@ -1,6 +1,40 @@
 # Change Log
 
-## v1.1.18 (Current)
+## v1.1.19 (Current)
+
+### Summary
+
+This release refines file scope and folder visibility settings, and updates several actions across the gallery and settings workflows.
+
+### Highlights
+
+- Added settings to easily toggle nested files and folder visibility in the gallery.
+- Added new `Delete` and `Rename` actions directly inside Tag Lists for faster organization.
+- Updated dialog styling for a more consistent appearance.
+
+### Added
+
+- Added `Include nested files in gallery` and `Show folders in gallery` settings.
+- Added a convenient `Include nested files` toggle directly in the header for fast access.
+- Added deduplication logic for move/copy operations when both a folder and its nested files are selected.
+- Added `Delete` and `Rename` options to Tag Lists.
+
+### Changed
+
+- Changed `Select All` behavior to correctly exclude folders when `Include nested files` is enabled.
+- Changed the masonry view to consistently hide folders regardless of the global show-folders setting.
+- Changed the file count chip in the header to accurately ignore folders.
+- Lowered the delay time for tooltip text and improved tooltip legibility.
+- Themed the `Create`, `Rename`, and `Delete` dialog windows to match the app.
+- Changed the default install folder to `MediaLens` and fixed database migration from older `MediaManagerX` versions.
+
+### Fixed
+
+- Fixed the `AttributeError: 'GalleryWebPage' object has no attribute 'view'` error that occurred during WebEngine console logging.
+
+---
+
+## v1.1.18
 
 ### Summary
 

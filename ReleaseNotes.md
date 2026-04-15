@@ -1,18 +1,20 @@
-## MediaLens v1.1.18
+## MediaLens v1.1.19
 
-### Summary
+### ✨ Summary
 
-This release improves reliability on installed Windows systems. MediaLens now uses a cleaner per-user app-data location and includes a safer gallery rendering path for machines that could show a black embedded gallery.
+This release refines folder visibility settings, and updates several actions across the gallery and settings workflows.
 
-### Highlights
+### 🔥 Highlights
 
-- Fixed installs where the gallery could render as a black surface even though media was still present underneath.
-- Moved logs, settings, and database storage to `%APPDATA%\MediaLens\` instead of the old legacy naming.
-- Existing installs automatically migrate forward so users keep their saved settings and library data.
+- **Folder Visibility:** Added settings to easily toggle nested files and folder visibility in the gallery, including a convenient header toggle.
+- **Tag Management:** Added new `Delete` and `Rename` actions directly inside Tag Lists for faster metadata organization.
+- **UI Polish:** Themed the `Create`, `Rename`, and `Delete` dialog windows for a more consistent appearance.
 
-### Notes
+### 🛠 Notes
 
-- Added deeper WebEngine logging to help diagnose any remaining machine-specific gallery rendering problems.
+- **Installation Path:** Changed the default install folder to `MediaLens` and fixed database migration from older `MediaManagerX` versions.
 
-Full Changelog:
+---
+
+📄 Full Changelog:
 <https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md>
