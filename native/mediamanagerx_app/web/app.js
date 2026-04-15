@@ -276,6 +276,8 @@ let gAdvancedSearchSavedQueries = [];
 let gAdvancedSearchCarryoverTokens = [];
 let gAdvancedSearchCollections = [];
 let gShowHidden = false;
+let gIncludeNestedFiles = true;
+let gShowFoldersInGallery = true;
 
 function normalizedVideoLoopCutoffSeconds() {
   const parsed = Number(gVideoLoopCutoffSeconds);
@@ -2198,6 +2200,14 @@ let gSelectedPaths = new Set();
 let gLastSelectionIdx = -1;
 let gIsCtxMenuClick = false; // Guard for context menu clicks
 
+function shouldSelectFoldersOnSelectAll() {
+  return !gIncludeNestedFiles;
+}
+
+function isFolderCardElement(card) {
+  return !!(card && card.getAttribute('data-is-folder') === 'true');
+}
+
 function deselectAll(force = false) {
   if (!force && gIsCtxMenuClick) {
     gIsCtxMenuClick = false;
@@ -2223,9 +2233,10 @@ window.deselectAll = deselectAll;
 function selectAll() {
   gSelectedPaths.clear();
   document.querySelectorAll('.card').forEach(c => {
-    c.classList.add('selected');
+    const selectCard = !isFolderCardElement(c) || shouldSelectFoldersOnSelectAll();
+    c.classList.toggle('selected', selectCard);
     const path = c.getAttribute('data-path');
-    if (path) gSelectedPaths.add(path);
+    if (path && selectCard) gSelectedPaths.add(path);
   });
   gIsCtxMenuClick = true; // Prevents the follow-up document click from deselecting
   syncMetadataToBridge();
@@ -6679,6 +6690,15 @@ function syncStartFolderEnabled() {
   if (browse) browse.disabled = on;
 }
 
+function syncGalleryScopeToggles() {
+  const settingsNestedToggle = document.getElementById('toggleIncludeNestedFiles');
+  const settingsFoldersToggle = document.getElementById('toggleShowFoldersInGallery');
+  const headerNestedToggle = document.getElementById('headerIncludeNestedFiles');
+  if (settingsNestedToggle) settingsNestedToggle.checked = !!gIncludeNestedFiles;
+  if (settingsFoldersToggle) settingsFoldersToggle.checked = !!gShowFoldersInGallery;
+  if (headerNestedToggle) headerNestedToggle.checked = !!gIncludeNestedFiles;
+}
+
 function wireSettings() {
   const openBtn = document.getElementById('openSettings');
   const closeBtn = document.getElementById('closeSettings');
@@ -6707,6 +6727,9 @@ function wireSettings() {
   const restoreToggle = document.getElementById('toggleRestoreLast');
   const useRecycleBinToggle = document.getElementById('toggleUseRecycleBin');
   const toggleShowHidden = document.getElementById('toggleShowHidden');
+  const toggleIncludeNestedFiles = document.getElementById('toggleIncludeNestedFiles');
+  const toggleShowFoldersInGallery = document.getElementById('toggleShowFoldersInGallery');
+  const headerIncludeNestedFiles = document.getElementById('headerIncludeNestedFiles');
   const toggleMuteVideoByDefault = document.getElementById('toggleMuteVideoByDefault');
   const toggleAutoplayGalleryAnimatedGifs = document.getElementById('toggleAutoplayGalleryAnimatedGifs');
   const toggleAutoplayPreviewAnimatedGifs = document.getElementById('toggleAutoplayPreviewAnimatedGifs');
@@ -6768,6 +6791,40 @@ function wireSettings() {
     toggleShowHidden.addEventListener('change', () => {
       if (!gBridge || !gBridge.set_setting_bool) return;
       gBridge.set_setting_bool('gallery.show_hidden', !!toggleShowHidden.checked, function () {
+        gPage = 0;
+        refreshFromBridge(gBridge);
+      });
+    });
+  }
+
+  const applyIncludeNestedFilesSetting = (checked) => {
+    if (!gBridge || !gBridge.set_setting_bool) return;
+    gIncludeNestedFiles = !!checked;
+    syncGalleryScopeToggles();
+    gBridge.set_setting_bool('gallery.include_nested_files', gIncludeNestedFiles, function () {
+      gPage = 0;
+      refreshFromBridge(gBridge);
+    });
+  };
+
+  if (toggleIncludeNestedFiles) {
+    toggleIncludeNestedFiles.addEventListener('change', () => {
+      applyIncludeNestedFilesSetting(!!toggleIncludeNestedFiles.checked);
+    });
+  }
+
+  if (headerIncludeNestedFiles) {
+    headerIncludeNestedFiles.addEventListener('change', () => {
+      applyIncludeNestedFilesSetting(!!headerIncludeNestedFiles.checked);
+    });
+  }
+
+  if (toggleShowFoldersInGallery) {
+    toggleShowFoldersInGallery.addEventListener('change', () => {
+      if (!gBridge || !gBridge.set_setting_bool) return;
+      gShowFoldersInGallery = !!toggleShowFoldersInGallery.checked;
+      syncGalleryScopeToggles();
+      gBridge.set_setting_bool('gallery.show_folders', gShowFoldersInGallery, function () {
         gPage = 0;
         refreshFromBridge(gBridge);
       });
@@ -8616,6 +8673,9 @@ async function main() {
       const hd = document.getElementById('toggleShowHidden');
       if (hd) hd.checked = !!(s && s['gallery.show_hidden']);
       gShowHidden = !!(s && s['gallery.show_hidden']);
+      gIncludeNestedFiles = !s || s['gallery.include_nested_files'] !== false;
+      gShowFoldersInGallery = !s || s['gallery.show_folders'] !== false;
+      syncGalleryScopeToggles();
 
       gMuteVideoByDefault = (s && s['gallery.mute_video_by_default'] !== undefined)
         ? !!s['gallery.mute_video_by_default']
@@ -8886,10 +8946,18 @@ async function main() {
           updateThemeAwareIcons(theme);
           return;
         }
-        if (key === 'gallery.show_hidden' || key === 'gallery.view_mode' || key === 'gallery.group_by' || key === 'gallery.group_date_granularity' || key === 'gallery.similarity_threshold') {
+        if (key === 'gallery.show_hidden' || key === 'gallery.include_nested_files' || key === 'gallery.show_folders' || key === 'gallery.view_mode' || key === 'gallery.group_by' || key === 'gallery.group_date_granularity' || key === 'gallery.similarity_threshold') {
           if (key === 'gallery.show_hidden') {
             gShowHidden = !!value;
             refreshAdvancedCollections();
+          }
+          if (key === 'gallery.include_nested_files') {
+            gIncludeNestedFiles = !!value;
+            syncGalleryScopeToggles();
+          }
+          if (key === 'gallery.show_folders') {
+            gShowFoldersInGallery = !!value;
+            syncGalleryScopeToggles();
           }
           if (key === 'gallery.view_mode' && bridge.get_settings) {
             bridge.get_settings(function (s) {
@@ -8899,6 +8967,9 @@ async function main() {
               gGroupBy = ['date', 'duplicates', 'similar', 'similar_only'].includes(nextGroupBy) ? nextGroupBy : 'none';
               gGroupDateGranularity = (s && s['gallery.group_date_granularity']) || 'day';
               gSimilarityThreshold = (s && s['gallery.similarity_threshold']) || 'low';
+              gIncludeNestedFiles = !s || s['gallery.include_nested_files'] !== false;
+              gShowFoldersInGallery = !s || s['gallery.show_folders'] !== false;
+              syncGalleryScopeToggles();
               if (!REVIEW_VIEW_MODES.has(gGalleryViewMode)) {
                 gLastStandardViewMode = gGalleryViewMode;
               }

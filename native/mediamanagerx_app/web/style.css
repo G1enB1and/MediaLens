@@ -2990,6 +2990,31 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   white-space: nowrap;
 }
 
+.header-toggle-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--input-bg);
+  color: var(--fg);
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.header-toggle-chip:hover {
+  border-color: var(--accent);
+  background: var(--hover-bg);
+}
+
+.header-toggle-chip input {
+  margin: 0;
+}
+
 /* Custom Select Replacement */
 .custom-select {
   position: relative;

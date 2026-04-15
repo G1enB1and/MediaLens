@@ -4428,6 +4428,12 @@ class Bridge(QObject):
     def _show_hidden_enabled(self) -> bool:
         return bool(self.settings.value("gallery/show_hidden", False, type=bool))
 
+    def _gallery_include_nested_files_enabled(self) -> bool:
+        return bool(self.settings.value("gallery/include_nested_files", True, type=bool))
+
+    def _gallery_show_folders_enabled(self) -> bool:
+        return bool(self.settings.value("gallery/show_folders", True, type=bool))
+
     def _preview_above_details_enabled(self) -> bool:
         return bool(self.settings.value("ui/preview_above_details", True, type=bool))
 
@@ -5102,6 +5108,8 @@ class Bridge(QObject):
                 "gallery.randomize": self._randomize_enabled(),
                 "gallery.restore_last": self._restore_last_enabled(),
                 "gallery.show_hidden": self._show_hidden_enabled(),
+                "gallery.include_nested_files": self._gallery_include_nested_files_enabled(),
+                "gallery.show_folders": self._gallery_show_folders_enabled(),
                 "gallery.use_recycle_bin": bool(self.settings.value("gallery/use_recycle_bin", True, type=bool)),
                 "gallery.mute_video_by_default": self._mute_video_by_default_enabled(),
                 "player.autoplay_gallery_animated_gifs": self._autoplay_gallery_animated_gifs_enabled(),
@@ -5186,6 +5194,8 @@ class Bridge(QObject):
                 "gallery.randomize": False,
                 "gallery.restore_last": False,
                 "gallery.show_hidden": False,
+                "gallery.include_nested_files": True,
+                "gallery.show_folders": True,
                 "gallery.use_recycle_bin": True,
                 "gallery.mute_video_by_default": True,
                 "player.autoplay_gallery_animated_gifs": True,
@@ -5685,6 +5695,8 @@ class Bridge(QObject):
                 "gallery.randomize", 
                 "gallery.restore_last", 
                 "gallery.show_hidden",
+                "gallery.include_nested_files",
+                "gallery.show_folders",
                 "gallery.use_recycle_bin",
                 "gallery.mute_video_by_default",
                 "player.autoplay_gallery_animated_gifs",
@@ -5703,7 +5715,7 @@ class Bridge(QObject):
                 return False
             qkey = key.replace(".", "/")
             self.settings.setValue(qkey, bool(value))
-            if key.startswith("ui.") or key.startswith("metadata.display.") or key in {"gallery.show_hidden", "gallery.mute_video_by_default", "player.autoplay_gallery_animated_gifs", "player.autoplay_preview_animated_gifs"}:
+            if key.startswith("ui.") or key.startswith("metadata.display.") or key in {"gallery.show_hidden", "gallery.include_nested_files", "gallery.show_folders", "gallery.mute_video_by_default", "player.autoplay_gallery_animated_gifs", "player.autoplay_preview_animated_gifs"}:
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, bool(value))
             elif key in {"duplicate.rules.merge_before_delete", "duplicate.rules.preferred_folders_enabled"} or key.startswith("duplicate.rules.merge"):
@@ -6214,11 +6226,11 @@ class Bridge(QObject):
 
     @Slot(list, str)
     def move_paths_async(self, src_paths: list[str], target_folder: str) -> None:
-        self._process_file_op("move", [Path(p) for p in src_paths], Path(target_folder))
+        self._process_file_op("move", [Path(p) for p in self._dedupe_file_op_paths(src_paths)], Path(target_folder))
 
     @Slot(list, str)
     def copy_paths_async(self, src_paths: list[str], target_folder: str) -> None:
-        self._process_file_op("copy", [Path(p) for p in src_paths], Path(target_folder))
+        self._process_file_op("copy", [Path(p) for p in self._dedupe_file_op_paths(src_paths)], Path(target_folder))
 
     @Slot(list, result=bool)
     def show_metadata(self, paths: list) -> bool:
@@ -6245,7 +6257,7 @@ class Bridge(QObject):
     def copy_to_clipboard(self, paths: list[str]) -> None:
         try:
             clipboard, mime = QApplication.clipboard(), QMimeData()
-            abs_paths = [str(Path(p).resolve()) for p in paths]
+            abs_paths = self._dedupe_file_op_paths(paths)
             mime.setUrls([QUrl.fromLocalFile(p) for p in abs_paths])
             mime.setText("\n".join(abs_paths))
             mime.setData("Preferred DropEffect", b'\x05\x00\x00\x00')
@@ -6257,7 +6269,7 @@ class Bridge(QObject):
     def cut_to_clipboard(self, paths: list[str]) -> None:
         try:
             clipboard, mime = QApplication.clipboard(), QMimeData()
-            abs_paths = [str(Path(p).resolve()) for p in paths]
+            abs_paths = self._dedupe_file_op_paths(paths)
             mime.setUrls([QUrl.fromLocalFile(p) for p in abs_paths])
             mime.setText("\n".join(abs_paths))
             mime.setData("Preferred DropEffect", b'\x02\x00\x00\x00')
@@ -6372,11 +6384,51 @@ class Bridge(QObject):
                 self.fileOpFinished.emit("paste", False, "", "")
                 return
             is_move = bool(mime.hasFormat("Preferred DropEffect") and mime.data("Preferred DropEffect")[0] == 2)
-            src_paths = [Path(url.toLocalFile()) for url in mime.urls() if url.toLocalFile()]
+            src_paths = [Path(p) for p in self._dedupe_file_op_paths([url.toLocalFile() for url in mime.urls() if url.toLocalFile()])]
             op_type = "paste_move" if is_move else "paste_copy"
             self._process_file_op(op_type, src_paths, target_dir)
         except Exception:
             self.fileOpFinished.emit("paste", False, "", "")
+
+    @staticmethod
+    def _path_contains(parent: str, child: str) -> bool:
+        parent_key = str(parent or "").replace("/", "\\").rstrip("\\").casefold()
+        child_key = str(child or "").replace("/", "\\").rstrip("\\").casefold()
+        if not parent_key or not child_key:
+            return False
+        return child_key == parent_key or child_key.startswith(parent_key + "\\")
+
+    def _dedupe_file_op_paths(self, paths: list[str]) -> list[str]:
+        resolved_paths: list[str] = []
+        seen: set[str] = set()
+        for raw_path in list(paths or []):
+            clean = str(raw_path or "").strip()
+            if not clean:
+                continue
+            try:
+                resolved = str(Path(clean).resolve())
+            except Exception:
+                resolved = clean
+            key = resolved.replace("/", "\\").rstrip("\\").casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            resolved_paths.append(resolved)
+
+        folder_paths: list[str] = []
+        for path in resolved_paths:
+            try:
+                if Path(path).is_dir():
+                    folder_paths.append(path)
+            except Exception:
+                continue
+
+        deduped: list[str] = []
+        for path in sorted(resolved_paths, key=lambda value: (len(str(value)), str(value).casefold())):
+            if any(self._path_contains(folder, path) for folder in folder_paths if not self._path_contains(path, folder)):
+                continue
+            deduped.append(path)
+        return deduped
 
     @Slot(str, result=float)
     def get_video_duration_seconds(self, video_path: str) -> float:
@@ -6991,7 +7043,17 @@ class Bridge(QObject):
         media_filter, _, tags_filter, desc_filter, ai_filter = self._parse_filter_groups(filter_type)
         if not folders: return []
         show_hidden = self._show_hidden_enabled()
-        current_key = hashlib.sha1(",".join(sorted(folders)).encode()).hexdigest()
+        include_nested = self._gallery_include_nested_files_enabled()
+        current_key = hashlib.sha1(
+            json.dumps(
+                {
+                    "folders": sorted(str(folder or "") for folder in folders),
+                    "show_hidden": bool(show_hidden),
+                    "include_nested": bool(include_nested),
+                },
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()
         cached_scope = self._disk_cache_by_scope.get(current_key)
         if cached_scope is not None:
             disk_files = cached_scope
@@ -7003,18 +7065,28 @@ class Bridge(QObject):
                 folder_path = Path(folder)
                 if not folder_path.is_dir(): continue
                 try:
-                    for root_dir, dir_names, files in os.walk(str(folder_path), followlinks=True):
-                        curr_root = Path(root_dir)
-                        if not show_hidden:
-                            dir_names[:] = [
-                                name for name in dir_names
-                                if not self.repo.is_path_hidden(str(curr_root / name))
-                            ]
-                        for f in files:
-                            p = curr_root / f
-                            if not show_hidden and self.repo.is_path_hidden(str(p)):
+                    if include_nested:
+                        for root_dir, dir_names, files in os.walk(str(folder_path), followlinks=True):
+                            curr_root = Path(root_dir)
+                            if not show_hidden:
+                                dir_names[:] = [
+                                    name for name in dir_names
+                                    if not self.repo.is_path_hidden(str(curr_root / name))
+                                ]
+                            for f in files:
+                                p = curr_root / f
+                                if not show_hidden and self.repo.is_path_hidden(str(p)):
+                                    continue
+                                if p.suffix.lower() in ALL_EXTS:
+                                    disk_files[normalize_windows_path(str(p))] = p
+                    else:
+                        for child in folder_path.iterdir():
+                            if not child.is_file():
                                 continue
-                            if p.suffix.lower() in ALL_EXTS: disk_files[normalize_windows_path(str(p))] = p
+                            if not show_hidden and self.repo.is_path_hidden(str(child)):
+                                continue
+                            if child.suffix.lower() in ALL_EXTS:
+                                disk_files[normalize_windows_path(str(child))] = child
                 except Exception: pass
             self._disk_cache_by_scope[current_key] = disk_files
             self._disk_cache, self._disk_cache_key = disk_files, current_key
@@ -7029,7 +7101,7 @@ class Bridge(QObject):
             path_obj = disk_files.get(norm) or Path(r["path"])
             if path_obj.exists() and path_obj.is_dir():
                 continue
-            if norm in disk_files or path_obj.exists():
+            if norm in disk_files or (include_nested and path_obj.exists()):
                 if norm in disk_files:
                     r = dict(r)
                     r["_real_path"] = disk_files[norm]
@@ -7401,7 +7473,7 @@ class Bridge(QObject):
         _, text_filter, _, _, _ = self._parse_filter_groups(filter_type)
         if folders:
             entries = self._get_reconciled_candidates(folders, filter_type, search_query)
-            if self._gallery_view_mode() not in {"masonry", "duplicates", "similar", "similar_only"} and self._review_group_mode() is None:
+            if self._gallery_show_folders_enabled() and self._review_group_mode() is None:
                 entries = self._list_folder_entries(folders, search_query) + entries
         elif self._active_collection_id is not None:
             entries = self._get_collection_candidates(self._active_collection_id, filter_type, search_query)
@@ -10918,10 +10990,30 @@ class MainWindow(QMainWindow):
             return self.bulk_status_lbl
         return self.meta_status_lbl
 
+    def _current_file_paths(self, paths: list[str] | None = None) -> list[str]:
+        raw_paths = list(paths if paths is not None else getattr(self, "_current_paths", []) or [])
+        file_paths: list[str] = []
+        seen: set[str] = set()
+        for raw_path in raw_paths:
+            path = str(raw_path or "").strip()
+            if not path:
+                continue
+            key = path.casefold()
+            if key in seen:
+                continue
+            try:
+                if not Path(path).is_file():
+                    continue
+            except Exception:
+                continue
+            seen.add(key)
+            file_paths.append(path)
+        return file_paths
+
     def _selected_paths_tag_summary(self) -> tuple[list[str], list[str]]:
         from app.mediamanager.utils.pathing import normalize_windows_path
 
-        paths = [str(path or "").strip() for path in list(getattr(self, "_current_paths", []) or []) if str(path or "").strip()]
+        paths = self._current_file_paths()
         if not paths:
             return [], []
         unique_paths: list[str] = []
@@ -11302,7 +11394,7 @@ class MainWindow(QMainWindow):
 
     def _add_tag_to_current_editor(self, tag_name: str) -> None:
         if self._is_bulk_editor_active():
-            paths = list(getattr(self, "_current_paths", []) or [])
+            paths = self._current_file_paths()
             for path in paths:
                 try:
                     self.bridge.attach_media_tags(path, [tag_name])
@@ -11333,7 +11425,7 @@ class MainWindow(QMainWindow):
             from app.mediamanager.db.tags_repo import list_media_tags
 
             remove_key = str(tag_name or "").casefold()
-            paths = list(getattr(self, "_current_paths", []) or [])
+            paths = self._current_file_paths()
             for path in paths:
                 try:
                     media = get_media_by_path(self.bridge.conn, path)
@@ -11785,7 +11877,7 @@ class MainWindow(QMainWindow):
     def _save_native_metadata(self) -> None:
         """Save rename (if changed) + description/tags/notes, then show confirmation."""
         # Use paths list if available, else fallback to current_path
-        paths = getattr(self, "_current_paths", [])
+        paths = self._current_file_paths()
         if not paths and hasattr(self, "_current_path") and self._current_path:
             paths = [self._current_path]
             
@@ -12674,7 +12766,7 @@ class MainWindow(QMainWindow):
     @Slot()
     def _save_to_exif_cmd(self) -> None:
         """Embed tags and comments from the 'Embedded' UI fields INTO the file."""
-        paths = getattr(self, "_current_paths", [])
+        paths = self._current_file_paths()
         if len(paths) > 1:
             self._embed_bulk_tags_to_files(paths, self._normalize_tag_list(self._active_tag_editor().text()))
             return
@@ -12868,7 +12960,7 @@ class MainWindow(QMainWindow):
             self.meta_status_lbl.setText(f"Embed Error: {e}")
     def _clear_bulk_tags(self) -> None:
         """Remove all tags from currently selected files with warning."""
-        paths = getattr(self, "_current_paths", [])
+        paths = self._current_file_paths()
         if not paths:
             return
 
@@ -12904,18 +12996,24 @@ class MainWindow(QMainWindow):
 
     def _show_metadata_for_path(self, paths: list[str]) -> None:
         # Ignore empty lists (e.g. from background clicks that deselect cards).
-        if not paths:
+        raw_paths = [str(path or "").strip() for path in list(paths or []) if str(path or "").strip()]
+        if not raw_paths:
+            self._clear_metadata_panel()
+            return
+        file_paths = self._current_file_paths(raw_paths)
+        self._current_paths = raw_paths
+        if not file_paths:
+            self._current_path = None
             self._clear_metadata_panel()
             return
 
-        is_bulk = len(paths) > 1
-        primary_path = paths[0] if paths else None
+        is_bulk = len(file_paths) > 1
+        primary_path = file_paths[0] if file_paths else None
         if is_bulk:
-            self._current_paths = paths
             self._current_path = None
             self._current_metadata_kind = self._metadata_kind_for_path(primary_path)
             self._refresh_preview_for_path(None)
-            self._configure_bulk_tag_editor(len(paths))
+            self._configure_bulk_tag_editor(len(file_paths))
             self.bulk_meta_tags.blockSignals(True)
             self.bulk_meta_tags.setText("")
             self.bulk_meta_tags.blockSignals(False)
@@ -12926,7 +13024,6 @@ class MainWindow(QMainWindow):
         self._set_active_right_workspace("details")
         is_video = bool(primary_path and Path(primary_path).suffix.lower() in {".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv"})
         self._set_metadata_empty_state(False)
-        self._current_paths = paths # Store list for bulk save
         self._current_path = primary_path if not is_bulk else None
         self._refresh_preview_for_path(primary_path if not is_bulk else None)
         metadata_kind = self._metadata_kind_for_path(primary_path)

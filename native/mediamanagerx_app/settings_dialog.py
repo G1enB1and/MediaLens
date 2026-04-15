@@ -840,9 +840,13 @@ class GeneralSettingsPage(SettingsPage):
         self.randomize_toggle = QCheckBox("Randomize gallery order")
         self.restore_last_toggle = QCheckBox("Restore previous folder on launch")
         self.show_hidden_toggle = QCheckBox("Show hidden files and folders")
+        self.include_nested_files_toggle = QCheckBox("Include nested files in gallery")
+        self.show_folders_in_gallery_toggle = QCheckBox("Show folders in gallery")
         startup_layout.addWidget(self.randomize_toggle)
         startup_layout.addWidget(self.restore_last_toggle)
         startup_layout.addWidget(self.show_hidden_toggle)
+        startup_layout.addWidget(self.include_nested_files_toggle)
+        startup_layout.addWidget(self.show_folders_in_gallery_toggle)
 
         startup_layout.addWidget(QLabel("Starting folder"))
         folder_row = QHBoxLayout()
@@ -913,6 +917,8 @@ class GeneralSettingsPage(SettingsPage):
         self.randomize_toggle.toggled.connect(self._on_randomize_changed)
         self.restore_last_toggle.toggled.connect(self._on_restore_last_changed)
         self.show_hidden_toggle.toggled.connect(self._on_show_hidden_changed)
+        self.include_nested_files_toggle.toggled.connect(self._on_include_nested_files_changed)
+        self.show_folders_in_gallery_toggle.toggled.connect(self._on_show_folders_in_gallery_changed)
         self.use_recycle_bin_toggle.toggled.connect(self._on_recycle_bin_changed)
         self.use_medialens_retention_toggle.toggled.connect(self._on_medialens_retention_changed)
         self.retention_days_input.valueChanged.connect(lambda val: self.dialog.set_setting_str("gallery.medialens_retention_days", str(val)))
@@ -985,6 +991,14 @@ class GeneralSettingsPage(SettingsPage):
         self.dialog.set_setting_bool("gallery.show_hidden", checked)
         self.main_window._refresh_current_folder()
 
+    def _on_include_nested_files_changed(self, checked: bool) -> None:
+        self.dialog.set_setting_bool("gallery.include_nested_files", checked)
+        self.main_window._refresh_current_folder()
+
+    def _on_show_folders_in_gallery_changed(self, checked: bool) -> None:
+        self.dialog.set_setting_bool("gallery.show_folders", checked)
+        self.main_window._refresh_current_folder()
+
     def _browse_start_folder(self) -> None:
         folder = self.bridge.pick_folder()
         if folder:
@@ -1020,6 +1034,10 @@ class GeneralSettingsPage(SettingsPage):
             self.restore_last_toggle.setChecked(bool(state.get("gallery.restore_last", False)))
         with QSignalBlocker(self.show_hidden_toggle):
             self.show_hidden_toggle.setChecked(bool(state.get("gallery.show_hidden", False)))
+        with QSignalBlocker(self.include_nested_files_toggle):
+            self.include_nested_files_toggle.setChecked(bool(state.get("gallery.include_nested_files", True)))
+        with QSignalBlocker(self.show_folders_in_gallery_toggle):
+            self.show_folders_in_gallery_toggle.setChecked(bool(state.get("gallery.show_folders", True)))
         with QSignalBlocker(self.use_recycle_bin_toggle):
             self.use_recycle_bin_toggle.setChecked(bool(self.settings.value("gallery/use_recycle_bin", True, type=bool)))
         with QSignalBlocker(self.use_medialens_retention_toggle):
