@@ -7956,7 +7956,8 @@ class GalleryWebPage(QWebEnginePage):
     """Logs WebEngine console and renderer failures into the app log."""
 
     def javaScriptConsoleMessage(self, level, message, line_number, source_id) -> None:
-        main_win = self.window()
+        view = self.parent()
+        main_win = view.window() if view else None
         bridge = getattr(main_win, "bridge", None)
         if bridge:
             try:
