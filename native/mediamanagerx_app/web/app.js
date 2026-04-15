@@ -985,6 +985,7 @@ let gChildFolderRequestSeq = 0;
 let gPendingChildFolderRequests = new Map();
 let gGalleryRequestSeq = 0;
 let gPendingMediaCountRequests = new Map();
+let gPendingMediaFileCountRequests = new Map();
 let gPendingMediaListRequests = new Map();
 let gRefreshGeneration = 0;
 
@@ -2202,6 +2203,38 @@ let gIsCtxMenuClick = false; // Guard for context menu clicks
 
 function shouldSelectFoldersOnSelectAll() {
   return !gIncludeNestedFiles;
+}
+
+function fetchMediaFileCount(folders, filterType, searchQuery) {
+  if (!gBridge) return Promise.resolve(0);
+  const effectiveQuery = getEffectiveSearchQuery(searchQuery || '');
+  if (gBridge.count_media_files_async) {
+    return new Promise((resolve) => {
+      const requestId = `file-count-${Date.now()}-${++gGalleryRequestSeq}`;
+      gPendingMediaFileCountRequests.set(requestId, resolve);
+      gBridge.count_media_files_async(requestId, folders || [], filterType || 'all', effectiveQuery);
+    });
+  }
+  if (!gBridge.count_media_files) {
+    return Promise.resolve(0);
+  }
+  return new Promise((resolve) => {
+    gBridge.count_media_files(folders || [], filterType || 'all', effectiveQuery, function (count) {
+      resolve(Number(count || 0));
+    });
+  });
+}
+
+function refreshGalleryFileCountChip() {
+  return fetchMediaFileCount(gSelectedFolders, gFilter, gSearchQuery || '')
+    .then((count) => {
+      updateGalleryCountChip(count);
+      return count;
+    })
+    .catch(() => {
+      updateGalleryCountChip(0);
+      return 0;
+    });
 }
 
 function isFolderCardElement(card) {
@@ -6492,7 +6525,7 @@ function refreshFromBridge(bridge, resetPage = false) {
             return;
           }
           gTotal = Array.isArray(items) ? items.length : 0;
-          updateGalleryCountChip(gTotal);
+          refreshGalleryFileCountChip();
           if (!gReviewLoadingActive && reviewSignature && reviewSignature === gLastRenderedReviewSignature) {
             consumeSelectAllAfterRefresh();
             renderPager();
@@ -6542,7 +6575,7 @@ function refreshFromBridge(bridge, resetPage = false) {
         fetchMediaCount(gSelectedFolders, gFilter, gSearchQuery || '').then(function (count) {
           if (refreshToken !== gRefreshGeneration) return;
           gTotal = count || 0;
-          updateGalleryCountChip(gTotal);
+          refreshGalleryFileCountChip();
           renderPager();
         });
       });
@@ -8623,7 +8656,7 @@ async function main() {
           gScanActive = false;
           gAwaitingScanResults = false;
           gTotal = count || gTotal || 0;
-          updateGalleryCountChip(gTotal);
+          refreshGalleryFileCountChip();
           return;
         }
         if (isDuplicateModeActive() && gReviewLoadingActive && !gAwaitingScanResults) {
@@ -8633,7 +8666,7 @@ async function main() {
         if (isDuplicateModeActive() && !gReviewLoadingActive && !gAwaitingScanResults && Array.isArray(gMedia) && gMedia.length > 0) {
           gScanActive = false;
           gTotal = count || gTotal || 0;
-          updateGalleryCountChip(gTotal);
+          refreshGalleryFileCountChip();
           return;
         }
         if (gReviewLoadingActive && isDuplicateModeActive()) {
@@ -8849,6 +8882,15 @@ async function main() {
         const pending = gPendingMediaCountRequests.get(requestId);
         if (!pending) return;
         gPendingMediaCountRequests.delete(requestId);
+        pending(Number(count || 0));
+      });
+    }
+
+    if (bridge.mediaFileCounted) {
+      bridge.mediaFileCounted.connect(function (requestId, count) {
+        const pending = gPendingMediaFileCountRequests.get(requestId);
+        if (!pending) return;
+        gPendingMediaFileCountRequests.delete(requestId);
         pending(Number(count || 0));
       });
     }

@@ -3744,6 +3744,7 @@ class Bridge(QObject):
     navigationStateChanged = Signal(bool, bool, bool, str)  # can_back, can_forward, can_up, current_path
     childFoldersListed = Signal(str, list)  # request_id, folders
     mediaCounted = Signal(str, int)  # request_id, count
+    mediaFileCounted = Signal(str, int)  # request_id, file count
     mediaListed = Signal(str, list)  # request_id, items
     galleryScopeChanged = Signal()
     textProcessingStarted = Signal(str, int)  # stage label, total items
@@ -7022,6 +7023,17 @@ class Bridge(QObject):
             return len(self._get_gallery_entries(folders, "none", filter_type, search_query))
         except Exception: return 0
 
+    @Slot(list, str, str, result=int)
+    def count_media_files(self, folders: list, filter_type: str = "all", search_query: str = "") -> int:
+        try:
+            try:
+                self.conn.commit()
+            except Exception:
+                pass
+            return sum(1 for entry in self._get_gallery_entries(folders, "none", filter_type, search_query) if not entry.get("is_folder"))
+        except Exception:
+            return 0
+
     @Slot(str, list, str, str)
     def count_media_async(self, request_id: str, folders: list, filter_type: str = "all", search_query: str = "") -> None:
         req = str(request_id or "")
@@ -7032,6 +7044,19 @@ class Bridge(QObject):
         def work() -> None:
             count = self.count_media(folder_list, ftype, query)
             self.mediaCounted.emit(req, int(count or 0))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    @Slot(str, list, str, str)
+    def count_media_files_async(self, request_id: str, folders: list, filter_type: str = "all", search_query: str = "") -> None:
+        req = str(request_id or "")
+        folder_list = list(folders or [])
+        ftype = str(filter_type or "all")
+        query = str(search_query or "")
+
+        def work() -> None:
+            count = self.count_media_files(folder_list, ftype, query)
+            self.mediaFileCounted.emit(req, int(count or 0))
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -7473,7 +7498,7 @@ class Bridge(QObject):
         _, text_filter, _, _, _ = self._parse_filter_groups(filter_type)
         if folders:
             entries = self._get_reconciled_candidates(folders, filter_type, search_query)
-            if self._gallery_show_folders_enabled() and self._review_group_mode() is None:
+            if self._gallery_show_folders_enabled() and self._gallery_view_mode() != "masonry" and self._review_group_mode() is None:
                 entries = self._list_folder_entries(folders, search_query) + entries
         elif self._active_collection_id is not None:
             entries = self._get_collection_candidates(self._active_collection_id, filter_type, search_query)
