@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pkgutil
+import re
 import sqlite3
 from pathlib import Path
 
@@ -119,19 +120,13 @@ def _ensure_media_item_date_columns(conn: sqlite3.Connection) -> None:
 def init_db(db_path: str) -> None:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     sql = _load_schema_sql()
-    # Old databases may not have newly added columns yet. Avoid creating indexes
-    # against columns that will be added by the migration helpers below.
-    sql = sql.replace(
-        "CREATE INDEX IF NOT EXISTS idx_media_items_phash ON media_items(phash);\n",
+    # Old databases may not have newly added columns yet. Avoid creating
+    # indexes against columns that are added later by the migration helpers.
+    # Use a regex so this remains safe across LF/CRLF and packaged schema text.
+    sql = re.sub(
+        r"(?im)^\s*CREATE INDEX IF NOT EXISTS idx_media_items_(?:phash|text_detected|text_more_likely)\s+ON\s+media_items\([^)]+\);\s*$",
         "",
-    )
-    sql = sql.replace(
-        "CREATE INDEX IF NOT EXISTS idx_media_items_text_detected ON media_items(text_detected);\n",
-        "",
-    )
-    sql = sql.replace(
-        "CREATE INDEX IF NOT EXISTS idx_media_items_text_more_likely ON media_items(text_more_likely);\n",
-        "",
+        sql,
     )
     with sqlite3.connect(db_path) as conn:
         conn.execute("PRAGMA foreign_keys=ON;")

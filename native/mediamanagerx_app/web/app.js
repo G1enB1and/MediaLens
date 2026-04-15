@@ -2241,14 +2241,15 @@ function triggerRename() {
     path = Array.from(gSelectedPaths)[0];
   }
 
-  if (path && gBridge && gBridge.rename_path_async) {
+  if (path && gBridge && gBridge.rename_path_async && gBridge.themed_text_input) {
     const curName = path.split(/[/\\]/).pop();
-    const next = prompt('Rename to:', curName);
-    if (next && next !== curName) {
-      if (typeof closeLightbox === 'function') closeLightbox();
-      setGlobalLoading(true, 'Renaming…', 25);
-      gBridge.rename_path_async(path, next, () => { });
-    }
+    gBridge.themed_text_input('Rename File', 'Rename to:', curName, function (next) {
+      if (next && next !== curName) {
+        if (typeof closeLightbox === 'function') closeLightbox();
+        setGlobalLoading(true, 'Renaming…', 25);
+        gBridge.rename_path_async(path, next, () => { });
+      }
+    });
   }
 }
 window.triggerRename = triggerRename;
@@ -5657,14 +5658,15 @@ function wireCtxMenu() {
         }
         break;
       case 'ctxRename':
-        if (item && item.path && gBridge && gBridge.rename_path_async) {
+        if (item && item.path && gBridge && gBridge.rename_path_async && gBridge.themed_text_input) {
           const curName = item.path.split(/[/\\]/).pop();
-          const next = prompt('Rename to:', curName);
-          if (next && next !== curName) {
-            if (fromLb) closeLightbox();
-            setGlobalLoading(true, 'Renaming…', 25);
-            gBridge.rename_path_async(item.path, next, () => { });
-          }
+          gBridge.themed_text_input('Rename File', 'Rename to:', curName, function (next) {
+            if (next && next !== curName) {
+              if (fromLb) closeLightbox();
+              setGlobalLoading(true, 'Renaming…', 25);
+              gBridge.rename_path_async(item.path, next, () => { });
+            }
+          });
         }
         break;
       case 'ctxAddToCollection':
@@ -5719,10 +5721,13 @@ function wireCtxMenu() {
         }
         break;
       case 'ctxNewFolder':
-        const name = prompt('New Folder Name:');
-        if (name && gBridge && gBridge.create_folder && gSelectedFolders.length > 0) {
-          const folder = gSelectedFolders[0];
-          gBridge.create_folder(folder, name, (res) => { if (res) refreshFromBridge(gBridge); });
+        if (gBridge && gBridge.themed_text_input && gBridge.create_folder && gSelectedFolders.length > 0) {
+          gBridge.themed_text_input('New Folder', 'Folder Name:', '', function (name) {
+            if (name) {
+              const folder = gSelectedFolders[0];
+              gBridge.create_folder(folder, name, (res) => { if (res) refreshFromBridge(gBridge); });
+            }
+          });
         }
         break;
       case 'ctxSelectAll':

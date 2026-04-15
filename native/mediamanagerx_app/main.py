@@ -227,6 +227,7 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QPlainTextEdit,
     QTextEdit,
+    QToolTip,
     QLineEdit,
     QComboBox,
     QFrame,
@@ -240,6 +241,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QStyledItemDelegate,
     QStyle,
+    QProxyStyle,
 )
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -787,6 +789,260 @@ class Theme:
     ACCENT_DEFAULT = "#8ab4f8"
 
 
+class ToolTipProxyStyle(QProxyStyle):
+    def styleHint(self, hint, option=None, widget=None, returnData=None):
+        if hint == QStyle.StyleHint.SH_ToolTip_WakeUpDelay:
+            return 300
+        return super().styleHint(hint, option, widget, returnData)
+
+
+def _selection_text_for_color(color: QColor | str) -> str:
+    q = QColor(color)
+    if not q.isValid():
+        return "#ffffff"
+
+    def _to_linear(channel: int) -> float:
+        value = max(0.0, min(1.0, channel / 255.0))
+        if value <= 0.04045:
+            return value / 12.92
+        return ((value + 0.055) / 1.055) ** 2.4
+
+    luminance = (
+        0.2126 * _to_linear(q.red())
+        + 0.7152 * _to_linear(q.green())
+        + 0.0722 * _to_linear(q.blue())
+    )
+    contrast_black = (luminance + 0.05) / 0.05
+    contrast_white = 1.05 / (luminance + 0.05)
+    return "#000000" if contrast_black >= contrast_white else "#ffffff"
+
+
+def _dialog_accent() -> QColor:
+    try:
+        accent = str(app_settings().value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT)
+    except Exception:
+        accent = Theme.ACCENT_DEFAULT
+    resolved = QColor(accent)
+    return resolved if resolved.isValid() else QColor(Theme.ACCENT_DEFAULT)
+
+
+def _themed_input_dialog_stylesheet(accent_q: QColor) -> str:
+    bg = Theme.get_bg(accent_q)
+    control_bg = Theme.get_input_bg(accent_q)
+    fg = Theme.get_text_color()
+    muted = Theme.get_text_muted()
+    border = Theme.get_input_border(accent_q)
+    popup_border = Theme.mix(border, accent_q, 0.18)
+    btn_bg = Theme.get_btn_save_bg(accent_q)
+    btn_hover = Theme.get_btn_save_hover(accent_q)
+    selection_text = _selection_text_for_color(accent_q)
+    accent_str = accent_q.name()
+    return f"""
+        QInputDialog {{
+            background-color: {bg};
+            color: {fg};
+        }}
+        QLabel {{
+            color: {fg};
+            background: transparent;
+        }}
+        QLineEdit, QComboBox, QListView {{
+            background-color: {control_bg};
+            color: {fg};
+            border: 1px solid {border};
+            border-radius: 6px;
+        }}
+        QLineEdit, QComboBox {{
+            padding: 6px 8px;
+            selection-background-color: {accent_str};
+            selection-color: {selection_text};
+        }}
+        QLineEdit:focus, QComboBox:focus {{
+            border: 1px solid {accent_str};
+        }}
+        QComboBox::drop-down {{
+            border: none;
+            width: 24px;
+        }}
+        QComboBox QAbstractItemView, QListView {{
+            background-color: {control_bg};
+            color: {fg};
+            border: 1px solid {popup_border};
+            border-radius: 8px;
+            padding: 4px;
+            selection-background-color: {accent_str};
+            selection-color: {selection_text};
+            outline: none;
+        }}
+        QComboBox QAbstractItemView::item, QListView::item {{
+            min-height: 24px;
+            padding: 6px 10px;
+            margin: 2px 0;
+            border-radius: 6px;
+            background: transparent;
+        }}
+        QPushButton {{
+            background-color: {btn_bg};
+            color: {fg};
+            border: 1px solid {border};
+            border-radius: 8px;
+            padding: 8px 18px;
+            font-weight: 600;
+            min-width: 84px;
+        }}
+        QPushButton:hover {{
+            background-color: {btn_hover};
+            border: 1px solid {accent_str};
+        }}
+        QPushButton:pressed {{
+            background-color: {Theme.mix(btn_hover, accent_q, 0.12)};
+            border: 1px solid {accent_str};
+        }}
+        QPushButton:disabled {{
+            color: {muted};
+        }}
+    """
+
+
+def _themed_message_box_stylesheet(accent_q: QColor) -> str:
+    bg = Theme.get_bg(accent_q)
+    control_bg = Theme.get_input_bg(accent_q)
+    fg = Theme.get_text_color()
+    muted = Theme.get_text_muted()
+    border = Theme.get_input_border(accent_q)
+    btn_bg = Theme.get_btn_save_bg(accent_q)
+    btn_hover = Theme.get_btn_save_hover(accent_q)
+    accent_str = accent_q.name()
+    return f"""
+        QMessageBox {{
+            background-color: {bg};
+            color: {fg};
+        }}
+        QMessageBox QLabel {{
+            color: {fg};
+            background: transparent;
+        }}
+        QMessageBox QPushButton {{
+            background-color: {btn_bg};
+            color: {fg};
+            border: 1px solid {border};
+            border-radius: 8px;
+            padding: 8px 18px;
+            min-width: 88px;
+            font-weight: 600;
+        }}
+        QMessageBox QPushButton:hover {{
+            background-color: {btn_hover};
+            border: 1px solid {accent_str};
+        }}
+        QMessageBox QPushButton:pressed {{
+            background-color: {Theme.mix(btn_hover, accent_q, 0.12)};
+            border: 1px solid {accent_str};
+        }}
+        QMessageBox QPushButton:disabled {{
+            color: {muted};
+        }}
+        QMessageBox QWidget {{
+            background-color: {bg};
+            color: {fg};
+        }}
+        QMessageBox QTextEdit, QMessageBox QPlainTextEdit {{
+            background-color: {control_bg};
+            color: {fg};
+            border: 1px solid {border};
+        }}
+    """
+
+
+def _question_icon_pixmap(accent_q: QColor, size: int = 36) -> QPixmap:
+    accent = QColor(accent_q)
+    if not accent.isValid():
+        accent = QColor(Theme.ACCENT_DEFAULT)
+    glyph = QColor(_selection_text_for_color(accent))
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(accent)
+    painter.drawEllipse(0, 0, size, size)
+
+    font = QFont()
+    font.setBold(True)
+    font.setPointSizeF(max(14.0, size * 0.48))
+    painter.setFont(font)
+    painter.setPen(glyph)
+    painter.drawText(QRect(0, 0, size, size), Qt.AlignmentFlag.AlignCenter, "?")
+    painter.end()
+    return pixmap
+
+
+def _run_themed_question_dialog(
+    parent: QWidget | None,
+    title: str,
+    text: str,
+    *,
+    buttons: QMessageBox.StandardButton = QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+    default_button: QMessageBox.StandardButton = QMessageBox.StandardButton.No,
+) -> QMessageBox.StandardButton:
+    dialog = QMessageBox(parent)
+    dialog.setIcon(QMessageBox.Icon.NoIcon)
+    accent_q = _dialog_accent()
+    dialog.setIconPixmap(_question_icon_pixmap(accent_q))
+    dialog.setWindowTitle(title)
+    dialog.setText(text)
+    dialog.setStandardButtons(buttons)
+    dialog.setDefaultButton(default_button)
+    dialog.setStyleSheet(_themed_message_box_stylesheet(accent_q))
+    return QMessageBox.StandardButton(dialog.exec())
+
+
+def _run_themed_text_input_dialog(
+    parent: QWidget | None,
+    title: str,
+    label: str,
+    *,
+    text: str = "",
+    echo: QLineEdit.EchoMode = QLineEdit.EchoMode.Normal,
+) -> tuple[str, bool]:
+    dialog = QInputDialog(parent)
+    dialog.setInputMode(QInputDialog.InputMode.TextInput)
+    dialog.setWindowTitle(title)
+    dialog.setLabelText(label)
+    dialog.setTextValue(str(text or ""))
+    dialog.setTextEchoMode(echo)
+    dialog.setOption(QInputDialog.InputDialogOption.UsePlainTextEditForTextInput, False)
+    dialog.setStyleSheet(_themed_input_dialog_stylesheet(_dialog_accent()))
+    dialog.resize(420, dialog.sizeHint().height())
+    ok = dialog.exec() == int(QDialog.DialogCode.Accepted)
+    return dialog.textValue(), ok
+
+
+def _run_themed_item_input_dialog(
+    parent: QWidget | None,
+    title: str,
+    label: str,
+    items: list[str],
+    *,
+    current: int = 0,
+    editable: bool = False,
+) -> tuple[str, bool]:
+    dialog = QInputDialog(parent)
+    dialog.setInputMode(QInputDialog.InputMode.TextInput)
+    dialog.setWindowTitle(title)
+    dialog.setLabelText(label)
+    dialog.setComboBoxItems([str(item) for item in items])
+    dialog.setComboBoxEditable(bool(editable))
+    if items:
+        safe_index = max(0, min(int(current), len(items) - 1))
+        dialog.setTextValue(str(items[safe_index]))
+    dialog.setStyleSheet(_themed_input_dialog_stylesheet(_dialog_accent()))
+    dialog.resize(440, dialog.sizeHint().height())
+    ok = dialog.exec() == int(QDialog.DialogCode.Accepted)
+    return dialog.textValue(), ok
+
+
 def _rounded_preview_pixmap(source: QPixmap, target: QSize, border_color: str, radius: float = 10.0) -> QPixmap:
     scaled = source.scaled(
         target,
@@ -840,6 +1096,7 @@ class FileConflictDialog(QDialog):
         btn_bg = Theme.get_btn_save_bg(accent_q)
         btn_hover = Theme.get_btn_save_hover(accent_q)
         input_bg = Theme.get_input_bg(accent_q)
+        selection_text = _selection_text_for_color(accent_q)
         
         # Physical SVG for checkbox (data URIs are unreliable in Qt QSS)
         check_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "scrollbar_arrows", "check.svg").replace("\\", "/")
@@ -871,6 +1128,11 @@ class FileConflictDialog(QDialog):
                 border: 1px solid {border_color};
                 border-radius: 6px;
                 padding: 6px;
+                selection-background-color: {accent_str};
+                selection-color: {selection_text};
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {accent_str};
             }}
             QCheckBox {{
                 color: {muted_color};
@@ -1559,6 +1821,7 @@ class TagListTagRow(QWidget):
         self._global_use_count = int(entry.get("global_use_count") or 0)
         self._selection_state = str(entry.get("selection_state") or ("selected" if entry.get("in_selected_tags") else "none"))
         self._filter_active = bool(entry.get("filter_active"))
+        self._can_remove_from_selection = False
         self._drag_bg_color = QColor("#dbeafe")
         self._drag_border_color = QColor("#8ab4f8")
         self._drag_text_color = QColor("#111111")
@@ -1570,44 +1833,50 @@ class TagListTagRow(QWidget):
         layout.setContentsMargins(6, 2, 6, 2)
         layout.setSpacing(6)
 
+        self.remove_from_list_btn = QPushButton("")
+        self.remove_from_list_btn.setObjectName("tagListRemoveFromListButton")
+        self.remove_from_list_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.remove_from_list_btn.setFixedSize(30, 28)
+        self.remove_from_list_btn.setToolTip("Delete tag from list")
+        self.remove_from_list_btn.clicked.connect(lambda: self.removeFromListRequested.emit(self._tag_id, self._tag_name))
+        layout.addWidget(self.remove_from_list_btn, 0)
+
         self.scope_btn = QPushButton(str(self._scope_use_count))
         self.scope_btn.setObjectName("tagListScopeCountButton")
         self.scope_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.scope_btn.setFixedHeight(24)
         self.scope_btn.setMinimumWidth(28)
         self.scope_btn.clicked.connect(lambda: self.filterRequested.emit(self._tag_name))
+        self.scope_btn.setToolTip(f"The tag {self._tag_name} was found in {self._scope_use_count} files within the current scope")
         layout.addWidget(self.scope_btn, 0)
 
         self.name_lbl = QLabel(self._tag_name)
         self.name_lbl.setObjectName("tagListTagName")
         self.name_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.name_lbl.setTextFormat(Qt.TextFormat.PlainText)
+        self.name_lbl.setAutoFillBackground(False)
+        self.name_lbl.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.name_lbl.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.name_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.name_lbl.setToolTip(f"Click to filter gallery using Tag: {self._tag_name}")
         self.name_lbl.customContextMenuRequested.connect(lambda _pos: self.filterRequested.emit(self._tag_name))
         layout.addWidget(self.name_lbl, 1)
+
+        self.remove_from_selection_btn = QPushButton("X")
+        self.remove_from_selection_btn.setObjectName("tagListRemoveFromSelectionButton")
+        self.remove_from_selection_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.remove_from_selection_btn.setFixedSize(26, 24)
+        self.remove_from_selection_btn.setToolTip("Remove this tag from the selected file's Tags field")
+        self.remove_from_selection_btn.clicked.connect(self._on_remove_from_selection_clicked)
+        layout.addWidget(self.remove_from_selection_btn, 0)
 
         self.add_btn = QPushButton("→")
         self.add_btn.setObjectName("tagListAddButton")
         self.add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.add_btn.setFixedSize(26, 24)
+        self.add_btn.setToolTip("Add tag to selected file(s)")
         self.add_btn.clicked.connect(lambda: self.addToSelectionRequested.emit(self._tag_name))
         layout.addWidget(self.add_btn, 0)
-
-        self.remove_from_selection_btn = QPushButton("")
-        self.remove_from_selection_btn.setObjectName("tagListRemoveFromSelectionButton")
-        self.remove_from_selection_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.remove_from_selection_btn.setFixedSize(30, 28)
-        self.remove_from_selection_btn.setToolTip("Remove this tag from the selected file's Tags field")
-        self.remove_from_selection_btn.clicked.connect(lambda: self.removeFromSelectionRequested.emit(self._tag_name))
-        layout.addWidget(self.remove_from_selection_btn, 0)
-
-        self.remove_from_list_btn = QPushButton("X")
-        self.remove_from_list_btn.setObjectName("tagListRemoveFromListButton")
-        self.remove_from_list_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.remove_from_list_btn.setFixedSize(26, 24)
-        self.remove_from_list_btn.setToolTip("Remove this tag from the tag list")
-        self.remove_from_list_btn.clicked.connect(lambda: self.removeFromListRequested.emit(self._tag_id, self._tag_name))
-        layout.addWidget(self.remove_from_list_btn, 0)
 
     @property
     def tag_id(self) -> int:
@@ -1623,6 +1892,13 @@ class TagListTagRow(QWidget):
         self._selection_state = str(entry.get("selection_state") or ("selected" if entry.get("in_selected_tags") else "none"))
         self._filter_active = bool(entry.get("filter_active"))
         self.scope_btn.setText(str(self._scope_use_count))
+        self.scope_btn.setToolTip(f"The tag {self._tag_name} was found in {self._scope_use_count} files within the current scope")
+        self.name_lbl.setToolTip(f"Click to filter gallery using Tag: {self._tag_name}")
+
+    def _on_remove_from_selection_clicked(self) -> None:
+        if not self._can_remove_from_selection:
+            return
+        self.removeFromSelectionRequested.emit(self._tag_name)
 
     def apply_theme(self, *, accent_color: str, accent_text: str, accent_text_muted: str, text: str, text_muted: str, btn_bg: str, btn_hover: str, btn_border: str, btn_border_hover: str, is_light: bool) -> None:
         trash_svg_name = "trashcan.svg" if is_light else "trashcan-white.svg"
@@ -1650,10 +1926,20 @@ class TagListTagRow(QWidget):
             """
         )
 
-        self.name_lbl.setStyleSheet(
-            f"color: {row_text}; "
-            f"font-weight: {row_weight}; background: transparent;"
-        )
+        name_palette = self.name_lbl.palette()
+        name_palette.setColor(QPalette.ColorRole.WindowText, QColor(row_text))
+        name_palette.setColor(QPalette.ColorRole.Text, QColor(row_text))
+        name_palette.setColor(QPalette.ColorRole.Window, Qt.GlobalColor.transparent)
+        name_palette.setColor(QPalette.ColorRole.Base, Qt.GlobalColor.transparent)
+        self.name_lbl.setPalette(name_palette)
+        name_font = QFont(self.name_lbl.font())
+        if str(row_weight) == "700":
+            name_font.setWeight(QFont.Weight.Bold)
+        elif str(row_weight) == "600":
+            name_font.setWeight(QFont.Weight.DemiBold)
+        else:
+            name_font.setWeight(QFont.Weight.Normal)
+        self.name_lbl.setFont(name_font)
         scope_text = accent_text if row_filter_active else text
         button_qss = (
             f"QPushButton {{ background-color: {btn_bg}; color: {text}; border: 1px solid {btn_border}; border-radius: 6px; padding: 2px 6px; }}"
@@ -1661,42 +1947,11 @@ class TagListTagRow(QWidget):
         )
         self.scope_btn.setStyleSheet(
             f"QPushButton {{ background-color: {btn_bg}; color: {scope_text}; border: 1px solid {btn_border}; border-radius: 6px; padding: 2px 6px; }}"
-            f"QPushButton:hover {{ background-color: {btn_hover}; border-color: {btn_border_hover}; }}"
+            f"QPushButton:hover {{ background-color: {btn_hover}; border-color: {accent_color}; }}"
         )
-        self.add_btn.setStyleSheet(button_qss)
-
-        can_remove_from_selection = self._selection_state in {"selected", "common", "uncommon"}
-        self.remove_from_selection_btn.setEnabled(can_remove_from_selection)
-        self.remove_from_selection_btn.setStyleSheet(
+        self.add_btn.setStyleSheet(
             f"""
-            QPushButton#tagListRemoveFromSelectionButton {{
-                background-color: {btn_bg};
-                border: 1px solid {btn_border};
-                border-radius: 8px;
-                padding: 6px;
-                image: url('{trash_svg}');
-            }}
-            QPushButton#tagListRemoveFromSelectionButton:hover {{
-                background-color: {btn_hover};
-                border-color: #d45a5a;
-                padding: 6px;
-                image: url('{trash_red_svg}');
-            }}
-            QPushButton#tagListRemoveFromSelectionButton:disabled {{
-                background-color: {btn_bg};
-                border-color: {btn_border};
-                padding: 6px;
-                image: url('{trash_disabled_svg}');
-            }}
-            """
-        )
-
-        can_remove_from_list = self._global_use_count <= 0
-        self.remove_from_list_btn.setEnabled(can_remove_from_list)
-        self.remove_from_list_btn.setCursor(Qt.CursorShape.PointingHandCursor if can_remove_from_list else Qt.CursorShape.ArrowCursor)
-        self.remove_from_list_btn.setStyleSheet(
-            f"""
-            QPushButton#tagListRemoveFromListButton {{
+            QPushButton#tagListAddButton {{
                 background-color: {btn_bg};
                 color: {text};
                 border: 1px solid {btn_border};
@@ -1704,18 +1959,72 @@ class TagListTagRow(QWidget):
                 padding: 0px;
                 font-weight: 700;
             }}
-            QPushButton#tagListRemoveFromListButton:hover {{
+            QPushButton#tagListAddButton:hover {{
                 background-color: {btn_hover};
-                color: {accent_color};
-                border-color: {btn_border_hover};
+                color: {'#000000' if is_light else '#ffffff'};
+                border-color: {accent_color};
+                font-weight: 800;
             }}
-            QPushButton#tagListRemoveFromListButton:disabled {{
+            """
+        )
+
+        self.remove_from_list_btn.setEnabled(True)
+        self.remove_from_list_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.remove_from_list_btn.setToolTip("Delete tag from list")
+        self.remove_from_list_btn.setStyleSheet(
+            f"""
+            QPushButton#tagListRemoveFromListButton {{
+                background-color: {btn_bg};
+                border: 1px solid {btn_border};
+                border-radius: 8px;
+                padding: 6px;
+                image: url('{trash_svg}');
+            }}
+            QPushButton#tagListRemoveFromListButton:hover {{
+                background-color: {btn_bg};
+                border-color: #d45a5a;
+                padding: 6px;
+                image: url('{trash_red_svg}');
+            }}
+            """
+        )
+
+        can_remove_from_selection = self._selection_state in {"selected", "common", "uncommon"}
+        self._can_remove_from_selection = bool(can_remove_from_selection)
+        self.remove_from_selection_btn.setEnabled(True)
+        self.remove_from_selection_btn.setCursor(
+            Qt.CursorShape.PointingHandCursor if can_remove_from_selection else Qt.CursorShape.ForbiddenCursor
+        )
+        self.remove_from_selection_btn.setToolTip(
+            "Remove this tag from the selected file's Tags field"
+            if can_remove_from_selection else
+            "This tag isn't in the file(s) selected"
+        )
+        self.remove_from_selection_btn.setStyleSheet(
+            f"""
+            QPushButton#tagListRemoveFromSelectionButton {{
+                background-color: {btn_bg};
+                color: {'#ffffff' if can_remove_from_selection else text_muted};
+                border: 1px solid {btn_border};
+                border-radius: 6px;
+                padding: 0px;
+                font-weight: 700;
+            }}
+            QPushButton#tagListRemoveFromSelectionButton:hover {{
+                background-color: {btn_bg};
+                color: #d45a5a;
+                border-color: #d45a5a;
+            }}
+            QPushButton#tagListRemoveFromSelectionButton[removeEnabled="false"] {{
                 background-color: {btn_bg};
                 color: {text_muted};
                 border-color: {btn_border};
             }}
             """
         )
+        self.remove_from_selection_btn.setProperty("removeEnabled", "true" if can_remove_from_selection else "false")
+        self.remove_from_selection_btn.style().unpolish(self.remove_from_selection_btn)
+        self.remove_from_selection_btn.style().polish(self.remove_from_selection_btn)
 
     def create_drag_pixmap(self, item_rect: QRect | None = None) -> QPixmap:
         text = self._tag_name
@@ -1972,16 +2281,41 @@ class AccentSelectionTreeDelegate(QStyledItemDelegate):
 class TagListComboDelegate(QStyledItemDelegate):
     """Paint combo popup rows with accent-selected text and extra vertical breathing room."""
 
-    def __init__(self, bridge: "Bridge", combo: QComboBox, parent: QWidget | None = None) -> None:
+    def __init__(self, bridge: "Bridge", combo: QComboBox, parent: QWidget | None = None, *, show_actions: bool = False) -> None:
         super().__init__(parent)
         self.bridge = bridge
         self.combo = combo
+        self.show_actions = bool(show_actions)
 
     def sizeHint(self, option, index):
         size = super().sizeHint(option, index)
         min_height = option.fontMetrics.height() + 10
         size.setHeight(max(size.height(), min_height))
         return size
+
+    @staticmethod
+    def trash_icon_rect(row_rect: QRect) -> QRect:
+        icon_size = 16
+        right_padding = 12
+        return QRect(
+            row_rect.right() - right_padding - icon_size + 1,
+            row_rect.center().y() - (icon_size // 2),
+            icon_size,
+            icon_size,
+        )
+
+    @staticmethod
+    def rename_chip_rect(row_rect: QRect) -> QRect:
+        chip_width = 58
+        chip_height = 22
+        gap = 10
+        trash_rect = TagListComboDelegate.trash_icon_rect(row_rect)
+        return QRect(
+            trash_rect.left() - gap - chip_width,
+            row_rect.center().y() - (chip_height // 2),
+            chip_width,
+            chip_height,
+        )
 
     def paint(self, painter: QPainter, option, index) -> None:
         accent_str = str(self.bridge.settings.value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT)
@@ -2003,14 +2337,95 @@ class TagListComboDelegate(QStyledItemDelegate):
         painter.setFont(font)
         painter.setPen(accent_text if is_current_value else text_color)
 
-        text_rect = option.rect.adjusted(12, 5, -12, -5)
+        rename_rect = self.rename_chip_rect(option.rect) if self.show_actions else QRect()
+        icon_rect = self.trash_icon_rect(option.rect) if self.show_actions else QRect()
+        right_pad = (option.rect.right() - rename_rect.left() + 12) if self.show_actions else 12
+        text_rect = option.rect.adjusted(12, 5, -right_pad, -5)
         text = option.fontMetrics.elidedText(
             str(index.data(Qt.ItemDataRole.DisplayRole) or ""),
             Qt.TextElideMode.ElideRight,
             max(0, text_rect.width()),
         )
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
+        if self.show_actions:
+            chip_bg = QColor(Theme.mix(combo_bg.name(), accent.name(), 0.18 if is_light else 0.26))
+            chip_border = QColor(Theme.mix(accent.name(), combo_bg.name(), 0.22 if is_light else 0.08))
+            chip_text = QColor(_selection_text_for_color(chip_bg))
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setPen(QPen(chip_border, 1))
+            painter.setBrush(chip_bg)
+            painter.drawRoundedRect(QRectF(rename_rect), 10, 10)
+            painter.setPen(chip_text)
+            rename_font = QFont(font)
+            rename_font.setBold(True)
+            rename_font.setPointSizeF(max(8.5, rename_font.pointSizeF() - 0.5))
+            painter.setFont(rename_font)
+            painter.drawText(rename_rect, Qt.AlignmentFlag.AlignCenter, "Rename")
+            trash_icon_name = "trashcan.svg" if is_light else "trashcan-white.svg"
+            trash_icon = QIcon(str((Path(__file__).with_name("web") / "icons" / trash_icon_name).resolve()))
+            trash_hover_icon = QIcon(str((Path(__file__).with_name("web") / "icons" / "trashcan-red.svg").resolve()))
+            icon = trash_hover_icon if is_hover else trash_icon
+            icon.paint(painter, icon_rect)
         painter.restore()
+
+
+class TagListComboPopupView(QListView):
+    deleteRequested = Signal(int)
+    renameRequested = Signal(int)
+
+    def __init__(self, bridge: "Bridge", combo: QComboBox, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.bridge = bridge
+        self.combo = combo
+
+    def _tag_list_id_for_index(self, index: QModelIndex) -> int:
+        if not index.isValid():
+            return 0
+        return int(index.data(Qt.ItemDataRole.UserRole) or 0)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        index = self.indexAt(event.position().toPoint())
+        if event.button() == Qt.MouseButton.LeftButton and index.isValid():
+            point = event.position().toPoint()
+            row_rect = self.visualRect(index)
+            tag_list_id = self._tag_list_id_for_index(index)
+            if (
+                tag_list_id > 0
+                and TagListComboDelegate.rename_chip_rect(row_rect).contains(point)
+            ):
+                self.combo.setCurrentIndex(index.row())
+                self.renameRequested.emit(tag_list_id)
+                event.accept()
+                return
+            if (
+                tag_list_id > 0
+                and TagListComboDelegate.trash_icon_rect(row_rect).contains(point)
+            ):
+                self.combo.setCurrentIndex(index.row())
+                self.deleteRequested.emit(tag_list_id)
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def contextMenuEvent(self, event) -> None:
+        index = self.indexAt(event.pos())
+        if not index.isValid():
+            super().contextMenuEvent(event)
+            return
+
+        tag_list_id = self._tag_list_id_for_index(index)
+        if tag_list_id <= 0:
+            return
+
+        self.combo.setCurrentIndex(index.row())
+        menu = QMenu(self)
+        act_rename = menu.addAction("Rename Tag List...")
+        act_delete = menu.addAction("Delete Tag List")
+        chosen = menu.exec(event.globalPos())
+        if chosen == act_rename:
+            self.renameRequested.emit(tag_list_id)
+        elif chosen == act_delete:
+            self.deleteRequested.emit(tag_list_id)
 
 
 class CompareRevealViewer(QWidget):
@@ -3583,6 +3998,7 @@ class Bridge(QObject):
         if folders == self._selected_folders:
             return
         self._selected_folders = folders
+        self._current_gallery_tag_scope_search = ""
         if folders:
             self._active_collection_id = None
             self._active_collection_name = ""
@@ -3735,6 +4151,7 @@ class Bridge(QObject):
             return
         self._current_gallery_filter = next_filter
         self._current_gallery_search = next_search
+        self._current_gallery_tag_scope_search = ""
         self.galleryScopeChanged.emit()
 
     @Slot(str)
@@ -3974,19 +4391,19 @@ class Bridge(QObject):
         try:
             collections = list_collections(self.conn)
             options = ["New collection..."] + [str(collection["name"]) for collection in collections]
-            choice, ok = QInputDialog.getItem(
+            choice, ok = _run_themed_item_input_dialog(
                 None,
                 "Add to Collection",
                 "Collection:",
                 options,
-                0,
-                False,
+                current=0,
+                editable=False,
             )
             if not ok or not choice:
                 return False
 
             if choice == "New collection...":
-                name, created_ok = QInputDialog.getText(None, "New Collection", "Collection Name:")
+                name, created_ok = _run_themed_text_input_dialog(None, "New Collection", "Collection Name:")
                 if not created_ok or not name.strip():
                     return False
                 created = create_collection(self.conn, name)
@@ -5656,6 +6073,12 @@ class Bridge(QObject):
             self._invalidate_scan_caches()
         threading.Thread(target=work, daemon=True).start()
         return True
+
+    @Slot(str, str, str, result=str)
+    def themed_text_input(self, title: str, label: str, text: str = "") -> str:
+        parent = self.parent() if isinstance(self.parent(), QWidget) else None
+        value, ok = _run_themed_text_input_dialog(parent, str(title or ""), str(label or ""), text=str(text or ""))
+        return str(value or "") if ok else ""
 
     @Slot(str, result=str)
     def path_to_url(self, path: str) -> str:
@@ -7925,7 +8348,7 @@ class MainWindow(QMainWindow):
         else:
             count = len(paths)
             msg = f"Are you sure you want to permanently delete {count} items?" if count > 1 else f"Are you sure you want to permanently delete '{Path(paths[0]).name}'?"
-            ret = QMessageBox.question(self, "Confirm Permanent Delete", msg, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            ret = _run_themed_question_dialog(self, "Confirm Permanent Delete", msg)
             if ret == QMessageBox.StandardButton.Yes:
                 for p in paths:
                     self.bridge.delete_path_permanent(p)
@@ -7937,7 +8360,7 @@ class MainWindow(QMainWindow):
         
         count = len(paths)
         msg = f"Are you sure you want to permanently delete {count} items?" if count > 1 else f"Are you sure you want to permanently delete '{Path(paths[0]).name}'?"
-        ret = QMessageBox.question(self, "Confirm Permanent Delete", msg, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        ret = _run_themed_question_dialog(self, "Confirm Permanent Delete", msg)
         if ret == QMessageBox.StandardButton.Yes:
             for p in paths:
                 self.bridge.delete_path_permanent(p)
@@ -10113,7 +10536,7 @@ class MainWindow(QMainWindow):
 
         chosen = menu.exec(self.collections_list.viewport().mapToGlobal(pos))
         if chosen == act_new:
-            name, ok = QInputDialog.getText(self, "New Collection", "Collection Name:")
+            name, ok = _run_themed_text_input_dialog(self, "New Collection", "Collection Name:")
             if ok and name.strip():
                 created = self.bridge.create_collection(name)
                 if created:
@@ -10123,7 +10546,7 @@ class MainWindow(QMainWindow):
         elif item and chosen == act_rename:
             collection_id = int(item.data(Qt.ItemDataRole.UserRole) or 0)
             current_name = item.text()
-            name, ok = QInputDialog.getText(self, "Rename Collection", "Collection Name:", text=current_name)
+            name, ok = _run_themed_text_input_dialog(self, "Rename Collection", "Collection Name:", text=current_name)
             if ok and name.strip() and name.strip() != current_name:
                 if self.bridge.rename_collection(collection_id, name):
                     self._reload_collections()
@@ -10577,7 +11000,8 @@ class MainWindow(QMainWindow):
         self.bulk_uncommon_tags_text.setPlainText(", ".join(uncommon))
 
     def _configure_tag_list_combo(self, combo: QComboBox) -> None:
-        view = QListView(combo)
+        is_tag_list_selector = combo.objectName() == "tagListSelect"
+        view = TagListComboPopupView(self.bridge, combo, combo) if is_tag_list_selector else QListView(combo)
         view.setObjectName(f"{combo.objectName()}Popup")
         view.setFrameShape(QFrame.Shape.NoFrame)
         view.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -10586,8 +11010,11 @@ class MainWindow(QMainWindow):
         view.setUniformItemSizes(False)
         view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         view.setMouseTracking(True)
+        if is_tag_list_selector and isinstance(view, TagListComboPopupView):
+            view.deleteRequested.connect(self._delete_tag_list)
+            view.renameRequested.connect(self._rename_tag_list_by_id)
         combo.setView(view)
-        combo.setItemDelegate(TagListComboDelegate(self.bridge, combo, view))
+        combo.setItemDelegate(TagListComboDelegate(self.bridge, combo, view, show_actions=is_tag_list_selector))
 
     def _selected_tag_names_from_editor(self) -> set[str]:
         return {tag.casefold() for tag in self._normalize_tag_list(self._active_tag_editor().text())}
@@ -10650,7 +11077,7 @@ class MainWindow(QMainWindow):
     def _create_tag_list(self) -> None:
         from app.mediamanager.db.tag_lists_repo import create_tag_list
 
-        name, ok = QInputDialog.getText(self, "Create Tag List", "List name:")
+        name, ok = _run_themed_text_input_dialog(self, "Create Tag List", "List name:")
         if not ok or not str(name or "").strip():
             return
         created = create_tag_list(self.bridge.conn, name)
@@ -10660,14 +11087,13 @@ class MainWindow(QMainWindow):
         self._reload_tag_lists(int(created.get("id") or 0))
         self._open_tag_list_panel()
 
-    def _rename_active_tag_list(self) -> None:
+    def _rename_tag_list_by_id(self, tag_list_id: int) -> None:
         from app.mediamanager.db.tag_lists_repo import get_tag_list, rename_tag_list
 
-        tag_list_id = self._active_tag_list_id()
         if tag_list_id <= 0:
             return
         current = get_tag_list(self.bridge.conn, tag_list_id) or {}
-        name, ok = QInputDialog.getText(self, "Rename Tag List", "List name:", text=str(current.get("name") or ""))
+        name, ok = _run_themed_text_input_dialog(self, "Rename Tag List", "List name:", text=str(current.get("name") or ""))
         if not ok or not str(name or "").strip():
             return
         if not rename_tag_list(self.bridge.conn, tag_list_id, name):
@@ -10675,13 +11101,36 @@ class MainWindow(QMainWindow):
             return
         self._reload_tag_lists(tag_list_id)
 
+    def _rename_active_tag_list(self) -> None:
+        self._rename_tag_list_by_id(self._active_tag_list_id())
+
+    def _delete_tag_list(self, tag_list_id: int | None = None) -> None:
+        from app.mediamanager.db.tag_lists_repo import delete_tag_list, get_tag_list
+
+        resolved_id = int(tag_list_id or self._active_tag_list_id() or 0)
+        if resolved_id <= 0:
+            return
+        current = get_tag_list(self.bridge.conn, resolved_id) or {}
+        current_name = str(current.get("name") or "")
+        reply = _run_themed_question_dialog(
+            self,
+            "Delete Tag List",
+            f"Delete tag list '{current_name}'?",
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        if not delete_tag_list(self.bridge.conn, resolved_id):
+            QMessageBox.warning(self, "Delete Tag List", "Unable to delete that tag list.")
+            return
+        self._reload_tag_lists()
+
     def _add_tag_to_active_list(self) -> None:
         from app.mediamanager.db.tag_lists_repo import add_tag_to_list
 
         tag_list_id = self._active_tag_list_id()
         if tag_list_id <= 0:
             return
-        tag_name, ok = QInputDialog.getText(self, "Add New Tag", "Tag:")
+        tag_name, ok = _run_themed_text_input_dialog(self, "Add New Tag", "Tag:")
         if not ok or not str(tag_name or "").strip():
             return
         add_tag_to_list(self.bridge.conn, tag_list_id, tag_name)
@@ -10785,6 +11234,8 @@ class MainWindow(QMainWindow):
     def _refresh_tag_list_scope_counts(self) -> None:
         if not hasattr(self, "tag_list_panel") or not self.tag_list_panel.isVisible():
             return
+        if not str(getattr(self.bridge, "_current_gallery_tag_scope_search", "") or "").strip():
+            self._active_tag_scope_name = ""
         self._refresh_tag_list_panel()
 
     def _refresh_tag_list_rows_state(self) -> None:
@@ -10902,14 +11353,10 @@ class MainWindow(QMainWindow):
         editor.setText(", ".join(next_tags))
 
     def _remove_tag_from_active_list(self, tag_id: int, _tag_name: str) -> None:
-        from app.mediamanager.db.tag_lists_repo import list_tag_list_entries, remove_tag_from_list
+        from app.mediamanager.db.tag_lists_repo import remove_tag_from_list
 
         tag_list_id = self._active_tag_list_id()
         if tag_list_id <= 0:
-            return
-        entries = list_tag_list_entries(self.bridge.conn, tag_list_id)
-        entry = next((row for row in entries if int(row.get("tag_id") or 0) == int(tag_id)), None)
-        if not entry or int(entry.get("global_use_count") or 0) > 0:
             return
         if remove_tag_from_list(self.bridge.conn, tag_list_id, tag_id):
             self._refresh_tag_list_panel()
@@ -13757,7 +14204,7 @@ class MainWindow(QMainWindow):
 
         if chosen == act_rename:
             cur = Path(folder_path).name
-            next_name, ok = QInputDialog.getText(self, "Rename folder", "New name:", text=cur)
+            next_name, ok = _run_themed_text_input_dialog(self, "Rename folder", "New name:", text=cur)
             if ok and next_name and next_name != cur:
                 new_path = self.bridge.rename_path(folder_path, next_name)
                 if new_path:
@@ -13784,7 +14231,7 @@ class MainWindow(QMainWindow):
             self._delete_item(folder_path)
 
     def _create_folder_at(self, parent_path: str):
-        name, ok = QInputDialog.getText(self, "New Folder", "Folder Name:")
+        name, ok = _run_themed_text_input_dialog(self, "New Folder", "Folder Name:")
         if ok and name:
             new_path = self.bridge.create_folder(parent_path, name)
             if new_path:
@@ -13806,18 +14253,18 @@ class MainWindow(QMainWindow):
             self.bridge.delete_path(path_str)
         else:
             if p.is_dir():
-                reply = QMessageBox.question(
-                    self, "Confirm Permanent Delete",
+                reply = _run_themed_question_dialog(
+                    self,
+                    "Confirm Permanent Delete",
                     f"Are you sure you want to permanently delete the folder and all its contents?\n\n{p.name}",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
                 )
                 if reply != QMessageBox.StandardButton.Yes:
                     return
             else:
-                reply = QMessageBox.question(
-                    self, "Confirm Permanent Delete",
+                reply = _run_themed_question_dialog(
+                    self,
+                    "Confirm Permanent Delete",
                     f"Are you sure you want to permanently delete this file?\n\n{p.name}",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
                 )
                 if reply != QMessageBox.StandardButton.Yes:
                     return
@@ -14679,6 +15126,8 @@ class MainWindow(QMainWindow):
         sb_bg = Theme.get_sidebar_bg(accent)
         border = Theme.get_border(accent)
         text = Theme.get_text_color()
+        tooltip_bg = Theme.get_bg(accent)
+        tooltip_border = Theme.get_input_border(accent)
         highlight_bg = Theme.get_accent_soft(accent)
         menu_qss = f"""
             QMenuBar {{
@@ -14730,8 +15179,18 @@ class MainWindow(QMainWindow):
                 background-color: {highlight_bg};
                 border-color: {accent.name()};
             }}
+            QToolTip {{
+                background-color: {tooltip_bg};
+                color: {text};
+                border: 1px solid {tooltip_border};
+                padding: 4px 6px;
+            }}
         """
         QApplication.instance().setStyleSheet(menu_qss)
+        tooltip_palette = QApplication.instance().palette()
+        tooltip_palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(tooltip_bg))
+        tooltip_palette.setColor(QPalette.ColorRole.ToolTipText, QColor(text))
+        QToolTip.setPalette(tooltip_palette)
         try:
             menu_bar = self.menuBar()
             if menu_bar is not None:
@@ -15344,6 +15803,7 @@ def main() -> None:
     if os.name == "nt" and bool(_WINDOWS_WEBENGINE_RUNTIME.get("enabled")):
         QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseSoftwareOpenGL, True)
     app = QApplication(sys.argv)
+    app.setStyle(ToolTipProxyStyle(app.style()))
 
     # Keep the visible Qt app name aligned with the installed product name.
     app.setOrganizationName(APP_NAME)
@@ -15363,8 +15823,20 @@ def main() -> None:
     palette.setColor(QPalette.ColorRole.WindowText, startup_fg)
     palette.setColor(QPalette.ColorRole.Text, startup_fg)
     app.setPalette(palette)
+    tooltip_palette = app.palette()
+    tooltip_palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(Theme.get_bg(QColor(startup_accent))))
+    tooltip_palette.setColor(QPalette.ColorRole.ToolTipText, startup_fg)
+    QToolTip.setPalette(tooltip_palette)
     app.setStyleSheet(
-        f"QWidget {{ background-color: {startup_bg.name()}; color: {startup_fg.name()}; }}"
+        f"""
+        QWidget {{ background-color: {startup_bg.name()}; color: {startup_fg.name()}; }}
+        QToolTip {{
+            background-color: {Theme.get_input_bg(QColor(startup_accent))};
+            color: {startup_fg.name()};
+            border: 1px solid {Theme.get_input_border(QColor(startup_accent))};
+            padding: 4px 6px;
+        }}
+        """
     )
 
     splash = _create_startup_splash(app, startup_bg) if show_splash else None

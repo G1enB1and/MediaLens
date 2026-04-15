@@ -89,6 +89,15 @@ def rename_tag_list(conn: sqlite3.Connection, tag_list_id: int, name: str) -> bo
         return False
 
 
+def delete_tag_list(conn: sqlite3.Connection, tag_list_id: int) -> bool:
+    cur = conn.execute(
+        "DELETE FROM tag_lists WHERE id = ?",
+        (int(tag_list_id),),
+    )
+    conn.commit()
+    return cur.rowcount > 0
+
+
 def set_tag_list_sort_mode(conn: sqlite3.Connection, tag_list_id: int, sort_mode: str) -> bool:
     mode = str(sort_mode or "none").strip().lower() or "none"
     if mode not in {"none", "az", "za", "most_used", "least_used"}:

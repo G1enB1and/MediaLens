@@ -13,6 +13,7 @@ AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
+UsePreviousAppDir=no
 ; Allow user to choose "Current User" vs "All Users" (requires admin)
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir=.\
