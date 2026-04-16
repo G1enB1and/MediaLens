@@ -1,6 +1,44 @@
 # Change Log
 
-## v1.1.19 (Current)
+## v1.1.20 (Current)
+
+### Summary
+
+This release makes MediaLens easier to support on more machines with safer debugging-log bundles, clearer failure details, and more self-contained video tooling. It also lays the groundwork for optional support-log submission when a support endpoint is configured.
+
+### Highlights
+
+- Support bundles are now safer to share because they exclude private app data and redact path-like details.
+- Debugging logs can be submitted from the Help menu after user consent once an upload endpoint is configured.
+- Video thumbnails and probing are more reliable because packaged builds now include FFmpeg and FFprobe.
+
+### Added
+
+- Added a `debugging-logs` folder under `%APPDATA%\MediaLens\` for app logs, faulthandler logs, and crash reports.
+- Added startup migration for existing root-level `app.log`, `faulthandler.log`, and `crash-reports` into the new `debugging-logs` folder.
+- Added `Help > Create Debugging Log Bundle`, which creates a sanitized zip bundle for support.
+- Added `Help > Submit Debugging Logs...`, which creates the sanitized bundle and uploads it only when a support endpoint is configured.
+- Added consent, optional contact email, and optional issue notes to the debugging-log submission flow.
+- Added hidden upload configuration through `MEDIALENS_DEBUG_UPLOAD_URL`, `MEDIALENS_DEBUG_UPLOAD_TOKEN`, or the matching support settings keys.
+- Added a DreamHost-ready PHP upload endpoint template under `support-server/dreamhost`.
+- Added DreamHost deployment instructions for a low-cost support-log submission setup.
+- Added bundled `ffmpeg.exe` and `ffprobe.exe` packaging during installer builds.
+
+### Changed
+
+- Changed crash reports and diagnostic bundles to redact path-like values where practical.
+- Changed normal app logging to keep startup diagnostics and problem reports while dropping routine tree, page-load, and frontend chatter unless verbose logging is enabled.
+- Changed video tooling lookup to prefer bundled FFmpeg and FFprobe before falling back to the system PATH.
+- Changed video thumbnail, probing, preprocessing, and playback failures to produce more useful app-log entries.
+- Changed debugging-log bundles to include only sanitized diagnostic text and recent crash reports, excluding databases, settings, thumbnails, recycle-bin files, and media files.
+
+### Removed
+
+- Removed the installed app's reliance on users having FFmpeg and FFprobe separately installed for video poster generation and probing.
+
+---
+
+## v1.1.19
 
 ### Summary
 

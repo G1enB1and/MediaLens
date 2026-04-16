@@ -1,20 +1,20 @@
-## MediaLens v1.1.19
+## MediaLens v1.1.20
 
-### ✨ Summary
+### Summary
 
-This release refines folder visibility settings, and updates several actions across the gallery and settings workflows.
+This release makes MediaLens easier to support on more machines with safer debugging-log bundles, clearer failure details, and more self-contained video tooling.
 
-### 🔥 Highlights
+### Highlights
 
-- **Folder Visibility:** Added settings to easily toggle nested files and folder visibility in the gallery, including a convenient header toggle.
-- **Tag Management:** Added new `Delete` and `Rename` actions directly inside Tag Lists for faster metadata organization.
-- **UI Polish:** Themed the `Create`, `Rename`, and `Delete` dialog windows for a more consistent appearance.
+- **Safer Support Logs:** MediaLens now creates sanitized debugging-log bundles that exclude private app data such as databases, settings, thumbnails, recycle-bin files, and media files.
+- **Optional Log Submission:** A new Help menu flow can submit debugging logs after user consent once a support endpoint is configured.
+- **More Reliable Video Support:** Packaged builds now include FFmpeg and FFprobe, so video thumbnails and probing no longer depend on tools already installed on the user's PC.
 
-### 🛠 Notes
+### Notes
 
-- **Installation Path:** Changed the default install folder to `MediaLens` and fixed database migration from older `MediaManagerX` versions.
+- Debugging logs now live under `%APPDATA%\MediaLens\debugging-logs\`.
+- Existing root-level app logs, faulthandler logs, and crash reports are moved into the new debugging-log folder automatically.
+- The included DreamHost support endpoint template is a starter for future low-cost support-log uploads.
 
----
-
-📄 Full Changelog:
-<https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md>
+Full Changelog:
+https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md

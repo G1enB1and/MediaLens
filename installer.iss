@@ -1,5 +1,5 @@
 #define MyAppName "MediaLens"
-#define MyAppVersion "v1.1.19" ; Source of Truth: \VERSION
+#define MyAppVersion "v1.1.20" ; Source of Truth: \VERSION
 #define MyAppPublisher "G1enB1and"
 #define MyAppExeName "MediaLens.exe"
 #ifndef MyBuildSourceDir
