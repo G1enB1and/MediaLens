@@ -3785,6 +3785,8 @@ class Bridge(QObject):
         appdata = _appdata_runtime_dir()
         self._thumb_dir = appdata / "thumbs"
         self._thumb_dir.mkdir(parents=True, exist_ok=True)
+        self._logged_tool_paths: set[str] = set()
+        self._logged_missing_tools: set[str] = set()
         
         # Initialize Logging
         self.log_path = appdata / "app.log"
@@ -3944,11 +3946,69 @@ class Bridge(QObject):
                 pass
             return str(path_obj)
 
+    def _bundled_tool_candidates(self, name: str) -> list[Path]:
+        exe_name = f"{name}.exe" if os.name == "nt" else name
+        roots: list[Path] = []
+        try:
+            roots.append(Path(sys.executable).resolve().parent)
+        except Exception:
+            pass
+        try:
+            meipass = getattr(sys, "_MEIPASS", "")
+            if meipass:
+                roots.append(Path(meipass).resolve())
+        except Exception:
+            pass
+        try:
+            roots.append(Path(__file__).resolve().parents[2])
+        except Exception:
+            pass
+
+        candidates: list[Path] = []
+        for root in roots:
+            candidates.extend(
+                [
+                    root / "tools" / "ffmpeg" / "bin" / exe_name,
+                    root / "tools" / exe_name,
+                    root / exe_name,
+                ]
+            )
+        return candidates
+
+    def _media_tool_bin(self, name: str) -> str | None:
+        env_key = f"MEDIALENS_{name.upper()}_PATH"
+        env_path = str(os.environ.get(env_key, "") or "").strip().strip('"')
+        candidates = [Path(env_path)] if env_path else []
+        candidates.extend(self._bundled_tool_candidates(name))
+
+        for candidate in candidates:
+            try:
+                if candidate.exists() and candidate.is_file():
+                    resolved = str(candidate.resolve())
+                    if name not in self._logged_tool_paths:
+                        self._log(f"Using {name} binary: {resolved}")
+                        self._logged_tool_paths.add(name)
+                    return resolved
+            except Exception:
+                continue
+
+        found = shutil.which(name)
+        if found:
+            if name not in self._logged_tool_paths:
+                self._log(f"Using {name} from PATH: {found}")
+                self._logged_tool_paths.add(name)
+            return found
+
+        if name not in self._logged_missing_tools:
+            self._log(f"{name} binary not found. Bundled video tooling is missing and PATH lookup failed.")
+            self._logged_missing_tools.add(name)
+        return None
+
     def _ffmpeg_bin(self) -> str | None:
-        return shutil.which("ffmpeg")
+        return self._media_tool_bin("ffmpeg")
 
     def _ffprobe_bin(self) -> str | None:
-        return shutil.which("ffprobe")
+        return self._media_tool_bin("ffprobe")
 
     def _ensure_video_poster(self, video_path: Path) -> Path | None:
         """Generate a poster jpg for a video or image using ffmpeg (if missing)."""
@@ -3957,6 +4017,7 @@ class Bridge(QObject):
             return out
         ffmpeg = self._ffmpeg_bin()
         if not ffmpeg:
+            self._log(f"Video poster unavailable; ffmpeg not found for {video_path}")
             return None
         try:
             out.parent.mkdir(parents=True, exist_ok=True)
@@ -3973,9 +4034,12 @@ class Bridge(QObject):
             
             r = _run_hidden_subprocess(cmd, capture_output=True, text=True, timeout=5)
             if r.returncode != 0:
+                err = (r.stderr or r.stdout or "").strip().replace("\r", " ").replace("\n", " ")
+                self._log(f"Video poster generation failed for {video_path}: exit={r.returncode} {err[:500]}")
                 return None
             return out if out.exists() else None
         except Exception as e:
+            self._log(f"Video poster generation error for {video_path}: {type(e).__name__}: {e}")
             return None
         
     def _is_animated(self, path: Path) -> bool:
@@ -6435,21 +6499,31 @@ class Bridge(QObject):
     def get_video_duration_seconds(self, video_path: str) -> float:
         try:
             ffprobe = self._ffprobe_bin()
-            if not ffprobe: return 0.0
+            if not ffprobe:
+                self._log(f"Video duration unavailable; ffprobe not found for {video_path}")
+                return 0.0
             runtime_path = self._video_runtime_path(video_path)
             cmd = [ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", runtime_path]
             r = _run_hidden_subprocess(cmd, capture_output=True, text=True, check=True, timeout=5)
             return float((r.stdout or "").strip() or 0.0)
-        except Exception: return 0.0
+        except Exception as exc:
+            self._log(f"Video duration probe failed for {video_path}: {type(exc).__name__}: {exc}")
+            return 0.0
 
     def _probe_video_size(self, video_path: str) -> tuple[int, int, bool]:
         ffprobe = self._ffprobe_bin()
-        if not ffprobe: return (0, 0, False)
+        if not ffprobe:
+            self._log(f"Video size probe unavailable; ffprobe not found for {video_path}")
+            return (0, 0, False)
         runtime_path = self._video_runtime_path(video_path)
         cmd = [ffprobe, "-v", "quiet", "-print_format", "json", "-show_streams", runtime_path]
         try:
             import json
             r = _run_hidden_subprocess(cmd, capture_output=True, text=True, timeout=5)
+            if r.returncode != 0:
+                err = (r.stderr or r.stdout or "").strip().replace("\r", " ").replace("\n", " ")
+                self._log(f"Video size probe failed for {video_path}: exit={r.returncode} {err[:500]}")
+                return (0, 0, False)
             data = json.loads(r.stdout)
             streams = data.get("streams", [])
             if not streams: return (0, 0, False)
@@ -6476,7 +6550,9 @@ class Bridge(QObject):
                         
                     return (w, h, (w % 2 != 0 or h % 2 != 0))
             return (0, 0, False)
-        except Exception: return (0, 0, False)
+        except Exception as exc:
+            self._log(f"Video size probe error for {video_path}: {type(exc).__name__}: {exc}")
+            return (0, 0, False)
 
     @Slot(str, bool, bool, bool, int, int, result=bool)
     def open_native_video(self, video_path: str, autoplay: bool, loop: bool, muted: bool, w: int = 0, h: int = 0) -> bool:
@@ -6584,7 +6660,9 @@ class Bridge(QObject):
     def _preprocess_to_even_dims(self, video_path: str, w: int, h: int) -> str | None:
         import tempfile
         ffmpeg = self._ffmpeg_bin()
-        if not ffmpeg: return None
+        if not ffmpeg:
+            self._log(f"Video preprocessing unavailable; ffmpeg not found for {video_path}")
+            return None
         runtime_path = self._video_runtime_path(video_path)
         ew, eh = (w if w % 2 == 0 else w - 1), (h if h % 2 == 0 else h - 1)
         if ew <= 0 or eh <= 0: return None
@@ -6594,10 +6672,15 @@ class Bridge(QObject):
         vf = f"scale={ew}:{eh},setsar=1,format=yuv420p"
         cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "warning", "-i", runtime_path, "-vf", vf, "-c:v", "mjpeg", "-q:v", "3", "-c:a", "copy", out_path]
         try:
-            if _run_hidden_subprocess(cmd, capture_output=True, timeout=60).returncode == 0:
+            result = _run_hidden_subprocess(cmd, capture_output=True, timeout=60)
+            if result.returncode == 0:
+                self._log(f"Video preprocessing succeeded for {video_path}: {out_path}")
                 return out_path
-        except Exception:
-            pass
+            err_bytes = result.stderr or result.stdout or b""
+            err = err_bytes.decode("utf-8", errors="replace") if isinstance(err_bytes, bytes) else str(err_bytes)
+            self._log(f"Video preprocessing failed for {video_path}: exit={result.returncode} {err.strip()[:500]}")
+        except Exception as exc:
+            self._log(f"Video preprocessing error for {video_path}: {type(exc).__name__}: {exc}")
         return None
 
     @Slot(result=bool)
@@ -9485,6 +9568,7 @@ class MainWindow(QMainWindow):
         self.video_overlay.on_close = self._close_web_lightbox
         self.video_overlay.on_prev = self._on_video_prev
         self.video_overlay.on_next = self._on_video_next
+        self.video_overlay.on_log = self.bridge._log
         self.video_overlay.raise_()
 
         self.channel = QWebChannel(self.web.page())
@@ -11524,6 +11608,7 @@ class MainWindow(QMainWindow):
             overlay = LightboxVideoOverlay(parent=self.preview_image_lbl)
             overlay.set_mode(True)
             overlay.on_close = self._sync_sidebar_video_preview_controls
+            overlay.on_log = self.bridge._log
             overlay.setGeometry(self.preview_image_lbl.rect())
             overlay.hide()
             self.sidebar_video_overlay = overlay

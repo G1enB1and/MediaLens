@@ -117,6 +117,7 @@ class LightboxVideoOverlay(QWidget):
         self.on_close = None
         self.on_prev = None
         self.on_next = None
+        self.on_log = None
 
         self.player = QMediaPlayer(self)
         self.audio = QAudioOutput(self)
@@ -308,6 +309,17 @@ class LightboxVideoOverlay(QWidget):
         self._loop = False
         self._current_source = ""
         self.player.mediaStatusChanged.connect(self._on_media_status)
+
+    def _log(self, message: str) -> None:
+        try:
+            if callable(self.on_log):
+                self.on_log(message)
+        except Exception:
+            pass
+        try:
+            print(message)
+        except Exception:
+            pass
 
     def _is_light(self) -> bool:
         from PySide6.QtCore import QSettings
@@ -658,7 +670,7 @@ class LightboxVideoOverlay(QWidget):
 
     def open_video(self, req: VideoRequest) -> None:
         path = str(Path(req.path))
-        print(f"Video Overlay Opening: {path} ({req.width}x{req.height})")
+        self._log(f"Video Overlay Opening: {path} ({req.width}x{req.height})")
         
         self._loop = bool(req.loop)
         self.audio.setMuted(bool(req.muted))
@@ -827,7 +839,7 @@ class LightboxVideoOverlay(QWidget):
                 # Update UI once, then keep returning silently.
                 if not self.lbl_dbg.isVisible():
                     msg = f"Incompatible frame format ({pf.name} {raw_w}×{raw_h})"
-                    print(f"[VideoOverlay] Radioactive frame blocked: {msg}")
+                    self._log(f"[VideoOverlay] Radioactive frame blocked: {msg}")
                     self.lbl_dbg.setText(msg)
                     self.lbl_dbg.setVisible(True)
                 return
@@ -936,7 +948,7 @@ class LightboxVideoOverlay(QWidget):
                 self.lbl_dbg.setVisible(True)
 
         except Exception as e:
-            print(f"[VideoOverlay] Frame processing error: {type(e).__name__}: {e}")
+            self._log(f"[VideoOverlay] Frame processing error: {type(e).__name__}: {e}")
             self.lbl_dbg.setText(f"Frame error: {type(e).__name__}")
             self.lbl_dbg.setVisible(True)
             self.video_view.set_image(None)
@@ -946,6 +958,7 @@ class LightboxVideoOverlay(QWidget):
         if status == QMediaPlayer.MediaStatus.InvalidMedia:
             self.lbl_dbg.setText("Error: Could not load media")
             self.lbl_dbg.setVisible(True)
+            self._log(f"Video Overlay InvalidMedia: source={self.player.source().toString()}")
 
         # Fallback looping when setLoops() isn't available (older Qt builds).
         if self._loop and status == QMediaPlayer.MediaStatus.EndOfMedia:
@@ -955,7 +968,7 @@ class LightboxVideoOverlay(QWidget):
     def _on_player_error(self, error: QMediaPlayer.Error, error_string: str) -> None:
         self.lbl_dbg.setText(f"Player Error: {error_string}")
         self.lbl_dbg.setVisible(True)
-        print(f"Video Overlay Player Error: {error_string} (code {error})")
+        self._log(f"Video Overlay Player Error: {error_string} (code {error}) source={self.player.source().toString()}")
 
     def _format_ms(self, ms: int) -> str:
         s = max(0, int(ms // 1000))
