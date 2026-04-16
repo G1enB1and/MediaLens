@@ -21,6 +21,10 @@ import json
 import html
 import shlex
 import traceback
+import zipfile
+import urllib.error
+import urllib.request
+import uuid
 from collections import Counter
 from datetime import datetime, timezone, timedelta
 from math import gcd
@@ -576,6 +580,125 @@ def _appdata_runtime_dir() -> Path:
     return out
 
 
+def _debugging_logs_dir(appdata_dir: Path | None = None) -> Path:
+    root = appdata_dir or _appdata_runtime_dir()
+    out = root / "debugging-logs"
+    out.mkdir(parents=True, exist_ok=True)
+    return out
+
+
+def _crash_reports_dir(appdata_dir: Path | None = None) -> Path:
+    out = _debugging_logs_dir(appdata_dir) / "crash-reports"
+    out.mkdir(parents=True, exist_ok=True)
+    return out
+
+
+def _migrate_legacy_debugging_logs(appdata_dir: Path | None = None) -> None:
+    root = appdata_dir or _appdata_runtime_dir()
+    debug_dir = _debugging_logs_dir(root)
+
+    def _unique_target(path: Path) -> Path:
+        if not path.exists():
+            return path
+        stem = path.stem
+        suffix = path.suffix
+        for idx in range(1, 1000):
+            candidate = path.with_name(f"{stem}-{idx}{suffix}")
+            if not candidate.exists():
+                return candidate
+        return path.with_name(f"{stem}-{int(time.time())}{suffix}")
+
+    for name in ("app.log", "faulthandler.log"):
+        old_path = root / name
+        new_path = debug_dir / name
+        if not old_path.exists():
+            continue
+        try:
+            if new_path.exists():
+                with open(new_path, "a", encoding="utf-8", errors="replace") as out_handle:
+                    out_handle.write("\n")
+                    out_handle.write(old_path.read_text(encoding="utf-8", errors="replace"))
+                old_path.unlink(missing_ok=True)
+            else:
+                shutil.move(str(old_path), str(new_path))
+        except Exception:
+            pass
+
+    old_crash_dir = root / "crash-reports"
+    new_crash_dir = debug_dir / "crash-reports"
+    if old_crash_dir.exists() and old_crash_dir.is_dir():
+        try:
+            new_crash_dir.mkdir(parents=True, exist_ok=True)
+            for child in old_crash_dir.iterdir():
+                target = _unique_target(new_crash_dir / child.name)
+                try:
+                    shutil.move(str(child), str(target))
+                except Exception:
+                    pass
+            try:
+                old_crash_dir.rmdir()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+
+_WINDOWS_PATH_RE = re.compile(
+    r"(?P<path>(?:[A-Za-z]:\\|\\\\)[^\s\"'<>|]+(?:[^\s\"'<>|.,;:)\]}]))"
+)
+_FILE_URL_RE = re.compile(r"file:///[^\s\"'<>]+")
+
+
+def _sanitize_diagnostic_text(text: object) -> str:
+    raw = str(text)
+    raw = _FILE_URL_RE.sub("file:///[redacted-path]", raw)
+
+    def _replace_path(match: re.Match) -> str:
+        path_text = match.group("path")
+        suffix = Path(path_text).suffix
+        if suffix:
+            return f"[redacted-path]{suffix}"
+        return "[redacted-path]"
+
+    return _WINDOWS_PATH_RE.sub(_replace_path, raw)
+
+
+def _diagnostic_log_should_write(message: str, *, verbose: bool = False) -> bool:
+    if verbose:
+        return True
+    text = str(message or "").strip()
+    if not text:
+        return False
+    lower = text.lower()
+    always_keep = (
+        "bridge: initializing",
+        "webengine runtime:",
+        "dpi:",
+        "using ffmpeg",
+        "using ffprobe",
+        "diagnostic",
+    )
+    if any(token in lower for token in always_keep):
+        return True
+    problem_tokens = (
+        "error",
+        "failed",
+        "failure",
+        "exception",
+        "traceback",
+        "crash",
+        "invalid",
+        "unavailable",
+        "missing",
+        "rejected",
+        "terminated",
+        "warning",
+        "could not",
+        "unable",
+    )
+    return any(token in lower for token in problem_tokens)
+
+
 def _runtime_db_path(appdata_dir: Path | None = None) -> Path:
     root = appdata_dir or _appdata_runtime_dir()
     legacy = root / "mediamanagerx.db"
@@ -625,24 +748,23 @@ def app_settings() -> QSettings:
 
 def _write_crash_report(kind: str, exc_type=None, exc_value=None, exc_tb=None) -> Path | None:
     try:
-        report_dir = _appdata_runtime_dir() / "crash-reports"
-        report_dir.mkdir(parents=True, exist_ok=True)
+        report_dir = _crash_reports_dir()
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         report_path = report_dir / f"{kind}-{stamp}.log"
         lines = [
             f"Version: {__version__}",
             f"Timestamp: {datetime.now().isoformat()}",
             f"Python: {sys.version}",
-            f"Executable: {sys.executable}",
+            f"Executable: {_sanitize_diagnostic_text(sys.executable)}",
             f"Frozen: {bool(getattr(sys, 'frozen', False))}",
-            f"CWD: {os.getcwd()}",
-            _format_dpi_state(),
+            f"CWD: {_sanitize_diagnostic_text(os.getcwd())}",
+            _sanitize_diagnostic_text(_format_dpi_state()),
         ]
         if exc_type is not None:
             lines.extend([
                 "",
                 "Traceback:",
-                "".join(traceback.format_exception(exc_type, exc_value, exc_tb)).rstrip(),
+                _sanitize_diagnostic_text("".join(traceback.format_exception(exc_type, exc_value, exc_tb)).rstrip()),
             ])
         with open(report_path, "w", encoding="utf-8") as handle:
             handle.write("\n".join(lines) + "\n")
@@ -654,7 +776,9 @@ def _write_crash_report(kind: str, exc_type=None, exc_value=None, exc_tb=None) -
 def _install_crash_reporting() -> None:
     global _FAULT_HANDLER_STREAM
     try:
-        faulthandler_log = _appdata_runtime_dir() / "faulthandler.log"
+        appdata = _appdata_runtime_dir()
+        _migrate_legacy_debugging_logs(appdata)
+        faulthandler_log = _debugging_logs_dir(appdata) / "faulthandler.log"
         _FAULT_HANDLER_STREAM = open(faulthandler_log, "a", encoding="utf-8")
         faulthandler.enable(_FAULT_HANDLER_STREAM)
     except Exception:
@@ -3783,15 +3907,20 @@ class Bridge(QObject):
         self._can_nav_forward = False
         
         appdata = _appdata_runtime_dir()
+        _migrate_legacy_debugging_logs(appdata)
         self._thumb_dir = appdata / "thumbs"
         self._thumb_dir.mkdir(parents=True, exist_ok=True)
         self._logged_tool_paths: set[str] = set()
         self._logged_missing_tools: set[str] = set()
         
         # Initialize Logging
-        self.log_path = appdata / "app.log"
+        self.log_path = _debugging_logs_dir(appdata) / "app.log"
+        self._verbose_logs = str(os.environ.get("MEDIALENS_VERBOSE_LOGS", "") or "").strip().lower() in {"1", "true", "yes", "on"}
         def _log(msg):
             try:
+                msg = _sanitize_diagnostic_text(msg)
+                if not _diagnostic_log_should_write(msg, verbose=self._verbose_logs):
+                    return
                 with open(self.log_path, "a", encoding="utf-8") as f:
                     f.write(f"[{time.ctime()}] {msg}\n")
             except Exception: pass
@@ -3892,8 +4021,10 @@ class Bridge(QObject):
 
     @Slot(str)
     def debug_log(self, msg: str) -> None:
-        """Helper to print logs from the JavaScript side to the terminal."""
-        print(f"JS Debug: {msg}")
+        """Receive frontend diagnostics without bloating logs during normal use."""
+        text = str(msg or "")
+        if "JS ERROR" in text or getattr(self, "_verbose_logs", False):
+            self._log(f"JS Debug: {text}")
 
     def _thumb_key(self, path: Path) -> str:
         s = str(path).replace("\\", "/").lower().encode("utf-8")
@@ -8044,9 +8175,12 @@ class GalleryWebPage(QWebEnginePage):
         bridge = getattr(main_win, "bridge", None)
         if bridge:
             try:
+                level_name = getattr(level, "name", str(level))
+                if "Info" in level_name and not getattr(bridge, "_verbose_logs", False):
+                    return
                 bridge._log(
                     "Web console: "
-                    f"level={level} source={source_id or '<inline>'} "
+                    f"level={level_name} source={source_id or '<inline>'} "
                     f"line={int(line_number)} message={message}"
                 )
             except Exception:
@@ -8061,6 +8195,7 @@ class MainWindow(QMainWindow):
     _DEFAULT_BOTTOM_PANEL_HEIGHT = 220
     videoSidebarMetadataReady = Signal(str, dict)
     videoSidebarPosterReady = Signal(str, str)
+    debugLogUploadFinished = Signal(bool, str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -8105,6 +8240,7 @@ class MainWindow(QMainWindow):
         self.bridge.videoMutedChanged.connect(self._on_video_muted_changed)
         self.bridge.videoPausedChanged.connect(self._on_video_paused_changed)
         self.bridge.videoPreprocessingStatus.connect(self._on_video_preprocessing_status)
+        self.debugLogUploadFinished.connect(self._on_debug_log_upload_finished)
         self.bridge.uiFlagChanged.connect(self._apply_ui_flag)
         self.bridge.metadataRequested.connect(self._show_metadata_for_path)
         self.videoSidebarMetadataReady.connect(self._on_video_sidebar_metadata_ready)
@@ -8318,11 +8454,15 @@ class MainWindow(QMainWindow):
 
         help_menu.addSeparator()
 
-        diagnostics_action = QAction("Create &Diagnostic Report", self)
+        diagnostics_action = QAction("Create &Debugging Log Bundle", self)
         diagnostics_action.triggered.connect(self.create_diagnostic_report)
         help_menu.addAction(diagnostics_action)
 
-        crash_logs_action = QAction("Open &Crash Report Folder", self)
+        submit_diagnostics_action = QAction("&Submit Debugging Logs...", self)
+        submit_diagnostics_action.triggered.connect(self.submit_debugging_logs)
+        help_menu.addAction(submit_diagnostics_action)
+
+        crash_logs_action = QAction("Open &Debugging Logs Folder", self)
         crash_logs_action.triggered.connect(self.open_crash_report_folder)
         help_menu.addAction(crash_logs_action)
 
@@ -15936,31 +16076,251 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "What's New", f"Error loading changelog: {e}")
 
     def open_crash_report_folder(self) -> None:
-        folder = _appdata_runtime_dir() / "crash-reports"
+        folder = _debugging_logs_dir()
         folder.mkdir(parents=True, exist_ok=True)
         try:
             os.startfile(str(folder))
         except Exception:
-            QMessageBox.information(self, "Crash Reports", f"Crash reports folder:\n{folder}")
+            QMessageBox.information(self, "Debugging Logs", f"Debugging logs folder:\n{folder}")
 
-    def create_diagnostic_report(self) -> None:
+    def _create_debugging_log_bundle(self) -> Path | None:
+        debug_dir = _debugging_logs_dir()
         report = _write_crash_report("diagnostic")
         if report is None:
-            QMessageBox.warning(self, "Diagnostic Report", "Unable to create diagnostic report.")
-            return
+            return None
+
+        lines: list[str] = []
+        if getattr(self.bridge, "log_path", None) and Path(self.bridge.log_path).exists():
+            with open(self.bridge.log_path, "r", encoding="utf-8", errors="replace") as handle:
+                tail = handle.readlines()[-120:]
+            lines.append("")
+            lines.append("Recent sanitized app.log tail:")
+            lines.extend(_sanitize_diagnostic_text(line.rstrip("\n")) for line in tail)
+        with open(report, "a", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + ("\n" if lines else ""))
+
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        bundle_path = debug_dir / f"medialens-debugging-logs-{stamp}.zip"
+        include_files: list[tuple[Path, str]] = []
+        for candidate in (
+            report,
+            debug_dir / "app.log",
+            debug_dir / "faulthandler.log",
+        ):
+            if candidate.exists() and candidate.is_file():
+                include_files.append((candidate, candidate.name))
+
+        crash_dir = _crash_reports_dir()
+        if crash_dir.exists():
+            crash_logs = sorted(
+                (p for p in crash_dir.glob("*.log") if p.is_file()),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )[:10]
+            for idx, crash_log in enumerate(crash_logs, start=1):
+                include_files.append((crash_log, f"crash-reports/crash-report-{idx:02d}.log"))
+
+        with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(
+                "README.txt",
+                "\n".join(
+                    [
+                        "MediaLens debugging log bundle",
+                        f"Version: {__version__}",
+                        "Private media files, thumbnails, recycle-bin contents, settings, and databases are not included.",
+                        "Path-like values are redacted where practical before export.",
+                        "",
+                    ]
+                ),
+            )
+            seen_names: set[str] = set()
+            for source, arcname in include_files:
+                if arcname in seen_names:
+                    continue
+                seen_names.add(arcname)
+                try:
+                    text = source.read_text(encoding="utf-8", errors="replace")
+                    zf.writestr(arcname, _sanitize_diagnostic_text(text))
+                except Exception:
+                    continue
+        return bundle_path
+
+    def create_diagnostic_report(self) -> None:
         try:
-            lines: list[str] = []
-            if getattr(self.bridge, "log_path", None) and Path(self.bridge.log_path).exists():
-                with open(self.bridge.log_path, "r", encoding="utf-8", errors="replace") as handle:
-                    tail = handle.readlines()[-200:]
-                lines.append("")
-                lines.append("Recent app.log tail:")
-                lines.extend(line.rstrip("\n") for line in tail)
-            with open(report, "a", encoding="utf-8") as handle:
-                handle.write("\n".join(lines) + ("\n" if lines else ""))
-            QMessageBox.information(self, "Diagnostic Report", f"Diagnostic report created:\n{report}")
+            bundle_path = self._create_debugging_log_bundle()
+            if bundle_path is None:
+                QMessageBox.warning(self, "Debugging Logs", "Unable to create diagnostic report.")
+                return
+            QMessageBox.information(
+                self,
+                "Debugging Logs",
+                f"Debugging log bundle created:\n{bundle_path}\n\nThis bundle excludes databases, settings, thumbnails, and recycle-bin files.",
+            )
         except Exception as exc:
-            QMessageBox.warning(self, "Diagnostic Report", f"Report created but log tail could not be appended:\n{report}\n\n{exc}")
+            QMessageBox.warning(self, "Debugging Logs", f"Debugging log bundle could not be completed:\n{exc}")
+
+    def _debug_log_upload_config(self) -> tuple[str, str]:
+        url = str(os.environ.get("MEDIALENS_DEBUG_UPLOAD_URL", "") or "").strip()
+        token = str(os.environ.get("MEDIALENS_DEBUG_UPLOAD_TOKEN", "") or "").strip()
+        try:
+            if not url:
+                url = str(self.bridge.settings.value("support/debug_upload_url", "", type=str) or "").strip()
+            if not token:
+                token = str(self.bridge.settings.value("support/debug_upload_token", "", type=str) or "").strip()
+        except Exception:
+            pass
+        return url, token
+
+    def _prompt_debug_log_submission(self) -> tuple[str, str] | None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Submit Debugging Logs")
+        dialog.resize(520, 360)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(10)
+
+        intro = QLabel(
+            "MediaLens will create and submit a sanitized debugging log bundle. "
+            "It excludes media files, thumbnails, recycle-bin files, settings, and databases."
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        contact_label = QLabel("Contact email (optional)")
+        layout.addWidget(contact_label)
+        contact_edit = QLineEdit(dialog)
+        contact_edit.setPlaceholderText("you@example.com")
+        layout.addWidget(contact_edit)
+
+        note_label = QLabel("What happened? (optional)")
+        layout.addWidget(note_label)
+        note_edit = QPlainTextEdit(dialog)
+        note_edit.setPlaceholderText("Briefly describe what you were doing and what went wrong.")
+        note_edit.setMaximumHeight(110)
+        layout.addWidget(note_edit)
+
+        consent = QCheckBox("I consent to submit this debugging log bundle to MediaLens support.", dialog)
+        layout.addWidget(consent)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        cancel_btn = QPushButton("Cancel", dialog)
+        submit_btn = QPushButton("Submit", dialog)
+        submit_btn.setEnabled(False)
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(submit_btn)
+        layout.addLayout(btn_row)
+
+        consent.toggled.connect(submit_btn.setEnabled)
+        cancel_btn.clicked.connect(dialog.reject)
+        submit_btn.clicked.connect(dialog.accept)
+
+        if dialog.exec() != int(QDialog.DialogCode.Accepted):
+            return None
+        return contact_edit.text().strip(), note_edit.toPlainText().strip()
+
+    def submit_debugging_logs(self) -> None:
+        upload_url, upload_token = self._debug_log_upload_config()
+        if not upload_url:
+            try:
+                bundle_path = self._create_debugging_log_bundle()
+            except Exception as exc:
+                QMessageBox.warning(self, "Debugging Logs", f"Unable to create debugging log bundle:\n{exc}")
+                return
+            if bundle_path is None:
+                QMessageBox.warning(self, "Debugging Logs", "Unable to create debugging log bundle.")
+                return
+            msg = (
+                "Debug log upload is not configured yet.\n\n"
+                f"A local bundle was created here:\n{bundle_path}\n\n"
+                "After the DreamHost upload endpoint is deployed, set "
+                "MEDIALENS_DEBUG_UPLOAD_URL or the hidden setting support/debug_upload_url."
+            )
+            QMessageBox.information(self, "Submit Debugging Logs", msg)
+            return
+
+        prompt = self._prompt_debug_log_submission()
+        if prompt is None:
+            return
+        contact, note = prompt
+
+        try:
+            bundle_path = self._create_debugging_log_bundle()
+            if bundle_path is None:
+                QMessageBox.warning(self, "Submit Debugging Logs", "Unable to create debugging log bundle.")
+                return
+        except Exception as exc:
+            QMessageBox.warning(self, "Submit Debugging Logs", f"Unable to create debugging log bundle:\n{exc}")
+            return
+
+        QMessageBox.information(self, "Submit Debugging Logs", "Submitting debugging logs in the background.")
+        threading.Thread(
+            target=self._upload_debugging_log_bundle,
+            args=(bundle_path, upload_url, upload_token, contact, note),
+            daemon=True,
+        ).start()
+
+    def _upload_debugging_log_bundle(self, bundle_path: Path, upload_url: str, upload_token: str, contact: str, note: str) -> None:
+        try:
+            max_bytes = 25 * 1024 * 1024
+            size = bundle_path.stat().st_size
+            if size > max_bytes:
+                raise ValueError(f"Bundle is too large to upload ({size} bytes).")
+
+            boundary = f"----MediaLens{uuid.uuid4().hex}"
+            parts: list[bytes] = []
+
+            def add_field(name: str, value: str) -> None:
+                parts.append(
+                    (
+                        f"--{boundary}\r\n"
+                        f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
+                        f"{value}\r\n"
+                    ).encode("utf-8")
+                )
+
+            add_field("app_version", __version__)
+            add_field("contact", _sanitize_diagnostic_text(contact))
+            add_field("note", _sanitize_diagnostic_text(note))
+
+            file_bytes = bundle_path.read_bytes()
+            parts.append(
+                (
+                    f"--{boundary}\r\n"
+                    'Content-Disposition: form-data; name="debug_bundle"; '
+                    f'filename="{bundle_path.name}"\r\n'
+                    "Content-Type: application/zip\r\n\r\n"
+                ).encode("utf-8")
+                + file_bytes
+                + b"\r\n"
+            )
+            parts.append(f"--{boundary}--\r\n".encode("utf-8"))
+            body = b"".join(parts)
+
+            headers = {
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "User-Agent": f"MediaLens/{__version__}",
+            }
+            if upload_token:
+                headers["Authorization"] = f"Bearer {upload_token}"
+            request = urllib.request.Request(upload_url, data=body, headers=headers, method="POST")
+            with urllib.request.urlopen(request, timeout=45) as response:
+                response_text = response.read(4096).decode("utf-8", errors="replace").strip()
+                status = int(getattr(response, "status", 200) or 200)
+            if status < 200 or status >= 300:
+                raise RuntimeError(f"Upload failed with HTTP {status}: {response_text}")
+            self.debugLogUploadFinished.emit(True, response_text or "Debugging logs submitted.")
+        except urllib.error.HTTPError as exc:
+            detail = exc.read(4096).decode("utf-8", errors="replace") if hasattr(exc, "read") else str(exc)
+            self.debugLogUploadFinished.emit(False, f"Upload failed with HTTP {exc.code}: {detail}")
+        except Exception as exc:
+            self.debugLogUploadFinished.emit(False, f"Upload failed: {exc}")
+
+    def _on_debug_log_upload_finished(self, ok: bool, message: str) -> None:
+        if ok:
+            QMessageBox.information(self, "Submit Debugging Logs", message)
+        else:
+            QMessageBox.warning(self, "Submit Debugging Logs", message)
 
     def _on_update_available(self, version: str, manual: bool) -> None:
         """Handled in web frontend (toast popup)."""
