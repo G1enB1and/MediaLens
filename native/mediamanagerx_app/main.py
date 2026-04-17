@@ -2443,14 +2443,15 @@ class TagListComboDelegate(QStyledItemDelegate):
 
     @staticmethod
     def visibility_icon_rect(row_rect: QRect) -> QRect:
-        icon_size = 22
+        chip_width = 28
+        chip_height = 22
         gap = 8
         rename_rect = TagListComboDelegate.rename_chip_rect(row_rect)
         return QRect(
-            rename_rect.left() - gap - icon_size,
-            row_rect.center().y() - (icon_size // 2),
-            icon_size,
-            icon_size,
+            rename_rect.left() - gap - chip_width,
+            row_rect.center().y() - (chip_height // 2),
+            chip_width,
+            chip_height,
         )
 
     @staticmethod
@@ -2476,22 +2477,35 @@ class TagListComboDelegate(QStyledItemDelegate):
     def _paint_eye_icon(painter: QPainter, rect: QRect, color: QColor, *, slashed: bool) -> None:
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        pen = QPen(color, 1.6)
+        pen = QPen(color, 1.4)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        r = QRectF(rect).adjusted(3.0, 5.5, -3.0, -5.5)
+        center_x = rect.left() + (rect.width() / 2.0)
+        center_y = rect.top() + (rect.height() / 2.0)
+        icon_rect = QRectF(
+            center_x - 7.0,
+            center_y - 5.0,
+            14.0,
+            10.0,
+        )
+        r = icon_rect.adjusted(0.5, 1.5, -0.5, -1.5)
         path = QPainterPath()
         path.moveTo(r.left(), r.center().y())
         path.cubicTo(r.left() + r.width() * 0.28, r.top(), r.left() + r.width() * 0.72, r.top(), r.right(), r.center().y())
         path.cubicTo(r.left() + r.width() * 0.72, r.bottom(), r.left() + r.width() * 0.28, r.bottom(), r.left(), r.center().y())
         painter.drawPath(path)
-        pupil = QRectF(rect.center().x() - 2.6, rect.center().y() - 2.6, 5.2, 5.2)
+        pupil = QRectF(center_x - 1.8, center_y - 1.8, 3.6, 3.6)
         painter.setBrush(color)
         painter.drawEllipse(pupil)
         if slashed:
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawLine(rect.left() + 4, rect.bottom() - 4, rect.right() - 4, rect.top() + 4)
+            painter.drawLine(
+                round(icon_rect.left() + 1),
+                round(icon_rect.bottom() - 1),
+                round(icon_rect.right() - 1),
+                round(icon_rect.top() + 1),
+            )
         painter.restore()
 
     def paint(self, painter: QPainter, option, index) -> None:
@@ -9208,7 +9222,7 @@ class MainWindow(QMainWindow):
         self.btn_add_tag_list_tag.setVisible(False)
         self.tag_list_panel_layout.addWidget(self.btn_add_tag_list_tag)
 
-        self.btn_import_tag_list_tags = QPushButton("Import Tags from File")
+        self.btn_import_tag_list_tags = QPushButton("Import Tags from Selected File(s)")
         self.btn_import_tag_list_tags.setObjectName("btnImportTagListTags")
         self.btn_import_tag_list_tags.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_import_tag_list_tags.clicked.connect(self._import_tags_from_current_file_into_active_list)
@@ -9224,6 +9238,8 @@ class MainWindow(QMainWindow):
 
         self.tag_list_rows = TagListRowsWidget(self.tag_list_panel)
         self.tag_list_rows.setObjectName("tagListRows")
+        self.tag_list_rows.setMinimumHeight(0)
+        self.tag_list_rows.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.tag_list_rows.orderChanged.connect(self._persist_active_tag_list_order)
         self.tag_list_rows.backgroundClicked.connect(self._clear_tag_scope_filter)
         self.tag_list_panel_layout.addWidget(self.tag_list_rows, 1)
@@ -9231,8 +9247,12 @@ class MainWindow(QMainWindow):
         self.tag_list_empty_lbl = QLabel("Create or select a tag list.")
         self.tag_list_empty_lbl.setObjectName("tagListEmptyLabel")
         self.tag_list_empty_lbl.setWordWrap(True)
+        self.tag_list_empty_lbl.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.tag_list_empty_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.tag_list_empty_lbl.setVisible(True)
         self.tag_list_panel_layout.addWidget(self.tag_list_empty_lbl)
+
+        self.tag_list_panel_layout.addStretch(1)
 
         self.right_panel = QWidget(self.right_splitter)
         self.right_panel.setObjectName("rightPanel")
@@ -11570,6 +11590,7 @@ class MainWindow(QMainWindow):
             index = self.tag_list_select.count() - 1
             self.tag_list_select.setItemData(index, bool(row.get("is_hidden")), Qt.ItemDataRole.UserRole + 1)
         self.tag_list_select.blockSignals(False)
+        self.tag_list_select.setVisible(bool(rows))
 
         index = -1
         for i, row in enumerate(rows):
@@ -11659,7 +11680,15 @@ class MainWindow(QMainWindow):
         tag_list_id = self._active_tag_list_id()
         if tag_list_id <= 0:
             return
-        tags = self._normalize_tag_list(self.meta_tags.text())
+        tags: list[str] = []
+        for path in self._current_file_paths():
+            try:
+                payload = self.bridge.get_media_metadata(path)
+                tags = self._merge_tag_lists(tags, list(payload.get("tags") or []))
+            except Exception:
+                pass
+        if not tags:
+            tags = self._normalize_tag_list(self._active_tag_editor().text())
         if not tags:
             self.meta_status_lbl.setText("No tags available to import")
             QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
@@ -11697,11 +11726,17 @@ class MainWindow(QMainWindow):
         self.btn_import_tag_list_tags.setVisible(has_list)
         self.btn_clear_tag_scope_filter.setVisible(has_list)
         self.tag_list_rows.setVisible(has_list)
+        self.tag_list_panel_layout.setStretchFactor(self.tag_list_rows, 1 if has_list else 0)
+        self.tag_list_rows.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding if has_list else QSizePolicy.Policy.Fixed,
+        )
 
         if not has_list:
             self.active_tag_list_name_lbl.setText("")
             self.tag_list_empty_lbl.setText("Create or select a tag list.")
-            self.tag_list_empty_lbl.setVisible(True)
+            self.tag_list_empty_lbl.setVisible(False)
+            self.tag_list_empty_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             return
 
         self.active_tag_list_name_lbl.setText(str(tag_list.get("name") or ""))
@@ -11746,6 +11781,7 @@ class MainWindow(QMainWindow):
 
         self.tag_list_empty_lbl.setText("No tags in this list yet." if not entries else "")
         self.tag_list_empty_lbl.setVisible(not entries)
+        self.tag_list_empty_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._apply_tag_list_theme()
 
     def _refresh_tag_list_scope_counts(self) -> None:
@@ -15298,6 +15334,10 @@ class MainWindow(QMainWindow):
                     show-decoration-selected: 0;
                     padding: 2px 0px;
                 }}
+                QComboBox#tagListSelect QAbstractItemView {{
+                    border: 1px solid {accent_str};
+                    border-top: none;
+                }}
                 QListView#tagListSelectPopup, QListView#tagListSortSelectPopup {{
                     background-color: {combo_bg};
                     color: {text};
@@ -15307,6 +15347,10 @@ class MainWindow(QMainWindow):
                     outline: 0;
                     padding: 2px 0px;
                     show-decoration-selected: 0;
+                }}
+                QListView#tagListSelectPopup {{
+                    border-color: {accent_str};
+                    border-top: none;
                 }}
                 QListView#tagListSelectPopup::item, QListView#tagListSortSelectPopup::item {{
                     padding: 5px 12px;

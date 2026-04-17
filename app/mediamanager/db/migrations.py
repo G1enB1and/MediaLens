@@ -133,7 +133,8 @@ def init_db(db_path: str) -> None:
         "",
         sql,
     )
-    with sqlite3.connect(db_path) as conn:
+    conn = sqlite3.connect(db_path)
+    try:
         conn.execute("PRAGMA foreign_keys=ON;")
         # The sandboxed Windows environment used in tests can fail when SQLite
         # tries to create rollback journals on disk. Keep schema initialization
@@ -144,3 +145,5 @@ def init_db(db_path: str) -> None:
         _ensure_is_hidden_columns(conn)
         _ensure_media_item_date_columns(conn)
         conn.commit()
+    finally:
+        conn.close()

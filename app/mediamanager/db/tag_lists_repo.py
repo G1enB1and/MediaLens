@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timezone
 
-from app.mediamanager.db.tags_repo import get_or_create_tag
+from app.mediamanager.db.tags_repo import dedupe_tags_case_insensitive, get_or_create_tag
 
 
 def _utc_now_iso() -> str:
@@ -146,6 +146,7 @@ def set_tag_list_sort_mode(conn: sqlite3.Connection, tag_list_id: int, sort_mode
 
 
 def list_tag_list_entries(conn: sqlite3.Connection, tag_list_id: int) -> list[dict]:
+    dedupe_tags_case_insensitive(conn)
     rows = conn.execute(
         """
         SELECT
