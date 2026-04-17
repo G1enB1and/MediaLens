@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QMimeData, QPointF, QRect, QSignalBlocker, QSize, Qt, Signal, QTimer
@@ -1229,6 +1230,156 @@ class PlayerSettingsPage(SettingsPage):
         self.loop_cutoff.setEnabled(loop_mode == "short")
 
 
+class ScannersSettingsPage(SettingsPage):
+    SCANNERS = [
+        ("text_detection", "Text Detection", "Finds whether images/videos likely contain visible text."),
+        ("ocr_text", "OCR for Text Detected Files", "Reads actual text only from files already marked as Text Detected."),
+    ]
+
+    def __init__(self, dialog: "SettingsDialog") -> None:
+        super().__init__(dialog)
+        self._widgets: dict[str, dict[str, QWidget]] = {}
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(14)
+        layout.addWidget(_section_title("Scanners"))
+        layout.addWidget(_description("Control optional background scanners. The main file scanner is intentionally not configurable here."))
+
+        for key, title, description in self.SCANNERS:
+            group = QGroupBox(title)
+            group_layout = QVBoxLayout(group)
+            group_layout.setSpacing(10)
+
+            desc_label = _description(description)
+            enable_toggle = QCheckBox("Run this scanner in the background")
+
+            schedule_row = QHBoxLayout()
+            schedule_row.setContentsMargins(0, 0, 0, 0)
+            schedule_label = QLabel("Run every")
+            interval = QSpinBox()
+            interval.setRange(1, 24 * 30)
+            interval.setSuffix(" hours")
+            schedule_row.addWidget(schedule_label)
+            schedule_row.addWidget(interval)
+            schedule_row.addStretch(1)
+
+            action_row = QHBoxLayout()
+            action_row.setContentsMargins(0, 0, 0, 0)
+            run_btn = QPushButton("Run Now")
+            status_label = QLabel("Status: Idle")
+            status_label.setWordWrap(True)
+            action_row.addWidget(run_btn)
+            action_row.addWidget(status_label, 1)
+
+            last_run_label = QLabel("Last run: Never")
+            last_run_label.setWordWrap(True)
+
+            group_layout.addWidget(desc_label)
+            group_layout.addWidget(enable_toggle)
+            group_layout.addLayout(schedule_row)
+            group_layout.addLayout(action_row)
+            group_layout.addWidget(last_run_label)
+            layout.addWidget(group)
+
+            self._widgets[key] = {
+                "enable": enable_toggle,
+                "interval": interval,
+                "run": run_btn,
+                "status": status_label,
+                "last_run": last_run_label,
+            }
+            enable_toggle.toggled.connect(lambda checked, scanner_key=key: self._set_enabled(scanner_key, checked))
+            interval.valueChanged.connect(lambda value, scanner_key=key: self._set_interval(scanner_key, int(value)))
+            run_btn.clicked.connect(lambda _checked=False, scanner_key=key: self._run_now(scanner_key))
+
+        layout.addStretch(1)
+        if hasattr(self.bridge, "scannerStatusChanged"):
+            self.bridge.scannerStatusChanged.connect(self._on_scanner_status_changed)
+
+    @staticmethod
+    def _format_last_run(value: object) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return "Never"
+        try:
+            dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if dt.tzinfo is not None:
+                dt = dt.astimezone()
+            return dt.strftime("%Y-%m-%d %I:%M %p").lstrip("0")
+        except Exception:
+            return text
+
+    def _set_enabled(self, scanner_key: str, checked: bool) -> None:
+        self.dialog.set_setting_bool(f"scanners.{scanner_key}.enabled", checked)
+        self._sync_enabled_state(scanner_key)
+
+    def _set_interval(self, scanner_key: str, value: int) -> None:
+        self.dialog.set_setting_str(f"scanners.{scanner_key}.interval_hours", str(max(1, int(value))))
+
+    def _run_now(self, scanner_key: str) -> None:
+        widgets = self._widgets.get(scanner_key) or {}
+        status = widgets.get("status")
+        if isinstance(status, QLabel):
+            status.setText("Status: Starting...")
+        try:
+            if hasattr(self.bridge, "run_scanner_now"):
+                self.bridge.run_scanner_now(scanner_key)
+        except Exception:
+            if isinstance(status, QLabel):
+                status.setText("Status: Error starting scanner")
+
+    def _sync_enabled_state(self, scanner_key: str) -> None:
+        widgets = self._widgets.get(scanner_key) or {}
+        enable = widgets.get("enable")
+        enabled = bool(enable.isChecked()) if isinstance(enable, QCheckBox) else True
+        for child_key in ("interval", "run"):
+            widget = widgets.get(child_key)
+            if widget is not None:
+                widget.setEnabled(enabled)
+
+    def _apply_status(self, scanner_key: str, payload: dict) -> None:
+        widgets = self._widgets.get(scanner_key) or {}
+        if not widgets:
+            return
+        enabled = bool(payload.get("enabled", True))
+        interval_value = int(payload.get("interval_hours") or 24)
+        enable = widgets.get("enable")
+        interval = widgets.get("interval")
+        status = widgets.get("status")
+        last_run = widgets.get("last_run")
+        if isinstance(enable, QCheckBox):
+            with QSignalBlocker(enable):
+                enable.setChecked(enabled)
+        if isinstance(interval, QSpinBox):
+            with QSignalBlocker(interval):
+                interval.setValue(max(1, interval_value))
+        if isinstance(status, QLabel):
+            status.setText(f"Status: {payload.get('status') or 'Idle'}")
+        if isinstance(last_run, QLabel):
+            last_run.setText(f"Last run: {self._format_last_run(payload.get('last_run_utc'))}")
+        self._sync_enabled_state(scanner_key)
+
+    def _on_scanner_status_changed(self, scanner_key: str, payload: dict) -> None:
+        self._apply_status(str(scanner_key or ""), dict(payload or {}))
+
+    def refresh(self) -> None:
+        try:
+            status = self.bridge.get_scanner_status() if hasattr(self.bridge, "get_scanner_status") else {}
+        except Exception:
+            status = {}
+        for scanner_key, _title, _description in self.SCANNERS:
+            payload = dict((status or {}).get(scanner_key) or {})
+            if not payload:
+                default_enabled = scanner_key != "ocr_text"
+                payload = {
+                    "enabled": bool(self.settings.value(f"scanners/{scanner_key}/enabled", default_enabled, type=bool)),
+                    "interval_hours": int(self.settings.value(f"scanners/{scanner_key}/interval_hours", 24, type=int) or 24),
+                    "last_run_utc": str(self.settings.value(f"scanners/{scanner_key}/last_run_utc", "", type=str) or ""),
+                    "status": str(self.settings.value(f"scanners/{scanner_key}/status", "Idle", type=str) or "Idle"),
+                }
+            self._apply_status(scanner_key, payload)
+
+
 class MetadataSettingsPage(SettingsPage):
     MODE_TITLES = [("image", "Images"), ("gif", "Animated GIFs"), ("video", "Videos"), ("svg", "SVGs")]
 
@@ -1943,6 +2094,7 @@ class SettingsDialog(QDialog):
             ("General", GeneralSettingsPage(self)),
             ("Appearance", AppearanceSettingsPage(self)),
             ("Player", PlayerSettingsPage(self)),
+            ("Scanners", ScannersSettingsPage(self)),
             ("Metadata", MetadataSettingsPage(self)),
             ("Similar File Rules", DuplicateSettingsPage(self)),
             ("AI", AISettingsPage(self)),

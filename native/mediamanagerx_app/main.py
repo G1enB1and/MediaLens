@@ -4052,6 +4052,7 @@ class Bridge(QObject):
     textProcessingProgress = Signal(str, int, int)  # stage label, current, total
     textProcessingFinished = Signal()
     manualOcrFinished = Signal(str, str, str)  # path, text, error
+    scannerStatusChanged = Signal(str, "QVariantMap")
     progressToastsRevealRequested = Signal()
     
     # Update Signals
@@ -4163,6 +4164,11 @@ class Bridge(QObject):
 
         self.settings = app_settings()
         Theme.set_theme_mode(str(self.settings.value("ui/theme_mode", "dark", type=str) or "dark"))
+        self._ocr_text_processing_active = False
+        self._scanner_schedule_timer = QTimer(self)
+        self._scanner_schedule_timer.setInterval(60_000)
+        self._scanner_schedule_timer.timeout.connect(self._check_scanner_schedules)
+        self._scanner_schedule_timer.start()
         self.nam = QNetworkAccessManager(self)
         self.nam.setRedirectPolicy(QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy)
         self._update_reply = None
@@ -5014,6 +5020,71 @@ class Bridge(QObject):
                 pass
 
     @staticmethod
+    def _scanner_setting_key(scanner_key: str, field: str) -> str:
+        return f"scanners/{scanner_key}/{field}"
+
+    @staticmethod
+    def _scanner_display_name(scanner_key: str) -> str:
+        return "OCR for Text Detected Files" if scanner_key == "ocr_text" else "Text Detection"
+
+    def _scanner_enabled(self, scanner_key: str) -> bool:
+        default_enabled = scanner_key != "ocr_text"
+        return bool(self.settings.value(self._scanner_setting_key(scanner_key, "enabled"), default_enabled, type=bool))
+
+    def _scanner_interval_hours(self, scanner_key: str) -> int:
+        try:
+            return max(1, int(self.settings.value(self._scanner_setting_key(scanner_key, "interval_hours"), 24, type=int) or 24))
+        except Exception:
+            return 24
+
+    def _scanner_last_run_utc(self, scanner_key: str) -> str:
+        return str(self.settings.value(self._scanner_setting_key(scanner_key, "last_run_utc"), "", type=str) or "")
+
+    def _set_scanner_status(self, scanner_key: str, status: str, *, mark_run: bool = False) -> None:
+        self.settings.setValue(self._scanner_setting_key(scanner_key, "status"), str(status or "Idle"))
+        if mark_run:
+            self.settings.setValue(
+                self._scanner_setting_key(scanner_key, "last_run_utc"),
+                datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            )
+        self.settings.sync()
+        self.scannerStatusChanged.emit(scanner_key, self._scanner_status_payload(scanner_key))
+
+    def _scanner_status_payload(self, scanner_key: str) -> dict:
+        enabled = self._scanner_enabled(scanner_key)
+        status = str(self.settings.value(self._scanner_setting_key(scanner_key, "status"), "Idle", type=str) or "Idle")
+        if not enabled:
+            status = "Disabled"
+        return {
+            "key": scanner_key,
+            "name": self._scanner_display_name(scanner_key),
+            "enabled": enabled,
+            "interval_hours": self._scanner_interval_hours(scanner_key),
+            "last_run_utc": self._scanner_last_run_utc(scanner_key),
+            "status": status,
+        }
+
+    def _scanner_due(self, scanner_key: str) -> bool:
+        if not self._scanner_enabled(scanner_key):
+            return False
+        last_run = self._scanner_last_run_utc(scanner_key)
+        if not last_run:
+            return True
+        try:
+            dt = datetime.fromisoformat(last_run.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            return True
+        return datetime.now(timezone.utc) - dt >= timedelta(hours=self._scanner_interval_hours(scanner_key))
+
+    def _check_scanner_schedules(self) -> None:
+        if self._scanner_due("text_detection"):
+            self._ensure_background_text_processing(force=True)
+        if self._scanner_due("ocr_text"):
+            self._run_ocr_text_scanner(force=True)
+
+    @staticmethod
     def _text_stage_label(stage_key: str) -> str:
         if stage_key == "waiting":
             return "Detecting Text (Waiting for Scan)"
@@ -5030,6 +5101,7 @@ class Bridge(QObject):
         self._text_processing_active = False
         self._text_processing_scope_key = ("none",)
         self._text_processing_thread = None
+        self.textProcessingFinished.emit()
 
     def _wait_while_scan_performance_paused(self) -> None:
         while True:
@@ -5099,9 +5171,14 @@ class Bridge(QObject):
         collection_id: int | None = None,
         *,
         allow_concurrent_scan: bool = False,
+        force: bool = False,
     ) -> None:
+        if not force and not self._scanner_enabled("text_detection"):
+            self._set_scanner_status("text_detection", "Disabled")
+            return
         scope_key = self._current_text_scope_key(folders, collection_id)
         if scope_key == ("none",):
+            self._set_scanner_status("text_detection", "Idle (no active scope)")
             return
         if self._text_processing_active and not self._text_processing_paused and self._text_processing_scope_key == scope_key:
             return
@@ -5112,7 +5189,10 @@ class Bridge(QObject):
         self._text_processing_active = True
         self._text_processing_scope_key = scope_key
         if self._scan_lock.locked() and not allow_concurrent_scan:
+            self._set_scanner_status("text_detection", "Waiting for scan")
             self.textProcessingStarted.emit(self._text_stage_label("waiting"), 0)
+        else:
+            self._set_scanner_status("text_detection", "Running")
 
         resolved_folders = list(folders) if folders else (list(self._selected_folders) if self._selected_folders else [])
         resolved_collection_id = collection_id if collection_id is not None else self._active_collection_id
@@ -5141,6 +5221,9 @@ class Bridge(QObject):
                     pass
             finally:
                 if generation == self._text_processing_generation:
+                    if not self._text_processing_paused:
+                        self.textProcessingFinished.emit()
+                        self._set_scanner_status("text_detection", "Idle", mark_run=True)
                     self._text_processing_active = False
                     self._text_processing_thread = None
 
@@ -5150,7 +5233,7 @@ class Bridge(QObject):
 
     @Slot()
     def resume_text_processing(self) -> None:
-        self._ensure_background_text_processing(allow_concurrent_scan=True)
+        self._ensure_background_text_processing(allow_concurrent_scan=True, force=True)
 
     @Slot()
     def pause_text_processing(self) -> None:
@@ -5390,6 +5473,74 @@ class Bridge(QObject):
                 self.textProcessingFinished.emit()
         return completed
 
+    def _run_ocr_text_scanner(self, *, force: bool = False) -> bool:
+        if self._ocr_text_processing_active:
+            return False
+        if not force and not self._scanner_enabled("ocr_text"):
+            self._set_scanner_status("ocr_text", "Disabled")
+            return False
+        entries = self._collect_text_scope_entries()
+        if not entries:
+            self._set_scanner_status("ocr_text", "Idle (no active scope)")
+            return False
+
+        def work() -> None:
+            self._ocr_text_processing_active = True
+            self._set_scanner_status("ocr_text", "Running")
+            processed = 0
+            saved = 0
+            try:
+                from app.mediamanager.db.media_repo import add_media_item, update_media_detected_text
+                from app.mediamanager.utils.text_detection import extract_text_windows_ocr
+
+                eligible = [
+                    entry for entry in entries
+                    if not entry.get("is_folder")
+                    and bool(entry.get("effective_text_detected") if entry.get("effective_text_detected") is not None else entry.get("text_detected"))
+                    and not str(entry.get("detected_text") or "").strip()
+                ]
+                total = len(eligible)
+                if total <= 0:
+                    self._set_scanner_status("ocr_text", "Idle", mark_run=True)
+                    return
+                for entry in eligible:
+                    processed += 1
+                    self._set_scanner_status("ocr_text", f"Running {processed} / {total}")
+                    path = str(entry.get("path") or "").strip()
+                    if not path:
+                        continue
+                    try:
+                        p = Path(path)
+                        if not p.exists() or not p.is_file():
+                            continue
+                        if int(entry.get("id") or -1) < 0:
+                            media_type = str(entry.get("media_type") or "")
+                            real_path = str(entry.get("_real_path") or path)
+                            media_id = add_media_item(self.conn, real_path, media_type)
+                            entry["id"] = media_id
+                        ocr_source_path = self._manual_ocr_source_path(p)
+                        text = extract_text_windows_ocr(ocr_source_path)
+                        if not text.strip():
+                            continue
+                        update_media_detected_text(self.conn, int(entry["id"]), text)
+                        entry["detected_text"] = text
+                        saved += 1
+                    except Exception as exc:
+                        try:
+                            self._log(f"OCR text scanner failed for {path}: {exc}")
+                        except Exception:
+                            pass
+                self._set_scanner_status("ocr_text", f"Idle ({saved} saved)", mark_run=True)
+                if saved:
+                    self.galleryScopeChanged.emit()
+            except Exception as exc:
+                self._set_scanner_status("ocr_text", f"Error: {exc}")
+            finally:
+                self._ocr_text_processing_active = False
+
+        threading.Thread(target=work, daemon=True, name="ocr-text-scanner").start()
+        return True
+
     def _backfill_scope_content_hashes(self, entries: list[dict]) -> None:
         from app.mediamanager.utils.hashing import calculate_media_content_hash
 
@@ -5601,6 +5752,12 @@ class Bridge(QObject):
                 "metadata.display.order": self.settings.value("metadata/display/order", "[]", type=str),
                 "updates.check_on_launch": bool(self.settings.value("updates/check_on_launch", True, type=bool)),
             }
+            for scanner_key in ("text_detection", "ocr_text"):
+                payload = self._scanner_status_payload(scanner_key)
+                data[f"scanners.{scanner_key}.enabled"] = payload["enabled"]
+                data[f"scanners.{scanner_key}.interval_hours"] = payload["interval_hours"]
+                data[f"scanners.{scanner_key}.last_run_utc"] = payload["last_run_utc"]
+                data[f"scanners.{scanner_key}.status"] = payload["status"]
             for qkey in self.settings.allKeys():
                 if qkey.startswith("metadata/display/") or qkey.startswith("metadata/layout/") or qkey.startswith("duplicate/"):
                     data[qkey.replace("/", ".")] = self._coerce_setting_value(self.settings.value(qkey))
@@ -6097,6 +6254,23 @@ class Bridge(QObject):
     def should_check_on_launch(self) -> bool:
         return self.settings.value("updates/check_on_launch", True, type=bool)
 
+    @Slot(result=dict)
+    def get_scanner_status(self) -> dict:
+        return {
+            "text_detection": self._scanner_status_payload("text_detection"),
+            "ocr_text": self._scanner_status_payload("ocr_text"),
+        }
+
+    @Slot(str, result=bool)
+    def run_scanner_now(self, scanner_key: str) -> bool:
+        key = str(scanner_key or "").strip()
+        if key == "text_detection":
+            self._ensure_background_text_processing(allow_concurrent_scan=True, force=True)
+            return True
+        if key == "ocr_text":
+            return self._run_ocr_text_scanner(force=True)
+        return False
+
     @staticmethod
     def _coerce_setting_value(value):
         if isinstance(value, str):
@@ -6126,7 +6300,9 @@ class Bridge(QObject):
                 "ui.show_splash_screen",
                 "ui.advanced_search_expanded",
                 "ui.preview_above_details",
-                "updates.check_on_launch"
+                "updates.check_on_launch",
+                "scanners.text_detection.enabled",
+                "scanners.ocr_text.enabled",
             )
             if key not in allowed and key not in {"duplicate.rules.merge_before_delete", "duplicate.rules.preferred_folders_enabled"} and not key.startswith("metadata.display.") and not key.startswith("duplicate.rules.merge"):
                 return False
@@ -6140,6 +6316,10 @@ class Bridge(QObject):
             elif key in {"duplicate.rules.merge_before_delete", "duplicate.rules.preferred_folders_enabled"} or key.startswith("duplicate.rules.merge"):
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, bool(value))
+            elif key.startswith("scanners."):
+                self.settings.sync()
+                scanner_key = "ocr_text" if "ocr_text" in key else "text_detection"
+                self.scannerStatusChanged.emit(scanner_key, self._scanner_status_payload(scanner_key))
             if key == "ui.show_bottom_panel":
                 self._emit_compare_state_changed()
             return True
@@ -6149,7 +6329,7 @@ class Bridge(QObject):
     @Slot(str, str, result=bool)
     def set_setting_str(self, key: str, value: str) -> bool:
         try:
-            if key not in ("gallery.start_folder", "gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "gallery.similarity_threshold", "ui.accent_color", "ui.theme_mode", "ui.advanced_search_saved_queries", "metadata.display.order", "duplicate.settings.active_tab", "player.video_loop_mode", "player.video_loop_cutoff_seconds") and not key.startswith("metadata.layout.") and not key.startswith("duplicate.rules.") and key != "duplicate.priorities.order":
+            if key not in ("gallery.start_folder", "gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "gallery.similarity_threshold", "ui.accent_color", "ui.theme_mode", "ui.advanced_search_saved_queries", "metadata.display.order", "duplicate.settings.active_tab", "player.video_loop_mode", "player.video_loop_cutoff_seconds", "scanners.text_detection.interval_hours", "scanners.ocr_text.interval_hours") and not key.startswith("metadata.layout.") and not key.startswith("duplicate.rules.") and key != "duplicate.priorities.order":
                 return False
             if key == "gallery.view_mode":
                 allowed = {"masonry", "grid_small", "grid_medium", "grid_large", "grid_xlarge", "list", "content", "details", "duplicates", "similar", "similar_only"}
@@ -6175,6 +6355,11 @@ class Bridge(QObject):
                     value = str(max(1, int(str(value or "90").strip())))
                 except Exception:
                     return False
+            elif key in {"scanners.text_detection.interval_hours", "scanners.ocr_text.interval_hours"}:
+                try:
+                    value = str(max(1, int(str(value or "24").strip())))
+                except Exception:
+                    return False
             qkey = key.replace(".", "/")
             self.settings.setValue(qkey, str(value or ""))
             if key == "ui.accent_color":
@@ -6197,6 +6382,10 @@ class Bridge(QObject):
             elif key == "metadata.display.order" or key.startswith("metadata.layout."):
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, True)
+            elif key.startswith("scanners."):
+                self.settings.sync()
+                scanner_key = "ocr_text" if "ocr_text" in key else "text_detection"
+                self.scannerStatusChanged.emit(scanner_key, self._scanner_status_payload(scanner_key))
             return True
         except Exception:
             return False
@@ -7102,9 +7291,9 @@ class Bridge(QObject):
 
     @Slot(str, bool)
     def update_media_text_override(self, path: str, text_detected: bool) -> None:
-        from app.mediamanager.db.media_repo import get_media_by_path, update_user_confirmed_text_detected
+        from app.mediamanager.db.media_repo import update_user_confirmed_text_detected
         try:
-            m = get_media_by_path(self.conn, path)
+            m = self._ensure_media_record_for_tag_write(path)
             if m:
                 update_user_confirmed_text_detected(self.conn, m["id"], bool(text_detected))
                 self.galleryScopeChanged.emit()
@@ -7209,6 +7398,7 @@ class Bridge(QObject):
                 metadata_families_detected=data.get("metadata_families_detected"),
                 ai_detection_reasons=data.get("ai_detection_reasons"),
             )
+            self.galleryScopeChanged.emit()
         except Exception:
             pass
 
@@ -9609,7 +9799,7 @@ class MainWindow(QMainWindow):
         self.meta_text_detected_toggle.toggled.connect(
             lambda checked: self._set_switch_value_label(self.meta_text_detected_value_lbl, checked, "Text", "No Text")
         )
-        self.meta_text_detected_toggle.clicked.connect(lambda _checked: setattr(self, "_text_detected_override_dirty", True))
+        self.meta_text_detected_toggle.clicked.connect(self._save_text_detected_override_from_toggle)
         self.lbl_text_detected_note = QLabel("This overrides the auto text detection value of [No Text Detected]")
         self.lbl_text_detected_note.setObjectName("metaFieldNoteLabel")
         self.lbl_text_detected_note.setWordWrap(True)
@@ -9727,7 +9917,7 @@ class MainWindow(QMainWindow):
         self.meta_ai_generated_toggle.toggled.connect(
             lambda checked: self._set_switch_value_label(self.meta_ai_generated_value_lbl, checked, "AI", "Non-AI")
         )
-        self.meta_ai_generated_toggle.clicked.connect(lambda _checked: setattr(self, "_ai_generated_override_dirty", True))
+        self.meta_ai_generated_toggle.clicked.connect(self._save_ai_generated_override_from_toggle)
         self.lbl_ai_generated_note = QLabel("This overrides the auto AI Detection value of [Not AI Generated]")
         self.lbl_ai_generated_note.setObjectName("metaFieldNoteLabel")
         self.lbl_ai_generated_note.setWordWrap(True)
@@ -14415,6 +14605,49 @@ class MainWindow(QMainWindow):
         else:
             self.meta_status_lbl.setText("No OCR text found")
         QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
+
+    @Slot(bool)
+    def _save_text_detected_override_from_toggle(self, checked: bool) -> None:
+        self._text_detected_override_dirty = False
+        path = str(getattr(self, "_current_path", "") or "").strip()
+        if not path:
+            self._text_detected_override_dirty = True
+            return
+        try:
+            value = bool(checked)
+            self.bridge.update_media_text_override(path, value)
+            self._current_user_confirmed_text_detected = value
+            self.meta_status_lbl.setText("Text detection override saved")
+            QTimer.singleShot(2500, lambda: self.meta_status_lbl.setText(""))
+        except Exception:
+            self._text_detected_override_dirty = True
+
+    @Slot(bool)
+    def _save_ai_generated_override_from_toggle(self, checked: bool) -> None:
+        self._ai_generated_override_dirty = False
+        path = str(getattr(self, "_current_path", "") or "").strip()
+        if not path:
+            self._ai_generated_override_dirty = True
+            return
+        try:
+            current_ai_meta = dict(getattr(self, "_current_ai_meta", {}) or {})
+            value = bool(checked)
+            payload = {
+                "is_ai_detected": bool(current_ai_meta.get("is_ai_detected")),
+                "is_ai_confidence": float(current_ai_meta.get("is_ai_confidence") or 0.0),
+                "user_confirmed_ai": value,
+                "tool_name_found": current_ai_meta.get("tool_name_found"),
+                "tool_name_inferred": current_ai_meta.get("tool_name_inferred"),
+                "tool_name_confidence": current_ai_meta.get("tool_name_confidence"),
+                "source_formats": list(current_ai_meta.get("source_formats") or []),
+            }
+            self.bridge.update_media_ai_metadata(path, payload)
+            current_ai_meta["user_confirmed_ai"] = value
+            self._current_ai_meta = current_ai_meta
+            self.meta_status_lbl.setText("AI detection override saved")
+            QTimer.singleShot(2500, lambda: self.meta_status_lbl.setText(""))
+        except Exception:
+            self._ai_generated_override_dirty = True
 
     def _metadata_default_group_order(self, kind: str) -> list[str]:
         return list(self._metadata_group_fields(kind).keys())
