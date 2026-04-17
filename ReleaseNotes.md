@@ -1,19 +1,19 @@
-## MediaLens v1.1.21
+## MediaLens v1.1.22
 
-### ✨ Summary
+### Summary
 
-This release improves overall UI polish, tag management, and video playback performance. The tag workflow is smoother with better dropdowns and database handling, while the details panel and image comparison view are more polished and responsive.
+This release makes MediaLens more dependable when installing updates and playing videos in the lightbox. Update prompts now appear earlier during startup, and legacy cleanup helps prevent old shortcuts or folders from opening the wrong version.
 
-### 🔥 Highlights
+### Highlights
 
-- **Smoother Tag Management**
-    Hide list panels, improved dropdowns, and robust database entries that preserve capitalization without duplication.
-- **Polished UI & Interactions**
-    The Details panel and Image Comparison view feel more polished with smoother resizing, aligned buttons, and consistent margins.
-- **Improved Lightbox Playback**
-    Video playback in the lightbox performs more consistently because it now automatically pauses background scanners and animated gifs.
+- Startup update checks now use a native dialog before the main app opens, improving the chance that an update can repair a broken build.
+- Lightbox video playback is smoother after reducing background work and avoiding expensive video rendering paths.
+- Installer cleanup now migrates old app data into `%APPDATA%\MediaLens\` and removes stale legacy shortcuts and folders.
 
----
+### Notes
 
-📄 Full Changelog:
-<https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md>
+- Existing settings, databases, thumbnails, and recycle-bin data are preserved during migration whenever possible.
+- If a legacy file conflicts with an existing file in `%APPDATA%\MediaLens\`, the current file is kept and the legacy copy is preserved with a `.legacy-N` name.
+
+Full Changelog:
+https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md

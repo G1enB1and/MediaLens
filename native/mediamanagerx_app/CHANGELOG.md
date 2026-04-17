@@ -1,6 +1,31 @@
 # Change Log
 
-## v1.1.21 (Current)
+## v1.1.22 (Current)
+
+### Summary
+
+This release makes MediaLens more dependable when installing updates and playing videos in the lightbox. Update prompts now appear before the main window opens, while legacy install and app-data cleanup reduce confusion from old shortcuts and folders.
+
+### Highlights
+
+- Update prompts now appear earlier at startup, giving MediaLens a better chance to patch a broken build before the main app loads.
+- Lightbox video playback is smoother after reducing expensive background and WebEngine rendering work.
+- Installer cleanup now migrates legacy app data into `%APPDATA%\MediaLens\` and removes stale legacy shortcuts and folders.
+
+### Changed
+
+- Moved the update check to the earliest startup point and replaced the web toast update prompt with a native dialog.
+- Changed lightbox video styling to avoid WebEngine paths that can force video rendering onto the CPU.
+- Changed the gallery overflow behavior to prevent rare horizontal scrollbar flicker during resize.
+- Changed installer migration to merge legacy app data into `%APPDATA%\MediaLens\`, remove old branded app-data folders after migration, and clean stale legacy shortcuts/install folders.
+
+### Fixed
+
+- Fixed stale current-user taskbar shortcuts that could continue opening an older legacy install after updating.
+
+---
+
+## v1.1.21
 
 ### Summary
 
@@ -24,7 +49,6 @@ This release improves overall UI polish, tag management, and playback performanc
 - Adjusted margins and padding in the Image Comparison panel for a cleaner look.
 - Replaced the comparison close buttons with a symmetrical SVG icon featuring more consistent colors and hover effects.
 - Improved lightbox video playback performance by automatically pausing background scanners and animated gifs while a video is playing.
-- Changed startup and installer migration to merge legacy app data into `%APPDATA%\MediaLens\`, remove old branded app-data folders after migration, and clean stale legacy shortcuts/install folders.
 
 ### Fixed
 
