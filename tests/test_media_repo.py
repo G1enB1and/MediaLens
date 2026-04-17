@@ -9,10 +9,13 @@ from app.mediamanager.db.media_repo import (
     add_media_item,
     add_review_pair_exclusions,
     clear_review_pair_exclusions,
+    get_media_by_path,
     is_path_hidden,
     list_media_in_scope,
     list_review_pair_exclusions,
     set_folder_hidden,
+    update_media_detected_text,
+    update_user_confirmed_text_detected,
 )
 from app.mediamanager.db.migrations import init_db
 from native.mediamanagerx_app.main import Bridge, _load_media_metadata_payload
@@ -76,6 +79,31 @@ class TestMediaRepo(unittest.TestCase):
             from app.mediamanager.db.media_repo import list_media_page
             page = list_media_page(conn, [r"C:\\Media\\Cats"], page=1, page_size=2)
             self.assertEqual([r['path'] for r in page], ['c:/media/cats/0.jpg', 'c:/media/cats/1.jpg'])
+
+    def test_user_confirmed_text_detected_overrides_effective_value(self) -> None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("PRAGMA journal_mode=MEMORY;")
+            media_id = add_media_item(conn, r"C:\\Media\\Cats\\a.jpg", "image", text_detected=False)
+
+            media = get_media_by_path(conn, r"C:\\Media\\Cats\\a.jpg")
+            self.assertIs(media["effective_text_detected"], False)
+
+            update_user_confirmed_text_detected(conn, media_id, True)
+            media = get_media_by_path(conn, r"C:\\Media\\Cats\\a.jpg")
+
+            self.assertIs(media["text_detected"], False)
+            self.assertIs(media["user_confirmed_text_detected"], True)
+            self.assertIs(media["effective_text_detected"], True)
+
+    def test_detected_text_is_persisted_on_media_item(self) -> None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("PRAGMA journal_mode=MEMORY;")
+            media_id = add_media_item(conn, r"C:\\Media\\Cats\\a.jpg", "image")
+
+            update_media_detected_text(conn, media_id, "BigMike sign\nSuite 12")
+            media = get_media_by_path(conn, r"C:\\Media\\Cats\\a.jpg")
+
+            self.assertEqual(media["detected_text"], "BigMike sign\nSuite 12")
 
     def test_move_directory_in_db(self) -> None:
         with sqlite3.connect(self.db_path) as conn:

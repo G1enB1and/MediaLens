@@ -104,6 +104,8 @@ class TestDbInit(unittest.TestCase):
 
         self.assertIn("phash", columns)
         self.assertIn("text_detected", columns)
+        self.assertIn("user_confirmed_text_detected", columns)
+        self.assertIn("detected_text", columns)
         self.assertIn("text_more_likely", columns)
         self.assertIn("idx_media_items_phash", indexes)
 

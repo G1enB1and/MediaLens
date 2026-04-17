@@ -56,6 +56,10 @@ def _ensure_media_items_scan_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE media_items ADD COLUMN text_detection_score REAL")
     if "text_detection_version" not in cols:
         conn.execute("ALTER TABLE media_items ADD COLUMN text_detection_version INTEGER")
+    if "user_confirmed_text_detected" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN user_confirmed_text_detected INTEGER")
+    if "detected_text" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN detected_text TEXT")
     if "text_more_likely" not in cols:
         conn.execute("ALTER TABLE media_items ADD COLUMN text_more_likely INTEGER")
     if "text_more_likely_score" not in cols:
@@ -282,7 +286,7 @@ def get_media_by_path(conn: sqlite3.Connection, path: str) -> Optional[dict]:
     _ensure_media_items_scan_columns(conn)
     normalized = normalize_windows_path(path)
     row = conn.execute(
-        "SELECT id, path, content_hash, media_type, file_size_bytes, file_created_time_utc, modified_time_utc, original_file_date_utc, exif_date_taken, metadata_date, width, height, duration_ms, is_hidden, phash, text_detected, text_detection_score, text_detection_version, text_more_likely, text_more_likely_score, text_more_likely_version, text_verified, text_verification_score, text_verification_version FROM media_items WHERE path = ?",
+        "SELECT id, path, content_hash, media_type, file_size_bytes, file_created_time_utc, modified_time_utc, original_file_date_utc, exif_date_taken, metadata_date, width, height, duration_ms, is_hidden, phash, text_detected, text_detection_score, text_detection_version, user_confirmed_text_detected, detected_text, text_more_likely, text_more_likely_score, text_more_likely_version, text_verified, text_verification_score, text_verification_version FROM media_items WHERE path = ?",
         (normalized,),
     ).fetchone()
     if not row:
@@ -306,13 +310,50 @@ def get_media_by_path(conn: sqlite3.Connection, path: str) -> Optional[dict]:
         "text_detected": None if row[15] is None else bool(row[15]),
         "text_detection_score": row[16],
         "text_detection_version": row[17],
-        "text_more_likely": None if row[18] is None else bool(row[18]),
-        "text_more_likely_score": row[19],
-        "text_more_likely_version": row[20],
-        "text_verified": None if row[21] is None else bool(row[21]),
-        "text_verification_score": row[22],
-        "text_verification_version": row[23],
+        "user_confirmed_text_detected": None if row[18] is None else bool(row[18]),
+        "effective_text_detected": bool(row[18]) if row[18] is not None else (None if row[15] is None else bool(row[15])),
+        "detected_text": row[19] or "",
+        "text_more_likely": None if row[20] is None else bool(row[20]),
+        "text_more_likely_score": row[21],
+        "text_more_likely_version": row[22],
+        "text_verified": None if row[23] is None else bool(row[23]),
+        "text_verification_score": row[24],
+        "text_verification_version": row[25],
     }
+
+
+def update_user_confirmed_text_detected(
+    conn: sqlite3.Connection,
+    media_id: int,
+    user_confirmed_text_detected: bool | None,
+) -> None:
+    _ensure_media_items_scan_columns(conn)
+    conn.execute(
+        """
+        UPDATE media_items
+        SET user_confirmed_text_detected = ?, updated_at_utc = ?
+        WHERE id = ?
+        """,
+        (
+            None if user_confirmed_text_detected is None else (1 if bool(user_confirmed_text_detected) else 0),
+            _utc_now_iso(),
+            int(media_id),
+        ),
+    )
+    conn.commit()
+
+
+def update_media_detected_text(conn: sqlite3.Connection, media_id: int, detected_text: str | None) -> None:
+    _ensure_media_items_scan_columns(conn)
+    conn.execute(
+        """
+        UPDATE media_items
+        SET detected_text = ?, updated_at_utc = ?
+        WHERE id = ?
+        """,
+        (str(detected_text or "").strip(), _utc_now_iso(), int(media_id)),
+    )
+    conn.commit()
 
 
 def rename_media_path(conn: sqlite3.Connection, old_path: str, new_path: str) -> bool:
@@ -608,6 +649,8 @@ def _list_media_with_where(
             m.text_detected,
             m.text_detection_score,
             m.text_detection_version,
+            m.user_confirmed_text_detected,
+            m.detected_text,
             m.text_more_likely,
             m.text_more_likely_score,
             m.text_more_likely_version,
@@ -682,35 +725,38 @@ def _media_row_to_dict(row) -> dict:
         "text_detected": None if row[15] is None else bool(row[15]),
         "text_detection_score": row[16],
         "text_detection_version": row[17],
-        "text_more_likely": None if row[18] is None else bool(row[18]),
-        "text_more_likely_score": row[19],
-        "text_more_likely_version": row[20],
-        "text_verified": None if row[21] is None else bool(row[21]),
-        "text_verification_score": row[22],
-        "text_verification_version": row[23],
-        "is_ai_detected": None if row[24] is None else bool(row[24]),
-        "is_ai_confidence": row[25],
-        "user_confirmed_ai": None if row[26] is None else bool(row[26]),
-        "effective_is_ai": (bool(row[26]) if row[26] is not None else (None if row[24] is None else bool(row[24]))),
-        "title": row[27],
-        "description": row[28],
-        "notes": row[29],
-        "ai_prompt": row[30],
-        "ai_negative_prompt": row[31],
-        "tool_name_found": row[32],
-        "tool_name_inferred": row[33],
-        "model_name": row[34],
-        "checkpoint_name": row[35],
-        "sampler": row[36],
-        "scheduler": row[37],
-        "cfg_scale": row[38],
-        "steps": row[39],
-        "seed": row[40],
-        "source_formats": row[41],
-        "metadata_families": row[42],
-        "ai_loras": row[43],
-        "tags": row[44],
-        "collection_names": row[45],
+        "user_confirmed_text_detected": None if row[18] is None else bool(row[18]),
+        "effective_text_detected": bool(row[18]) if row[18] is not None else (None if row[15] is None else bool(row[15])),
+        "detected_text": row[19] or "",
+        "text_more_likely": None if row[20] is None else bool(row[20]),
+        "text_more_likely_score": row[21],
+        "text_more_likely_version": row[22],
+        "text_verified": None if row[23] is None else bool(row[23]),
+        "text_verification_score": row[24],
+        "text_verification_version": row[25],
+        "is_ai_detected": None if row[26] is None else bool(row[26]),
+        "is_ai_confidence": row[27],
+        "user_confirmed_ai": None if row[28] is None else bool(row[28]),
+        "effective_is_ai": (bool(row[28]) if row[28] is not None else (None if row[26] is None else bool(row[26]))),
+        "title": row[29],
+        "description": row[30],
+        "notes": row[31],
+        "ai_prompt": row[32],
+        "ai_negative_prompt": row[33],
+        "tool_name_found": row[34],
+        "tool_name_inferred": row[35],
+        "model_name": row[36],
+        "checkpoint_name": row[37],
+        "sampler": row[38],
+        "scheduler": row[39],
+        "cfg_scale": row[40],
+        "steps": row[41],
+        "seed": row[42],
+        "source_formats": row[43],
+        "metadata_families": row[44],
+        "ai_loras": row[45],
+        "tags": row[46],
+        "collection_names": row[47],
     }
 
 

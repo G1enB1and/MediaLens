@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS media_items (
   text_detected INTEGER,
   text_detection_score REAL,
   text_detection_version INTEGER,
+  user_confirmed_text_detected INTEGER,
+  detected_text TEXT,
   text_more_likely INTEGER,
   text_more_likely_score REAL,
   text_more_likely_version INTEGER,

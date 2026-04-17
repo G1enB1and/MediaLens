@@ -3947,6 +3947,10 @@ def _load_media_metadata_payload(conn, path: str, log_fn=None) -> dict:
             "original_file_date": media.get("original_file_date") or "",
             "file_created_time": media.get("file_created_time") or "",
             "modified_time": media.get("modified_time") or "",
+            "text_detected": media.get("text_detected"),
+            "user_confirmed_text_detected": media.get("user_confirmed_text_detected"),
+            "effective_text_detected": media.get("effective_text_detected"),
+            "detected_text": media.get("detected_text") or "",
         }
 
         meta: dict = {}
@@ -4047,6 +4051,7 @@ class Bridge(QObject):
     textProcessingStarted = Signal(str, int)  # stage label, total items
     textProcessingProgress = Signal(str, int, int)  # stage label, current, total
     textProcessingFinished = Signal()
+    manualOcrFinished = Signal(str, str, str)  # path, text, error
     progressToastsRevealRequested = Signal()
     
     # Update Signals
@@ -5556,6 +5561,7 @@ class Bridge(QObject):
                 "metadata.display.originalfiledate": bool(self.settings.value("metadata/display/originalfiledate", self.settings.value("metadata/display/filecreateddate", False, type=bool), type=bool)),
                 "metadata.display.filecreateddate": bool(self.settings.value("metadata/display/filecreateddate", False, type=bool)),
                 "metadata.display.filemodifieddate": bool(self.settings.value("metadata/display/filemodifieddate", False, type=bool)),
+                "metadata.display.textdetected": bool(self.settings.value("metadata/display/textdetected", True, type=bool)),
                 "metadata.display.description": bool(self.settings.value("metadata/display/description", True, type=bool)),
                 "metadata.display.tags": bool(self.settings.value("metadata/display/tags", True, type=bool)),
                 "metadata.display.notes": bool(self.settings.value("metadata/display/notes", True, type=bool)),
@@ -5571,6 +5577,7 @@ class Bridge(QObject):
                 "metadata.display.embeddedcomments": bool(self.settings.value("metadata/display/embeddedcomments", True, type=bool)),
                 "metadata.display.embeddedmetadata": bool(self.settings.value("metadata/display/embeddedmetadata", True, type=bool)),
                 "metadata.display.aistatus": bool(self.settings.value("metadata/display/aistatus", True, type=bool)),
+                "metadata.display.aigenerated": bool(self.settings.value("metadata/display/aigenerated", True, type=bool)),
                 "metadata.display.aisource": bool(self.settings.value("metadata/display/aisource", True, type=bool)),
                 "metadata.display.aifamilies": bool(self.settings.value("metadata/display/aifamilies", True, type=bool)),
                 "metadata.display.aidetectionreasons": bool(self.settings.value("metadata/display/aidetectionreasons", False, type=bool)),
@@ -5748,7 +5755,10 @@ class Bridge(QObject):
             "ai_prompt": ((meta or {}).get("ai_prompt") or (ai_meta or {}).get("ai_prompt") or ""),
             "ai_loras": ", ".join(str(item.get("name") or "").strip() for item in ((ai_meta or {}).get("loras") or []) if str(item.get("name") or "").strip()),
             "model_name": (ai_meta or {}).get("model_name") or "",
-            "text_detected": media.get("text_detected"),
+            "text_detected": media.get("effective_text_detected"),
+            "raw_text_detected": media.get("text_detected"),
+            "user_confirmed_text_detected": media.get("user_confirmed_text_detected"),
+            "detected_text": media.get("detected_text") or "",
         }
         entry["preferred_date"] = self._preferred_date_ns(entry)
         entry["file_size_text"] = self._format_file_size(file_size)
@@ -7090,6 +7100,65 @@ class Bridge(QObject):
         except Exception:
             pass
 
+    @Slot(str, bool)
+    def update_media_text_override(self, path: str, text_detected: bool) -> None:
+        from app.mediamanager.db.media_repo import get_media_by_path, update_user_confirmed_text_detected
+        try:
+            m = get_media_by_path(self.conn, path)
+            if m:
+                update_user_confirmed_text_detected(self.conn, m["id"], bool(text_detected))
+                self.galleryScopeChanged.emit()
+        except Exception:
+            pass
+
+    @Slot(str, str)
+    def update_media_detected_text(self, path: str, detected_text: str) -> None:
+        from app.mediamanager.db.media_repo import update_media_detected_text
+        try:
+            m = self._ensure_media_record_for_tag_write(path)
+            if m:
+                update_media_detected_text(self.conn, m["id"], detected_text)
+                self.galleryScopeChanged.emit()
+        except Exception:
+            pass
+
+    def _manual_ocr_source_path(self, media_path: Path) -> Path:
+        if media_path.suffix.lower() not in VIDEO_EXTS:
+            return media_path
+        poster = self._video_poster_path(media_path)
+        if poster.exists():
+            return poster
+        poster = self._ensure_video_poster(media_path)
+        if poster and poster.exists():
+            return poster
+        raise RuntimeError("No video preview image is available for OCR.")
+
+    @Slot(str)
+    def run_manual_ocr(self, path: str) -> None:
+        def work() -> None:
+            text = ""
+            error = ""
+            try:
+                media_path = Path(path)
+                if not media_path.exists() or not media_path.is_file():
+                    raise FileNotFoundError("Selected file was not found.")
+                from app.mediamanager.db.media_repo import update_media_detected_text, update_user_confirmed_text_detected
+                from app.mediamanager.utils.text_detection import extract_text_windows_ocr
+
+                ocr_source_path = self._manual_ocr_source_path(media_path)
+                text = extract_text_windows_ocr(ocr_source_path)
+                if text.strip():
+                    m = self._ensure_media_record_for_tag_write(path)
+                    if m:
+                        update_media_detected_text(self.conn, m["id"], text)
+                        update_user_confirmed_text_detected(self.conn, m["id"], True)
+                        self.galleryScopeChanged.emit()
+            except Exception as exc:
+                error = str(exc) or "OCR failed."
+            self.manualOcrFinished.emit(path, text, error)
+
+        threading.Thread(target=work, daemon=True, name="manual-ocr").start()
+
     def _ensure_media_record_for_tag_write(self, path: str) -> dict | None:
         from app.mediamanager.db.media_repo import add_media_item, get_media_by_path
 
@@ -7373,6 +7442,9 @@ class Bridge(QObject):
                             "duplicate_file_format": "",
                             "review_group_mode": "",
                             "text_detected": None,
+                            "user_confirmed_text_detected": None,
+                            "effective_text_detected": None,
+                            "detected_text": "",
                             "text_detection_score": 0.0,
                             "text_detection_version": 0,
                             "text_more_likely": None,
@@ -7430,7 +7502,10 @@ class Bridge(QObject):
                     "duplicate_size_variant": r.get("duplicate_size_variant") or "",
                     "duplicate_file_format": r.get("duplicate_file_format") or "",
                     "review_group_mode": r.get("review_group_mode") or "",
-                    "text_detected": r.get("text_detected"),
+                    "text_detected": self._effective_text_detected(r),
+                    "user_confirmed_text_detected": r.get("user_confirmed_text_detected"),
+                    "effective_text_detected": self._effective_text_detected(r),
+                    "detected_text": r.get("detected_text") or "",
                     "text_detection_score": float(r.get("text_detection_score") or 0.0),
                     "text_detection_version": int(r.get("text_detection_version") or 0),
                     "text_more_likely": r.get("text_more_likely"),
@@ -7714,6 +7789,16 @@ class Bridge(QObject):
             return [r for r in candidates if r.get("effective_is_ai") is False]
         return candidates
 
+    @staticmethod
+    def _effective_text_detected(entry: dict) -> bool:
+        override = entry.get("user_confirmed_text_detected")
+        if override is not None:
+            return bool(override)
+        effective = entry.get("effective_text_detected")
+        if effective is not None:
+            return bool(effective)
+        return bool(entry.get("text_detected"))
+
     def _matches_media_search(self, row: dict, search_query: str) -> bool:
         from app.mediamanager.search_query import matches_media_search
         return matches_media_search(row, search_query)
@@ -7955,9 +8040,9 @@ class Bridge(QObject):
         if text_filter in {"text_detected", "no_text_detected"}:
             self._ensure_background_text_processing(folders if folders else None, self._active_collection_id if not folders else None)
             if text_filter == "no_text_detected":
-                entries = [entry for entry in entries if not bool(entry.get("text_detected"))]
+                entries = [entry for entry in entries if not self._effective_text_detected(entry)]
             else:
-                entries = [entry for entry in entries if bool(entry.get("text_detected"))]
+                entries = [entry for entry in entries if self._effective_text_detected(entry)]
         review_mode = self._review_group_mode()
         if review_mode in {"similar", "similar_only"}:
             self._backfill_scope_content_hashes(entries)
@@ -8488,6 +8573,7 @@ class MainWindow(QMainWindow):
         self.bridge.openSettingsDialogRequested.connect(self.open_settings)
         self.bridge.accentColorChanged.connect(self._on_accent_changed)
         self.bridge.galleryScopeChanged.connect(self._refresh_tag_list_scope_counts)
+        self.bridge.manualOcrFinished.connect(self._on_manual_ocr_finished)
         self._current_accent = Theme.ACCENT_DEFAULT
         self._folder_history: list[str] = []
         self._folder_history_index: int = -1
@@ -9504,6 +9590,42 @@ class MainWindow(QMainWindow):
         self.meta_file_modified_date_lbl = QLabel("")
         self.meta_file_modified_date_lbl.setObjectName("metaFileModifiedDateLabel")
         self.meta_file_modified_date_lbl.setWordWrap(True)
+
+        self.lbl_text_detected_cap = QLabel("Text Detected?")
+        self.lbl_text_detected_cap.setObjectName("metaTextDetectedCaption")
+        self.meta_text_detected_row = QWidget()
+        self.meta_text_detected_row.setObjectName("metaSwitchRow")
+        text_detected_layout = QHBoxLayout(self.meta_text_detected_row)
+        text_detected_layout.setContentsMargins(0, 0, 0, 0)
+        text_detected_layout.setSpacing(8)
+        self.meta_text_detected_toggle = QCheckBox()
+        self.meta_text_detected_toggle.setObjectName("metaSwitch")
+        self.meta_text_detected_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.meta_text_detected_value_lbl = QLabel("No Text")
+        self.meta_text_detected_value_lbl.setObjectName("metaSwitchValueLabel")
+        text_detected_layout.addWidget(self.meta_text_detected_toggle)
+        text_detected_layout.addWidget(self.meta_text_detected_value_lbl)
+        text_detected_layout.addStretch(1)
+        self.meta_text_detected_toggle.toggled.connect(
+            lambda checked: self._set_switch_value_label(self.meta_text_detected_value_lbl, checked, "Text", "No Text")
+        )
+        self.meta_text_detected_toggle.clicked.connect(lambda _checked: setattr(self, "_text_detected_override_dirty", True))
+        self.lbl_text_detected_note = QLabel("This overrides the auto text detection value of [No Text Detected]")
+        self.lbl_text_detected_note.setObjectName("metaFieldNoteLabel")
+        self.lbl_text_detected_note.setWordWrap(True)
+
+        self.lbl_detected_text_cap = QLabel("Text Detected:")
+        self.lbl_detected_text_cap.setObjectName("metaDetectedTextCaption")
+        self.meta_detected_text_edit = QPlainTextEdit()
+        self.meta_detected_text_edit.setObjectName("metaDetectedTextEdit")
+        self.meta_detected_text_edit.setPlaceholderText("OCR text or manually entered text...")
+        self.meta_detected_text_edit.setMaximumHeight(90)
+        self.btn_use_ocr = QPushButton("Use OCR")
+        self.btn_use_ocr.setObjectName("btnUseOcr")
+        self.btn_use_ocr.setProperty("baseText", "Use OCR")
+        self.btn_use_ocr.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_use_ocr.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.btn_use_ocr.clicked.connect(self._run_text_ocr)
         
         self.meta_fields_layout = QVBoxLayout()
         self.meta_fields_layout.setContentsMargins(0, 0, 0, 0)
@@ -9587,12 +9709,28 @@ class MainWindow(QMainWindow):
         self.meta_ai_status_edit.setReadOnly(True)
         self.meta_ai_status_edit.setPlaceholderText("AI detection status...")
 
-        self.lbl_user_confirmed_ai_cap = QLabel("User Confirmed AI:")
-        self.lbl_user_confirmed_ai_cap.setObjectName("metaUserConfirmedAICaption")
-        self.meta_user_confirmed_ai_edit = QLineEdit()
-        self.meta_user_confirmed_ai_edit.setObjectName("metaUserConfirmedAIEdit")
-        self.meta_user_confirmed_ai_edit.setReadOnly(False)
-        self.meta_user_confirmed_ai_edit.setPlaceholderText("Yes, No, or blank")
+        self.lbl_ai_generated_cap = QLabel("AI Generated?")
+        self.lbl_ai_generated_cap.setObjectName("metaAIGeneratedCaption")
+        self.meta_ai_generated_row = QWidget()
+        self.meta_ai_generated_row.setObjectName("metaSwitchRow")
+        ai_generated_layout = QHBoxLayout(self.meta_ai_generated_row)
+        ai_generated_layout.setContentsMargins(0, 0, 0, 0)
+        ai_generated_layout.setSpacing(8)
+        self.meta_ai_generated_toggle = QCheckBox()
+        self.meta_ai_generated_toggle.setObjectName("metaSwitch")
+        self.meta_ai_generated_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.meta_ai_generated_value_lbl = QLabel("Non-AI")
+        self.meta_ai_generated_value_lbl.setObjectName("metaSwitchValueLabel")
+        ai_generated_layout.addWidget(self.meta_ai_generated_toggle)
+        ai_generated_layout.addWidget(self.meta_ai_generated_value_lbl)
+        ai_generated_layout.addStretch(1)
+        self.meta_ai_generated_toggle.toggled.connect(
+            lambda checked: self._set_switch_value_label(self.meta_ai_generated_value_lbl, checked, "AI", "Non-AI")
+        )
+        self.meta_ai_generated_toggle.clicked.connect(lambda _checked: setattr(self, "_ai_generated_override_dirty", True))
+        self.lbl_ai_generated_note = QLabel("This overrides the auto AI Detection value of [Not AI Generated]")
+        self.lbl_ai_generated_note.setObjectName("metaFieldNoteLabel")
+        self.lbl_ai_generated_note.setWordWrap(True)
 
         self.lbl_ai_source_cap = QLabel("AI Tool / Source:")
         self.lbl_ai_source_cap.setObjectName("metaAISourceCaption")
@@ -11369,6 +11507,7 @@ class MainWindow(QMainWindow):
             getattr(self, "btn_open_tag_list", None),
             getattr(self, "btn_clear_bulk_tags", None),
             getattr(self, "btn_save_meta", None),
+            getattr(self, "btn_use_ocr", None),
             getattr(self, "btn_import_exif", None),
             getattr(self, "btn_merge_hidden_meta", None),
             getattr(self, "btn_save_to_exif", None),
@@ -12507,6 +12646,7 @@ class MainWindow(QMainWindow):
             # --- Save metadata fields ---
             desc = self.meta_desc.toPlainText()
             notes = self.meta_notes.toPlainText()
+            detected_text = self.meta_detected_text_edit.toPlainText()
             
             ai_prompt = self.meta_ai_prompt_edit.toPlainText()
             ai_neg_prompt = self.meta_ai_negative_prompt_edit.toPlainText()
@@ -12514,10 +12654,23 @@ class MainWindow(QMainWindow):
             current_ai_meta = dict(getattr(self, "_current_ai_meta", {}) or {})
             is_ai_detected = bool(current_ai_meta.get("is_ai_detected"))
             is_ai_confidence = float(current_ai_meta.get("is_ai_confidence") or 0.0)
-            user_confirmed_ai = self._parse_user_confirmed_ai(self.meta_user_confirmed_ai_edit.text())
+            ai_override_dirty = bool(getattr(self, "_ai_generated_override_dirty", False))
+            text_override_dirty = bool(getattr(self, "_text_detected_override_dirty", False))
+            existing_ai_override = current_ai_meta.get("user_confirmed_ai")
+            existing_text_override = getattr(self, "_current_user_confirmed_text_detected", None)
+            user_confirmed_ai = (
+                bool(self.meta_ai_generated_toggle.isChecked())
+                if ai_override_dirty or existing_ai_override is not None
+                else ""
+            )
+            user_confirmed_text_detected = (
+                bool(self.meta_text_detected_toggle.isChecked())
+                if text_override_dirty or existing_text_override is not None
+                else None
+            )
             source_override = self._parse_ai_source_override(self.meta_ai_source_edit.toPlainText(), current_ai_meta)
             ai_detection_reasons = self._parse_ai_text_list(self.meta_ai_detection_reasons_edit.toPlainText())
-            if user_confirmed_ai != current_ai_meta.get("user_confirmed_ai") and user_confirmed_ai is not None and not ai_detection_reasons:
+            if user_confirmed_ai != "" and user_confirmed_ai != current_ai_meta.get("user_confirmed_ai") and not ai_detection_reasons:
                 ai_detection_reasons = ["Manual override from details panel"]
             ai_payload = {
                 "is_ai_detected": is_ai_detected,
@@ -12549,17 +12702,24 @@ class MainWindow(QMainWindow):
                 # Save Changes is DB-only. Embedded fields are file-only and should not be persisted here.
                 self.bridge.update_media_metadata(path, "", desc, notes, "", "", ai_prompt, ai_neg_prompt, ai_params)
                 self.bridge.update_media_ai_metadata(path, ai_payload)
+                if user_confirmed_text_detected is not None:
+                    self.bridge.update_media_text_override(path, user_confirmed_text_detected)
+                self.bridge.update_media_detected_text(path, detected_text)
                 self.bridge.update_media_dates(path, exif_date_taken, metadata_date)
                 self.bridge.set_media_tags(path, tags)
                 self._current_ai_meta = {
                     "is_ai_detected": is_ai_detected,
                     "is_ai_confidence": is_ai_confidence,
-                    "user_confirmed_ai": user_confirmed_ai,
+                    "user_confirmed_ai": bool(user_confirmed_ai) if user_confirmed_ai != "" else existing_ai_override,
                     "tool_name_found": source_override.get("tool_name_found"),
                     "tool_name_inferred": source_override.get("tool_name_inferred"),
                     "tool_name_confidence": source_override.get("tool_name_confidence"),
                     "source_formats": list(source_override.get("source_formats") or []),
                 }
+                if user_confirmed_text_detected is not None:
+                    self._current_user_confirmed_text_detected = user_confirmed_text_detected
+                self._ai_generated_override_dirty = False
+                self._text_detected_override_dirty = False
             except Exception:
                 pass
         else:
@@ -13677,6 +13837,7 @@ class MainWindow(QMainWindow):
         show_original_file_date = "originalfiledate" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "originalfiledate", False)
         show_file_created_date = "filecreateddate" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "filecreateddate", False)
         show_file_modified_date = "filemodifieddate" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "filemodifieddate", False)
+        show_text_detected = "textdetected" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "textdetected", True)
         show_duration = "duration" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "duration", True)
         show_fps = "fps" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "fps", True)
         show_codec = "codec" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "codec", True)
@@ -13695,6 +13856,7 @@ class MainWindow(QMainWindow):
         show_embedded_comments = "embeddedcomments" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "embeddedcomments", True)
         show_embedded_metadata = "embeddedmetadata" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "embeddedmetadata", True)
         show_ai_status = "aistatus" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aistatus", True)
+        show_ai_generated = "aigenerated" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aigenerated", True)
         show_ai_source = "aisource" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aisource", True)
         show_ai_families = "aifamilies" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aifamilies", True)
         show_ai_detection_reasons = "aidetectionreasons" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aidetectionreasons", False)
@@ -13732,6 +13894,12 @@ class MainWindow(QMainWindow):
         self.meta_file_created_date_lbl.setVisible(not is_bulk and show_file_created_date)
         self.lbl_file_modified_date_cap.setVisible(not is_bulk and show_file_modified_date)
         self.meta_file_modified_date_lbl.setVisible(not is_bulk and show_file_modified_date)
+        self.lbl_text_detected_cap.setVisible(not is_bulk and show_text_detected)
+        self.meta_text_detected_row.setVisible(not is_bulk and show_text_detected)
+        self.lbl_text_detected_note.setVisible(not is_bulk and show_text_detected)
+        self.lbl_detected_text_cap.setVisible(not is_bulk and show_text_detected)
+        self.meta_detected_text_edit.setVisible(not is_bulk and show_text_detected)
+        self.btn_use_ocr.setVisible(not is_bulk and show_text_detected)
         self.meta_duration_lbl.setVisible(not is_bulk and show_duration)
         self.meta_fps_lbl.setVisible(not is_bulk and show_fps)
         self.meta_codec_lbl.setVisible(not is_bulk and show_codec)
@@ -13752,8 +13920,9 @@ class MainWindow(QMainWindow):
         self.lbl_embedded_metadata_cap.setVisible(not is_bulk and show_embedded_metadata)
         self.meta_ai_status_edit.setVisible(not is_bulk and show_ai_status)
         self.lbl_ai_status_cap.setVisible(not is_bulk and show_ai_status)
-        self.meta_user_confirmed_ai_edit.setVisible(not is_bulk and show_ai_status)
-        self.lbl_user_confirmed_ai_cap.setVisible(not is_bulk and show_ai_status)
+        self.meta_ai_generated_row.setVisible(not is_bulk and show_ai_generated)
+        self.lbl_ai_generated_cap.setVisible(not is_bulk and show_ai_generated)
+        self.lbl_ai_generated_note.setVisible(not is_bulk and show_ai_generated)
         self.meta_ai_source_edit.setVisible(not is_bulk and show_ai_source)
         self.lbl_ai_source_cap.setVisible(not is_bulk and show_ai_source)
         self.meta_ai_families_edit.setVisible(not is_bulk and show_ai_families)
@@ -13807,6 +13976,8 @@ class MainWindow(QMainWindow):
         self.meta_original_file_date_lbl.setText("")
         self.meta_file_created_date_lbl.setText("")
         self.meta_file_modified_date_lbl.setText("")
+        self._set_metadata_switch(self.meta_text_detected_toggle, False)
+        self.meta_detected_text_edit.setPlainText("")
         self.meta_duration_lbl.setText("Duration: ")
         self.meta_fps_lbl.setText("FPS: ")
         self.meta_codec_lbl.setText("Codec: ")
@@ -13824,8 +13995,13 @@ class MainWindow(QMainWindow):
         # Clear the text edits
         self.meta_embedded_comments_edit.setPlainText("")
         self._current_ai_meta = {}
+        self._current_user_confirmed_text_detected = None
+        self._current_auto_text_detected = None
+        self._ai_generated_override_dirty = False
+        self._text_detected_override_dirty = False
+        self._update_override_note_labels(auto_text_detected=None, auto_ai_detected=None)
         self.meta_ai_status_edit.setText("")
-        self.meta_user_confirmed_ai_edit.setText("")
+        self._set_metadata_switch(self.meta_ai_generated_toggle, False)
         self.meta_ai_source_edit.setPlainText("")
         self.meta_ai_families_edit.setText("")
         self.meta_ai_detection_reasons_edit.setPlainText("")
@@ -13864,6 +14040,9 @@ class MainWindow(QMainWindow):
         self.meta_notes.blockSignals(True)
         self.meta_exif_date_taken_edit.blockSignals(True)
         self.meta_metadata_date_edit.blockSignals(True)
+        self.meta_detected_text_edit.blockSignals(True)
+        self.meta_text_detected_toggle.blockSignals(True)
+        self.meta_ai_generated_toggle.blockSignals(True)
 
         if not is_bulk:
             path = paths[0]
@@ -13887,6 +14066,10 @@ class MainWindow(QMainWindow):
                     "tool_name_confidence": float(data.get("tool_name_confidence") or 0.0),
                     "source_formats": list(data.get("source_formats") or []),
                 }
+                self._current_user_confirmed_text_detected = data.get("user_confirmed_text_detected")
+                self._current_auto_text_detected = data.get("text_detected")
+                self._ai_generated_override_dirty = False
+                self._text_detected_override_dirty = False
                 self.meta_desc.setPlainText(data.get("description", ""))
                 self.meta_notes.setPlainText(data.get("notes", ""))
                 
@@ -13900,7 +14083,13 @@ class MainWindow(QMainWindow):
                 if db_params: self.meta_ai_params_edit.setPlainText(db_params)
 
                 self.meta_ai_status_edit.setText(data.get("ai_status_summary", ""))
-                self.meta_user_confirmed_ai_edit.setText(data.get("user_confirmed_ai_summary", ""))
+                self._update_override_note_labels(
+                    auto_text_detected=data.get("text_detected"),
+                    auto_ai_detected=data.get("is_ai_detected"),
+                )
+                self._set_metadata_switch(self.meta_ai_generated_toggle, bool(data.get("effective_is_ai")))
+                self._set_metadata_switch(self.meta_text_detected_toggle, bool(data.get("effective_text_detected")))
+                self.meta_detected_text_edit.setPlainText(data.get("detected_text", "") or "")
                 self.meta_ai_source_edit.setPlainText(data.get("ai_source_summary", ""))
                 self.meta_ai_families_edit.setText(", ".join(data.get("metadata_families_detected", [])))
                 self.meta_ai_detection_reasons_edit.setPlainText("\n".join(data.get("ai_detection_reasons", [])))
@@ -14089,6 +14278,9 @@ class MainWindow(QMainWindow):
         self.meta_notes.blockSignals(False)
         self.meta_exif_date_taken_edit.blockSignals(False)
         self.meta_metadata_date_edit.blockSignals(False)
+        self.meta_detected_text_edit.blockSignals(False)
+        self.meta_text_detected_toggle.blockSignals(False)
+        self.meta_ai_generated_toggle.blockSignals(False)
         self._sync_tag_list_panel_visibility()
 
     def _clear_embedded_labels(self):
@@ -14103,7 +14295,14 @@ class MainWindow(QMainWindow):
         self.meta_embedded_tags_edit.setText("")
         self.meta_embedded_comments_edit.setPlainText("")
         self.meta_ai_status_edit.setText("")
-        self.meta_user_confirmed_ai_edit.setText("")
+        self._set_metadata_switch(self.meta_ai_generated_toggle, False)
+        self._set_metadata_switch(self.meta_text_detected_toggle, False)
+        self.meta_detected_text_edit.setPlainText("")
+        self._current_user_confirmed_text_detected = None
+        self._current_auto_text_detected = None
+        self._ai_generated_override_dirty = False
+        self._text_detected_override_dirty = False
+        self._update_override_note_labels(auto_text_detected=None, auto_ai_detected=None)
         self.meta_ai_source_edit.setPlainText("")
         self.meta_ai_families_edit.setText("")
         self.meta_ai_detection_reasons_edit.setPlainText("")
@@ -14161,28 +14360,61 @@ class MainWindow(QMainWindow):
         return "video"
 
     def _metadata_group_fields(self, kind: str) -> dict[str, list[str]]:
-        image_general = ["res", "size", "exifdatetaken", "metadatadate", "originalfiledate", "filecreateddate", "filemodifieddate", "description", "tags", "notes", "embeddedtags", "embeddedcomments", "embeddedmetadata"]
+        image_general = ["res", "size", "exifdatetaken", "metadatadate", "originalfiledate", "filecreateddate", "filemodifieddate", "textdetected", "description", "tags", "notes", "embeddedtags", "embeddedcomments", "embeddedmetadata"]
         image_camera = ["camera", "location", "iso", "shutter", "aperture", "software", "lens", "dpi"]
         image_ai = [
-            "aistatus", "aisource", "aifamilies", "aidetectionreasons", "ailoras", "aimodel", "aicheckpoint",
+            "aistatus", "aigenerated", "aisource", "aifamilies", "aidetectionreasons", "ailoras", "aimodel", "aicheckpoint",
             "aisampler", "aischeduler", "aicfg", "aisteps", "aiseed", "aiupscaler", "aidenoise",
             "aiprompt", "ainegprompt", "aiparams", "aiworkflows", "aiprovenance", "aicharcards", "airawpaths",
         ]
         if kind == "video":
             return {
-                "general": ["res", "size", "exifdatetaken", "metadatadate", "originalfiledate", "filecreateddate", "filemodifieddate", "duration", "fps", "codec", "audio", "description", "tags", "notes", "embeddedmetadata"],
+                "general": ["res", "size", "exifdatetaken", "metadatadate", "originalfiledate", "filecreateddate", "filemodifieddate", "textdetected", "duration", "fps", "codec", "audio", "description", "tags", "notes", "embeddedmetadata"],
                 "ai": image_ai,
             }
         if kind == "gif":
             return {
-                "general": ["res", "size", "exifdatetaken", "metadatadate", "originalfiledate", "filecreateddate", "filemodifieddate", "duration", "fps", "description", "tags", "notes", "embeddedtags", "embeddedcomments", "embeddedmetadata"],
+                "general": ["res", "size", "exifdatetaken", "metadatadate", "originalfiledate", "filecreateddate", "filemodifieddate", "textdetected", "duration", "fps", "description", "tags", "notes", "embeddedtags", "embeddedcomments", "embeddedmetadata"],
                 "ai": image_ai,
             }
         if kind == "svg":
             return {
-                "general": ["res", "size", "metadatadate", "originalfiledate", "filecreateddate", "filemodifieddate", "description", "tags", "notes", "embeddedmetadata"],
+                "general": ["res", "size", "metadatadate", "originalfiledate", "filecreateddate", "filemodifieddate", "textdetected", "description", "tags", "notes", "embeddedmetadata"],
             }
         return {"general": image_general, "camera": image_camera, "ai": image_ai}
+
+    def _run_text_ocr(self) -> None:
+        path = str(getattr(self, "_current_path", "") or "").strip()
+        if not path:
+            return
+        self.btn_use_ocr.setEnabled(False)
+        self.btn_use_ocr.setProperty("baseText", "Running OCR...")
+        self._wrap_button_text(self.btn_use_ocr, "Running OCR...", self._right_panel_content_width())
+        self.meta_status_lbl.setText("Running OCR...")
+        self.bridge.run_manual_ocr(path)
+
+    @Slot(str, str, str)
+    def _on_manual_ocr_finished(self, path: str, text: str, error: str) -> None:
+        if hasattr(self, "btn_use_ocr"):
+            self.btn_use_ocr.setEnabled(True)
+            self.btn_use_ocr.setProperty("baseText", "Use OCR")
+            self._wrap_button_text(self.btn_use_ocr, "Use OCR", self._right_panel_content_width())
+        if str(getattr(self, "_current_path", "") or "") != str(path or ""):
+            return
+        if error:
+            self.meta_status_lbl.setText(f"OCR Error: {error}")
+            QTimer.singleShot(4000, lambda: self.meta_status_lbl.setText(""))
+            return
+        clean_text = str(text or "").strip()
+        if clean_text:
+            self.meta_detected_text_edit.setPlainText(clean_text)
+            self._set_metadata_switch(self.meta_text_detected_toggle, True)
+            self._current_user_confirmed_text_detected = True
+            self._text_detected_override_dirty = False
+            self.meta_status_lbl.setText("OCR text saved")
+        else:
+            self.meta_status_lbl.setText("No OCR text found")
+        QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
 
     def _metadata_default_group_order(self, kind: str) -> list[str]:
         return list(self._metadata_group_fields(kind).keys())
@@ -14424,6 +14656,45 @@ class MainWindow(QMainWindow):
         }
 
     @staticmethod
+    def _set_switch_value_label(label: QLabel, checked: bool, on_text: str, off_text: str) -> None:
+        label.setText(on_text if checked else off_text)
+
+    @staticmethod
+    def _auto_text_detected_note_value(value) -> str:
+        if isinstance(value, str):
+            detected = value.strip().lower() in {"1", "true", "yes", "text", "text_detected"}
+        else:
+            detected = bool(value)
+        return "Text Detected" if detected else "No Text Detected"
+
+    @staticmethod
+    def _auto_ai_detected_note_value(value) -> str:
+        if isinstance(value, str):
+            detected = value.strip().lower() in {"1", "true", "yes", "ai", "ai_generated"}
+        else:
+            detected = bool(value)
+        return "AI Generated" if detected else "Not AI Generated"
+
+    def _update_override_note_labels(self, *, auto_text_detected=None, auto_ai_detected=None) -> None:
+        if hasattr(self, "lbl_text_detected_note"):
+            self.lbl_text_detected_note.setText(
+                "This overrides the auto text detection value of "
+                f"[{self._auto_text_detected_note_value(auto_text_detected)}]"
+            )
+        if hasattr(self, "lbl_ai_generated_note"):
+            self.lbl_ai_generated_note.setText(
+                "This overrides the auto AI Detection value of "
+                f"[{self._auto_ai_detected_note_value(auto_ai_detected)}]"
+            )
+
+    def _set_metadata_switch(self, toggle: QCheckBox, checked: bool) -> None:
+        toggle.setChecked(bool(checked))
+        if toggle is getattr(self, "meta_ai_generated_toggle", None):
+            self._set_switch_value_label(self.meta_ai_generated_value_lbl, bool(checked), "AI", "Non-AI")
+        elif toggle is getattr(self, "meta_text_detected_toggle", None):
+            self._set_switch_value_label(self.meta_text_detected_value_lbl, bool(checked), "Text", "No Text")
+
+    @staticmethod
     def _parse_user_confirmed_ai(value: str | None):
         text = str(value or "").strip().lower()
         if not text:
@@ -14546,6 +14817,14 @@ class MainWindow(QMainWindow):
             "originalfiledate": [self.lbl_original_file_date_cap, self.meta_original_file_date_lbl],
             "filecreateddate": [self.lbl_file_created_date_cap, self.meta_file_created_date_lbl],
             "filemodifieddate": [self.lbl_file_modified_date_cap, self.meta_file_modified_date_lbl],
+            "textdetected": [
+                self.lbl_text_detected_cap,
+                self.meta_text_detected_row,
+                self.lbl_text_detected_note,
+                self.lbl_detected_text_cap,
+                self.meta_detected_text_edit,
+                self.btn_use_ocr,
+            ],
             "duration": [self.meta_duration_lbl],
             "fps": [self.meta_fps_lbl],
             "codec": [self.meta_codec_lbl],
@@ -14564,7 +14843,8 @@ class MainWindow(QMainWindow):
             "embeddedtags": [self.lbl_embedded_tags_cap, self.meta_embedded_tags_edit],
             "embeddedcomments": [self.lbl_embedded_comments_cap, self.meta_embedded_comments_edit],
             "embeddedmetadata": [self.lbl_embedded_metadata_cap, self.meta_embedded_metadata_edit],
-            "aistatus": [self.lbl_ai_status_cap, self.meta_ai_status_edit, self.lbl_user_confirmed_ai_cap, self.meta_user_confirmed_ai_edit],
+            "aistatus": [self.lbl_ai_status_cap, self.meta_ai_status_edit],
+            "aigenerated": [self.lbl_ai_generated_cap, self.meta_ai_generated_row, self.lbl_ai_generated_note],
             "aisource": [self.lbl_ai_source_cap, self.meta_ai_source_edit],
             "aifamilies": [self.lbl_ai_families_cap, self.meta_ai_families_edit],
             "aidetectionreasons": [self.lbl_ai_detection_reasons_cap, self.meta_ai_detection_reasons_edit],
@@ -14664,6 +14944,12 @@ class MainWindow(QMainWindow):
         self.meta_file_created_date_lbl.setVisible("filecreateddate" in active_fields and self._is_metadata_enabled_for_kind(kind, "filecreateddate", False))
         self.lbl_file_modified_date_cap.setVisible("filemodifieddate" in active_fields and self._is_metadata_enabled_for_kind(kind, "filemodifieddate", False))
         self.meta_file_modified_date_lbl.setVisible("filemodifieddate" in active_fields and self._is_metadata_enabled_for_kind(kind, "filemodifieddate", False))
+        self.lbl_text_detected_cap.setVisible("textdetected" in active_fields and self._is_metadata_enabled_for_kind(kind, "textdetected", True))
+        self.meta_text_detected_row.setVisible("textdetected" in active_fields and self._is_metadata_enabled_for_kind(kind, "textdetected", True))
+        self.lbl_text_detected_note.setVisible("textdetected" in active_fields and self._is_metadata_enabled_for_kind(kind, "textdetected", True))
+        self.lbl_detected_text_cap.setVisible("textdetected" in active_fields and self._is_metadata_enabled_for_kind(kind, "textdetected", True))
+        self.meta_detected_text_edit.setVisible("textdetected" in active_fields and self._is_metadata_enabled_for_kind(kind, "textdetected", True))
+        self.btn_use_ocr.setVisible("textdetected" in active_fields and self._is_metadata_enabled_for_kind(kind, "textdetected", True))
         self.meta_duration_lbl.setVisible("duration" in active_fields and self._is_metadata_enabled_for_kind(kind, "duration", True))
         self.meta_fps_lbl.setVisible("fps" in active_fields and self._is_metadata_enabled_for_kind(kind, "fps", True))
         self.meta_codec_lbl.setVisible("codec" in active_fields and self._is_metadata_enabled_for_kind(kind, "codec", True))
@@ -14684,8 +14970,9 @@ class MainWindow(QMainWindow):
         self.lbl_embedded_metadata_cap.setVisible("embeddedmetadata" in active_fields and self._is_metadata_enabled_for_kind(kind, "embeddedmetadata", True))
         self.meta_ai_status_edit.setVisible("aistatus" in active_fields and self._is_metadata_enabled_for_kind(kind, "aistatus", True))
         self.lbl_ai_status_cap.setVisible("aistatus" in active_fields and self._is_metadata_enabled_for_kind(kind, "aistatus", True))
-        self.meta_user_confirmed_ai_edit.setVisible("aistatus" in active_fields and self._is_metadata_enabled_for_kind(kind, "aistatus", True))
-        self.lbl_user_confirmed_ai_cap.setVisible("aistatus" in active_fields and self._is_metadata_enabled_for_kind(kind, "aistatus", True))
+        self.meta_ai_generated_row.setVisible("aigenerated" in active_fields and self._is_metadata_enabled_for_kind(kind, "aigenerated", True))
+        self.lbl_ai_generated_cap.setVisible("aigenerated" in active_fields and self._is_metadata_enabled_for_kind(kind, "aigenerated", True))
+        self.lbl_ai_generated_note.setVisible("aigenerated" in active_fields and self._is_metadata_enabled_for_kind(kind, "aigenerated", True))
         self.meta_ai_source_edit.setVisible("aisource" in active_fields and self._is_metadata_enabled_for_kind(kind, "aisource", True))
         self.lbl_ai_source_cap.setVisible("aisource" in active_fields and self._is_metadata_enabled_for_kind(kind, "aisource", True))
         self.meta_ai_families_edit.setVisible("aifamilies" in active_fields and self._is_metadata_enabled_for_kind(kind, "aifamilies", True))
@@ -15695,6 +15982,43 @@ class MainWindow(QMainWindow):
                 padding: 4px;
                 min-height: 18px;
             }}
+            QLabel#metaSwitchValueLabel {{
+                color: {text};
+                font-weight: 600;
+                padding: 2px 0px;
+            }}
+            QLabel#metaFieldNoteLabel {{
+                color: {text_muted};
+                font-size: 11px;
+                padding: 0px 0px 2px 0px;
+            }}
+            QWidget#metaSwitchRow {{
+                background: transparent;
+                border: none;
+                padding: 0px;
+                margin: 0px;
+            }}
+            QCheckBox#metaSwitch {{
+                background: transparent;
+                spacing: 0px;
+                padding: 0px;
+                min-height: 22px;
+                max-height: 22px;
+            }}
+            QCheckBox#metaSwitch::indicator {{
+                width: 34px;
+                height: 18px;
+                border-radius: 9px;
+                border: 1px solid {Theme.get_input_border(accent)};
+                background-color: {Theme.get_input_bg(accent)};
+            }}
+            QCheckBox#metaSwitch::indicator:hover {{
+                border-color: {accent_str};
+            }}
+            QCheckBox#metaSwitch::indicator:checked {{
+                background-color: {Theme.get_btn_save_hover(accent)};
+                border-color: {accent_str};
+            }}
             QLabel#previewImageLabel {{
                 background-color: {Theme.get_control_bg(accent)};
                 border: 1px solid {Theme.get_border(accent)};
@@ -15749,7 +16073,7 @@ class MainWindow(QMainWindow):
             QPushButton#btnPreviewOverlayPlay:pressed {{
                 background-color: {"rgba(255, 255, 255, 115)" if is_light else "rgba(0, 0, 0, 115)"};
             }}
-            QPushButton#btnSaveMeta, QPushButton#btnImportExif, QPushButton#btnMergeHiddenMeta, QPushButton#btnSaveToExif, QPushButton#btnOpenTagList, QPushButton#metaEmptySelectAllButton {{
+            QPushButton#btnSaveMeta, QPushButton#btnUseOcr, QPushButton#btnImportExif, QPushButton#btnMergeHiddenMeta, QPushButton#btnSaveToExif, QPushButton#btnOpenTagList, QPushButton#metaEmptySelectAllButton {{
                 background-color: {Theme.get_btn_save_bg(accent)};
                 color: {text};
                 border: 1px solid {Theme.get_border(accent)};
@@ -15758,7 +16082,7 @@ class MainWindow(QMainWindow):
                 font-size: 11px;
                 font-weight: 500;
             }}
-            QPushButton#btnSaveMeta:hover, QPushButton#btnImportExif:hover, QPushButton#btnMergeHiddenMeta:hover, QPushButton#btnSaveToExif:hover, QPushButton#btnOpenTagList:hover, QPushButton#metaEmptySelectAllButton:hover {{
+            QPushButton#btnSaveMeta:hover, QPushButton#btnUseOcr:hover, QPushButton#btnImportExif:hover, QPushButton#btnMergeHiddenMeta:hover, QPushButton#btnSaveToExif:hover, QPushButton#btnOpenTagList:hover, QPushButton#metaEmptySelectAllButton:hover {{
                 background-color: {Theme.get_btn_save_hover(accent)};
                 color: {"#000" if is_light else "#fff"};
                 border-color: {accent_str};

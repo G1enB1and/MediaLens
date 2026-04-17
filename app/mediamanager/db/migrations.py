@@ -94,6 +94,10 @@ def _ensure_media_item_date_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE media_items ADD COLUMN text_detection_score REAL")
     if "text_detection_version" not in cols:
         conn.execute("ALTER TABLE media_items ADD COLUMN text_detection_version INTEGER")
+    if "user_confirmed_text_detected" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN user_confirmed_text_detected INTEGER")
+    if "detected_text" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN detected_text TEXT")
     if "text_more_likely" not in cols:
         conn.execute("ALTER TABLE media_items ADD COLUMN text_more_likely INTEGER")
     if "text_more_likely_score" not in cols:

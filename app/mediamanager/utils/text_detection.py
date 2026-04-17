@@ -481,6 +481,43 @@ def _ocr_word_quality_score(word_text: str) -> float:
     return 0.0
 
 
+def _score_ocr_text(text: str) -> float:
+    lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    if not lines:
+        return 0.0
+    words = re.findall(r"[A-Za-z0-9][A-Za-z0-9'._-]*", "\n".join(lines))
+    strong_words = sum(1 for word in words if _ocr_word_quality_score(word) >= 0.8)
+    char_count = sum(len(re.sub(r"[^A-Za-z0-9]", "", word)) for word in words)
+    return float(char_count + strong_words * 4 + len(lines) * 2)
+
+
+async def _extract_text_windows_ocr_async(path: str | Path) -> str:
+    if OcrEngine is None or Language is None or StorageFile is None or BitmapDecoder is None:
+        return ""
+
+    try:
+        engine = OcrEngine.try_create_from_language(Language("en-US"))
+        if engine is None:
+            return ""
+        file = await StorageFile.get_file_from_path_async(str(path))
+        stream = await file.open_async(0)
+        decoder = await BitmapDecoder.create_async(stream)
+        bitmap = await decoder.get_software_bitmap_async()
+        result = await engine.recognize_async(bitmap)
+    except Exception:
+        return ""
+
+    out: list[str] = []
+    for line in list(result.lines or []):
+        line_text = str(getattr(line, "text", "") or "").strip()
+        if not line_text:
+            words = [str(getattr(word, "text", "") or "").strip() for word in list(line.words or [])]
+            line_text = " ".join(word for word in words if word)
+        if line_text:
+            out.append(line_text)
+    return "\n".join(out).strip()
+
+
 async def _verify_text_presence_windows_ocr_async(path: str | Path) -> tuple[bool, float]:
     if OcrEngine is None or Language is None or StorageFile is None or BitmapDecoder is None:
         return False, 0.0
@@ -924,6 +961,37 @@ def verify_text_presence_windows_ocr(path: str | Path) -> tuple[bool, float]:
         return best_verified, round(float(best_score), 3)
     except Exception:
         return False, 0.0
+
+
+def extract_text_windows_ocr(path: str | Path) -> str:
+    """Return actual text from Windows OCR. Intended for explicit/manual OCR actions."""
+    if OcrEngine is None or Language is None or StorageFile is None or BitmapDecoder is None:
+        return ""
+    try:
+        import asyncio
+
+        variants = _build_ocr_variant_images(path)
+        if not variants:
+            return asyncio.run(_extract_text_windows_ocr_async(path))
+
+        best_text = ""
+        best_score = 0.0
+        with tempfile.TemporaryDirectory(prefix="medialens_ocr_text_") as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            for idx, variant in enumerate(variants):
+                temp_path = tmpdir_path / f"ocr_text_variant_{idx}.png"
+                try:
+                    variant.save(temp_path)
+                    text = asyncio.run(_extract_text_windows_ocr_async(temp_path))
+                except Exception:
+                    text = ""
+                score = _score_ocr_text(text)
+                if score > best_score:
+                    best_text = text
+                    best_score = score
+        return best_text.strip()
+    except Exception:
+        return ""
 
 
 def _detect_likely_text_presence_array(arr: np.ndarray) -> tuple[bool, float]:
