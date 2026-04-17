@@ -555,6 +555,80 @@ def _run_hidden_subprocess(cmd: list[str], **kwargs):
 
 _FAULT_HANDLER_STREAM = None
 _SETTINGS_MIGRATED = False
+_APPDATA_DIRS_MIGRATED = False
+
+
+def _paths_same(left: Path, right: Path) -> bool:
+    try:
+        return left.resolve() == right.resolve()
+    except Exception:
+        return os.path.abspath(str(left)) == os.path.abspath(str(right))
+
+
+def _unique_legacy_copy_path(path: Path) -> Path:
+    stem = path.stem
+    suffix = path.suffix
+    for idx in range(1, 1000):
+        candidate = path.with_name(f"{stem}.legacy-{idx}{suffix}")
+        if not candidate.exists():
+            return candidate
+    return path.with_name(f"{stem}.legacy-{int(time.time())}{suffix}")
+
+
+def _merge_directory_contents(source: Path, target: Path) -> bool:
+    if not source.exists() or not source.is_dir() or _paths_same(source, target):
+        return True
+
+    ok = True
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        entries = list(source.iterdir())
+    except Exception:
+        return False
+
+    for child in entries:
+        dest = target / child.name
+        try:
+            if child.is_dir():
+                ok = _merge_directory_contents(child, dest) and ok
+                continue
+
+            if dest.exists():
+                dest = _unique_legacy_copy_path(dest)
+            shutil.copy2(str(child), str(dest))
+        except Exception:
+            ok = False
+    return ok
+
+
+def _migrate_legacy_appdata_dirs(root: Path, out: Path) -> None:
+    global _APPDATA_DIRS_MIGRATED
+    if _APPDATA_DIRS_MIGRATED:
+        return
+
+    legacy_parent = root / LEGACY_APP_ORGANIZATION
+    legacy_candidates = [
+        legacy_parent / LEGACY_APP_NAME,
+        legacy_parent / APP_NAME,
+    ]
+    out.mkdir(parents=True, exist_ok=True)
+
+    for legacy in legacy_candidates:
+        if not legacy.exists() or not legacy.is_dir() or _paths_same(legacy, out):
+            continue
+        if _merge_directory_contents(legacy, out):
+            try:
+                shutil.rmtree(str(legacy))
+            except Exception:
+                pass
+
+    try:
+        if legacy_parent.exists() and legacy_parent.is_dir() and not any(legacy_parent.iterdir()):
+            legacy_parent.rmdir()
+    except Exception:
+        pass
+
+    _APPDATA_DIRS_MIGRATED = True
 
 
 def _appdata_runtime_dir() -> Path:
@@ -564,24 +638,7 @@ def _appdata_runtime_dir() -> Path:
     else:
         root = Path.home() / "AppData" / "Roaming"
     out = root / APP_NAME
-    legacy_candidates = [
-        root / LEGACY_APP_ORGANIZATION / APP_NAME,
-        root / LEGACY_APP_ORGANIZATION / LEGACY_APP_NAME,
-    ]
-    if not out.exists():
-        for legacy in legacy_candidates:
-            if not legacy.exists():
-                continue
-            try:
-                shutil.move(str(legacy), str(out))
-                break
-            except Exception:
-                try:
-                    shutil.copytree(legacy, out, dirs_exist_ok=True)
-                    break
-                except Exception:
-                    pass
-    out.mkdir(parents=True, exist_ok=True)
+    _migrate_legacy_appdata_dirs(root, out)
     return out
 
 

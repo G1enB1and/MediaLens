@@ -24,6 +24,7 @@ This release improves overall UI polish, tag management, and playback performanc
 - Adjusted margins and padding in the Image Comparison panel for a cleaner look.
 - Replaced the comparison close buttons with a symmetrical SVG icon featuring more consistent colors and hover effects.
 - Improved lightbox video playback performance by automatically pausing background scanners and animated gifs while a video is playing.
+- Changed startup and installer migration to merge legacy app data into `%APPDATA%\MediaLens\`, remove old branded app-data folders after migration, and clean stale legacy shortcuts/install folders.
 
 ### Fixed
 
