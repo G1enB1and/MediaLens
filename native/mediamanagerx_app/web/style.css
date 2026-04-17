@@ -800,7 +800,8 @@ main {
   gap: 12px;
   align-items: flex-start;
   flex: 1;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   background: var(--bg);
   position: relative;
 }
