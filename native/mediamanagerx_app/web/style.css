@@ -2754,7 +2754,6 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   z-index: 1;
   /* Let clicks fall through to the backdrop so click-outside closes */
   pointer-events: none;
-  overflow: hidden;
 }
 
 #lightboxImg,
