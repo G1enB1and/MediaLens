@@ -216,6 +216,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QSplitter,
     QSplitterHandle,
+    QSpacerItem,
     QWidget,
     QVBoxLayout,
     QSizePolicy,
@@ -9161,7 +9162,6 @@ class MainWindow(QMainWindow):
         self.tag_list_panel_layout = QVBoxLayout(self.tag_list_panel)
         self.tag_list_panel_layout.setContentsMargins(12, 12, 12, 12)
         self.tag_list_panel_layout.setSpacing(8)
-        self.tag_list_panel_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         self.tag_list_header_row = QWidget(self.tag_list_panel)
         self.tag_list_header_row.setObjectName("tagListHeaderRow")
@@ -9252,7 +9252,13 @@ class MainWindow(QMainWindow):
         self.tag_list_empty_lbl.setVisible(True)
         self.tag_list_panel_layout.addWidget(self.tag_list_empty_lbl)
 
-        self.tag_list_panel_layout.addStretch(1)
+        self.tag_list_bottom_spacer = QSpacerItem(
+            0,
+            0,
+            QSizePolicy.Policy.Minimum,
+            QSizePolicy.Policy.Expanding,
+        )
+        self.tag_list_panel_layout.addItem(self.tag_list_bottom_spacer)
 
         self.right_panel = QWidget(self.right_splitter)
         self.right_panel.setObjectName("rightPanel")
@@ -9276,6 +9282,7 @@ class MainWindow(QMainWindow):
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.scroll_area.setObjectName("metaScrollArea")
+        self.scroll_area.viewport().installEventFilter(self)
         
         self.scroll_container = QWidget(self.scroll_area)
         self.scroll_container.setObjectName("rightPanelScrollContainer")
@@ -9624,16 +9631,17 @@ class MainWindow(QMainWindow):
 
         self.tag_list_open_btn_row = QWidget()
         self.tag_list_open_btn_row.setObjectName("tagListOpenButtonRow")
+        self.tag_list_open_btn_row.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         tag_list_open_btn_layout = QHBoxLayout(self.tag_list_open_btn_row)
         tag_list_open_btn_layout.setContentsMargins(0, 0, 0, 0)
         tag_list_open_btn_layout.setSpacing(0)
-        tag_list_open_btn_layout.addStretch(1)
         self.btn_open_tag_list = QPushButton("Open Tag List")
         self.btn_open_tag_list.setObjectName("btnOpenTagList")
+        self.btn_open_tag_list.setProperty("baseText", "Open Tag List")
         self.btn_open_tag_list.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_open_tag_list.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.btn_open_tag_list.clicked.connect(self._toggle_tag_list_panel)
-        tag_list_open_btn_layout.addWidget(self.btn_open_tag_list, 0, Qt.AlignmentFlag.AlignCenter)
-        tag_list_open_btn_layout.addStretch(1)
+        tag_list_open_btn_layout.addWidget(self.btn_open_tag_list)
 
         self.lbl_ai_prompt_cap = QLabel("AI Prompt:")
         self.lbl_ai_prompt_cap.setObjectName("metaAIPromptCaption")
@@ -9771,6 +9779,7 @@ class MainWindow(QMainWindow):
         self.bulk_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.bulk_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.bulk_scroll_area.setObjectName("bulkTagEditorScrollArea")
+        self.bulk_scroll_area.viewport().installEventFilter(self)
 
         self.bulk_scroll_container = QWidget(self.bulk_scroll_area)
         self.bulk_scroll_container.setObjectName("bulkTagEditorScrollContainer")
@@ -9874,8 +9883,7 @@ class MainWindow(QMainWindow):
         self.right_workspace_stack.addWidget(self.details_workspace)
         self.right_workspace_stack.addWidget(self.bulk_editor_panel)
         self.right_workspace_stack.setCurrentWidget(self.details_workspace)
-        self._update_sidebar_action_buttons()
-        self._update_sidebar_input_widths()
+        self._sync_sidebar_panel_widths()
 
         self._update_native_styles(accent_val)
         self._update_splitter_style(accent_val)
@@ -11143,7 +11151,7 @@ class MainWindow(QMainWindow):
                     self.act_preview_above_details.setChecked(bool(value))
                 if hasattr(self, "right_layout"):
                     self.right_layout.activate()
-                    self._update_sidebar_input_widths()
+                    self._sync_sidebar_panel_widths()
                 self._sync_tag_list_panel_visibility()
                 self._sync_sidebar_video_preview_controls()
             elif key == "player.autoplay_preview_animated_gifs":
@@ -11250,18 +11258,39 @@ class MainWindow(QMainWindow):
         viewport_w = scroll_area.viewport().width()
         return max(90, viewport_w - left - right)
 
-    def _update_sidebar_action_buttons(self) -> None:
+    def _queue_sidebar_panel_width_sync(self) -> None:
+        if bool(getattr(self, "_sidebar_width_sync_pending", False)):
+            return
+        self._sidebar_width_sync_pending = True
+        QTimer.singleShot(0, self._sync_sidebar_panel_widths)
+
+    def _sync_sidebar_panel_widths(self) -> None:
+        self._sidebar_width_sync_pending = False
         if not hasattr(self, "scroll_area"):
             return
         available_w = self._right_panel_content_width()
+        self._update_sidebar_action_buttons(available_w)
+        self._update_sidebar_input_widths(available_w)
+        if hasattr(self, "right_layout"):
+            self.right_layout.activate()
+        if hasattr(self, "bulk_right_layout"):
+            self.bulk_right_layout.activate()
+
+    def _update_sidebar_action_buttons(self, available_w: int | None = None) -> None:
+        if not hasattr(self, "scroll_area"):
+            return
+        if available_w is None:
+            available_w = self._right_panel_content_width()
         buttons = [
             getattr(self, "meta_empty_select_all_btn", None),
+            getattr(self, "btn_open_tag_list", None),
             getattr(self, "btn_clear_bulk_tags", None),
             getattr(self, "btn_save_meta", None),
             getattr(self, "btn_import_exif", None),
             getattr(self, "btn_merge_hidden_meta", None),
             getattr(self, "btn_save_to_exif", None),
             getattr(self, "bulk_btn_select_all_gallery", None),
+            getattr(self, "bulk_btn_open_tag_list", None),
             getattr(self, "bulk_btn_clear_tags", None),
             getattr(self, "bulk_btn_save_meta", None),
             getattr(self, "bulk_btn_save_to_exif", None),
@@ -11277,12 +11306,23 @@ class MainWindow(QMainWindow):
             self._wrap_button_text(button, base_text, available_w)
             button.updateGeometry()
 
-    def _update_sidebar_input_widths(self) -> None:
+    def _update_sidebar_input_widths(self, available_w: int | None = None) -> None:
         if not hasattr(self, "scroll_container"):
             return
-        available_w = self._right_panel_content_width()
+        if available_w is None:
+            available_w = self._right_panel_content_width()
         if hasattr(self, "preview_image_lbl"):
             self.preview_image_lbl.setFixedWidth(available_w)
+        for wrapper in [
+            getattr(self, "tag_list_open_btn_row", None),
+        ]:
+            if wrapper is None:
+                continue
+            wrapper.setMinimumWidth(0)
+            wrapper.setMaximumWidth(16777215)
+            wrapper.setFixedWidth(available_w)
+            wrapper.setSizePolicy(QSizePolicy.Policy.Ignored, wrapper.sizePolicy().verticalPolicy())
+            wrapper.updateGeometry()
         active_container = self.bulk_scroll_container if self._is_bulk_editor_active() and hasattr(self, "bulk_scroll_container") else self.scroll_container
         for widget in active_container.findChildren(QWidget):
             if not isinstance(widget, (QLineEdit, QTextEdit, QPlainTextEdit)):
@@ -11341,7 +11381,7 @@ class MainWindow(QMainWindow):
         self.bulk_btn_save_to_exif.setProperty("baseText", f"Embed Tags in {selection_count} Files")
         self.bulk_btn_save_to_exif.setToolTip("Write only the entered tags into each selected file's embedded metadata")
         self._refresh_bulk_tag_editor_summary()
-        self._update_sidebar_action_buttons()
+        self._sync_sidebar_panel_widths()
 
     def _select_all_visible_gallery_items(self, _checked: bool = False) -> None:
         try:
@@ -11408,8 +11448,7 @@ class MainWindow(QMainWindow):
             self.right_workspace_stack.setCurrentWidget(self.bulk_editor_panel)
         elif hasattr(self, "details_workspace"):
             self.right_workspace_stack.setCurrentWidget(self.details_workspace)
-        self._update_sidebar_action_buttons()
-        self._update_sidebar_input_widths()
+        self._sync_sidebar_panel_widths()
         if hasattr(self, "tag_list_panel") and self.tag_list_panel.isVisible():
             self._refresh_tag_list_rows_state()
 
@@ -11731,6 +11770,14 @@ class MainWindow(QMainWindow):
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding if has_list else QSizePolicy.Policy.Fixed,
         )
+        if hasattr(self, "tag_list_bottom_spacer"):
+            self.tag_list_bottom_spacer.changeSize(
+                0,
+                0,
+                QSizePolicy.Policy.Minimum,
+                QSizePolicy.Policy.Fixed if has_list else QSizePolicy.Policy.Expanding,
+            )
+            self.tag_list_panel_layout.invalidate()
 
         if not has_list:
             self.active_tag_list_name_lbl.setText("")
@@ -13514,7 +13561,7 @@ class MainWindow(QMainWindow):
             self.btn_show_preview_inline.setVisible(not is_bulk and not self.bridge._preview_above_details_enabled())
         if hasattr(self, "right_layout"):
             self.right_layout.activate()
-            self._update_sidebar_input_widths()
+            self._sync_sidebar_panel_widths()
         self._sync_sidebar_video_preview_controls()
         self.btn_save_meta.setVisible(True)
         self.btn_clear_bulk_tags.setVisible(False)
@@ -13944,7 +13991,7 @@ class MainWindow(QMainWindow):
             self.btn_save_meta.setProperty("baseText", "Save Changes to Database")
             self.btn_clear_bulk_tags.setProperty("baseText", "Clear All Tags")
             self.btn_save_to_exif.setProperty("baseText", "Embed Data in File")
-            self._update_sidebar_action_buttons()
+            self._sync_sidebar_panel_widths()
         else:
             # Bulk mode
             self.meta_tags.setText("")
@@ -14618,8 +14665,7 @@ class MainWindow(QMainWindow):
         """Save splitter state and re-apply card selection if the resize caused a deselect."""
         self._maintain_tag_list_width_on_main_resize()
         self._save_splitter_state()
-        self._update_sidebar_action_buttons()
-        self._update_sidebar_input_widths()
+        self._sync_sidebar_panel_widths()
         self._update_preview_display()
         # Re-apply card selection via JS so resize doesn't visually deselect the last item
         if hasattr(self, "_current_path") and self._current_path:
@@ -14640,8 +14686,7 @@ class MainWindow(QMainWindow):
                 self.bridge.settings.setValue("ui/tag_list_last_details_width", self._details_panel_width_without_tag_list())
             except Exception:
                 pass
-        self._update_sidebar_action_buttons()
-        self._update_sidebar_input_widths()
+        self._sync_sidebar_panel_widths()
         self._update_preview_display()
         self._schedule_gallery_container_relayout(120)
 
@@ -15619,9 +15664,6 @@ class MainWindow(QMainWindow):
                 color: {"#000" if is_light else "#fff"};
                 border-color: {accent_str};
             }}
-            QPushButton#btnOpenTagList {{
-                min-width: 140px;
-            }}
         """)
         if hasattr(self, "bulk_scroll_container"):
             self.bulk_scroll_container.setStyleSheet(f"""
@@ -16041,6 +16083,13 @@ class MainWindow(QMainWindow):
             pass
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.Resize:
+            watched_viewports = {
+                getattr(getattr(self, "scroll_area", None), "viewport", lambda: None)(),
+                getattr(getattr(self, "bulk_scroll_area", None), "viewport", lambda: None)(),
+            }
+            if watched in watched_viewports:
+                self._queue_sidebar_panel_width_sync()
         if watched is getattr(self, "btn_preview_overlay_play", None):
             if event.type() == QEvent.Type.Enter:
                 self._set_preview_play_button_hovered(True)
@@ -16127,8 +16176,7 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         super().resizeEvent(event)
-        self._update_sidebar_action_buttons()
-        self._update_sidebar_input_widths()
+        self._sync_sidebar_panel_widths()
         # Keep overlays pinned to the web view.
         if self.web is not None and self.web_loading is not None:
             self.web_loading.setGeometry(self.web.rect())
