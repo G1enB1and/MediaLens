@@ -1,6 +1,29 @@
 # Change Log
 
-## v1.1.22 (Current)
+## v1.1.23 (Current)
+
+### Summary
+
+This release introduces comprehensive OCR support with manual corrections and a new Scanners settings category, giving you full control over background metadata tasks. Detected text is now fully searchable, making it easier than ever to find specific media based on its visual content.
+
+### Highlights
+
+- Full OCR support now includes manual text editing and "Save to DB" capabilities for perfect metadata accuracy.
+- New Scanners settings category provides transparency and control over background Text Detection and OCR task schedules.
+- "Detected Text" is now a first-class searchable field in the guided query builder.
+
+### Added
+
+- Added a Scanners settings category that shows real-time status, last-run times, and configurable intervals for background OCR and Text Detection.
+- Added "Run Now" buttons and enable/disable toggles for each scanner service.
+- Added a manual OCR button in the Details panel to trigger instant text extraction for the selected file.
+- Added an editable "Detected Text" segment in the metadata panel with a "Save to DB" button for manual corrections.
+- Added "Detected Text" as a searchable field in the Advanced Search guided builder.
+- Added manual override switches to explicitly toggle "Text Detection" and "AI Detection" status for any file.
+
+---
+
+## v1.1.22
 
 ### Summary
 

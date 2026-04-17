@@ -1,5 +1,5 @@
 #define MyAppName "MediaLens"
-#define MyAppVersion "v1.1.22" ; Source of Truth: \VERSION
+#define MyAppVersion "v1.1.23" ; Source of Truth: \VERSION
 #define MyAppPublisher "MediaLens"
 #define MyLegacyAppName "MediaManagerX"
 #define MyLegacyPublisher "G1enB1and"
