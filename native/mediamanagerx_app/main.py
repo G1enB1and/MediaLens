@@ -3038,7 +3038,7 @@ class CompareSlotCard(QFrame):
         self._thumb_border_color: str = Theme.get_border(QColor(Theme.ACCENT_DEFAULT))
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 0, 10, 10)
+        layout.setContentsMargins(0, 0, 0, 10)
         layout.setSpacing(8)
 
         self.header_row = QWidget()
@@ -8738,6 +8738,20 @@ class MainWindow(QMainWindow):
             button.setText("S")
         button.setIconSize(QSize(18, 18))
 
+    def _sync_close_button_icons(self) -> None:
+        icon_path = (Path(__file__).with_name("web") / "icons" / "close.svg").as_posix()
+        icon = QIcon(icon_path)
+        for button in (
+            getattr(self, "tag_list_close_btn", None),
+            getattr(self, "btn_close_preview", None),
+            getattr(self, "bottom_panel_close_btn", None),
+        ):
+            if button is None:
+                continue
+            button.setText("")
+            button.setIcon(icon)
+            button.setIconSize(QSize(14, 14))
+
     def _sync_menu_bar_controls(self) -> None:
         try:
             self._set_menu_bar_button_icon(
@@ -9172,7 +9186,7 @@ class MainWindow(QMainWindow):
         self.tag_list_title_lbl.setObjectName("tagListTitleLabel")
         tag_list_header_layout.addWidget(self.tag_list_title_lbl)
         tag_list_header_layout.addStretch(1)
-        self.tag_list_close_btn = QPushButton("X")
+        self.tag_list_close_btn = QPushButton("")
         self.tag_list_close_btn.setObjectName("tagListCloseButton")
         self.tag_list_close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.tag_list_close_btn.setFixedSize(22, 22)
@@ -9312,10 +9326,11 @@ class MainWindow(QMainWindow):
         preview_header_layout.addWidget(self.btn_play_preview)
 
         # Toggle OFF (Hide) button
-        self.btn_close_preview = QPushButton("×")
+        self.btn_close_preview = QPushButton("")
         self.btn_close_preview.setObjectName("btnClosePreview")
         self.btn_close_preview.setToolTip("Hide preview image")
         self.btn_close_preview.setFixedSize(QSize(22, 22))
+        self.btn_close_preview.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_close_preview.clicked.connect(lambda: self.bridge.set_setting_bool("ui.preview_above_details", False))
         preview_header_layout.addWidget(self.btn_close_preview)
 
@@ -9418,14 +9433,23 @@ class MainWindow(QMainWindow):
         self.meta_metadata_date_edit.setObjectName("metaMetadataDateEdit")
         self.meta_metadata_date_edit.setPlaceholderText("YYYY-MM-DD HH:MM:SS")
 
+        self.lbl_original_file_date_cap = QLabel("Original File Date:")
+        self.lbl_original_file_date_cap.setObjectName("metaOriginalFileDateCaption")
         self.meta_original_file_date_lbl = QLabel("")
         self.meta_original_file_date_lbl.setObjectName("metaOriginalFileDateLabel")
+        self.meta_original_file_date_lbl.setWordWrap(True)
 
+        self.lbl_file_created_date_cap = QLabel("Windows ctime:")
+        self.lbl_file_created_date_cap.setObjectName("metaFileCreatedDateCaption")
         self.meta_file_created_date_lbl = QLabel("")
         self.meta_file_created_date_lbl.setObjectName("metaFileCreatedDateLabel")
+        self.meta_file_created_date_lbl.setWordWrap(True)
 
+        self.lbl_file_modified_date_cap = QLabel("Date Modified:")
+        self.lbl_file_modified_date_cap.setObjectName("metaFileModifiedDateCaption")
         self.meta_file_modified_date_lbl = QLabel("")
         self.meta_file_modified_date_lbl.setObjectName("metaFileModifiedDateLabel")
+        self.meta_file_modified_date_lbl.setWordWrap(True)
         
         self.meta_fields_layout = QVBoxLayout()
         self.meta_fields_layout.setContentsMargins(0, 0, 0, 0)
@@ -9729,6 +9753,8 @@ class MainWindow(QMainWindow):
                 continue
             widget.setIndent(0)
             widget.setMargin(0)
+            if attr_name.startswith("lbl_"):
+                widget.setProperty("detailCaption", True)
 
         # AI/EXIF Actions
         action_layout = QVBoxLayout()
@@ -9883,6 +9909,7 @@ class MainWindow(QMainWindow):
         self.right_workspace_stack.addWidget(self.details_workspace)
         self.right_workspace_stack.addWidget(self.bulk_editor_panel)
         self.right_workspace_stack.setCurrentWidget(self.details_workspace)
+        self._sync_close_button_icons()
         self._sync_sidebar_panel_widths()
 
         self._update_native_styles(accent_val)
@@ -9932,7 +9959,7 @@ class MainWindow(QMainWindow):
         self.bottom_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         bottom_layout = QVBoxLayout(self.bottom_panel)
         bottom_layout.setContentsMargins(14, 10, 14, 14)
-        bottom_layout.setSpacing(6)
+        bottom_layout.setSpacing(10)
 
         self.bottom_panel_header_row = QWidget(self.bottom_panel)
         bottom_panel_header_layout = QHBoxLayout(self.bottom_panel_header_row)
@@ -9943,6 +9970,7 @@ class MainWindow(QMainWindow):
         self.bottom_panel_prev_group_btn.setObjectName("bottomPanelGroupNavButton")
         self.bottom_panel_prev_group_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.bottom_panel_prev_group_btn.setToolTip("Jump to Previous Group")
+        self.bottom_panel_prev_group_btn.setFixedHeight(22)
         self.bottom_panel_prev_group_btn.clicked.connect(lambda: self._jump_review_group(-1))
         bottom_panel_header_layout.addWidget(self.bottom_panel_prev_group_btn, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         bottom_panel_header_layout.addStretch(1)
@@ -9957,10 +9985,11 @@ class MainWindow(QMainWindow):
         self.bottom_panel_next_group_btn.setObjectName("bottomPanelGroupNavButton")
         self.bottom_panel_next_group_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.bottom_panel_next_group_btn.setToolTip("Jump to Next Group")
+        self.bottom_panel_next_group_btn.setFixedHeight(22)
         self.bottom_panel_next_group_btn.clicked.connect(lambda: self._jump_review_group(1))
         bottom_panel_header_layout.addWidget(self.bottom_panel_next_group_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
-        self.bottom_panel_close_btn = QPushButton("X")
+        self.bottom_panel_close_btn = QPushButton("")
         self.bottom_panel_close_btn.setObjectName("bottomPanelCloseButton")
         self.bottom_panel_close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.bottom_panel_close_btn.setFixedSize(22, 22)
@@ -12892,13 +12921,13 @@ class MainWindow(QMainWindow):
             self.meta_metadata_date_edit.setText(self._format_editable_datetime((media or {}).get("metadata_date")))
             original_file_text = self._format_sidebar_datetime((media or {}).get("original_file_date"))
             if original_file_text:
-                self.meta_original_file_date_lbl.setText(f"Original File Date: {original_file_text}")
+                self.meta_original_file_date_lbl.setText(original_file_text)
             file_created_text = self._format_sidebar_datetime((media or {}).get("file_created_time"))
             if file_created_text:
-                self.meta_file_created_date_lbl.setText(f"Windows ctime: {file_created_text}")
+                self.meta_file_created_date_lbl.setText(file_created_text)
             file_modified_text = self._format_sidebar_datetime((media or {}).get("modified_time"))
             if file_modified_text:
-                self.meta_file_modified_date_lbl.setText(f"Date Modified: {file_modified_text}")
+                self.meta_file_modified_date_lbl.setText(file_modified_text)
 
             # 2. Status update
             self.meta_status_lbl.setText("Metadata imported to UI. Click 'Save Changes' to persist.")
@@ -13463,13 +13492,13 @@ class MainWindow(QMainWindow):
                 self.meta_metadata_date_edit.setText(self._format_editable_datetime(data.get("metadata_date")))
                 original_file_text = self._format_sidebar_datetime(data.get("original_file_date"))
                 if original_file_text:
-                    self.meta_original_file_date_lbl.setText(f"Original File Date: {original_file_text}")
+                    self.meta_original_file_date_lbl.setText(original_file_text)
                 file_created_text = self._format_sidebar_datetime(data.get("file_created_time"))
                 if file_created_text:
-                    self.meta_file_created_date_lbl.setText(f"Windows ctime: {file_created_text}")
+                    self.meta_file_created_date_lbl.setText(file_created_text)
                 file_modified_text = self._format_sidebar_datetime(data.get("modified_time"))
                 if file_modified_text:
-                    self.meta_file_modified_date_lbl.setText(f"Date Modified: {file_modified_text}")
+                    self.meta_file_modified_date_lbl.setText(file_modified_text)
             except Exception:
                 pass
             self.meta_status_lbl.setText("✓ Metadata embedded in file")
@@ -13643,8 +13672,11 @@ class MainWindow(QMainWindow):
         self.meta_exif_date_taken_edit.setVisible(not is_bulk and show_exif_date_taken)
         self.lbl_metadata_date_cap.setVisible(not is_bulk and show_metadata_date)
         self.meta_metadata_date_edit.setVisible(not is_bulk and show_metadata_date)
+        self.lbl_original_file_date_cap.setVisible(not is_bulk and show_original_file_date)
         self.meta_original_file_date_lbl.setVisible(not is_bulk and show_original_file_date)
+        self.lbl_file_created_date_cap.setVisible(not is_bulk and show_file_created_date)
         self.meta_file_created_date_lbl.setVisible(not is_bulk and show_file_created_date)
+        self.lbl_file_modified_date_cap.setVisible(not is_bulk and show_file_modified_date)
         self.meta_file_modified_date_lbl.setVisible(not is_bulk and show_file_modified_date)
         self.meta_duration_lbl.setVisible(not is_bulk and show_duration)
         self.meta_fps_lbl.setVisible(not is_bulk and show_fps)
@@ -13718,9 +13750,9 @@ class MainWindow(QMainWindow):
         self.meta_size_lbl.setText("File Size: ")
         self.meta_exif_date_taken_edit.setText("")
         self.meta_metadata_date_edit.setText("")
-        self.meta_original_file_date_lbl.setText("Original File Date: ")
-        self.meta_file_created_date_lbl.setText("Windows ctime: ")
-        self.meta_file_modified_date_lbl.setText("Date Modified: ")
+        self.meta_original_file_date_lbl.setText("")
+        self.meta_file_created_date_lbl.setText("")
+        self.meta_file_modified_date_lbl.setText("")
         self.meta_duration_lbl.setText("Duration: ")
         self.meta_fps_lbl.setText("FPS: ")
         self.meta_codec_lbl.setText("Codec: ")
@@ -13843,13 +13875,13 @@ class MainWindow(QMainWindow):
                     self.meta_metadata_date_edit.setText(metadata_date)
                 original_file_date = self._format_sidebar_datetime(data.get("original_file_date"))
                 if original_file_date:
-                    self.meta_original_file_date_lbl.setText(f"Original File Date: {original_file_date}")
+                    self.meta_original_file_date_lbl.setText(original_file_date)
                 file_created_date = self._format_sidebar_datetime(data.get("file_created_time"))
                 if file_created_date:
-                    self.meta_file_created_date_lbl.setText(f"Windows ctime: {file_created_date}")
+                    self.meta_file_created_date_lbl.setText(file_created_date)
                 file_modified_date = self._format_sidebar_datetime(data.get("modified_time"))
                 if file_modified_date:
-                    self.meta_file_modified_date_lbl.setText(f"Date Modified: {file_modified_date}")
+                    self.meta_file_modified_date_lbl.setText(file_modified_date)
                 
                 width = int(data.get("width") or 0)
                 height = int(data.get("height") or 0)
@@ -13882,9 +13914,9 @@ class MainWindow(QMainWindow):
                     stat = p.stat()
                     created_iso = datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc).replace(microsecond=0).isoformat()
                     modified_iso = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat()
-                    self.meta_original_file_date_lbl.setText(f"Original File Date: {self._format_sidebar_datetime(min(created_iso, modified_iso))}")
-                    self.meta_file_created_date_lbl.setText(f"Windows ctime: {self._format_sidebar_datetime(created_iso)}")
-                    self.meta_file_modified_date_lbl.setText(f"Date Modified: {self._format_sidebar_datetime(modified_iso)}")
+                    self.meta_original_file_date_lbl.setText(self._format_sidebar_datetime(min(created_iso, modified_iso)))
+                    self.meta_file_created_date_lbl.setText(self._format_sidebar_datetime(created_iso))
+                    self.meta_file_modified_date_lbl.setText(self._format_sidebar_datetime(modified_iso))
                 except Exception:
                     pass
                 self.meta_fps_lbl.setText("FPS: ")
@@ -14457,9 +14489,9 @@ class MainWindow(QMainWindow):
             "size": [self.meta_size_lbl],
             "exifdatetaken": [self.lbl_exif_date_taken_cap, self.meta_exif_date_taken_edit],
             "metadatadate": [self.lbl_metadata_date_cap, self.meta_metadata_date_edit],
-            "originalfiledate": [self.meta_original_file_date_lbl],
-            "filecreateddate": [self.meta_file_created_date_lbl],
-            "filemodifieddate": [self.meta_file_modified_date_lbl],
+            "originalfiledate": [self.lbl_original_file_date_cap, self.meta_original_file_date_lbl],
+            "filecreateddate": [self.lbl_file_created_date_cap, self.meta_file_created_date_lbl],
+            "filemodifieddate": [self.lbl_file_modified_date_cap, self.meta_file_modified_date_lbl],
             "duration": [self.meta_duration_lbl],
             "fps": [self.meta_fps_lbl],
             "codec": [self.meta_codec_lbl],
@@ -14547,9 +14579,9 @@ class MainWindow(QMainWindow):
         self.meta_res_lbl.setText("Resolution: ")
         self.meta_exif_date_taken_edit.setText("")
         self.meta_metadata_date_edit.setText("")
-        self.meta_original_file_date_lbl.setText("Original File Date: ")
-        self.meta_file_created_date_lbl.setText("Windows ctime: ")
-        self.meta_file_modified_date_lbl.setText("Date Modified: ")
+        self.meta_original_file_date_lbl.setText("")
+        self.meta_file_created_date_lbl.setText("")
+        self.meta_file_modified_date_lbl.setText("")
         self.meta_duration_lbl.setText("Duration: ")
         self.meta_fps_lbl.setText("FPS: ")
         self.meta_codec_lbl.setText("Codec: ")
@@ -14572,8 +14604,11 @@ class MainWindow(QMainWindow):
         self.meta_exif_date_taken_edit.setVisible("exifdatetaken" in active_fields and self._is_metadata_enabled_for_kind(kind, "exifdatetaken", False))
         self.lbl_metadata_date_cap.setVisible("metadatadate" in active_fields and self._is_metadata_enabled_for_kind(kind, "metadatadate", False))
         self.meta_metadata_date_edit.setVisible("metadatadate" in active_fields and self._is_metadata_enabled_for_kind(kind, "metadatadate", False))
+        self.lbl_original_file_date_cap.setVisible("originalfiledate" in active_fields and self._is_metadata_enabled_for_kind(kind, "originalfiledate", False))
         self.meta_original_file_date_lbl.setVisible("originalfiledate" in active_fields and self._is_metadata_enabled_for_kind(kind, "originalfiledate", False))
+        self.lbl_file_created_date_cap.setVisible("filecreateddate" in active_fields and self._is_metadata_enabled_for_kind(kind, "filecreateddate", False))
         self.meta_file_created_date_lbl.setVisible("filecreateddate" in active_fields and self._is_metadata_enabled_for_kind(kind, "filecreateddate", False))
+        self.lbl_file_modified_date_cap.setVisible("filemodifieddate" in active_fields and self._is_metadata_enabled_for_kind(kind, "filemodifieddate", False))
         self.meta_file_modified_date_lbl.setVisible("filemodifieddate" in active_fields and self._is_metadata_enabled_for_kind(kind, "filemodifieddate", False))
         self.meta_duration_lbl.setVisible("duration" in active_fields and self._is_metadata_enabled_for_kind(kind, "duration", True))
         self.meta_fps_lbl.setVisible("fps" in active_fields and self._is_metadata_enabled_for_kind(kind, "fps", True))
@@ -15176,6 +15211,7 @@ class MainWindow(QMainWindow):
         combo_selected_text = Theme.mix(text, accent, 0.76)
         combo_hover_bg = Theme.mix(combo_bg, "#000000" if is_light else "#ffffff", 0.04 if is_light else 0.07)
         combo_hover_text = text if is_light else "#ffffff"
+        close_hover_bg = Theme.get_btn_save_hover(accent)
         
         # Only touch the native title bar after the top-level window is visible.
         # Forcing winId() during construction can create an early transient HWND
@@ -15326,17 +15362,17 @@ class MainWindow(QMainWindow):
                     background: transparent;
                 }}
                 QPushButton#tagListCloseButton {{
-                    background: transparent;
-                    border: none;
+                    background-color: {Theme.get_control_bg(accent)};
+                    border: 1px solid {Theme.get_border(accent)};
                     border-radius: 4px;
-                    color: {text_muted};
-                    font-size: 14px;
+                    color: {text};
                     padding: 0px;
                     margin: 0px;
                 }}
                 QPushButton#tagListCloseButton:hover {{
-                    background-color: {Theme.get_control_bg(accent)};
+                    background-color: {close_hover_bg};
                     color: {text};
+                    border-color: {accent_str};
                 }}
                 QComboBox#tagListSelect, QComboBox#tagListSortSelect {{
                     background-color: {combo_bg};
@@ -15527,6 +15563,11 @@ class MainWindow(QMainWindow):
                 QPushButton:hover {{
                     border-color: {accent.name()};
                 }}
+                QPushButton#bottomPanelGroupNavButton {{
+                    min-height: 22px;
+                    max-height: 22px;
+                    padding: 0px 12px;
+                }}
                 {scrollbar_style}
             """)
             if hasattr(self, "bottom_panel_header"):
@@ -15582,8 +15623,24 @@ class MainWindow(QMainWindow):
                 padding: 0px;
                 margin: 0px;
             }}
-            QLabel#previewHeaderLabel, QLabel#detailsHeaderLabel {{ font-weight: bold; }}
-            QLabel#metaGroupLabel {{ font-weight: bold; margin-top: 12px; margin-bottom: 4px; }}
+            QLabel[detailCaption="true"] {{
+                font-weight: 700;
+            }}
+            QLabel#previewHeaderLabel, QLabel#detailsHeaderLabel {{
+                font-weight: 800;
+                font-size: 14px;
+            }}
+            QLabel#metaGroupLabel {{
+                font-weight: 800;
+                font-size: 14px;
+                margin-top: 12px;
+                margin-bottom: 4px;
+            }}
+            QLabel#metaOriginalFileDateLabel, QLabel#metaFileCreatedDateLabel, QLabel#metaFileModifiedDateLabel {{
+                color: {text};
+                padding: 4px;
+                min-height: 18px;
+            }}
             QLabel#previewImageLabel {{
                 background-color: {Theme.get_control_bg(accent)};
                 border: 1px solid {Theme.get_border(accent)};
@@ -15597,17 +15654,19 @@ class MainWindow(QMainWindow):
                 padding: 4px;
                 color: {text};
             }}
-            QPushButton#btnClosePreview, QPushButton#btnShowPreviewInline {{
-                background: transparent;
-                border: none;
+            QPushButton#btnClosePreview {{
+                background-color: {Theme.get_control_bg(accent)};
+                border: 1px solid {Theme.get_border(accent)};
                 border-radius: 4px;
-                color: {text_muted};
-                font-size: 14px;
+                color: {text};
                 padding: 0px;
                 margin: 0px;
             }}
             
             QPushButton#btnShowPreviewInline {{
+                background: transparent;
+                border: none;
+                border-radius: 4px;
                 padding: 0px;
                 margin: 0px;
                 color: {text};
@@ -15615,12 +15674,12 @@ class MainWindow(QMainWindow):
                 font-weight: bold;
             }}
 
-            QPushButton#btnClosePreview:hover, QPushButton#btnShowPreviewInline:hover {{
-                background-color: {Theme.get_control_bg(accent)};
+            QPushButton#btnClosePreview:hover {{
+                background-color: {close_hover_bg};
                 color: {text};
+                border-color: {accent_str};
             }}
-            
-            QPushButton#btnClosePreview:hover, QPushButton#btnShowPreviewInline:hover {{
+            QPushButton#btnShowPreviewInline:hover {{
                 background-color: {Theme.get_control_bg(accent)};
                 color: {text};
             }}
@@ -15841,6 +15900,7 @@ class MainWindow(QMainWindow):
                 menu.repaint()
         except Exception:
             pass
+        self._sync_close_button_icons()
         self._apply_preview_image_label_style()
         self._sync_menu_bar_controls()
 
@@ -15962,7 +16022,7 @@ class MainWindow(QMainWindow):
         thumb_border = Theme.get_border(accent)
         btn_border = Theme.get_input_border(accent)
         close_btn_bg = "#eceef2" if is_light else "#2f2f2f"
-        close_btn_hover_bg = "#e4e8ee" if is_light else "#3a3a3a"
+        close_btn_hover_bg = Theme.get_btn_save_hover(accent)
         close_btn_text = text if is_light else "#f2f2f2"
         close_btn_hover_text = text if is_light else "#ffffff"
 
@@ -15979,7 +16039,6 @@ class MainWindow(QMainWindow):
                 color: {close_btn_text};
                 border: 1px solid {btn_border};
                 border-radius: 4px;
-                font-weight: 700;
                 padding: 0px;
             }}
             QPushButton#bottomPanelCloseButton:hover {{
