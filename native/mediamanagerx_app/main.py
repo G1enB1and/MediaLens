@@ -4005,6 +4005,10 @@ class Bridge(QObject):
         self._text_processing_active: bool = False
         self._text_processing_scope_key: tuple = ("none",)
         self._text_processing_thread: threading.Thread | None = None
+        self._lightbox_background_pause_depth: int = 0
+        self._lightbox_paused_text_processing: bool = False
+        self._scan_performance_paused: bool = False
+        self._performance_pause_lock = threading.Lock()
         self._compare_paths: dict[str, str] = {"left": "", "right": ""}
         self._compare_keep_paths: set[str] = set()
         self._compare_delete_paths: set[str] = set()
@@ -4848,6 +4852,42 @@ class Bridge(QObject):
         self._text_processing_active = False
         self._text_processing_scope_key = ("none",)
         self._text_processing_thread = None
+
+    def _wait_while_scan_performance_paused(self) -> None:
+        while True:
+            with self._performance_pause_lock:
+                paused = bool(self._scan_performance_paused)
+            if not paused or self._scan_abort:
+                return
+            time.sleep(0.1)
+
+    @Slot()
+    def pause_lightbox_background_work(self) -> None:
+        with self._performance_pause_lock:
+            self._lightbox_background_pause_depth += 1
+            self._scan_performance_paused = True
+            should_pause_text = (
+                self._lightbox_background_pause_depth == 1
+                and self._text_processing_active
+                and not self._text_processing_paused
+            )
+            if should_pause_text:
+                self._lightbox_paused_text_processing = True
+                self._text_processing_paused = True
+
+    @Slot()
+    def resume_lightbox_background_work(self) -> None:
+        should_resume_text = False
+        with self._performance_pause_lock:
+            if self._lightbox_background_pause_depth > 0:
+                self._lightbox_background_pause_depth -= 1
+            if self._lightbox_background_pause_depth > 0:
+                return
+            self._scan_performance_paused = False
+            should_resume_text = bool(self._lightbox_paused_text_processing)
+            self._lightbox_paused_text_processing = False
+        if should_resume_text:
+            self._ensure_background_text_processing(allow_concurrent_scan=True)
 
     def _current_text_scope_key(self, folders: list[str] | None = None, collection_id: int | None = None) -> tuple:
         if folders:
@@ -7854,6 +7894,7 @@ class Bridge(QObject):
         from datetime import datetime, timezone
         total, count = len(paths), 0
         for i, p in enumerate(paths):
+            self._wait_while_scan_performance_paused()
             if self._scan_abort: break
             if emit_progress:
                 self.scanProgress.emit(p.name, int(((i + 1) / total) * 100) if total > 0 else 100)

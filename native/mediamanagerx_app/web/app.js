@@ -6181,6 +6181,43 @@ document.addEventListener('DOMContentLoaded', () => {
 
 let gIndex = -1;
 let gLightboxNativeVideo = false;
+let gLightboxPerformanceSuspended = false;
+
+function pauseGalleryAnimatedImagesForLightbox() {
+  document.querySelectorAll('main img[data-animated="true"][src]').forEach((img) => {
+    if (img.hasAttribute('data-lightbox-paused-src')) return;
+    const src = img.getAttribute('src') || '';
+    if (!src) return;
+    img.setAttribute('data-lightbox-paused-src', src);
+    img.removeAttribute('src');
+  });
+}
+
+function resumeGalleryAnimatedImagesAfterLightbox() {
+  document.querySelectorAll('img[data-lightbox-paused-src]').forEach((img) => {
+    const src = img.getAttribute('data-lightbox-paused-src') || '';
+    img.removeAttribute('data-lightbox-paused-src');
+    if (src) img.setAttribute('src', src);
+  });
+}
+
+function suspendLightboxBackgroundWork() {
+  if (gLightboxPerformanceSuspended) return;
+  gLightboxPerformanceSuspended = true;
+  pauseGalleryAnimatedImagesForLightbox();
+  if (gBridge && gBridge.pause_lightbox_background_work) {
+    gBridge.pause_lightbox_background_work();
+  }
+}
+
+function resumeLightboxBackgroundWork() {
+  if (!gLightboxPerformanceSuspended) return;
+  gLightboxPerformanceSuspended = false;
+  resumeGalleryAnimatedImagesAfterLightbox();
+  if (gBridge && gBridge.resume_lightbox_background_work) {
+    gBridge.resume_lightbox_background_work();
+  }
+}
 
 function findNearestMediaIndex(idx, direction = 1) {
   if (!Array.isArray(gMedia) || gMedia.length === 0) return -1;
@@ -6197,8 +6234,6 @@ function openLightboxByIndex(idx) {
   const img = document.getElementById('lightboxImg');
   const vid = document.getElementById('lightboxVideo');
   if (!lb || !img || !vid) return;
-
-  document.body.classList.add('lightbox-open');
 
   // Stop native overlay ONLY if it was previously opened for a video.
   if (gLightboxNativeVideo && gBridge && gBridge.close_native_video) {
@@ -6227,6 +6262,8 @@ function openLightboxByIndex(idx) {
   gIndex = idx;
 
   const item = gMedia[gIndex];
+  document.body.classList.add('lightbox-open');
+  suspendLightboxBackgroundWork();
   if (item.media_type === 'video') {
     // Open web lightbox chrome, but delegate actual video rendering to native overlay.
     // (QtWebEngine codec support is unreliable on Windows.)
@@ -6313,6 +6350,7 @@ function closeLightbox() {
 
   gIndex = -1;
   document.body.style.overflow = '';
+  resumeLightboxBackgroundWork();
 }
 
 // Called from native when the native overlay closes.
