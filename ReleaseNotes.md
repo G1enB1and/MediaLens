@@ -1,20 +1,19 @@
-## MediaLens v1.1.20
+## MediaLens v1.1.21
 
-### Summary
+### ✨ Summary
 
-This release makes MediaLens easier to support on more machines with safer debugging-log bundles, clearer failure details, and more self-contained video tooling.
+This release improves overall UI polish, tag management, and video playback performance. The tag workflow is smoother with better dropdowns and database handling, while the details panel and image comparison view are more polished and responsive.
 
-### Highlights
+### 🔥 Highlights
 
-- **Safer Support Logs:** MediaLens now creates sanitized debugging-log bundles that exclude private app data such as databases, settings, thumbnails, recycle-bin files, and media files.
-- **Optional Log Submission:** A new Help menu flow can submit debugging logs after user consent once a support endpoint is configured.
-- **More Reliable Video Support:** Packaged builds now include FFmpeg and FFprobe, so video thumbnails and probing no longer depend on tools already installed on the user's PC.
+- **Smoother Tag Management**
+    Hide list panels, improved dropdowns, and robust database entries that preserve capitalization without duplication.
+- **Polished UI & Interactions**
+    The Details panel and Image Comparison view feel more polished with smoother resizing, aligned buttons, and consistent margins.
+- **Improved Lightbox Playback**
+    Video playback in the lightbox performs more consistently because it now automatically pauses background scanners and animated gifs.
 
-### Notes
+---
 
-- Debugging logs now live under `%APPDATA%\MediaLens\debugging-logs\`.
-- Existing root-level app logs, faulthandler logs, and crash reports are moved into the new debugging-log folder automatically.
-- The included DreamHost support endpoint template is a starter for future low-cost support-log uploads.
-
-Full Changelog:
-https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md
+📄 Full Changelog:
+<https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md>

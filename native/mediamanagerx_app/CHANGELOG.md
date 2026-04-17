@@ -1,6 +1,38 @@
 # Change Log
 
-## v1.1.20 (Current)
+## v1.1.21 (Current)
+
+### Summary
+
+This release improves overall UI polish, tag management, and playback performance. The tag workflow is smoother with better dropdowns and database handling, while the details panel and image comparison view are more polished and responsive. Video playback in the lightbox is also more stable with background tasks pausing automatically.
+
+### Highlights
+
+- Tag management is now smoother with the ability to hide list panels, improved dropdowns, and database entries that preserve capitalization.
+- The Details panel and Image Comparison view feel more polished with smoother resizing, aligned buttons, and consistent margins.
+- Video playback in the lightbox performs more consistently because it now automatically pauses background scanners and animated gifs.
+
+### Added
+
+- Added the ability to hide Tag lists to keep the workspace tidy.
+
+### Changed
+
+- Restyled the Tag Lists dropdown and updated the empty state UI when no lists exist.
+- Changed tag database handling to preserve capitalization while intelligently ignoring duplicates with different capitalization.
+- Changed Details panel resizing logic to a single shared calculation, keeping buttons and text inputs smoothly aligned while drag-resizing.
+- Adjusted margins and padding in the Image Comparison panel for a cleaner look.
+- Replaced the comparison close buttons with a symmetrical SVG icon featuring more consistent colors and hover effects.
+- Improved lightbox video playback performance by automatically pausing background scanners and animated gifs while a video is playing.
+
+### Fixed
+
+- Fixed tag creation so adding a new tag from the list creates a database entry immediately even if scanning hasn't processed it yet.
+- Fixed tag counts to correctly update when showing or hiding nested files and hidden files.
+
+---
+
+## v1.1.20
 
 ### Summary
 
