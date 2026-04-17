@@ -801,7 +801,7 @@ main {
   align-items: flex-start;
   flex: 1;
   overflow-x: hidden;
-  overflow-y: auto;
+  overflow-y: scroll;
   background: var(--bg);
   position: relative;
 }

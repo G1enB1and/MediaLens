@@ -56,6 +56,7 @@ let gGalleryRelayoutRaf = 0;
 let gGalleryResizeObserver = null;
 let gGalleryLastLayoutWidth = 0;
 let gGalleryLastLayoutHeight = 0;
+let gIsRenderingGallery = false;
 let gDuplicateKeepOverrides = new Map();
 let gDuplicateDeleteOverrides = new Map();
 let gDuplicateBestOverrides = new Map();
@@ -3495,7 +3496,10 @@ function runGalleryRelayout(reason = '') {
     applyDetailsColumnWidths(mediaList);
   }
 
-  if (Array.isArray(gMedia) && gMedia.length > 0 && !isDuplicateModeActive()) {
+  // Only perform a full DOM rerender if we are in Masonry mode (as it calculates column flows)
+  // or if explicitly forced. Standard grid/list modes rely on CSS for responsiveness.
+  const needsFullRerender = (gGalleryViewMode === 'masonry') || reason === 'force';
+  if (needsFullRerender && Array.isArray(gMedia) && gMedia.length > 0 && !isDuplicateModeActive()) {
     rerenderCurrentMediaPreservingScroll();
   }
 
@@ -3509,10 +3513,14 @@ function runGalleryRelayout(reason = '') {
 }
 
 function scheduleGalleryRelayout(reason = '') {
+  if (gIsRenderingGallery) return;
+
   const metrics = getGalleryLayoutMetrics();
   if (!metrics.mediaList) return;
+
   const widthChanged = Math.abs(metrics.width - gGalleryLastLayoutWidth) > 1;
   const heightChanged = Math.abs(metrics.height - gGalleryLastLayoutHeight) > 1;
+
   if (!widthChanged && !heightChanged && reason !== 'force') {
     return;
   }
@@ -3521,6 +3529,7 @@ function scheduleGalleryRelayout(reason = '') {
     clearTimeout(gGalleryRelayoutTimer);
     gGalleryRelayoutTimer = 0;
   }
+
   gGalleryRelayoutTimer = window.setTimeout(() => {
     gGalleryRelayoutTimer = 0;
     if (gGalleryRelayoutRaf) {
@@ -3529,9 +3538,10 @@ function scheduleGalleryRelayout(reason = '') {
     }
     gGalleryRelayoutRaf = requestAnimationFrame(() => {
       gGalleryRelayoutRaf = 0;
+      if (gIsRenderingGallery) return;
       runGalleryRelayout(reason);
     });
-  }, 90);
+  }, 150);
 }
 
 function initGalleryResizeObserver() {
@@ -5805,170 +5815,211 @@ function wireCtxMenu() {
 // applySearch is no longer used for local filtering.
 
 function renderMediaList(items, scrollToTop = true) {
-  const el = document.getElementById('mediaList');
-  if (!el) return;
-  if (!el.dataset.internalDropCancelBound) {
-    el.addEventListener('dragover', (e) => {
-      if (!isInternalGalleryDragEvent(e)) return;
-      const folderTarget = getFolderCardFromPoint(e.clientX, e.clientY, e.target);
-      const paths = getDraggedPathsFromEvent(e);
-      if (folderTarget) {
-        const targetPath = folderTarget.getAttribute('data-path') || '';
-        const eligiblePaths = getEligibleDroppedPaths(paths, targetPath);
-        if (eligiblePaths.length) {
-          e.preventDefault();
-          e.stopPropagation();
-          clearGalleryFolderDropTargets();
-          folderTarget.classList.add('folder-drop-target');
-          gCurrentTargetFolderName = getItemName({ path: targetPath, is_folder: true });
-          gCurrentDropFolderPath = targetPath;
-          const isCopy = e.ctrlKey || e.metaKey;
-          if (e.dataTransfer) e.dataTransfer.dropEffect = isCopy ? 'copy' : 'move';
-          if (gBridge && gBridge.update_drag_tooltip) {
-            const count = gCurrentDragCount || eligiblePaths.length || 1;
-            gBridge.update_drag_tooltip(count, isCopy, gCurrentTargetFolderName);
-          }
-          return;
-        }
-      }
-      clearGalleryFolderDropTargets();
-      e.preventDefault();
-      if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
+  if (gIsRenderingGallery) return;
+  gIsRenderingGallery = true;
+
+  const finalizeRender = () => {
+    requestAnimationFrame(() => {
+      gIsRenderingGallery = false;
     });
-    el.addEventListener('dragleave', (e) => {
-      if (el.contains(e.relatedTarget)) return;
-      clearGalleryFolderDropTargets();
-    });
-    el.addEventListener('drop', (e) => {
-      const folderTarget = getFolderCardFromPoint(e.clientX, e.clientY, e.target);
-      if (folderTarget && isInternalGalleryDragEvent(e)) {
-        const paths = getDraggedPathsFromEvent(e);
-        const targetPath = folderTarget.getAttribute('data-path') || gCurrentDropFolderPath || '';
-        const eligiblePaths = getEligibleDroppedPaths(paths, targetPath);
-        if (eligiblePaths.length) {
-          e.preventDefault();
-          e.stopPropagation();
-          clearGalleryFolderDropTargets();
-          const isCopy = e.ctrlKey || e.metaKey;
-          if (gBridge && gBridge.hide_drag_tooltip) gBridge.hide_drag_tooltip();
-          debugGalleryDrag(`gallery drop execute target=${targetPath} count=${eligiblePaths.length} op=${isCopy ? 'copy' : 'move'}`);
-          setGlobalLoading(true, isCopy ? 'Copying…' : 'Moving…', 25);
-          if (gBridge && (isCopy ? gBridge.copy_paths_async : gBridge.move_paths_async)) {
-            const op = isCopy ? gBridge.copy_paths_async : gBridge.move_paths_async;
-            op.call(gBridge, eligiblePaths, targetPath);
-          }
-          return;
-        }
-      }
-      debugGalleryDrag(`gallery drop cancel hovered=${gCurrentDropFolderPath || ''} dragCount=${gCurrentDragPaths.length}`);
-      cancelInternalGalleryDrop(e);
-    });
-    el.dataset.internalDropCancelBound = 'true';
-  }
-  applyGalleryViewMode(gGalleryViewMode);
+  };
 
-  el.innerHTML = '';
-  const main = document.querySelector('main');
-  if (scrollToTop && main && !gPendingScrollAnchor) {
-    main.scrollTop = 0;
-  }
-  gMedia = Array.isArray(items) ? items : [];
-  gMedia.forEach((item, idx) => { item.__galleryIndex = idx; });
-  reconcileSelectionWithVisibleItems(gMedia);
-  const viewItems = gMedia;
-
-  resetMediaState();
-  ensureMediaObserver();
-
-  // Cancel any previous background idle drain
-  if (gBackgroundIdleId) {
-    if (typeof cancelIdleCallback !== 'undefined') cancelIdleCallback(gBackgroundIdleId);
-    else clearTimeout(gBackgroundIdleId);
-    gBackgroundIdleId = null;
-  }
-  gBackgroundQueue = [];
-
-  gTotalOnPage = 0;
-  gLoadedOnPage = 0;
-  if (!items || items.length === 0) {
-    const div = document.createElement('div');
-    div.className = 'empty';
-    div.textContent = isDuplicateModeActive()
-      ? (shouldShowScanWaitingEmptyState()
-        ? 'Scanning current folder. Wait for results to finish loading.'
-        : ((getReviewMode() === 'similar' || getReviewMode() === 'similar_only') ? 'No similar images found in the current scope.' : 'No duplicates found in the current scope.'))
-      : 'No media discovered yet.';
-    el.appendChild(div);
-    renderTimelineRail([]);
-    return;
-  }
-
-  if (viewItems.length === 0) {
-    const div = document.createElement('div');
-    div.className = 'empty';
-    div.textContent = 'No results.';
-    el.appendChild(div);
-    renderTimelineRail([]);
-    return;
-  }
-
-  if (isDuplicateModeActive()) {
-    if (gReviewLoadingActive) {
-      const staging = document.createElement('div');
-      const groups = renderDuplicateMediaList(staging, viewItems, { deferFinalize: true });
-      staging.classList.forEach((cls) => el.classList.add(cls));
-      const reviewLoadingGeneration = gReviewLoadingGeneration;
-      prioritizeVisibleMediaLoads(staging);
-      waitForInitialReviewCards(staging, reviewLoadingGeneration).then(() => {
-        if (!gReviewLoadingActive || reviewLoadingGeneration !== gReviewLoadingGeneration) return;
-        el.replaceChildren(...Array.from(staging.childNodes));
-        finalizeDuplicateMediaList(el, groups);
-      });
-    } else {
-      renderDuplicateMediaList(el, viewItems);
+  try {
+    const el = document.getElementById('mediaList');
+    if (!el) {
+      finalizeRender();
+      return;
     }
-    return;
-  }
+    if (!el.dataset.internalDropCancelBound) {
+      el.addEventListener('dragover', (e) => {
+        if (!isInternalGalleryDragEvent(e)) return;
+        const folderTarget = getFolderCardFromPoint(e.clientX, e.clientY, e.target);
+        const paths = getDraggedPathsFromEvent(e);
+        if (folderTarget) {
+          const targetPath = folderTarget.getAttribute('data-path') || '';
+          const eligiblePaths = getEligibleDroppedPaths(paths, targetPath);
+          if (eligiblePaths.length) {
+            e.preventDefault();
+            e.stopPropagation();
+            clearGalleryFolderDropTargets();
+            folderTarget.classList.add('folder-drop-target');
+            gCurrentTargetFolderName = getItemName({ path: targetPath, is_folder: true });
+            gCurrentDropFolderPath = targetPath;
+            const isCopy = e.ctrlKey || e.metaKey;
+            if (e.dataTransfer) e.dataTransfer.dropEffect = isCopy ? 'copy' : 'move';
+            if (gBridge && gBridge.update_drag_tooltip) {
+              const count = gCurrentDragCount || eligiblePaths.length || 1;
+              gBridge.update_drag_tooltip(count, isCopy, gCurrentTargetFolderName);
+            }
+            return;
+          }
+        }
+        clearGalleryFolderDropTargets();
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
+      });
+      el.addEventListener('dragleave', (e) => {
+        if (el.contains(e.relatedTarget)) return;
+        clearGalleryFolderDropTargets();
+      });
+      el.addEventListener('drop', (e) => {
+        const folderTarget = getFolderCardFromPoint(e.clientX, e.clientY, e.target);
+        if (folderTarget && isInternalGalleryDragEvent(e)) {
+          const paths = getDraggedPathsFromEvent(e);
+          const targetPath = folderTarget.getAttribute('data-path') || gCurrentDropFolderPath || '';
+          const eligiblePaths = getEligibleDroppedPaths(paths, targetPath);
+          if (eligiblePaths.length) {
+            e.preventDefault();
+            e.stopPropagation();
+            clearGalleryFolderDropTargets();
+            const isCopy = e.ctrlKey || e.metaKey;
+            if (gBridge && gBridge.hide_drag_tooltip) gBridge.hide_drag_tooltip();
+            debugGalleryDrag(`gallery drop execute target=${targetPath} count=${eligiblePaths.length} op=${isCopy ? 'copy' : 'move'}`);
+            setGlobalLoading(true, isCopy ? 'Copying…' : 'Moving…', 25);
+            if (gBridge && (isCopy ? gBridge.copy_paths_async : gBridge.move_paths_async)) {
+              const op = isCopy ? gBridge.copy_paths_async : gBridge.move_paths_async;
+              op.call(gBridge, eligiblePaths, targetPath);
+            }
+            return;
+          }
+        }
+        debugGalleryDrag(`gallery drop cancel hovered=${gCurrentDropFolderPath || ''} dragCount=${gCurrentDragPaths.length}`);
+        cancelInternalGalleryDrop(e);
+      });
+      el.dataset.internalDropCancelBound = 'true';
+    }
+    applyGalleryViewMode(gGalleryViewMode);
 
-  if (gGroupBy === 'date') {
-    renderGroupedMediaList(el, viewItems);
-    return;
-  }
-
-  if (gGalleryViewMode !== 'masonry') {
-    renderStructuredMediaList(el, viewItems);
-    renderTimelineRail([]);
-    return;
-  }
-
-  viewItems.forEach((item, idx) => {
-    el.appendChild(createMasonryCard(item, idx));
-  });
-
-  // After building all cards, queue the items NOT yet visible into the
-  // background idle-time loader. The IntersectionObserver will handle them
-  // first if the user scrolls near them; the background queue will handle
-  // anything that hasn't been touched yet once the browser is idle.
-  requestAnimationFrame(() => {
-    prioritizeVisibleMediaLoads(el);
-    const unobserved = el.querySelectorAll('img[data-src]:not([src]), img[data-poster-path]:not([src]), img[data-video-path]:not([src])');
-    unobserved.forEach(img => {
-      if (gPosterRequested.has(img)) return;
-      const imgSrc = img.getAttribute('data-src');
-      const posterPath = img.getAttribute('data-poster-path');
-      const path = img.getAttribute('data-video-path');
-      const item = gMedia.find(m => m.path === path || m.url === imgSrc); // Find the original item to get width/height
-      if (imgSrc) {
-        gBackgroundQueue.push({ type: 'image', el: img, imgSrc });
-      } else if (posterPath) {
-        gBackgroundQueue.push({ type: 'poster', el: img, path: posterPath });
-      } else if (path && item) {
-        gBackgroundQueue.push({ type: 'video', el: img, path, width: item.width, height: item.height });
-      }
+    el.innerHTML = '';
+    const main = document.querySelector('main');
+    if (scrollToTop && main && !gPendingScrollAnchor) {
+      main.scrollTop = 0;
+    }
+    gMedia = Array.isArray(items) ? items : [];
+    gMedia.forEach((item, idx) => {
+      item.__galleryIndex = idx;
     });
-    scheduleBackgroundDrain();
-  });
-  renderTimelineRail([]);
+    reconcileSelectionWithVisibleItems(gMedia);
+    const viewItems = gMedia;
+
+    resetMediaState();
+    ensureMediaObserver();
+
+    // Cancel any previous background idle drain
+    if (gBackgroundIdleId) {
+      if (typeof cancelIdleCallback !== 'undefined') cancelIdleCallback(gBackgroundIdleId);
+      else clearTimeout(gBackgroundIdleId);
+      gBackgroundIdleId = null;
+    }
+    gBackgroundQueue = [];
+
+    gTotalOnPage = 0;
+    gLoadedOnPage = 0;
+    if (!items || items.length === 0) {
+      const div = document.createElement('div');
+      div.className = 'empty';
+      div.textContent = isDuplicateModeActive()
+        ? (shouldShowScanWaitingEmptyState()
+          ? 'Scanning current folder. Wait for results to finish loading.'
+          : ((getReviewMode() === 'similar' || getReviewMode() === 'similar_only') ? 'No similar images found in the current scope.' : 'No duplicates found in the current scope.'))
+        : 'No media discovered yet.';
+      el.appendChild(div);
+      renderTimelineRail([]);
+      finalizeRender();
+      return;
+    }
+
+    if (viewItems.length === 0) {
+      const div = document.createElement('div');
+      div.className = 'empty';
+      div.textContent = 'No results.';
+      el.appendChild(div);
+      renderTimelineRail([]);
+      finalizeRender();
+      return;
+    }
+
+    if (isDuplicateModeActive()) {
+      if (gReviewLoadingActive) {
+        const staging = document.createElement('div');
+        const groups = renderDuplicateMediaList(staging, viewItems, {
+          deferFinalize: true
+        });
+        staging.classList.forEach((cls) => el.classList.add(cls));
+        const reviewLoadingGeneration = gReviewLoadingGeneration;
+        prioritizeVisibleMediaLoads(staging);
+        waitForInitialReviewCards(staging, reviewLoadingGeneration).then(() => {
+          if (!gReviewLoadingActive || reviewLoadingGeneration !== gReviewLoadingGeneration) return;
+          el.replaceChildren(...Array.from(staging.childNodes));
+          finalizeDuplicateMediaList(el, groups);
+        });
+      } else {
+        renderDuplicateMediaList(el, viewItems);
+      }
+      finalizeRender();
+      return;
+    }
+
+    if (gGroupBy === 'date') {
+      renderGroupedMediaList(el, viewItems);
+      finalizeRender();
+      return;
+    }
+
+    if (gGalleryViewMode !== 'masonry') {
+      renderStructuredMediaList(el, viewItems);
+      renderTimelineRail([]);
+      finalizeRender();
+      return;
+    }
+
+    viewItems.forEach((item, idx) => {
+      el.appendChild(createMasonryCard(item, idx));
+    });
+
+    // After building all cards, queue the items NOT yet visible into the
+    // background idle-time loader. The IntersectionObserver will handle them
+    // first if the user scrolls near them; the background queue will handle
+    // anything that hasn't been touched yet once the browser is idle.
+    requestAnimationFrame(() => {
+      prioritizeVisibleMediaLoads(el);
+      const unobserved = el.querySelectorAll('img[data-src]:not([src]), img[data-poster-path]:not([src]), img[data-video-path]:not([src])');
+      unobserved.forEach(img => {
+        if (gPosterRequested.has(img)) return;
+        const imgSrc = img.getAttribute('data-src');
+        const posterPath = img.getAttribute('data-poster-path');
+        const path = img.getAttribute('data-video-path');
+        const item = gMedia.find(m => m.path === path || m.url === imgSrc); // Find the original item to get width/height
+        if (imgSrc) {
+          gBackgroundQueue.push({
+            type: 'image',
+            el: img,
+            imgSrc
+          });
+        } else if (posterPath) {
+          gBackgroundQueue.push({
+            type: 'poster',
+            el: img,
+            path: posterPath
+          });
+        } else if (path && item) {
+          gBackgroundQueue.push({
+            type: 'video',
+            el: img,
+            path,
+            width: item.width,
+            height: item.height
+          });
+        }
+      });
+      scheduleBackgroundDrain();
+    });
+    renderTimelineRail([]);
+    finalizeRender();
+  } catch (err) {
+    finalizeRender();
+    throw err;
+  }
 }
 
 
