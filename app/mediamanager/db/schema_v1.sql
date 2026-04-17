@@ -188,6 +188,7 @@ CREATE TABLE IF NOT EXISTS tag_lists (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
   sort_mode TEXT NOT NULL DEFAULT 'none',
+  is_hidden INTEGER DEFAULT 0,
   created_at_utc TEXT NOT NULL,
   updated_at_utc TEXT NOT NULL
 );

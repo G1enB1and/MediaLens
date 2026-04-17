@@ -10,11 +10,21 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
-def list_tag_lists(conn: sqlite3.Connection) -> list[dict]:
+def _ensure_tag_list_columns(conn: sqlite3.Connection) -> None:
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(tag_lists)").fetchall()}
+    if "is_hidden" not in cols:
+        conn.execute("ALTER TABLE tag_lists ADD COLUMN is_hidden INTEGER DEFAULT 0")
+        conn.commit()
+
+
+def list_tag_lists(conn: sqlite3.Connection, include_hidden: bool = True) -> list[dict]:
+    _ensure_tag_list_columns(conn)
+    where_sql = "" if include_hidden else "WHERE COALESCE(is_hidden, 0) = 0"
     rows = conn.execute(
-        """
-        SELECT id, name, sort_mode, created_at_utc, updated_at_utc
+        f"""
+        SELECT id, name, sort_mode, COALESCE(is_hidden, 0), created_at_utc, updated_at_utc
         FROM tag_lists
+        {where_sql}
         ORDER BY LOWER(name), id
         """
     ).fetchall()
@@ -23,17 +33,19 @@ def list_tag_lists(conn: sqlite3.Connection) -> list[dict]:
             "id": int(row[0]),
             "name": str(row[1] or ""),
             "sort_mode": str(row[2] or "none"),
-            "created_at_utc": str(row[3] or ""),
-            "updated_at_utc": str(row[4] or ""),
+            "is_hidden": bool(row[3]),
+            "created_at_utc": str(row[4] or ""),
+            "updated_at_utc": str(row[5] or ""),
         }
         for row in rows
     ]
 
 
 def get_tag_list(conn: sqlite3.Connection, tag_list_id: int) -> dict | None:
+    _ensure_tag_list_columns(conn)
     row = conn.execute(
         """
-        SELECT id, name, sort_mode, created_at_utc, updated_at_utc
+        SELECT id, name, sort_mode, COALESCE(is_hidden, 0), created_at_utc, updated_at_utc
         FROM tag_lists
         WHERE id = ?
         """,
@@ -45,12 +57,14 @@ def get_tag_list(conn: sqlite3.Connection, tag_list_id: int) -> dict | None:
         "id": int(row[0]),
         "name": str(row[1] or ""),
         "sort_mode": str(row[2] or "none"),
-        "created_at_utc": str(row[3] or ""),
-        "updated_at_utc": str(row[4] or ""),
+        "is_hidden": bool(row[3]),
+        "created_at_utc": str(row[4] or ""),
+        "updated_at_utc": str(row[5] or ""),
     }
 
 
 def create_tag_list(conn: sqlite3.Connection, name: str) -> dict | None:
+    _ensure_tag_list_columns(conn)
     clean = str(name or "").strip()
     if not clean:
         return None
@@ -71,6 +85,7 @@ def create_tag_list(conn: sqlite3.Connection, name: str) -> dict | None:
 
 
 def rename_tag_list(conn: sqlite3.Connection, tag_list_id: int, name: str) -> bool:
+    _ensure_tag_list_columns(conn)
     clean = str(name or "").strip()
     if not clean:
         return False
@@ -90,6 +105,7 @@ def rename_tag_list(conn: sqlite3.Connection, tag_list_id: int, name: str) -> bo
 
 
 def delete_tag_list(conn: sqlite3.Connection, tag_list_id: int) -> bool:
+    _ensure_tag_list_columns(conn)
     cur = conn.execute(
         "DELETE FROM tag_lists WHERE id = ?",
         (int(tag_list_id),),
@@ -98,7 +114,22 @@ def delete_tag_list(conn: sqlite3.Connection, tag_list_id: int) -> bool:
     return cur.rowcount > 0
 
 
+def set_tag_list_hidden(conn: sqlite3.Connection, tag_list_id: int, hidden: bool) -> bool:
+    _ensure_tag_list_columns(conn)
+    cur = conn.execute(
+        """
+        UPDATE tag_lists
+        SET is_hidden = ?, updated_at_utc = ?
+        WHERE id = ?
+        """,
+        (1 if hidden else 0, _utc_now_iso(), int(tag_list_id)),
+    )
+    conn.commit()
+    return cur.rowcount > 0
+
+
 def set_tag_list_sort_mode(conn: sqlite3.Connection, tag_list_id: int, sort_mode: str) -> bool:
+    _ensure_tag_list_columns(conn)
     mode = str(sort_mode or "none").strip().lower() or "none"
     if mode not in {"none", "az", "za", "most_used", "least_used"}:
         mode = "none"

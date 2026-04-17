@@ -70,6 +70,11 @@ def _ensure_is_hidden_columns(conn: sqlite3.Connection) -> None:
     if "is_hidden" not in caps:
         conn.execute("ALTER TABLE collections ADD COLUMN is_hidden INTEGER DEFAULT 0")
 
+    # 4. tag_lists
+    caps = {row[1] for row in conn.execute("PRAGMA table_info(tag_lists)").fetchall()}
+    if "is_hidden" not in caps:
+        conn.execute("ALTER TABLE tag_lists ADD COLUMN is_hidden INTEGER DEFAULT 0")
+
 
 def _ensure_media_item_date_columns(conn: sqlite3.Connection) -> None:
     cols = {row[1] for row in conn.execute("PRAGMA table_info(media_items)").fetchall()}

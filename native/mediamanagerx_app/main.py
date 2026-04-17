@@ -2441,6 +2441,59 @@ class TagListComboDelegate(QStyledItemDelegate):
             chip_height,
         )
 
+    @staticmethod
+    def visibility_icon_rect(row_rect: QRect) -> QRect:
+        icon_size = 22
+        gap = 8
+        rename_rect = TagListComboDelegate.rename_chip_rect(row_rect)
+        return QRect(
+            rename_rect.left() - gap - icon_size,
+            row_rect.center().y() - (icon_size // 2),
+            icon_size,
+            icon_size,
+        )
+
+    @staticmethod
+    def action_at(row_rect: QRect, point: QPoint) -> str:
+        if TagListComboDelegate.visibility_icon_rect(row_rect).contains(point):
+            return "visibility"
+        if TagListComboDelegate.rename_chip_rect(row_rect).contains(point):
+            return "rename"
+        if TagListComboDelegate.trash_icon_rect(row_rect).contains(point):
+            return "delete"
+        return ""
+
+    def _hover_action(self, row_rect: QRect) -> str:
+        parent = self.parent()
+        try:
+            target = parent.viewport() if parent is not None and hasattr(parent, "viewport") else parent
+            point = target.mapFromGlobal(QCursor.pos()) if target is not None else QPoint(-1, -1)
+        except Exception:
+            point = QPoint(-1, -1)
+        return self.action_at(row_rect, point) if row_rect.contains(point) else ""
+
+    @staticmethod
+    def _paint_eye_icon(painter: QPainter, rect: QRect, color: QColor, *, slashed: bool) -> None:
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        pen = QPen(color, 1.6)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        r = QRectF(rect).adjusted(3.0, 5.5, -3.0, -5.5)
+        path = QPainterPath()
+        path.moveTo(r.left(), r.center().y())
+        path.cubicTo(r.left() + r.width() * 0.28, r.top(), r.left() + r.width() * 0.72, r.top(), r.right(), r.center().y())
+        path.cubicTo(r.left() + r.width() * 0.72, r.bottom(), r.left() + r.width() * 0.28, r.bottom(), r.left(), r.center().y())
+        painter.drawPath(path)
+        pupil = QRectF(rect.center().x() - 2.6, rect.center().y() - 2.6, 5.2, 5.2)
+        painter.setBrush(color)
+        painter.drawEllipse(pupil)
+        if slashed:
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawLine(rect.left() + 4, rect.bottom() - 4, rect.right() - 4, rect.top() + 4)
+        painter.restore()
+
     def paint(self, painter: QPainter, option, index) -> None:
         accent_str = str(self.bridge.settings.value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT)
         accent = QColor(accent_str)
@@ -2451,6 +2504,8 @@ class TagListComboDelegate(QStyledItemDelegate):
         hover_bg = QColor(Theme.mix(combo_bg.name(), "#000000" if is_light else "#ffffff", 0.04 if is_light else 0.07))
         is_current_value = index.row() == self.combo.currentIndex()
         is_hover = bool(option.state & QStyle.StateFlag.State_MouseOver)
+        hover_action = self._hover_action(option.rect) if self.show_actions and is_hover else ""
+        is_hidden = bool(index.data(Qt.ItemDataRole.UserRole + 1))
 
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
@@ -2458,12 +2513,15 @@ class TagListComboDelegate(QStyledItemDelegate):
 
         font = option.font
         font.setBold(is_current_value)
+        font.setItalic(is_hidden)
         painter.setFont(font)
-        painter.setPen(accent_text if is_current_value else text_color)
+        hidden_text = QColor(Theme.get_text_muted())
+        painter.setPen(accent_text if is_current_value else (hidden_text if is_hidden else text_color))
 
         rename_rect = self.rename_chip_rect(option.rect) if self.show_actions else QRect()
         icon_rect = self.trash_icon_rect(option.rect) if self.show_actions else QRect()
-        right_pad = (option.rect.right() - rename_rect.left() + 12) if self.show_actions else 12
+        visibility_rect = self.visibility_icon_rect(option.rect) if self.show_actions else QRect()
+        right_pad = (option.rect.right() - visibility_rect.left() + 12) if self.show_actions else 12
         text_rect = option.rect.adjusted(12, 5, -right_pad, -5)
         text = option.fontMetrics.elidedText(
             str(index.data(Qt.ItemDataRole.DisplayRole) or ""),
@@ -2472,23 +2530,40 @@ class TagListComboDelegate(QStyledItemDelegate):
         )
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
         if self.show_actions:
-            chip_bg = QColor(Theme.mix(combo_bg.name(), accent.name(), 0.18 if is_light else 0.26))
-            chip_border = QColor(Theme.mix(accent.name(), combo_bg.name(), 0.22 if is_light else 0.08))
+            default_chip_bg = QColor("#f3f4f6" if is_light else "#303236")
+            default_chip_border = QColor("#c8cdd4" if is_light else "#5a5f66")
+            hover_chip_bg = QColor(Theme.mix(combo_bg.name(), accent.name(), 0.18 if is_light else 0.26))
+            hover_chip_border = QColor(Theme.mix(accent.name(), combo_bg.name(), 0.22 if is_light else 0.08))
+            chip_bg = hover_chip_bg if hover_action == "rename" else default_chip_bg
+            chip_border = hover_chip_border if hover_action == "rename" else default_chip_border
             chip_text = QColor(_selection_text_for_color(chip_bg))
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
             painter.setPen(QPen(chip_border, 1))
             painter.setBrush(chip_bg)
-            painter.drawRoundedRect(QRectF(rename_rect), 10, 10)
+            painter.drawRoundedRect(QRectF(rename_rect), 6, 6)
             painter.setPen(chip_text)
             rename_font = QFont(font)
             rename_font.setBold(True)
             rename_font.setPointSizeF(max(8.5, rename_font.pointSizeF() - 0.5))
             painter.setFont(rename_font)
             painter.drawText(rename_rect, Qt.AlignmentFlag.AlignCenter, "Rename")
+
+            eye_bg = hover_chip_bg if hover_action == "visibility" else default_chip_bg
+            eye_border = hover_chip_border if hover_action == "visibility" else default_chip_border
+            painter.setPen(QPen(eye_border, 1))
+            painter.setBrush(eye_bg)
+            painter.drawRoundedRect(QRectF(visibility_rect), 6, 6)
+            self._paint_eye_icon(
+                painter,
+                visibility_rect,
+                QColor(_selection_text_for_color(eye_bg)),
+                slashed=is_hidden,
+            )
+
             trash_icon_name = "trashcan.svg" if is_light else "trashcan-white.svg"
             trash_icon = QIcon(str((Path(__file__).with_name("web") / "icons" / trash_icon_name).resolve()))
             trash_hover_icon = QIcon(str((Path(__file__).with_name("web") / "icons" / "trashcan-red.svg").resolve()))
-            icon = trash_hover_icon if is_hover else trash_icon
+            icon = trash_hover_icon if hover_action == "delete" else trash_icon
             icon.paint(painter, icon_rect)
         painter.restore()
 
@@ -2496,11 +2571,13 @@ class TagListComboDelegate(QStyledItemDelegate):
 class TagListComboPopupView(QListView):
     deleteRequested = Signal(int)
     renameRequested = Signal(int)
+    hiddenToggled = Signal(int, bool)
 
     def __init__(self, bridge: "Bridge", combo: QComboBox, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.bridge = bridge
         self.combo = combo
+        self.setMouseTracking(True)
 
     def _tag_list_id_for_index(self, index: QModelIndex) -> int:
         if not index.isValid():
@@ -2513,23 +2590,39 @@ class TagListComboPopupView(QListView):
             point = event.position().toPoint()
             row_rect = self.visualRect(index)
             tag_list_id = self._tag_list_id_for_index(index)
-            if (
-                tag_list_id > 0
-                and TagListComboDelegate.rename_chip_rect(row_rect).contains(point)
-            ):
+            action = TagListComboDelegate.action_at(row_rect, point) if tag_list_id > 0 else ""
+            if action == "visibility":
+                self.combo.setCurrentIndex(index.row())
+                is_hidden = bool(index.data(Qt.ItemDataRole.UserRole + 1))
+                self.hiddenToggled.emit(tag_list_id, not is_hidden)
+                event.accept()
+                return
+            if action == "rename":
                 self.combo.setCurrentIndex(index.row())
                 self.renameRequested.emit(tag_list_id)
                 event.accept()
                 return
-            if (
-                tag_list_id > 0
-                and TagListComboDelegate.trash_icon_rect(row_rect).contains(point)
-            ):
+            if action == "delete":
                 self.combo.setCurrentIndex(index.row())
                 self.deleteRequested.emit(tag_list_id)
                 event.accept()
                 return
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        point = event.position().toPoint()
+        index = self.indexAt(point)
+        action = ""
+        if index.isValid() and self._tag_list_id_for_index(index) > 0:
+            action = TagListComboDelegate.action_at(self.visualRect(index), point)
+        self.viewport().setCursor(Qt.CursorShape.PointingHandCursor if action else Qt.CursorShape.ArrowCursor)
+        self.viewport().update()
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self.viewport().setCursor(Qt.CursorShape.ArrowCursor)
+        self.viewport().update()
+        super().leaveEvent(event)
 
     def contextMenuEvent(self, event) -> None:
         index = self.indexAt(event.pos())
@@ -2540,13 +2633,17 @@ class TagListComboPopupView(QListView):
         tag_list_id = self._tag_list_id_for_index(index)
         if tag_list_id <= 0:
             return
+        is_hidden = bool(index.data(Qt.ItemDataRole.UserRole + 1))
 
         self.combo.setCurrentIndex(index.row())
         menu = QMenu(self)
+        act_toggle_hidden = menu.addAction("Unhide Tag List" if is_hidden else "Hide Tag List")
         act_rename = menu.addAction("Rename Tag List...")
         act_delete = menu.addAction("Delete Tag List")
         chosen = menu.exec(event.globalPos())
-        if chosen == act_rename:
+        if chosen == act_toggle_hidden:
+            self.hiddenToggled.emit(tag_list_id, not is_hidden)
+        elif chosen == act_rename:
             self.renameRequested.emit(tag_list_id)
         elif chosen == act_delete:
             self.deleteRequested.emit(tag_list_id)
@@ -11069,6 +11166,10 @@ class MainWindow(QMainWindow):
                     self.proxy_model.invalidateFilter()
                 if hasattr(self, "pinned_folders_list"):
                     self._reload_pinned_folders()
+                if hasattr(self, "collections_list"):
+                    self._reload_collections()
+                if hasattr(self, "tag_list_select"):
+                    self._reload_tag_lists()
             if key == "ui.show_left_panel" and hasattr(self, "act_toggle_left_panel"):
                 self.act_toggle_left_panel.setChecked(bool(value))
             if schedule_gallery_relayout:
@@ -11417,6 +11518,7 @@ class MainWindow(QMainWindow):
         if is_tag_list_selector and isinstance(view, TagListComboPopupView):
             view.deleteRequested.connect(self._delete_tag_list)
             view.renameRequested.connect(self._rename_tag_list_by_id)
+            view.hiddenToggled.connect(self._set_tag_list_hidden)
         combo.setView(view)
         combo.setItemDelegate(TagListComboDelegate(self.bridge, combo, view, show_actions=is_tag_list_selector))
 
@@ -11460,11 +11562,13 @@ class MainWindow(QMainWindow):
         from app.mediamanager.db.tag_lists_repo import list_tag_lists
 
         current_id = preferred_id if preferred_id is not None else self._active_tag_list_id()
-        rows = list_tag_lists(self.bridge.conn)
+        rows = list_tag_lists(self.bridge.conn, include_hidden=self.bridge._show_hidden_enabled())
         self.tag_list_select.blockSignals(True)
         self.tag_list_select.clear()
         for row in rows:
             self.tag_list_select.addItem(str(row.get("name") or ""), int(row.get("id") or 0))
+            index = self.tag_list_select.count() - 1
+            self.tag_list_select.setItemData(index, bool(row.get("is_hidden")), Qt.ItemDataRole.UserRole + 1)
         self.tag_list_select.blockSignals(False)
 
         index = -1
@@ -11507,6 +11611,15 @@ class MainWindow(QMainWindow):
 
     def _rename_active_tag_list(self) -> None:
         self._rename_tag_list_by_id(self._active_tag_list_id())
+
+    def _set_tag_list_hidden(self, tag_list_id: int, hidden: bool) -> None:
+        from app.mediamanager.db.tag_lists_repo import set_tag_list_hidden
+
+        resolved_id = int(tag_list_id or 0)
+        if resolved_id <= 0:
+            return
+        if set_tag_list_hidden(self.bridge.conn, resolved_id, bool(hidden)):
+            self._reload_tag_lists(None if hidden and not self.bridge._show_hidden_enabled() else resolved_id)
 
     def _delete_tag_list(self, tag_list_id: int | None = None) -> None:
         from app.mediamanager.db.tag_lists_repo import delete_tag_list, get_tag_list
