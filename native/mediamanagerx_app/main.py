@@ -5954,6 +5954,8 @@ class Bridge(QObject):
             if key.startswith("ui.") or key.startswith("metadata.display.") or key in {"gallery.show_hidden", "gallery.include_nested_files", "gallery.show_folders", "gallery.mute_video_by_default", "player.autoplay_gallery_animated_gifs", "player.autoplay_preview_animated_gifs"}:
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, bool(value))
+                if key in {"gallery.show_hidden", "gallery.include_nested_files"}:
+                    self.galleryScopeChanged.emit()
             elif key in {"duplicate.rules.merge_before_delete", "duplicate.rules.preferred_folders_enabled"} or key.startswith("duplicate.rules.merge"):
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, bool(value))
@@ -6917,6 +6919,22 @@ class Bridge(QObject):
         except Exception:
             pass
 
+    def _ensure_media_record_for_tag_write(self, path: str) -> dict | None:
+        from app.mediamanager.db.media_repo import add_media_item, get_media_by_path
+
+        clean = str(path or "").strip()
+        if not clean:
+            return None
+        media = get_media_by_path(self.conn, clean)
+        if media:
+            return media
+        p = Path(clean)
+        if not p.exists() or not p.is_file():
+            return None
+        media_type = "image" if p.suffix.lower() in IMAGE_EXTS else "video"
+        add_media_item(self.conn, clean, media_type)
+        return get_media_by_path(self.conn, clean)
+
     @Slot(str, "QVariantMap")
     def update_media_ai_metadata(self, path: str, payload: dict) -> None:
         from app.mediamanager.db.ai_metadata_repo import upsert_media_ai_selected_fields
@@ -6956,29 +6974,32 @@ class Bridge(QObject):
 
     @Slot(str, list)
     def set_media_tags(self, path: str, tags: list) -> None:
-        from app.mediamanager.db.media_repo import get_media_by_path
         from app.mediamanager.db.tags_repo import set_media_tags
         try:
-            m = get_media_by_path(self.conn, path)
-            if m: set_media_tags(self.conn, m["id"], tags)
+            m = self._ensure_media_record_for_tag_write(path)
+            if m:
+                set_media_tags(self.conn, m["id"], tags)
+                self.galleryScopeChanged.emit()
         except Exception: pass
 
     @Slot(str, list)
     def attach_media_tags(self, path: str, tags: list) -> None:
-        from app.mediamanager.db.media_repo import get_media_by_path
         from app.mediamanager.db.tags_repo import attach_tags
         try:
-            m = get_media_by_path(self.conn, path)
-            if m: attach_tags(self.conn, m["id"], tags)
+            m = self._ensure_media_record_for_tag_write(path)
+            if m:
+                attach_tags(self.conn, m["id"], tags)
+                self.galleryScopeChanged.emit()
         except Exception: pass
 
     @Slot(str)
     def clear_media_tags(self, path: str) -> None:
-        from app.mediamanager.db.media_repo import get_media_by_path
         from app.mediamanager.db.tags_repo import clear_all_media_tags
         try:
-            m = get_media_by_path(self.conn, path)
-            if m: clear_all_media_tags(self.conn, m["id"])
+            m = self._ensure_media_record_for_tag_write(path)
+            if m:
+                clear_all_media_tags(self.conn, m["id"])
+                self.galleryScopeChanged.emit()
         except Exception: pass
 
     @Slot(list, result=bool)
@@ -11734,6 +11755,15 @@ class MainWindow(QMainWindow):
         editor = self._active_tag_editor()
         next_tags = [tag for tag in self._normalize_tag_list(editor.text()) if tag.casefold() != remove_key]
         editor.setText(", ".join(next_tags))
+        path = str(getattr(self, "_current_path", "") or "").strip()
+        if path:
+            try:
+                self.bridge.set_media_tags(path, next_tags)
+            except Exception:
+                pass
+        self.meta_status_lbl.setText(f"âœ“ Removed '{tag_name}'")
+        QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
+        self._refresh_tag_list_scope_counts()
 
     def _remove_tag_from_active_list(self, tag_id: int, _tag_name: str) -> None:
         from app.mediamanager.db.tag_lists_repo import remove_tag_from_list
