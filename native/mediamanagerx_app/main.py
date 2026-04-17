@@ -25,6 +25,7 @@ import zipfile
 import urllib.error
 import urllib.request
 import uuid
+import tempfile
 from collections import Counter
 from datetime import datetime, timezone, timedelta
 from math import gcd
@@ -34,6 +35,8 @@ from pathlib import Path
 APP_NAME = "MediaLens"
 LEGACY_APP_NAME = "MediaManagerX"
 LEGACY_APP_ORGANIZATION = "G1enB1and"
+UPDATE_VERSION_URL = "https://raw.githubusercontent.com/G1enB1and/MediaLens/main/VERSION"
+UPDATE_INSTALLER_URL = "https://github.com/G1enB1and/MediaLens/releases/latest/download/MediaLens_Setup.exe"
 
 
 def _append_env_flag(name: str, flag: str) -> None:
@@ -231,6 +234,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QInputDialog,
     QPlainTextEdit,
+    QProgressDialog,
     QTextEdit,
     QToolTip,
     QLineEdit,
@@ -5969,8 +5973,7 @@ class Bridge(QObject):
     @Slot(bool)
     def check_for_updates(self, manual: bool = False):
         """Check GitHub for a newer version in the VERSION file."""
-        url = "https://raw.githubusercontent.com/G1enB1and/MediaLens/main/VERSION"
-        request = QNetworkRequest(QUrl(url))
+        request = QNetworkRequest(QUrl(UPDATE_VERSION_URL))
         self._update_reply = self.nam.get(request)
         
         def _on_finished():
@@ -5995,8 +5998,7 @@ class Bridge(QObject):
     @Slot()
     def download_and_install_update(self):
         """Download latest installer and launch it."""
-        url = "https://github.com/G1enB1and/MediaLens/releases/latest/download/MediaLens_Setup.exe"
-        request = QNetworkRequest(QUrl(url))
+        request = QNetworkRequest(QUrl(UPDATE_INSTALLER_URL))
         self._download_reply = self.nam.get(request)
         
         def _on_progress(received, total):
@@ -6026,7 +6028,7 @@ class Bridge(QObject):
 
     @Slot(result=bool)
     def should_check_on_launch(self) -> bool:
-        return self.settings.value("updates.check_on_launch", True, type=bool)
+        return self.settings.value("updates/check_on_launch", True, type=bool)
 
     @staticmethod
     def _coerce_setting_value(value):
@@ -8462,11 +8464,6 @@ class MainWindow(QMainWindow):
         self.bridge.updateError.connect(self._on_update_error)
 
         self._setup_shortcuts()
-
-        # Check for updates on launch if enabled
-        if self.bridge.settings.value("updates/check_on_launch", True, type=bool):
-            # Short delay to let the UI finish rendering before the network request
-            QTimer.singleShot(1500, lambda: self.bridge.check_for_updates(manual=False))
 
     def _setup_shortcuts(self) -> None:
         """Standard Windows-style keyboard shortcuts."""
@@ -16658,8 +16655,28 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Submit Debugging Logs", message)
 
     def _on_update_available(self, version: str, manual: bool) -> None:
-        """Handled in web frontend (toast popup)."""
-        pass
+        if version:
+            answer = QMessageBox.question(
+                self,
+                "Update Available",
+                (
+                    f"MediaLens {version} is available.\n\n"
+                    f"You are currently using {__version__}.\n\n"
+                    "Download and install the update now?"
+                ),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if answer == QMessageBox.StandardButton.Yes:
+                try:
+                    setup_path = _download_update_installer_with_dialog(QApplication.instance(), version)
+                    if setup_path is not None:
+                        _launch_update_installer(setup_path)
+                        QApplication.quit()
+                except Exception as exc:
+                    QMessageBox.warning(self, "Update Error", f"Unable to download or launch the update installer:\n{exc}")
+        elif manual:
+            QMessageBox.information(self, "Check for Updates", f"You are using the latest version.\n\nCurrent version: {__version__}")
 
     def _on_update_error(self, message: str) -> None:
         QMessageBox.warning(self, "Update Error", message)
@@ -16702,6 +16719,104 @@ def _create_startup_splash(app: QApplication, startup_bg: QColor) -> QSplashScre
         return None
 
 
+def _remote_version_is_newer(remote_version: str) -> bool:
+    try:
+        return bool(remote_version) and Version(str(remote_version).strip()) > Version(__version__)
+    except Exception:
+        return False
+
+
+def _fetch_latest_version_for_startup(timeout_seconds: float = 6.0) -> str:
+    request = urllib.request.Request(
+        UPDATE_VERSION_URL,
+        headers={"User-Agent": f"MediaLens/{__version__}"},
+    )
+    with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+        return response.read(128).decode("utf-8", errors="replace").strip()
+
+
+def _download_update_installer_with_dialog(app: QApplication, version: str) -> Path | None:
+    temp_dir = Path(QStandardPaths.writableLocation(QStandardPaths.TempLocation) or tempfile.gettempdir())
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    setup_path = temp_dir / "MediaLens_Setup_New.exe"
+    progress = QProgressDialog(f"Downloading MediaLens {version}...", "Cancel", 0, 100)
+    progress.setWindowTitle("Downloading Update")
+    progress.setWindowModality(Qt.WindowModality.ApplicationModal)
+    progress.setMinimumDuration(0)
+    progress.setValue(0)
+    progress.show()
+    app.processEvents()
+    try:
+        request = urllib.request.Request(
+            UPDATE_INSTALLER_URL,
+            headers={"User-Agent": f"MediaLens/{__version__}"},
+        )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            total = int(response.headers.get("Content-Length") or 0)
+            received = 0
+            with open(setup_path, "wb") as handle:
+                while True:
+                    if progress.wasCanceled():
+                        return None
+                    chunk = response.read(1024 * 256)
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+                    received += len(chunk)
+                    if total > 0:
+                        progress.setValue(max(0, min(100, int((received / total) * 100))))
+                    else:
+                        progress.setLabelText(f"Downloading MediaLens {version}...\n{received // 1024} KB")
+                    app.processEvents()
+        progress.setValue(100)
+        return setup_path
+    finally:
+        progress.close()
+
+
+def _launch_update_installer(setup_path: Path) -> None:
+    subprocess.Popen([str(setup_path), "/SILENT", "/SP-", "/NOICONS", "/RELAUNCH"])
+
+
+def _run_startup_update_check(app: QApplication, settings: QSettings) -> bool:
+    if not bool(settings.value("updates/check_on_launch", True, type=bool)):
+        return False
+    try:
+        remote_version = _fetch_latest_version_for_startup()
+    except Exception:
+        return False
+    if not _remote_version_is_newer(remote_version):
+        return False
+
+    answer = QMessageBox.question(
+        None,
+        "Update Available",
+        (
+            f"MediaLens {remote_version} is available.\n\n"
+            f"You are currently using {__version__}.\n\n"
+            "Download and install the update before opening MediaLens?"
+        ),
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        QMessageBox.StandardButton.Yes,
+    )
+    if answer != QMessageBox.StandardButton.Yes:
+        return False
+
+    try:
+        setup_path = _download_update_installer_with_dialog(app, remote_version)
+        if setup_path is None:
+            return False
+        _launch_update_installer(setup_path)
+        return True
+    except Exception as exc:
+        QMessageBox.warning(
+            None,
+            "Update Error",
+            f"Unable to download or launch the update installer:\n{exc}",
+        )
+        return False
+
+
 def main() -> None:
     if os.name == "nt" and bool(_WINDOWS_WEBENGINE_RUNTIME.get("enabled")):
         QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseSoftwareOpenGL, True)
@@ -16741,6 +16856,9 @@ def main() -> None:
         }}
         """
     )
+
+    if _run_startup_update_check(app, startup_settings):
+        sys.exit(0)
 
     splash = _create_startup_splash(app, startup_bg) if show_splash else None
     if splash is not None:
