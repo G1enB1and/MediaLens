@@ -3496,9 +3496,9 @@ function runGalleryRelayout(reason = '') {
     applyDetailsColumnWidths(mediaList);
   }
 
-  // Only perform a full DOM rerender if we are in Masonry mode (as it calculates column flows)
-  // or if explicitly forced. Standard grid/list modes rely on CSS for responsiveness.
-  const needsFullRerender = (gGalleryViewMode === 'masonry') || reason === 'force';
+  // Only perform a full DOM rerender if explicitly forced. 
+  // Standard grid/list/masonry modes rely on CSS for responsiveness.
+  const needsFullRerender = reason === 'force';
   if (needsFullRerender && Array.isArray(gMedia) && gMedia.length > 0 && !isDuplicateModeActive()) {
     rerenderCurrentMediaPreservingScroll();
   }
@@ -3532,6 +3532,7 @@ function scheduleGalleryRelayout(reason = '') {
 
   gGalleryRelayoutTimer = window.setTimeout(() => {
     gGalleryRelayoutTimer = 0;
+    if (gIsRenderingGallery) return; // Final guard before RAF
     if (gGalleryRelayoutRaf) {
       cancelAnimationFrame(gGalleryRelayoutRaf);
       gGalleryRelayoutRaf = 0;
@@ -3541,7 +3542,7 @@ function scheduleGalleryRelayout(reason = '') {
       if (gIsRenderingGallery) return;
       runGalleryRelayout(reason);
     });
-  }, 150);
+  }, 250);
 }
 
 function initGalleryResizeObserver() {
@@ -6183,9 +6184,7 @@ document.addEventListener('DOMContentLoaded', () => {
       gTextProcessingWaiting = false;
       gTextProcessingDismissed = false;
       gTextProcessingForceVisible = true;
-      if (gBridge && gBridge.resume_text_processing) {
-        gBridge.resume_text_processing();
-      }
+      gLastRequestedFullScanKey = '';
       if (gRenderTextProcessingToast) gRenderTextProcessingToast();
     } else if (gRenderTextProcessingToast) {
       gRenderTextProcessingToast();

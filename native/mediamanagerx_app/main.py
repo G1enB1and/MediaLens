@@ -3947,7 +3947,8 @@ def _load_media_metadata_payload(conn, path: str, log_fn=None) -> dict:
             "original_file_date": media.get("original_file_date") or "",
             "file_created_time": media.get("file_created_time") or "",
             "modified_time": media.get("modified_time") or "",
-            "text_detected": media.get("text_detected"),
+            "text_likely": media.get("text_likely"),
+            "text_detected": media.get("effective_text_detected"),
             "user_confirmed_text_detected": media.get("user_confirmed_text_detected"),
             "effective_text_detected": media.get("effective_text_detected"),
             "detected_text": media.get("detected_text") or "",
@@ -5251,7 +5252,7 @@ class Bridge(QObject):
             entry for entry in entries
             if not entry.get("is_folder")
             and not (
-                entry.get("text_detected") is not None
+                entry.get("text_likely") is not None
                 and int(entry.get("text_detection_version") or 0) >= TEXT_DETECTION_VERSION
             )
         ]
@@ -5268,7 +5269,7 @@ class Bridge(QObject):
             if entry.get("is_folder"):
                 continue
             if (
-                entry.get("text_detected") is not None
+                entry.get("text_likely") is not None
                 and int(entry.get("text_detection_version") or 0) >= TEXT_DETECTION_VERSION
             ):
                 continue
@@ -5295,17 +5296,21 @@ class Bridge(QObject):
                     analysis_path = poster
                 elif media_type != "image":
                     continue
-                text_detected, text_score = detect_text_presence(analysis_path, source_path=path)
+                text_likely, text_score = detect_text_presence(analysis_path, source_path=path)
             except Exception:
-                text_detected, text_score = False, 0.0
-            entry["text_detected"] = bool(text_detected)
+                text_likely, text_score = False, 0.0
+            existing_positive = self._has_existing_positive_text_signal(entry)
+            if existing_positive and not text_likely:
+                text_likely = True
+                text_score = max(float(entry.get("text_detection_score") or 0.0), float(text_score or 0.0))
+            entry["text_likely"] = bool(text_likely)
             entry["text_detection_score"] = float(text_score or 0.0)
             entry["text_detection_version"] = TEXT_DETECTION_VERSION
-            updates.append((1 if text_detected else 0, float(text_score or 0.0), TEXT_DETECTION_VERSION, path))
+            updates.append((1 if text_likely else 0, float(text_score or 0.0), TEXT_DETECTION_VERSION, path))
         try:
             if updates:
                 self.conn.executemany(
-                    "UPDATE media_items SET text_detected = ?, text_detection_score = ?, text_detection_version = ? WHERE path = ?",
+                    "UPDATE media_items SET text_likely = ?, text_detection_score = ?, text_detection_version = ? WHERE path = ?",
                     updates,
                 )
                 self.conn.commit()
@@ -5326,7 +5331,7 @@ class Bridge(QObject):
         eligible = [
             entry for entry in entries
             if not entry.get("is_folder")
-            and bool(entry.get("text_detected"))
+            and bool(entry.get("text_likely"))
             and not (
                 entry.get("text_more_likely") is not None
                 and int(entry.get("text_more_likely_version") or 0) >= TEXT_MORE_LIKELY_VERSION
@@ -5342,7 +5347,7 @@ class Bridge(QObject):
             if not self._text_processing_should_continue(generation):
                 completed = False
                 break
-            if entry.get("is_folder") or not bool(entry.get("text_detected")):
+            if entry.get("is_folder") or not bool(entry.get("text_likely")):
                 continue
             if (
                 entry.get("text_more_likely") is not None
@@ -5496,7 +5501,7 @@ class Bridge(QObject):
                 eligible = [
                     entry for entry in entries
                     if not entry.get("is_folder")
-                    and bool(entry.get("effective_text_detected") if entry.get("effective_text_detected") is not None else entry.get("text_detected"))
+                    and bool(entry.get("effective_text_detected") if entry.get("effective_text_detected") is not None else entry.get("text_likely"))
                     and not str(entry.get("detected_text") or "").strip()
                 ]
                 total = len(eligible)
@@ -5913,7 +5918,7 @@ class Bridge(QObject):
             "ai_loras": ", ".join(str(item.get("name") or "").strip() for item in ((ai_meta or {}).get("loras") or []) if str(item.get("name") or "").strip()),
             "model_name": (ai_meta or {}).get("model_name") or "",
             "text_detected": media.get("effective_text_detected"),
-            "raw_text_detected": media.get("text_detected"),
+            "raw_text_likely": media.get("text_likely"),
             "user_confirmed_text_detected": media.get("user_confirmed_text_detected"),
             "detected_text": media.get("detected_text") or "",
         }
@@ -7290,12 +7295,12 @@ class Bridge(QObject):
             pass
 
     @Slot(str, bool)
-    def update_media_text_override(self, path: str, text_detected: bool) -> None:
+    def update_media_text_override(self, path: str, text_present_override: bool) -> None:
         from app.mediamanager.db.media_repo import update_user_confirmed_text_detected
         try:
             m = self._ensure_media_record_for_tag_write(path)
             if m:
-                update_user_confirmed_text_detected(self.conn, m["id"], bool(text_detected))
+                update_user_confirmed_text_detected(self.conn, m["id"], bool(text_present_override))
                 self.galleryScopeChanged.emit()
         except Exception:
             pass
@@ -7631,6 +7636,7 @@ class Bridge(QObject):
                             "duplicate_size_variant": "",
                             "duplicate_file_format": "",
                             "review_group_mode": "",
+                            "text_likely": None,
                             "text_detected": None,
                             "user_confirmed_text_detected": None,
                             "effective_text_detected": None,
@@ -7692,6 +7698,7 @@ class Bridge(QObject):
                     "duplicate_size_variant": r.get("duplicate_size_variant") or "",
                     "duplicate_file_format": r.get("duplicate_file_format") or "",
                     "review_group_mode": r.get("review_group_mode") or "",
+                    "text_likely": r.get("text_likely"),
                     "text_detected": self._effective_text_detected(r),
                     "user_confirmed_text_detected": r.get("user_confirmed_text_detected"),
                     "effective_text_detected": self._effective_text_detected(r),
@@ -7984,10 +7991,22 @@ class Bridge(QObject):
         override = entry.get("user_confirmed_text_detected")
         if override is not None:
             return bool(override)
+        if entry.get("text_verified") is True:
+            return True
+        if entry.get("text_more_likely") is True:
+            return True
         effective = entry.get("effective_text_detected")
         if effective is not None:
             return bool(effective)
-        return bool(entry.get("text_detected"))
+        return bool(entry.get("text_likely"))
+
+    @staticmethod
+    def _has_existing_positive_text_signal(entry: dict) -> bool:
+        return bool(
+            entry.get("text_likely") is True
+            or entry.get("text_more_likely") is True
+            or entry.get("text_verified") is True
+        )
 
     def _matches_media_search(self, row: dict, search_query: str) -> bool:
         from app.mediamanager.search_query import matches_media_search
@@ -8228,7 +8247,6 @@ class Bridge(QObject):
         else:
             entries = []
         if text_filter in {"text_detected", "no_text_detected"}:
-            self._ensure_background_text_processing(folders if folders else None, self._active_collection_id if not folders else None)
             if text_filter == "no_text_detected":
                 entries = [entry for entry in entries if not self._effective_text_detected(entry)]
             else:
@@ -8305,6 +8323,7 @@ class Bridge(QObject):
                     self.scanFinished.emit(primary, int(count))
                 except Exception:
                     pass
+                self._ensure_background_text_processing(list(folders), None)
 
             threading.Thread(target=emit_cached_scan_finished, daemon=True).start()
             return
@@ -8324,12 +8343,12 @@ class Bridge(QObject):
                         self._last_full_scan_key = scan_key
                         self._warm_scan_keys.add(scan_key)
                         self.scanFinished.emit(primary, len(reconciled))
-                        return
-                    paths = list(self._disk_cache.values())
-                    self._do_full_scan(paths, self.conn, emit_progress=True)
-                    self._last_full_scan_key = scan_key
-                    self._warm_scan_keys.add(scan_key)
-                    self.scanFinished.emit(primary, len(self._get_reconciled_candidates(folders, "all", search_query)))
+                    else:
+                        paths = list(self._disk_cache.values())
+                        self._do_full_scan(paths, self.conn, emit_progress=True)
+                        self._last_full_scan_key = scan_key
+                        self._warm_scan_keys.add(scan_key)
+                        self.scanFinished.emit(primary, len(self._get_reconciled_candidates(folders, "all", search_query)))
                 self._ensure_background_text_processing(list(folders), None)
             except Exception as exc:
                 try:
@@ -14257,7 +14276,7 @@ class MainWindow(QMainWindow):
                     "source_formats": list(data.get("source_formats") or []),
                 }
                 self._current_user_confirmed_text_detected = data.get("user_confirmed_text_detected")
-                self._current_auto_text_detected = data.get("text_detected")
+                self._current_auto_text_detected = data.get("effective_text_detected")
                 self._ai_generated_override_dirty = False
                 self._text_detected_override_dirty = False
                 self.meta_desc.setPlainText(data.get("description", ""))
@@ -14274,7 +14293,7 @@ class MainWindow(QMainWindow):
 
                 self.meta_ai_status_edit.setText(data.get("ai_status_summary", ""))
                 self._update_override_note_labels(
-                    auto_text_detected=data.get("text_detected"),
+                    auto_text_detected=data.get("effective_text_detected"),
                     auto_ai_detected=data.get("is_ai_detected"),
                 )
                 self._set_metadata_switch(self.meta_ai_generated_toggle, bool(data.get("effective_is_ai")))

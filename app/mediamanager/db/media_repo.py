@@ -44,14 +44,33 @@ def _collect_file_stats(path: str) -> tuple[int, str, str]:
     return size, created, modified
 
 
+def _effective_text_detected_value(
+    text_likely,
+    user_confirmed_text_detected,
+    text_more_likely=None,
+    text_verified=None,
+):
+    if user_confirmed_text_detected is not None:
+        return bool(user_confirmed_text_detected)
+    if text_verified is not None and bool(text_verified):
+        return True
+    if text_more_likely is not None and bool(text_more_likely):
+        return True
+    if text_likely is None:
+        return None
+    return bool(text_likely)
+
+
 def _ensure_media_items_scan_columns(conn: sqlite3.Connection) -> None:
     cols = {row[1] for row in conn.execute("PRAGMA table_info(media_items)").fetchall()}
     if "original_file_date_utc" not in cols:
         conn.execute("ALTER TABLE media_items ADD COLUMN original_file_date_utc TEXT")
     if "phash" not in cols:
         conn.execute("ALTER TABLE media_items ADD COLUMN phash TEXT")
-    if "text_detected" not in cols:
-        conn.execute("ALTER TABLE media_items ADD COLUMN text_detected INTEGER")
+    if "text_likely" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN text_likely INTEGER")
+        if "text_detected" in cols:
+            conn.execute("UPDATE media_items SET text_likely = text_detected WHERE text_likely IS NULL")
     if "text_detection_score" not in cols:
         conn.execute("ALTER TABLE media_items ADD COLUMN text_detection_score REAL")
     if "text_detection_version" not in cols:
@@ -87,7 +106,7 @@ def _ensure_media_items_scan_columns(conn: sqlite3.Connection) -> None:
                 (next_original, int(media_id)),
             )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_media_items_phash ON media_items(phash)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_items_text_detected ON media_items(text_detected)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_items_text_likely ON media_items(text_likely)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_media_items_text_more_likely ON media_items(text_more_likely)")
     conn.commit()
 
@@ -216,7 +235,7 @@ def add_media_item(
     media_type: str,
     content_hash: Optional[str] = None,
     phash: Optional[str] = None,
-    text_detected: Optional[bool] = None,
+    text_likely: Optional[bool] = None,
     text_detection_score: Optional[float] = None,
     text_detection_version: Optional[int] = None,
     text_more_likely: Optional[bool] = None,
@@ -248,12 +267,12 @@ def add_media_item(
 
     conn.execute(
         """
-        INSERT INTO media_items(path, content_hash, phash, text_detected, text_detection_score, text_detection_version, text_more_likely, text_more_likely_score, text_more_likely_version, text_verified, text_verification_score, text_verification_version, media_type, file_size_bytes, file_created_time_utc, modified_time_utc, original_file_date_utc, width, height, duration_ms, is_hidden, created_at_utc, updated_at_utc)
+        INSERT INTO media_items(path, content_hash, phash, text_likely, text_detection_score, text_detection_version, text_more_likely, text_more_likely_score, text_more_likely_version, text_verified, text_verification_score, text_verification_version, media_type, file_size_bytes, file_created_time_utc, modified_time_utc, original_file_date_utc, width, height, duration_ms, is_hidden, created_at_utc, updated_at_utc)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(path) DO UPDATE SET
           content_hash=COALESCE(excluded.content_hash, content_hash),
           phash=COALESCE(excluded.phash, phash),
-          text_detected=COALESCE(excluded.text_detected, text_detected),
+          text_likely=COALESCE(excluded.text_likely, text_likely),
           text_detection_score=COALESCE(excluded.text_detection_score, text_detection_score),
           text_detection_version=COALESCE(excluded.text_detection_version, text_detection_version),
           text_more_likely=COALESCE(excluded.text_more_likely, text_more_likely),
@@ -273,7 +292,7 @@ def add_media_item(
           is_hidden=COALESCE(excluded.is_hidden, is_hidden),
           updated_at_utc=excluded.updated_at_utc
         """,
-        (normalized, content_hash, phash, (1 if text_detected else 0) if text_detected is not None else None, text_detection_score, text_detection_version, (1 if text_more_likely else 0) if text_more_likely is not None else None, text_more_likely_score, text_more_likely_version, (1 if text_verified else 0) if text_verified is not None else None, text_verification_score, text_verification_version, media_type, size, created_time, mtime, original_file_date, width, height, duration_ms, is_hidden, now, now),
+        (normalized, content_hash, phash, (1 if text_likely else 0) if text_likely is not None else None, text_detection_score, text_detection_version, (1 if text_more_likely else 0) if text_more_likely is not None else None, text_more_likely_score, text_more_likely_version, (1 if text_verified else 0) if text_verified is not None else None, text_verification_score, text_verification_version, media_type, size, created_time, mtime, original_file_date, width, height, duration_ms, is_hidden, now, now),
     )
     row = conn.execute("SELECT id FROM media_items WHERE path = ?", (normalized,)).fetchone()
     if not row:
@@ -286,7 +305,7 @@ def get_media_by_path(conn: sqlite3.Connection, path: str) -> Optional[dict]:
     _ensure_media_items_scan_columns(conn)
     normalized = normalize_windows_path(path)
     row = conn.execute(
-        "SELECT id, path, content_hash, media_type, file_size_bytes, file_created_time_utc, modified_time_utc, original_file_date_utc, exif_date_taken, metadata_date, width, height, duration_ms, is_hidden, phash, text_detected, text_detection_score, text_detection_version, user_confirmed_text_detected, detected_text, text_more_likely, text_more_likely_score, text_more_likely_version, text_verified, text_verification_score, text_verification_version FROM media_items WHERE path = ?",
+        "SELECT id, path, content_hash, media_type, file_size_bytes, file_created_time_utc, modified_time_utc, original_file_date_utc, exif_date_taken, metadata_date, width, height, duration_ms, is_hidden, phash, text_likely, text_detection_score, text_detection_version, user_confirmed_text_detected, detected_text, text_more_likely, text_more_likely_score, text_more_likely_version, text_verified, text_verification_score, text_verification_version FROM media_items WHERE path = ?",
         (normalized,),
     ).fetchone()
     if not row:
@@ -307,11 +326,11 @@ def get_media_by_path(conn: sqlite3.Connection, path: str) -> Optional[dict]:
         "duration_ms": row[12],
         "is_hidden": bool(row[13]),
         "phash": row[14],
-        "text_detected": None if row[15] is None else bool(row[15]),
+        "text_likely": None if row[15] is None else bool(row[15]),
         "text_detection_score": row[16],
         "text_detection_version": row[17],
         "user_confirmed_text_detected": None if row[18] is None else bool(row[18]),
-        "effective_text_detected": bool(row[18]) if row[18] is not None else (None if row[15] is None else bool(row[15])),
+        "effective_text_detected": _effective_text_detected_value(row[15], row[18], row[20], row[23]),
         "detected_text": row[19] or "",
         "text_more_likely": None if row[20] is None else bool(row[20]),
         "text_more_likely_score": row[21],
@@ -389,7 +408,7 @@ def upsert_media_item(
     media_type: str,
     content_hash: str,
     phash: str | None = None,
-    text_detected: bool | None = None,
+    text_likely: bool | None = None,
     text_detection_score: float | None = None,
     text_detection_version: int | None = None,
     text_more_likely: bool | None = None,
@@ -421,10 +440,10 @@ def upsert_media_item(
         conn.execute(
             """
                 UPDATE media_items 
-            SET content_hash = ?, phash = COALESCE(?, phash), text_detected = COALESCE(?, text_detected), text_detection_score = COALESCE(?, text_detection_score), text_detection_version = COALESCE(?, text_detection_version), text_more_likely = COALESCE(?, text_more_likely), text_more_likely_score = COALESCE(?, text_more_likely_score), text_more_likely_version = COALESCE(?, text_more_likely_version), text_verified = COALESCE(?, text_verified), text_verification_score = COALESCE(?, text_verification_score), text_verification_version = COALESCE(?, text_verification_version), file_size_bytes = ?, file_created_time_utc = ?, modified_time_utc = ?, original_file_date_utc = ?, width = ?, height = ?, duration_ms = ?, updated_at_utc = ? 
+            SET content_hash = ?, phash = COALESCE(?, phash), text_likely = COALESCE(?, text_likely), text_detection_score = COALESCE(?, text_detection_score), text_detection_version = COALESCE(?, text_detection_version), text_more_likely = COALESCE(?, text_more_likely), text_more_likely_score = COALESCE(?, text_more_likely_score), text_more_likely_version = COALESCE(?, text_more_likely_version), text_verified = COALESCE(?, text_verified), text_verification_score = COALESCE(?, text_verification_score), text_verification_version = COALESCE(?, text_verification_version), file_size_bytes = ?, file_created_time_utc = ?, modified_time_utc = ?, original_file_date_utc = ?, width = ?, height = ?, duration_ms = ?, updated_at_utc = ? 
             WHERE id = ?
             """,
-            (content_hash, phash, (1 if text_detected else 0) if text_detected is not None else None, text_detection_score, text_detection_version, (1 if text_more_likely else 0) if text_more_likely is not None else None, text_more_likely_score, text_more_likely_version, (1 if text_verified else 0) if text_verified is not None else None, text_verification_score, text_verification_version, size, created_time, mtime, original_file_date, width, height, duration_ms, now, existing_by_path[0]),
+            (content_hash, phash, (1 if text_likely else 0) if text_likely is not None else None, text_detection_score, text_detection_version, (1 if text_more_likely else 0) if text_more_likely is not None else None, text_more_likely_score, text_more_likely_version, (1 if text_verified else 0) if text_verified is not None else None, text_verification_score, text_verification_version, size, created_time, mtime, original_file_date, width, height, duration_ms, now, existing_by_path[0]),
         )
         conn.commit()
         return int(existing_by_path[0])
@@ -454,13 +473,13 @@ def upsert_media_item(
             conn.execute(
                 """
                 UPDATE media_items 
-                SET path = ?, phash = COALESCE(?, phash), text_detected = COALESCE(?, text_detected), text_detection_score = COALESCE(?, text_detection_score), text_detection_version = COALESCE(?, text_detection_version), text_more_likely = COALESCE(?, text_more_likely), text_more_likely_score = COALESCE(?, text_more_likely_score), text_more_likely_version = COALESCE(?, text_more_likely_version), text_verified = COALESCE(?, text_verified), text_verification_score = COALESCE(?, text_verification_score), text_verification_version = COALESCE(?, text_verification_version), file_size_bytes = ?, file_created_time_utc = ?, modified_time_utc = ?, original_file_date_utc = ?, width = ?, height = ?, duration_ms = ?, updated_at_utc = ? 
+                SET path = ?, phash = COALESCE(?, phash), text_likely = COALESCE(?, text_likely), text_detection_score = COALESCE(?, text_detection_score), text_detection_version = COALESCE(?, text_detection_version), text_more_likely = COALESCE(?, text_more_likely), text_more_likely_score = COALESCE(?, text_more_likely_score), text_more_likely_version = COALESCE(?, text_more_likely_version), text_verified = COALESCE(?, text_verified), text_verification_score = COALESCE(?, text_verification_score), text_verification_version = COALESCE(?, text_verification_version), file_size_bytes = ?, file_created_time_utc = ?, modified_time_utc = ?, original_file_date_utc = ?, width = ?, height = ?, duration_ms = ?, updated_at_utc = ? 
                 WHERE id = ?
                 """,
                 (
                     normalized,
                     phash,
-                    (1 if text_detected else 0) if text_detected is not None else None,
+                    (1 if text_likely else 0) if text_likely is not None else None,
                     text_detection_score,
                     text_detection_version,
                     (1 if text_more_likely else 0) if text_more_likely is not None else None,
@@ -488,7 +507,7 @@ def upsert_media_item(
             pass
 
     # 3. Brand new item (or duplicate content at new path)
-    return add_media_item(conn, normalized, media_type, content_hash, phash=phash, text_detected=text_detected, text_detection_score=text_detection_score, text_detection_version=text_detection_version, text_more_likely=text_more_likely, text_more_likely_score=text_more_likely_score, text_more_likely_version=text_more_likely_version, text_verified=text_verified, text_verification_score=text_verification_score, text_verification_version=text_verification_version, width=width, height=height, duration_ms=duration_ms)
+    return add_media_item(conn, normalized, media_type, content_hash, phash=phash, text_likely=text_likely, text_detection_score=text_detection_score, text_detection_version=text_detection_version, text_more_likely=text_more_likely, text_more_likely_score=text_more_likely_score, text_more_likely_version=text_more_likely_version, text_verified=text_verified, text_verification_score=text_verification_score, text_verification_version=text_verification_version, width=width, height=height, duration_ms=duration_ms)
 
 
 def list_media_in_scope(
@@ -646,7 +665,7 @@ def _list_media_with_where(
                 ) THEN 1
                 ELSE 0
             END AS effective_is_hidden,
-            m.text_detected,
+            m.text_likely,
             m.text_detection_score,
             m.text_detection_version,
             m.user_confirmed_text_detected,
@@ -722,11 +741,11 @@ def _media_row_to_dict(row) -> dict:
         "height": row[12],
         "duration": (row[13] / 1000.0) if row[13] else None,
         "is_hidden": bool(row[14]),
-        "text_detected": None if row[15] is None else bool(row[15]),
+        "text_likely": None if row[15] is None else bool(row[15]),
         "text_detection_score": row[16],
         "text_detection_version": row[17],
         "user_confirmed_text_detected": None if row[18] is None else bool(row[18]),
-        "effective_text_detected": bool(row[18]) if row[18] is not None else (None if row[15] is None else bool(row[15])),
+        "effective_text_detected": _effective_text_detected_value(row[15], row[18], row[20], row[23]),
         "detected_text": row[19] or "",
         "text_more_likely": None if row[20] is None else bool(row[20]),
         "text_more_likely_score": row[21],

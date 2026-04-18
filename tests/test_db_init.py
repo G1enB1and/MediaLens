@@ -103,11 +103,48 @@ class TestDbInit(unittest.TestCase):
             }
 
         self.assertIn("phash", columns)
-        self.assertIn("text_detected", columns)
+        self.assertIn("text_likely", columns)
         self.assertIn("user_confirmed_text_detected", columns)
         self.assertIn("detected_text", columns)
         self.assertIn("text_more_likely", columns)
         self.assertIn("idx_media_items_phash", indexes)
+
+    def test_init_db_copies_legacy_text_detected_to_text_likely(self) -> None:
+        tmp_dir = Path(".tmp-tests")
+        tmp_dir.mkdir(exist_ok=True)
+        db_path = tmp_dir / f"mm-legacy-text-{uuid.uuid4()}.db"
+        if db_path.exists():
+            db_path.unlink()
+
+        with sqlite3.connect(db_path) as conn:
+            conn.executescript(
+                """
+                CREATE TABLE media_items (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  path TEXT NOT NULL UNIQUE,
+                  content_hash TEXT,
+                  media_type TEXT NOT NULL,
+                  file_size_bytes INTEGER,
+                  modified_time_utc TEXT,
+                  text_detected INTEGER,
+                  created_at_utc TEXT NOT NULL,
+                  updated_at_utc TEXT NOT NULL
+                );
+                INSERT INTO media_items(path, media_type, text_detected, created_at_utc, updated_at_utc)
+                VALUES ('c:/media/cats/a.jpg', 'image', 1, datetime('now'), datetime('now'));
+                """
+            )
+            conn.commit()
+
+        init_db(str(db_path))
+
+        with sqlite3.connect(db_path) as conn:
+            row = conn.execute(
+                "SELECT text_likely FROM media_items WHERE path = ?",
+                ("c:/media/cats/a.jpg",),
+            ).fetchone()
+
+        self.assertEqual(row[0], 1)
 
 
 if __name__ == "__main__":

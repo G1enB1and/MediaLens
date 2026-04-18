@@ -88,8 +88,10 @@ def _ensure_media_item_date_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE media_items ADD COLUMN metadata_date TEXT")
     if "phash" not in cols:
         conn.execute("ALTER TABLE media_items ADD COLUMN phash TEXT")
-    if "text_detected" not in cols:
-        conn.execute("ALTER TABLE media_items ADD COLUMN text_detected INTEGER")
+    if "text_likely" not in cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN text_likely INTEGER")
+        if "text_detected" in cols:
+            conn.execute("UPDATE media_items SET text_likely = text_detected WHERE text_likely IS NULL")
     if "text_detection_score" not in cols:
         conn.execute("ALTER TABLE media_items ADD COLUMN text_detection_score REAL")
     if "text_detection_version" not in cols:
@@ -122,7 +124,7 @@ def _ensure_media_item_date_columns(conn: sqlite3.Connection) -> None:
                 (next_original, int(media_id)),
             )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_media_items_phash ON media_items(phash)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_items_text_detected ON media_items(text_detected)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_items_text_likely ON media_items(text_likely)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_media_items_text_more_likely ON media_items(text_more_likely)")
 
 
@@ -133,7 +135,7 @@ def init_db(db_path: str) -> None:
     # indexes against columns that are added later by the migration helpers.
     # Use a regex so this remains safe across LF/CRLF and packaged schema text.
     sql = re.sub(
-        r"(?im)^\s*CREATE INDEX IF NOT EXISTS idx_media_items_(?:phash|text_detected|text_more_likely)\s+ON\s+media_items\([^)]+\);\s*$",
+        r"(?im)^\s*CREATE INDEX IF NOT EXISTS idx_media_items_(?:phash|text_detected|text_likely|text_more_likely)\s+ON\s+media_items\([^)]+\);\s*$",
         "",
         sql,
     )

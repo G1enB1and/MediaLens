@@ -83,7 +83,7 @@ class TestMediaRepo(unittest.TestCase):
     def test_user_confirmed_text_detected_overrides_effective_value(self) -> None:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("PRAGMA journal_mode=MEMORY;")
-            media_id = add_media_item(conn, r"C:\\Media\\Cats\\a.jpg", "image", text_detected=False)
+            media_id = add_media_item(conn, r"C:\\Media\\Cats\\a.jpg", "image", text_likely=False)
 
             media = get_media_by_path(conn, r"C:\\Media\\Cats\\a.jpg")
             self.assertIs(media["effective_text_detected"], False)
@@ -91,9 +91,47 @@ class TestMediaRepo(unittest.TestCase):
             update_user_confirmed_text_detected(conn, media_id, True)
             media = get_media_by_path(conn, r"C:\\Media\\Cats\\a.jpg")
 
-            self.assertIs(media["text_detected"], False)
+            self.assertIs(media["text_likely"], False)
             self.assertIs(media["user_confirmed_text_detected"], True)
             self.assertIs(media["effective_text_detected"], True)
+
+    def test_stronger_text_detection_signals_keep_effective_value_positive(self) -> None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("PRAGMA journal_mode=MEMORY;")
+            media_id = add_media_item(
+                conn,
+                r"C:\\Media\\Cats\\a.jpg",
+                "image",
+                text_likely=False,
+                text_more_likely=True,
+            )
+
+            media = get_media_by_path(conn, r"C:\\Media\\Cats\\a.jpg")
+            self.assertIs(media["text_likely"], False)
+            self.assertIs(media["text_more_likely"], True)
+            self.assertIs(media["effective_text_detected"], True)
+
+            update_user_confirmed_text_detected(conn, media_id, False)
+            media = get_media_by_path(conn, r"C:\\Media\\Cats\\a.jpg")
+            self.assertIs(media["user_confirmed_text_detected"], False)
+            self.assertIs(media["effective_text_detected"], False)
+
+    def test_verified_text_signal_keeps_scoped_effective_value_positive(self) -> None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("PRAGMA journal_mode=MEMORY;")
+            add_media_item(
+                conn,
+                r"C:\\Media\\Cats\\a.jpg",
+                "image",
+                text_likely=False,
+                text_verified=True,
+            )
+
+            scoped = list_media_in_scope(conn, [r"C:\\Media\\Cats"])
+            self.assertEqual(len(scoped), 1)
+            self.assertIs(scoped[0]["text_likely"], False)
+            self.assertIs(scoped[0]["text_verified"], True)
+            self.assertIs(scoped[0]["effective_text_detected"], True)
 
     def test_detected_text_is_persisted_on_media_item(self) -> None:
         with sqlite3.connect(self.db_path) as conn:
