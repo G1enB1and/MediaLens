@@ -1,18 +1,17 @@
-## MediaLens v1.1.24
+## MediaLens v1.1.25
 
 ### Summary
 
-This release makes gallery filtering more trustworthy and predictable, especially when working with Text Detection and AI Detection. Scanner runs, manual overrides, pagination, and filter dropdowns now behave more consistently.
+This release introduces local AI-powered tagging and description generation directly into MediaLens, turning your library into something you can understand, search, and organize automatically. It also improves gallery stability and behavior during everyday workflows, making browsing, sorting, and cleanup feel more consistent and reliable.
 
 ### Highlights
 
-- Text Detection filters no longer treat weak text_likely signals as final results, relying instead on stronger and verified detection signals.
-- Running Text Detection from Settings now performs a real rescan instead of finishing instantly from cached values.
-- Gallery controls now behave more naturally, with pagination returning to the top and filter dropdowns collapsing when you click away.
+- MediaLens can now generate tags and natural-language descriptions locally, using separate AI models and workflows designed for accuracy and control.
+- AI-generated tags and descriptions integrate directly into search, filtering, and metadata workflows.
+- Keep randomized galleries in the same order for the rest of the session, even after deletes, hides, refreshes, and metadata updates.
+- Use masonry view with fewer jumps, flashes, and older JPG sizing problems.
 
 ### Notes
 
-- This update includes a database-safe behavior change for Text Detection status: `text_likely` remains available as a weak scanner candidate signal, but it no longer marks media as Text Detected by itself.
-
-Full Changelog:
-<https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md>
+- Local AI models live outside the app package and are ignored by git, so they can remain available without bloating source control.
+- Full changelog: <https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md>

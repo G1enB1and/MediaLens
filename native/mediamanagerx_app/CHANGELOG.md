@@ -1,6 +1,38 @@
 # Change Log
 
-## v1.1.24 (Current)
+## v1.1.25 (Current)
+
+### Summary
+
+This release introduces local AI-powered tagging and description generation directly into MediaLens, turning your library into something you can understand, search, and organize automatically. It also improves gallery stability and behavior during everyday workflows, making browsing, sorting, and cleanup feel more consistent and reliable.
+
+### Highlights
+
+- Local AI can now generate tags and descriptions into the MediaLens database, with separate controls for each workflow.
+- Randomized galleries now keep the same session order after refreshes, deletes, hides, and metadata updates.
+- Masonry view is more reliable when deleting, hiding, and displaying older JPG files with EXIF orientation.
+
+### Added
+
+- Added local AI tag generation using the local WD SwinV2 tagger model.
+- Added local AI description generation that uses existing tags as context, producing more accurate and relevant descriptions.
+- Added separate Generate Tags and Generate Description actions in the Details panel.
+- Added AI settings groups for Tags and Descriptions, with separate prompts and generation settings for each workflow.
+- Added Union Merge as the default tag write mode so generated tags append without duplicates.
+- Added a scrollable multiline Tags editor in the Details panel.
+
+### Changed
+
+- Changed random sorting to assign each media path a session-stable random rank that resets only when the app starts or randomize is enabled again.
+- Changed delete and hide handling in masonry view to return near the previous scroll position instead of jumping to the top.
+- Changed masonry sizing to account for JPG EXIF orientation when reading image dimensions.
+- Changed gallery refreshes to skip unnecessary DOM rebuilds when the visible gallery signature has not changed, reducing fast flashes during background updates.
+- Changed lightbox video rendering to reduce expensive per-frame styling and improve playback performance.
+- Changed AI prompt inputs in Settings to match the same input styling as the rest of the settings controls.
+
+---
+
+## v1.1.24
 
 ### Summary
 
