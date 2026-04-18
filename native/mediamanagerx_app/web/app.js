@@ -40,6 +40,7 @@ let gTimelineScrubPointerId = null;
 let gTimelineHoverActive = false;
 let gTimelineScrubRatio = 0;
 let gPendingScrollAnchor = null;
+let gPreserveGalleryScrollUntil = 0;
 let gInfiniteScrollLoading = false;
 let gTimelineScrollTargetsFrozen = null;
 let gTimelineRefreshTargetsRaf = 0;
@@ -2544,6 +2545,7 @@ function toggleDuplicateDeletePath(groupKey, path, checked) {
 
 function deletePathsSequential(paths, onDone) {
   const queue = Array.isArray(paths) ? paths.slice() : [];
+  if (queue.length) markGalleryMutationScrollPreserve(queue);
   const step = () => {
     const next = queue.shift();
     if (!next) {
@@ -2567,7 +2569,7 @@ function deletePathFromUi(path, onDone) {
     return;
   }
   if (!gPendingScrollAnchor) {
-    gPendingScrollAnchor = captureCurrentGroupScrollAnchor();
+    markGalleryMutationScrollPreserve([path]);
   }
   const finish = (ok) => {
     if (typeof onDone === 'function') onDone(!!ok);
@@ -3377,10 +3379,10 @@ window.__mmx_jumpReviewGroup = function (direction) {
   return jumpReviewGroup(direction);
 };
 
-function captureCurrentGroupScrollAnchor() {
+function captureCurrentGroupScrollAnchor(excludedPaths = null) {
   const main = document.querySelector('main');
   if (!main) return null;
-  const topCard = captureCurrentCardScrollAnchor(main);
+  const topCard = captureCurrentCardScrollAnchor(main, excludedPaths);
   if (topCard) return topCard;
   const groups = Array.from(document.querySelectorAll('.gallery-group'));
   if (!groups.length) {
@@ -3422,14 +3424,55 @@ function captureCurrentGroupScrollAnchor() {
   };
 }
 
-function captureCurrentCardScrollAnchor(mainOverride = null) {
+function captureDeleteScrollAnchor(paths) {
+  const excludedPaths = new Set(
+    (Array.isArray(paths) ? paths : [paths])
+      .map(normalizeMediaPath)
+      .filter(Boolean)
+  );
+  const main = document.querySelector('main');
+  if (!main) return null;
+  return captureCurrentGroupScrollAnchor(excludedPaths);
+}
+
+function markGalleryMutationScrollPreserve(paths = null) {
+  if (!gPendingScrollAnchor) {
+    const pathList = Array.isArray(paths) ? paths : (paths ? [paths] : []);
+    gPendingScrollAnchor = pathList.length
+      ? captureDeleteScrollAnchor(pathList)
+      : captureCurrentGroupScrollAnchor();
+  }
+  gPreserveGalleryScrollUntil = Date.now() + 3000;
+}
+
+function shouldPreserveGalleryScrollForRefresh() {
+  return !!gPendingScrollAnchor || Date.now() < gPreserveGalleryScrollUntil;
+}
+
+function prepareGalleryScrollPreservationForRefresh(resetPage = false) {
+  if (resetPage) {
+    gPreserveGalleryScrollUntil = 0;
+    gPendingScrollAnchor = null;
+    return false;
+  }
+  if (!shouldPreserveGalleryScrollForRefresh()) return false;
+  if (!gPendingScrollAnchor) {
+    gPendingScrollAnchor = captureCurrentGroupScrollAnchor();
+  }
+  return !!gPendingScrollAnchor;
+}
+
+function captureCurrentCardScrollAnchor(mainOverride = null, excludedPaths = null) {
   const main = mainOverride || document.querySelector('main');
   if (!main) return null;
   const cards = Array.from(document.querySelectorAll('.card[data-path]'));
   if (!cards.length) return null;
   const mainRect = main.getBoundingClientRect();
   let best = null;
+  const excluded = excludedPaths instanceof Set ? excludedPaths : new Set();
   cards.forEach((card) => {
+    const path = card.getAttribute('data-path') || '';
+    if (excluded.has(normalizeMediaPath(path))) return;
     const rect = card.getBoundingClientRect();
     if (rect.bottom < mainRect.top || rect.top > mainRect.bottom) return;
     const topWithinMain = rect.top - mainRect.top;
@@ -3517,6 +3560,14 @@ function restoreGroupScrollAnchor() {
   }
   const targetScrollTop = (bestGroup.offsetTop || 0) + (anchor.offsetWithinGroup || 0);
   main.scrollTop = Math.max(0, targetScrollTop);
+}
+
+function restorePendingGalleryScrollAnchor() {
+  if (!gPendingScrollAnchor) return;
+  restoreGroupScrollAnchor();
+  if (Date.now() >= gPreserveGalleryScrollUntil) {
+    gPreserveGalleryScrollUntil = 0;
+  }
 }
 
 function rerenderCurrentMediaPreservingScroll() {
@@ -5654,6 +5705,7 @@ function wireCtxMenu() {
       const targetPaths = getTargetPaths();
       if (!targetPaths.length) return false;
 
+      markGalleryMutationScrollPreserve(hidden ? targetPaths : null);
       if (fromLb) closeLightbox();
       setGlobalLoading(true, hidden ? 'Hiding...' : 'Unhiding...', 25);
       hideCtx();
@@ -6065,6 +6117,9 @@ function renderMediaList(items, scrollToTop = true) {
     if (gGalleryViewMode !== 'masonry') {
       renderStructuredMediaList(el, viewItems);
       renderTimelineRail([]);
+      requestAnimationFrame(() => {
+        restorePendingGalleryScrollAnchor();
+      });
       finalizeRender();
       return;
     }
@@ -6078,6 +6133,7 @@ function renderMediaList(items, scrollToTop = true) {
     // first if the user scrolls near them; the background queue will handle
     // anything that hasn't been touched yet once the browser is idle.
     requestAnimationFrame(() => {
+      restorePendingGalleryScrollAnchor();
       prioritizeVisibleMediaLoads(el);
       const unobserved = el.querySelectorAll('img[data-src]:not([src]), img[data-poster-path]:not([src]), img[data-video-path]:not([src])');
       unobserved.forEach(img => {
@@ -6684,6 +6740,7 @@ function navigateToGalleryPage(pageIndex) {
 
 function refreshFromBridge(bridge, resetPage = false) {
   if (!bridge) return;
+  const preserveScroll = prepareGalleryScrollPreservationForRefresh(resetPage);
   const refreshToken = ++gRefreshGeneration;
   const consumeSelectAllAfterRefresh = function () {
     if (!gSelectAllAfterRefresh) return;
@@ -6727,7 +6784,7 @@ function refreshFromBridge(bridge, resetPage = false) {
       if (duplicateMode && shouldShowScanWaitingEmptyState() && !currentReviewSignature) {
         gTotal = 0;
         updateGalleryCountChip(0);
-        renderMediaList([], !gPendingScrollAnchor);
+        renderMediaList([], !preserveScroll);
         renderPager();
         if (gReviewLoadingActive) updateReviewLoadingProgress(15, getReviewBuildStageText('scan'));
         else setGlobalLoading(true, 'Scanning folder...', 10);
@@ -6753,7 +6810,7 @@ function refreshFromBridge(bridge, resetPage = false) {
             return;
           }
           if (gReviewLoadingActive) updateReviewLoadingProgress(90, getReviewBuildStageText('prepare'));
-          renderMediaList(items, !gPendingScrollAnchor);
+          renderMediaList(items, !preserveScroll);
           consumeSelectAllAfterRefresh();
           renderPager();
           const reviewLoadingGeneration = gReviewLoadingGeneration;
@@ -6783,7 +6840,7 @@ function refreshFromBridge(bridge, resetPage = false) {
       const offset = useInfinite ? 0 : gPage * PAGE_SIZE;
       fetchMediaList(gSelectedFolders, limit, offset, gSort, gFilter, gSearchQuery || '').then(function (items) {
         if (refreshToken !== gRefreshGeneration) return;
-        renderMediaList(items, !gPendingScrollAnchor);
+        renderMediaList(items, !preserveScroll);
         consumeSelectAllAfterRefresh();
         renderPager();
         if (useInfinite) requestAnimationFrame(() => maybeLoadMoreInfiniteResults());
