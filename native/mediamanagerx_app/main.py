@@ -4176,6 +4176,8 @@ class Bridge(QObject):
         self._update_reply = None
         self._download_reply = None
         self._session_shuffle_seed = random.getrandbits(32)
+        self._session_shuffle_random = random.Random(self._session_shuffle_seed)
+        self._session_shuffle_order: dict[str, float] = {}
         self._current_gallery_filter: str = "all"
         self._current_gallery_search: str = ""
         self._current_gallery_tag_scope_search: str = ""
@@ -4815,6 +4817,18 @@ class Bridge(QObject):
 
     def _randomize_enabled(self) -> bool:
         return bool(self.settings.value("gallery/randomize", False, type=bool))
+
+    def _reset_session_shuffle_order(self) -> None:
+        self._session_shuffle_seed = random.getrandbits(32)
+        self._session_shuffle_random = random.Random(self._session_shuffle_seed)
+        self._session_shuffle_order = {}
+
+    def _session_shuffle_key(self, row: dict) -> tuple[float, str]:
+        path = str(row.get("path") or "")
+        key = path.replace("/", "\\").casefold()
+        if key not in self._session_shuffle_order:
+            self._session_shuffle_order[key] = self._session_shuffle_random.random()
+        return self._session_shuffle_order[key], key
 
     def _restore_last_enabled(self) -> bool:
         return bool(self.settings.value("gallery/restore_last", False, type=bool))
@@ -6348,6 +6362,8 @@ class Bridge(QObject):
                 return False
             qkey = key.replace(".", "/")
             self.settings.setValue(qkey, bool(value))
+            if key == "gallery.randomize" and bool(value):
+                self._reset_session_shuffle_order()
             if key.startswith("ui.") or key.startswith("metadata.display.") or key in {"gallery.show_hidden", "gallery.include_nested_files", "gallery.show_folders", "gallery.mute_video_by_default", "player.autoplay_gallery_animated_gifs", "player.autoplay_preview_animated_gifs"}:
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, bool(value))
@@ -8223,7 +8239,7 @@ class Bridge(QObject):
 
         if self._randomize_enabled() and sort_by == "none":
             folders.sort(key=name_key)
-            random.Random(self._session_shuffle_seed).shuffle(media)
+            media.sort(key=self._session_shuffle_key)
             return folders + media
 
         if sort_by == "none":
