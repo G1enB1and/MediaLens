@@ -6039,6 +6039,12 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   // Hook up custom dropdowns
+  function closeCustomSelects(except = null) {
+    document.querySelectorAll('.custom-select.open').forEach((select) => {
+      if (select !== except) select.classList.remove('open');
+    });
+  }
+
   function setupCustomSelect(id, onChange) {
     const el = document.getElementById(id);
     if (!el) return;
@@ -6048,10 +6054,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Toggle open
     el.addEventListener('click', (e) => {
       e.stopPropagation();
-      // Close others
-      document.querySelectorAll('.custom-select').forEach(s => {
-        if (s !== el) s.classList.remove('open');
-      });
+      closeCustomSelects(el);
       el.classList.toggle('open');
     });
 
@@ -6099,9 +6102,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     el.addEventListener('click', (e) => {
       e.stopPropagation();
-      document.querySelectorAll('.custom-select').forEach(s => {
-        if (s !== el) s.classList.remove('open');
-      });
+      closeCustomSelects(el);
       el.classList.toggle('open');
     });
 
@@ -6124,9 +6125,23 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  document.addEventListener('pointerdown', (e) => {
+    if (!e.target.closest('.custom-select')) {
+      closeCustomSelects();
+    }
+  }, true);
+
+  document.addEventListener('focusin', (e) => {
+    if (!e.target.closest('.custom-select')) {
+      closeCustomSelects();
+    }
+  }, true);
+
   // Close on outside click and handle global deselection
   document.addEventListener('click', (e) => {
-    document.querySelectorAll('.custom-select').forEach(s => s.classList.remove('open'));
+    if (!e.target.closest('.custom-select')) {
+      closeCustomSelects();
+    }
 
     // If we clicked something that is NOT a card or a descendant of a card,
     // and not a menu item or other interactive element that should keep selection,

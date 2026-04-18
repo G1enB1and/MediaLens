@@ -15838,6 +15838,12 @@ class MainWindow(QMainWindow):
             if is_light
             else (Path(__file__).with_name("web") / "icons" / "chevron-down-dark.svg")
         ).as_posix()
+        meta_switch_on_svg = (
+            Path(__file__).with_name("web") / "icons" / ("black-toggle-on.svg" if is_light else "white-toggle-on.svg")
+        ).as_posix()
+        meta_switch_off_svg = (
+            Path(__file__).with_name("web") / "icons" / ("black-toggle-off.svg" if is_light else "white-toggle-off.svg")
+        ).as_posix()
         combo_bg = "#ffffff" if is_light else Theme.mix(Theme.get_control_bg(accent), "#000000", 0.12)
         combo_selected_text = Theme.mix(text, accent, 0.76)
         combo_hover_bg = Theme.mix(combo_bg, "#000000" if is_light else "#ffffff", 0.04 if is_light else 0.07)
@@ -16292,22 +16298,24 @@ class MainWindow(QMainWindow):
                 background: transparent;
                 spacing: 0px;
                 padding: 0px;
-                min-height: 22px;
-                max-height: 22px;
+                min-width: 44px;
+                max-width: 44px;
+                min-height: 24px;
+                max-height: 24px;
             }}
             QCheckBox#metaSwitch::indicator {{
-                width: 34px;
-                height: 18px;
-                border-radius: 9px;
-                border: 1px solid {Theme.get_input_border(accent)};
-                background-color: {Theme.get_input_bg(accent)};
+                width: 44px;
+                height: 24px;
+                border: none;
+                background: transparent;
+                image: url('{meta_switch_off_svg}');
             }}
             QCheckBox#metaSwitch::indicator:hover {{
-                border-color: {accent_str};
+                background: transparent;
             }}
             QCheckBox#metaSwitch::indicator:checked {{
-                background-color: {Theme.get_btn_save_hover(accent)};
-                border-color: {accent_str};
+                background: transparent;
+                image: url('{meta_switch_on_svg}');
             }}
             QLabel#previewImageLabel {{
                 background-color: {Theme.get_control_bg(accent)};
