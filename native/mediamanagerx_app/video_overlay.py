@@ -5,7 +5,7 @@ from pathlib import Path
 
 import os
 from PySide6.QtCore import QEvent, QTimer, Qt, QUrl, QRect, QSize, QPoint, QByteArray
-from PySide6.QtGui import QKeySequence, QShortcut, QRegion, QPainterPath, QPixmap, QColor
+from PySide6.QtGui import QKeySequence, QShortcut, QRegion, QPixmap, QColor
 from PySide6.QtGui import QImage, QPainter, QIcon
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer, QVideoSink, QVideoFrame
 from PySide6.QtMultimedia import QVideoFrameFormat
@@ -47,7 +47,8 @@ class VideoFrameWidget(QWidget):
     def __init__(self, *, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setMouseTracking(True)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self._img: QImage | None = None
 
     def set_image(self, img: QImage | None) -> None:
@@ -63,19 +64,11 @@ class VideoFrameWidget(QWidget):
 
     def paintEvent(self, event) -> None:  # type: ignore[override]
         p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        # Do NOT paint black behind the video; let the overlay backdrop show.
-        p.fillRect(self.rect(), Qt.GlobalColor.transparent)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
+        p.fillRect(self.rect(), Qt.GlobalColor.black)
 
         if not self._img or self._img.isNull():
             return
-
-        # Smooth Rounding: Use a clip path for anti-aliased corners
-        path = QPainterPath()
-        path.addRoundedRect(self.rect(), 8, 8)
-        p.setClipPath(path)
 
         # Fit while preserving aspect ratio.
         target = self.rect()
