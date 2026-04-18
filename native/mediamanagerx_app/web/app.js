@@ -6552,14 +6552,25 @@ function renderPager() {
       btn.textContent = String(p);
       if (p === cur) btn.setAttribute('aria-current', 'page');
       btn.addEventListener('click', () => {
-        gPage = p - 1;
-        refreshFromBridge(gBridge);
+        navigateToGalleryPage(p - 1);
       });
       links.appendChild(btn);
 
       last = p;
     }
   });
+}
+
+function navigateToGalleryPage(pageIndex) {
+  if (!gBridge) return;
+  const tp = totalPages();
+  const nextPageIndex = Math.max(0, Math.min(tp - 1, Number(pageIndex) || 0));
+  if (nextPageIndex === gPage) return;
+  gPage = nextPageIndex;
+  gPendingScrollAnchor = null;
+  const main = document.querySelector('main');
+  if (main) main.scrollTop = 0;
+  refreshFromBridge(gBridge);
 }
 
 function refreshFromBridge(bridge, resetPage = false) {
@@ -6698,16 +6709,11 @@ function scheduleFilterSensitiveMetadataRefresh() {
 }
 
 function nextPage() {
-  if (!gBridge) return;
-  const tp = totalPages();
-  gPage = Math.min(tp - 1, gPage + 1);
-  refreshFromBridge(gBridge);
+  navigateToGalleryPage(gPage + 1);
 }
 
 function prevPage() {
-  if (!gBridge) return;
-  gPage = Math.max(0, gPage - 1);
-  refreshFromBridge(gBridge);
+  navigateToGalleryPage(gPage - 1);
 }
 
 function wirePager() {
