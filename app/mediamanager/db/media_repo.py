@@ -56,9 +56,9 @@ def _effective_text_detected_value(
         return True
     if text_more_likely is not None and bool(text_more_likely):
         return True
-    if text_likely is None:
-        return None
-    return bool(text_likely)
+    if text_verified is not None or text_more_likely is not None or text_likely is not None:
+        return False
+    return None
 
 
 def _ensure_media_items_scan_columns(conn: sqlite3.Connection) -> None:

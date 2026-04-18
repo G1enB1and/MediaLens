@@ -5182,6 +5182,7 @@ class Bridge(QObject):
         *,
         allow_concurrent_scan: bool = False,
         force: bool = False,
+        rescan_existing: bool = False,
     ) -> None:
         if not force and not self._scanner_enabled("text_detection"):
             self._set_scanner_status("text_detection", "Disabled")
@@ -5215,7 +5216,7 @@ class Bridge(QObject):
                     entries = self._collect_text_scope_entries(resolved_folders, resolved_collection_id)
                     if not entries:
                         return
-                    self._backfill_scope_text_detection(entries, generation)
+                    self._backfill_scope_text_detection(entries, generation, rescan_existing=rescan_existing)
                 else:
                     with self._scan_lock:
                         if not self._text_processing_should_continue(generation):
@@ -5223,7 +5224,7 @@ class Bridge(QObject):
                         entries = self._collect_text_scope_entries(resolved_folders, resolved_collection_id)
                         if not entries:
                             return
-                        self._backfill_scope_text_detection(entries, generation)
+                        self._backfill_scope_text_detection(entries, generation, rescan_existing=rescan_existing)
             except Exception as exc:
                 try:
                     self._log(f"Background text processing failed: {exc}")
@@ -5253,22 +5254,31 @@ class Bridge(QObject):
     def reveal_progress_toasts(self) -> None:
         self.progressToastsRevealRequested.emit()
 
-    def _backfill_scope_text_detection(self, entries: list[dict], generation: int | None = None) -> bool:
+    def _backfill_scope_text_detection(
+        self,
+        entries: list[dict],
+        generation: int | None = None,
+        *,
+        rescan_existing: bool = False,
+    ) -> bool:
         from app.mediamanager.utils.text_detection import TEXT_DETECTION_VERSION, detect_text_presence
         from app.mediamanager.db.media_repo import add_media_item
 
         eligible = [
             entry for entry in entries
             if not entry.get("is_folder")
-            and not (
+            and (
+                rescan_existing
+                or not (
                 entry.get("text_likely") is not None
                 and int(entry.get("text_detection_version") or 0) >= TEXT_DETECTION_VERSION
+                )
             )
         ]
         total_eligible = len(eligible)
         if total_eligible:
             self.textProcessingStarted.emit(self._text_stage_label("detected"), total_eligible)
-        updates: list[tuple[int, float, int, str]] = []
+        updates: list[tuple] = []
         processed = 0
         completed = True
         for entry in entries:
@@ -5278,7 +5288,8 @@ class Bridge(QObject):
             if entry.get("is_folder"):
                 continue
             if (
-                entry.get("text_likely") is not None
+                not rescan_existing
+                and entry.get("text_likely") is not None
                 and int(entry.get("text_detection_version") or 0) >= TEXT_DETECTION_VERSION
             ):
                 continue
@@ -5308,20 +5319,35 @@ class Bridge(QObject):
                 text_likely, text_score = detect_text_presence(analysis_path, source_path=path)
             except Exception:
                 text_likely, text_score = False, 0.0
-            existing_positive = self._has_existing_positive_text_signal(entry)
+            existing_positive = (not rescan_existing) and self._has_existing_positive_text_signal(entry)
             if existing_positive and not text_likely:
                 text_likely = True
                 text_score = max(float(entry.get("text_detection_score") or 0.0), float(text_score or 0.0))
             entry["text_likely"] = bool(text_likely)
             entry["text_detection_score"] = float(text_score or 0.0)
             entry["text_detection_version"] = TEXT_DETECTION_VERSION
-            updates.append((1 if text_likely else 0, float(text_score or 0.0), TEXT_DETECTION_VERSION, path))
+            if rescan_existing:
+                entry["text_more_likely"] = None
+                entry["text_more_likely_score"] = 0.0
+                entry["text_more_likely_version"] = 0
+                entry["text_verified"] = None
+                entry["text_verification_score"] = 0.0
+                entry["text_verification_version"] = 0
+                updates.append((1 if text_likely else 0, float(text_score or 0.0), TEXT_DETECTION_VERSION, None, 0.0, 0, None, 0.0, 0, path))
+            else:
+                updates.append((1 if text_likely else 0, float(text_score or 0.0), TEXT_DETECTION_VERSION, path))
         try:
             if updates:
-                self.conn.executemany(
-                    "UPDATE media_items SET text_likely = ?, text_detection_score = ?, text_detection_version = ? WHERE path = ?",
-                    updates,
-                )
+                if rescan_existing:
+                    self.conn.executemany(
+                        "UPDATE media_items SET text_likely = ?, text_detection_score = ?, text_detection_version = ?, text_more_likely = ?, text_more_likely_score = ?, text_more_likely_version = ?, text_verified = ?, text_verification_score = ?, text_verification_version = ? WHERE path = ?",
+                        updates,
+                    )
+                else:
+                    self.conn.executemany(
+                        "UPDATE media_items SET text_likely = ?, text_detection_score = ?, text_detection_version = ? WHERE path = ?",
+                        updates,
+                    )
                 self.conn.commit()
         except Exception as exc:
             try:
@@ -5510,7 +5536,7 @@ class Bridge(QObject):
                 eligible = [
                     entry for entry in entries
                     if not entry.get("is_folder")
-                    and bool(entry.get("effective_text_detected") if entry.get("effective_text_detected") is not None else entry.get("text_likely"))
+                    and self._effective_text_detected(entry)
                     and not str(entry.get("detected_text") or "").strip()
                 ]
                 total = len(eligible)
@@ -6279,7 +6305,7 @@ class Bridge(QObject):
     def run_scanner_now(self, scanner_key: str) -> bool:
         key = str(scanner_key or "").strip()
         if key == "text_detection":
-            self._ensure_background_text_processing(allow_concurrent_scan=True, force=True)
+            self._ensure_background_text_processing(allow_concurrent_scan=True, force=True, rescan_existing=True)
             return True
         if key == "ocr_text":
             return self._run_ocr_text_scanner(force=True)
@@ -8011,13 +8037,12 @@ class Bridge(QObject):
         effective = entry.get("effective_text_detected")
         if effective is not None:
             return bool(effective)
-        return bool(entry.get("text_likely"))
+        return False
 
     @staticmethod
     def _has_existing_positive_text_signal(entry: dict) -> bool:
         return bool(
-            entry.get("text_likely") is True
-            or entry.get("text_more_likely") is True
+            entry.get("text_more_likely") is True
             or entry.get("text_verified") is True
         )
 

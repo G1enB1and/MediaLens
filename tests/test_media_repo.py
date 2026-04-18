@@ -95,6 +95,16 @@ class TestMediaRepo(unittest.TestCase):
             self.assertIs(media["user_confirmed_text_detected"], True)
             self.assertIs(media["effective_text_detected"], True)
 
+    def test_text_likely_alone_is_not_effective_text_detected(self) -> None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("PRAGMA journal_mode=MEMORY;")
+            add_media_item(conn, r"C:\\Media\\Cats\\a.jpg", "image", text_likely=True)
+
+            media = get_media_by_path(conn, r"C:\\Media\\Cats\\a.jpg")
+
+            self.assertIs(media["text_likely"], True)
+            self.assertIs(media["effective_text_detected"], False)
+
     def test_stronger_text_detection_signals_keep_effective_value_positive(self) -> None:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("PRAGMA journal_mode=MEMORY;")
