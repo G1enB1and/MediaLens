@@ -1,21 +1,18 @@
-## MediaLens v1.1.23
+## MediaLens v1.1.24
 
-### ✨ Summary
+### Summary
 
-This release brings powerful new ways to organize and find your media with full OCR support and a dedicated Scanners management view. You can now manually correct detected text, search through visual content, and fine-tune your background processing schedules.
+This release makes gallery filtering more trustworthy and predictable, especially when working with Text Detection and AI Detection. Scanner runs, manual overrides, pagination, and filter dropdowns now behave more consistently.
 
-### 🔥 Highlights
+### Highlights
 
-- **Smart Text Search**: "Detected Text" is now fully searchable in the Advanced Search builder.
-- **Manual OCR Tools**: Trigger text extraction instantly or manually edit detected text to fix errors.
-- **Scanner Control Center**: A new settings category lets you monitor status and schedule background metadata tasks.
-- **Manual Overrides**: Quickly toggle Text Detection and AI Detection status for any file directly from the sidebar.
+- Text Detection filters no longer treat weak text_likely signals as final results, relying instead on stronger and verified detection signals.
+- Running Text Detection from Settings now performs a real rescan instead of finishing instantly from cached values.
+- Gallery controls now behave more naturally, with pagination returning to the top and filter dropdowns collapsing when you click away.
 
-### 🛠 Notes
+### Notes
 
-- This update includes database schema migrations for new scanner metadata.
+- This update includes a database-safe behavior change for Text Detection status: `text_likely` remains available as a weak scanner candidate signal, but it no longer marks media as Text Detected by itself.
 
----
-
-📄 Full Changelog:
-https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md
+Full Changelog:
+<https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md>

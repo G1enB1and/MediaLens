@@ -1,25 +1,54 @@
 # Change Log
 
-## v1.1.23 (Current)
+## v1.1.24 (Current)
 
 ### Summary
 
-This release introduces comprehensive OCR support with manual corrections and a new Scanners settings category, giving you full control over background metadata tasks. Detected text is now fully searchable, making it easier than ever to find specific media based on its visual content.
+This release fixes inconsistent Text Detection behavior and makes gallery filtering far more trustworthy and predictable. Manual scanner runs now perform real rescans, filters react instantly to overrides, and navigation controls feel more polished.
 
 ### Highlights
 
-- Full OCR support now includes manual text editing and "Save to DB" capabilities for perfect metadata accuracy.
-- New Scanners settings category provides transparency and control over background Text Detection and OCR task schedules.
-- "Detected Text" is now a first-class searchable field in the guided query builder.
+- Text Detection filters no longer treat weak text_likely signals as final results, relying instead on stronger and verified detection signals.
+- Running Text Detection from Settings now performs a real rescan instead of finishing instantly from cached values.
+- Gallery controls now behave more naturally, with pagination returning to the top and filter dropdowns collapsing when you click away.
+
+### Added
+
+- Added new SVG-based override switches for Text Detection and AI Detection, with clear on/off states across light and dark modes.
+
+### Changed
+
+- Changed effective Text Detection status to use manual overrides, verified text, and stronger text-detection signals instead of treating `text_likely` as source of truth.
+- Changed Settings > Scanners > Text Detection > Run Now to rescan existing files and clear stale stronger auto text signals when rebuilding results.
+- Changed Text Detection and OCR scanner eligibility so `text_likely` remains only a weak candidate signal, not a final positive result.
+- Changed gallery refresh behavior so Text Detection and AI Detection manual override toggles immediately update active Text Detected, No Text Detected, AI, and Non-AI filters.
+- Changed pagination so navigating to a different page scrolls the gallery back to the top.
+- Changed the Filter By dropdown so it collapses when clicking or focusing outside of it.
+- Changed text-filter scanning behavior to avoid the results/no-results blinking loop when filtering by Text Detected or No Text Detected.
+
+---
+
+## v1.1.23
+
+### Summary
+
+This release adds manual OCR text extraction, searchable detected text, and a new Scanners settings category, giving you much more control over text-related metadata tasks. With manual overrides, editable detected text, and background scanner controls, MediaLens makes it easier to find and manage media based on visible text.
+
+### Highlights
+
+- Manual OCR extraction lets you pull real text from images and videos on demand, then review or refine it in the Details panel.
+- New Scanners settings provide visibility and control over background Text Detection and OCR schedules.
+- Detected Text is now a searchable field in both search and the guided query builder.
 
 ### Added
 
 - Added a Scanners settings category that shows real-time status, last-run times, and configurable intervals for background OCR and Text Detection.
-- Added "Run Now" buttons and enable/disable toggles for each scanner service.
+- Added Run Now buttons and enable/disable toggles for each scanner service.
 - Added a manual OCR button in the Details panel to trigger instant text extraction for the selected file.
-- Added an editable "Detected Text" segment in the metadata panel with a "Save to DB" button for manual corrections.
-- Added "Detected Text" as a searchable field in the Advanced Search guided builder.
-- Added manual override switches to explicitly toggle "Text Detection" and "AI Detection" status for any file.
+- Added OCR support for video files using the existing preview image.
+- Added an editable Detected Text field in the metadata panel with Save to DB support for manual corrections.
+- Added Detected Text as a searchable field in the Advanced Search guided builder.
+- Added manual override toggle buttons for Text / No Text and AI / Non-AI file classification.
 
 ---
 
