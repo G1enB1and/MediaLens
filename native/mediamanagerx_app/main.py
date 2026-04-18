@@ -321,8 +321,12 @@ def _image_size_with_svg_support(path: str | Path) -> QSize:
     if not clean:
         return QSize()
     reader = QImageReader(clean)
+    reader.setAutoTransform(True)
     size = reader.size()
     if size.isValid():
+        transform_name = getattr(reader.transformation(), "name", "")
+        if "Rotate90" in transform_name or "Rotate270" in transform_name:
+            return QSize(size.height(), size.width())
         return size
     if Path(clean).suffix.lower() == ".svg":
         renderer = QSvgRenderer(clean)
@@ -3924,6 +3928,21 @@ def _load_media_metadata_payload(conn, path: str, log_fn=None) -> dict:
                     media["original_file_date"] = min(values) if values else ""
             except Exception:
                 pass
+            if media.get("media_type") == "image" and media_path.suffix.lower() in image_exts and media_path.suffix.lower() != ".svg":
+                display_size = _image_size_with_svg_support(media_path)
+                if display_size.isValid():
+                    display_width, display_height = int(display_size.width()), int(display_size.height())
+                    if int(media.get("width") or 0) != display_width or int(media.get("height") or 0) != display_height:
+                        media["width"] = display_width
+                        media["height"] = display_height
+                        try:
+                            conn.execute(
+                                "UPDATE media_items SET width = ?, height = ? WHERE id = ?",
+                                (display_width, display_height, int(media["id"])),
+                            )
+                            conn.commit()
+                        except Exception:
+                            pass
 
         payload = {
             "title": "",
@@ -7718,6 +7737,22 @@ class Bridge(QObject):
                     ctime = self._iso_to_ns(r.get("file_created_time"))
                 original_file_date = self._original_file_date_ns(r)
                 auto_date = int(r.get("preferred_date") or self._preferred_date_ns(r))
+                display_width = r.get("width")
+                display_height = r.get("height")
+                if r.get("media_type") == "image" and p.suffix.lower() != ".svg":
+                    display_size = _image_size_with_svg_support(p)
+                    if display_size.isValid():
+                        next_width, next_height = int(display_size.width()), int(display_size.height())
+                        if int(display_width or 0) != next_width or int(display_height or 0) != next_height:
+                            display_width, display_height = next_width, next_height
+                            try:
+                                self.conn.execute(
+                                    "UPDATE media_items SET width = ?, height = ? WHERE path = ?",
+                                    (display_width, display_height, str(r.get("path") or str(p)).replace("\\", "/").lower()),
+                                )
+                                self.conn.commit()
+                            except Exception:
+                                pass
                     
                 out.append({
                     "path": str(p), 
@@ -7727,8 +7762,8 @@ class Bridge(QObject):
                     "thumb_bg_hint": _thumbnail_bg_hint(p),
                     "is_hidden": bool(r.get("is_hidden")),
                     "is_animated": self._is_animated(p),
-                    "width": r.get("width"),
-                    "height": r.get("height"),
+                    "width": display_width,
+                    "height": display_height,
                     "duration": r.get("duration"),
                     "file_created_time": ctime,
                     "modified_time": mtime,
@@ -8442,13 +8477,22 @@ class Bridge(QObject):
                 stat = p.stat()
                 existing, skip = get_media_by_path(conn, str(p)), False
                 media_id = existing["id"] if existing else None
+                display_size = QSize()
+                suffix = p.suffix.lower()
+                if suffix in IMAGE_EXTS and suffix != ".svg":
+                    display_size = _image_size_with_svg_support(p)
                 if existing:
                     curr_mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat()
                     if existing["file_size"] == stat.st_size and existing.get("modified_time") == curr_mtime:
                         has_required_content_hash = bool(str(existing.get("content_hash") or "").strip())
                         has_required_visual_data = bool(existing.get("width") and existing.get("height"))
-                        if p.suffix.lower() in IMAGE_EXTS and p.suffix.lower() != ".svg":
+                        if suffix in IMAGE_EXTS and suffix != ".svg":
                             has_required_visual_data = has_required_visual_data and bool(str(existing.get("phash") or "").strip())
+                            if display_size.isValid() and (
+                                int(existing.get("width") or 0) != int(display_size.width())
+                                or int(existing.get("height") or 0) != int(display_size.height())
+                            ):
+                                has_required_visual_data = False
                         if has_required_content_hash and has_required_visual_data:
                             skip = True
                 
@@ -8458,7 +8502,7 @@ class Bridge(QObject):
                     
                     phash = None
                     if mtype == "image":
-                        sz = _image_size_with_svg_support(p)
+                        sz = display_size if display_size.isValid() else _image_size_with_svg_support(p)
                         if sz.isValid():
                             width, height = sz.width(), sz.height()
                         
