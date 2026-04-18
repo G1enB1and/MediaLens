@@ -4073,6 +4073,10 @@ class Bridge(QObject):
     textProcessingProgress = Signal(str, int, int)  # stage label, current, total
     textProcessingFinished = Signal()
     manualOcrFinished = Signal(str, str, str)  # path, text, error
+    localAiCaptioningStarted = Signal(int)
+    localAiCaptioningProgress = Signal(str, int, int)
+    localAiCaptioningItemFinished = Signal(str, list, str, str)
+    localAiCaptioningFinished = Signal(int, str)
     scannerStatusChanged = Signal(str, "QVariantMap")
     progressToastsRevealRequested = Signal()
     
@@ -4105,6 +4109,9 @@ class Bridge(QObject):
         self._last_dlg_res = None
         self._can_nav_back = False
         self._can_nav_forward = False
+        self._local_ai_service = None
+        self._local_ai_service_key = ""
+        self._local_ai_running = False
         
         appdata = _appdata_runtime_dir()
         _migrate_legacy_debugging_logs(appdata)
@@ -7425,6 +7432,181 @@ class Bridge(QObject):
 
         threading.Thread(target=work, daemon=True, name="manual-ocr").start()
 
+    def _local_ai_source_path(self, media_path: Path) -> Path:
+        if media_path.suffix.lower() not in VIDEO_EXTS:
+            return media_path
+        poster = self._video_poster_path(media_path)
+        if poster.exists():
+            return poster
+        poster = self._ensure_video_poster(media_path)
+        if poster and poster.exists():
+            return poster
+        raise RuntimeError("No video preview image is available for local AI captioning.")
+
+    def _local_ai_models_dir_default(self) -> str:
+        from app.mediamanager.ai_captioning.local_captioning import project_models_dir
+
+        return str(project_models_dir())
+
+    def _local_ai_caption_settings(self):
+        from app.mediamanager.ai_captioning.local_captioning import (
+            CAPTION_MODEL_ID,
+            DEFAULT_BAD_WORDS,
+            DEFAULT_CAPTION_PROMPT,
+            DEFAULT_CAPTION_START,
+            TAG_MODEL_ID,
+            LocalAiSettings,
+        )
+
+        models_dir = Path(str(self.settings.value("ai_caption/models_dir", self._local_ai_models_dir_default(), type=str) or self._local_ai_models_dir_default()))
+        return LocalAiSettings(
+            models_dir=models_dir,
+            tag_model_id=str(self.settings.value("ai_caption/tag_model_id", TAG_MODEL_ID, type=str) or TAG_MODEL_ID),
+            caption_model_id=str(self.settings.value("ai_caption/caption_model_id", CAPTION_MODEL_ID, type=str) or CAPTION_MODEL_ID),
+            tag_min_probability=float(self.settings.value("ai_caption/tag_min_probability", 0.35, type=float) or 0.35),
+            tag_max_tags=int(self.settings.value("ai_caption/tag_max_tags", 75, type=int) or 75),
+            tags_to_exclude=str(self.settings.value("ai_caption/tags_to_exclude", "", type=str) or ""),
+            tag_prompt=str(self.settings.value("ai_caption/tag_prompt", "", type=str) or ""),
+            tag_write_mode=str(self.settings.value("ai_caption/tag_write_mode", "union", type=str) or "union"),
+            caption_prompt=str(self.settings.value("ai_caption/caption_prompt", DEFAULT_CAPTION_PROMPT, type=str) or DEFAULT_CAPTION_PROMPT),
+            caption_start=str(self.settings.value("ai_caption/caption_start", DEFAULT_CAPTION_START, type=str) or DEFAULT_CAPTION_START),
+            description_write_mode=str(self.settings.value("ai_caption/description_write_mode", "overwrite", type=str) or "overwrite"),
+            device=str(self.settings.value("ai_caption/device", "gpu", type=str) or "gpu"),
+            gpu_index=int(self.settings.value("ai_caption/gpu_index", 0, type=int) or 0),
+            load_in_4_bit=bool(self.settings.value("ai_caption/load_in_4_bit", False, type=bool)),
+            bad_words=str(self.settings.value("ai_caption/bad_words", DEFAULT_BAD_WORDS, type=str) or DEFAULT_BAD_WORDS),
+            forced_words=str(self.settings.value("ai_caption/forced_words", "", type=str) or ""),
+            min_new_tokens=int(self.settings.value("ai_caption/min_new_tokens", 1, type=int) or 1),
+            max_new_tokens=int(self.settings.value("ai_caption/max_new_tokens", 200, type=int) or 200),
+            num_beams=int(self.settings.value("ai_caption/num_beams", 1, type=int) or 1),
+            length_penalty=float(self.settings.value("ai_caption/length_penalty", 1.0, type=float) or 1.0),
+            do_sample=bool(self.settings.value("ai_caption/do_sample", False, type=bool)),
+            temperature=float(self.settings.value("ai_caption/temperature", 1.0, type=float) or 1.0),
+            top_k=int(self.settings.value("ai_caption/top_k", 50, type=int) or 50),
+            top_p=float(self.settings.value("ai_caption/top_p", 1.0, type=float) or 1.0),
+            repetition_penalty=float(self.settings.value("ai_caption/repetition_penalty", 1.0, type=float) or 1.0),
+            no_repeat_ngram_size=int(self.settings.value("ai_caption/no_repeat_ngram_size", 3, type=int) or 3),
+        )
+
+    def _local_ai_service_for_settings(self, ai_settings):
+        from app.mediamanager.ai_captioning.local_captioning import LocalAiCaptioningService
+
+        key = json.dumps(
+            {
+                "models_dir": str(ai_settings.models_dir),
+                "tag_model_id": ai_settings.tag_model_id,
+                "caption_model_id": ai_settings.caption_model_id,
+                "device": ai_settings.device,
+                "gpu_index": ai_settings.gpu_index,
+                "load_in_4_bit": ai_settings.load_in_4_bit,
+            },
+            sort_keys=True,
+        )
+        if self._local_ai_service is None or self._local_ai_service_key != key:
+            self._local_ai_service = LocalAiCaptioningService(ai_settings, self._log)
+            self._local_ai_service_key = key
+        else:
+            self._local_ai_service.settings = ai_settings
+        return self._local_ai_service
+
+    @Slot(result=list)
+    def list_local_ai_models(self) -> list:
+        from app.mediamanager.ai_captioning.local_captioning import available_models
+
+        return available_models()
+
+    @Slot(list, result=bool)
+    def run_local_ai_tags_descriptions(self, paths: list) -> bool:
+        return self.run_local_ai_tags(paths)
+
+    @Slot(list, result=bool)
+    def run_local_ai_tags(self, paths: list) -> bool:
+        clean_paths = [str(path or "").strip() for path in (paths or []) if str(path or "").strip()]
+        if not clean_paths or self._local_ai_running:
+            return False
+
+        def work() -> None:
+            from app.mediamanager.ai_captioning.local_captioning import apply_tags_to_database
+
+            self._local_ai_running = True
+            completed = 0
+            error = ""
+            self.localAiCaptioningStarted.emit(len(clean_paths))
+            try:
+                ai_settings = self._local_ai_caption_settings()
+                ai_settings.models_dir.mkdir(parents=True, exist_ok=True)
+                service = self._local_ai_service_for_settings(ai_settings)
+                for index, raw_path in enumerate(clean_paths, start=1):
+                    self.localAiCaptioningProgress.emit(raw_path, index, len(clean_paths))
+                    try:
+                        media = self._ensure_media_record_for_tag_write(raw_path)
+                        if not media:
+                            raise FileNotFoundError("Selected media record could not be created.")
+                        source_path = self._local_ai_source_path(Path(raw_path))
+                        tags = service.generate_tags(source_path)
+                        apply_tags_to_database(self.conn, raw_path, tags, ai_settings)
+                        completed += 1
+                        self.localAiCaptioningItemFinished.emit(raw_path, tags, "", "")
+                    except Exception as item_exc:
+                        item_error = str(item_exc) or "Local AI captioning failed."
+                        self._log(f"Local AI tag generation failed for {raw_path}: {item_error}")
+                        self.localAiCaptioningItemFinished.emit(raw_path, [], "", item_error)
+                self.galleryScopeChanged.emit()
+            except Exception as exc:
+                error = str(exc) or "Local AI tag generation failed."
+                self._log(f"Local AI tag generation failed: {error}")
+            finally:
+                self._local_ai_running = False
+                self.localAiCaptioningFinished.emit(completed, error)
+
+        threading.Thread(target=work, daemon=True, name="local-ai-captioning").start()
+        return True
+
+    @Slot(list, result=bool)
+    def run_local_ai_descriptions(self, paths: list) -> bool:
+        clean_paths = [str(path or "").strip() for path in (paths or []) if str(path or "").strip()]
+        if not clean_paths or self._local_ai_running:
+            return False
+
+        def work() -> None:
+            from app.mediamanager.ai_captioning.local_captioning import apply_description_to_database
+            from app.mediamanager.db.tags_repo import list_media_tags
+
+            self._local_ai_running = True
+            completed = 0
+            error = ""
+            self.localAiCaptioningStarted.emit(len(clean_paths))
+            try:
+                ai_settings = self._local_ai_caption_settings()
+                ai_settings.models_dir.mkdir(parents=True, exist_ok=True)
+                service = self._local_ai_service_for_settings(ai_settings)
+                for index, raw_path in enumerate(clean_paths, start=1):
+                    self.localAiCaptioningProgress.emit(raw_path, index, len(clean_paths))
+                    try:
+                        media = self._ensure_media_record_for_tag_write(raw_path)
+                        if not media:
+                            raise FileNotFoundError("Selected media record could not be created.")
+                        source_path = self._local_ai_source_path(Path(raw_path))
+                        tags = list_media_tags(self.conn, int(media["id"]))
+                        description = service.generate_description(source_path, tags)
+                        apply_description_to_database(self.conn, raw_path, description, ai_settings)
+                        completed += 1
+                        self.localAiCaptioningItemFinished.emit(raw_path, [], description, "")
+                    except Exception as item_exc:
+                        item_error = str(item_exc) or "Local AI description generation failed."
+                        self._log(f"Local AI description generation failed for {raw_path}: {item_error}")
+                        self.localAiCaptioningItemFinished.emit(raw_path, [], "", item_error)
+                self.galleryScopeChanged.emit()
+            except Exception as exc:
+                error = str(exc) or "Local AI description generation failed."
+                self._log(f"Local AI description generation failed: {error}")
+            finally:
+                self._local_ai_running = False
+                self.localAiCaptioningFinished.emit(completed, error)
+
+        threading.Thread(target=work, daemon=True, name="local-ai-description").start()
+        return True
+
     def _ensure_media_record_for_tag_write(self, path: str) -> dict | None:
         from app.mediamanager.db.media_repo import add_media_item, get_media_by_path
 
@@ -8881,6 +9063,10 @@ class MainWindow(QMainWindow):
         self.bridge.accentColorChanged.connect(self._on_accent_changed)
         self.bridge.galleryScopeChanged.connect(self._refresh_tag_list_scope_counts)
         self.bridge.manualOcrFinished.connect(self._on_manual_ocr_finished)
+        self.bridge.localAiCaptioningStarted.connect(self._on_local_ai_captioning_started)
+        self.bridge.localAiCaptioningProgress.connect(self._on_local_ai_captioning_progress)
+        self.bridge.localAiCaptioningItemFinished.connect(self._on_local_ai_captioning_item_finished)
+        self.bridge.localAiCaptioningFinished.connect(self._on_local_ai_captioning_finished)
         self._current_accent = Theme.ACCENT_DEFAULT
         self._folder_history: list[str] = []
         self._folder_history_index: int = -1
@@ -10146,11 +10332,43 @@ class MainWindow(QMainWindow):
         self.meta_desc.setMaximumHeight(90)
         self.meta_desc.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
 
+        self.generate_description_btn_row = QWidget()
+        self.generate_description_btn_row.setObjectName("generateDescriptionButtonRow")
+        self.generate_description_btn_row.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        generate_description_btn_layout = QHBoxLayout(self.generate_description_btn_row)
+        generate_description_btn_layout.setContentsMargins(0, 0, 0, 0)
+        generate_description_btn_layout.setSpacing(0)
+        self.btn_generate_description = QPushButton("Generate Description")
+        self.btn_generate_description.setObjectName("btnGenerateDescription")
+        self.btn_generate_description.setProperty("baseText", "Generate Description")
+        self.btn_generate_description.setToolTip("Generate a local AI description using the current database tags as context")
+        self.btn_generate_description.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_generate_description.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.btn_generate_description.clicked.connect(self._run_local_ai_description)
+        generate_description_btn_layout.addWidget(self.btn_generate_description)
+
         self.lbl_tags_cap = QLabel("Tags (comma separated):")
-        self.meta_tags = QLineEdit()
+        self.meta_tags = QTextEdit()
         self.meta_tags.setPlaceholderText("tag1, tag2...")
-        self.meta_tags.editingFinished.connect(self._save_native_tags)
-        self.meta_tags.textChanged.connect(lambda _text: self._refresh_tag_list_rows_state())
+        self.meta_tags.setMaximumHeight(78)
+        self.meta_tags.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.meta_tags.textChanged.connect(self._save_native_tags)
+        self.meta_tags.textChanged.connect(lambda: self._refresh_tag_list_rows_state())
+
+        self.generate_tags_btn_row = QWidget()
+        self.generate_tags_btn_row.setObjectName("generateTagsButtonRow")
+        self.generate_tags_btn_row.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        generate_tags_btn_layout = QHBoxLayout(self.generate_tags_btn_row)
+        generate_tags_btn_layout.setContentsMargins(0, 0, 0, 0)
+        generate_tags_btn_layout.setSpacing(0)
+        self.btn_generate_tags = QPushButton("Generate Tags")
+        self.btn_generate_tags.setObjectName("btnGenerateTags")
+        self.btn_generate_tags.setProperty("baseText", "Generate Tags")
+        self.btn_generate_tags.setToolTip("Generate local AI tags and merge them into the database tag field")
+        self.btn_generate_tags.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_generate_tags.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.btn_generate_tags.clicked.connect(self._run_local_ai_tags)
+        generate_tags_btn_layout.addWidget(self.btn_generate_tags)
 
         self.tag_list_open_btn_row = QWidget()
         self.tag_list_open_btn_row.setObjectName("tagListOpenButtonRow")
@@ -10384,6 +10602,15 @@ class MainWindow(QMainWindow):
         self.bulk_btn_clear_tags.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.bulk_btn_clear_tags.clicked.connect(self._clear_bulk_tags)
         self.bulk_right_layout.addWidget(self.bulk_btn_clear_tags)
+
+        self.bulk_btn_run_local_ai = QPushButton("Generate Tags")
+        self.bulk_btn_run_local_ai.setObjectName("bulkBtnRunLocalAI")
+        self.bulk_btn_run_local_ai.setProperty("baseText", "Generate Tags")
+        self.bulk_btn_run_local_ai.setToolTip("Run local AI tag generation for selected files")
+        self.bulk_btn_run_local_ai.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.bulk_btn_run_local_ai.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.bulk_btn_run_local_ai.clicked.connect(self._run_local_ai_tags)
+        self.bulk_right_layout.addWidget(self.bulk_btn_run_local_ai)
 
         self.bulk_btn_save_meta = QPushButton("Save Tags to DB")
         self.bulk_btn_save_meta.setObjectName("bulkBtnSaveMeta")
@@ -11815,12 +12042,15 @@ class MainWindow(QMainWindow):
             getattr(self, "btn_clear_bulk_tags", None),
             getattr(self, "btn_save_meta", None),
             getattr(self, "btn_use_ocr", None),
+            getattr(self, "btn_generate_tags", None),
+            getattr(self, "btn_generate_description", None),
             getattr(self, "btn_import_exif", None),
             getattr(self, "btn_merge_hidden_meta", None),
             getattr(self, "btn_save_to_exif", None),
             getattr(self, "bulk_btn_select_all_gallery", None),
             getattr(self, "bulk_btn_open_tag_list", None),
             getattr(self, "bulk_btn_clear_tags", None),
+            getattr(self, "bulk_btn_run_local_ai", None),
             getattr(self, "bulk_btn_save_meta", None),
             getattr(self, "bulk_btn_save_to_exif", None),
         ]
@@ -11981,10 +12211,23 @@ class MainWindow(QMainWindow):
         if hasattr(self, "tag_list_panel") and self.tag_list_panel.isVisible():
             self._refresh_tag_list_rows_state()
 
-    def _active_tag_editor(self) -> QLineEdit:
+    def _active_tag_editor(self):
         if self._is_bulk_editor_active() and hasattr(self, "bulk_meta_tags"):
             return self.bulk_meta_tags
         return self.meta_tags
+
+    def _tag_editor_text(self, editor=None) -> str:
+        editor = editor or self._active_tag_editor()
+        if isinstance(editor, QTextEdit):
+            return editor.toPlainText()
+        return editor.text()
+
+    def _set_tag_editor_text(self, text: str, editor=None) -> None:
+        editor = editor or self._active_tag_editor()
+        if isinstance(editor, QTextEdit):
+            editor.setPlainText(str(text or ""))
+        else:
+            editor.setText(str(text or ""))
 
     def _active_status_label(self) -> QLabel:
         if self._is_bulk_editor_active() and hasattr(self, "bulk_status_lbl"):
@@ -12111,7 +12354,7 @@ class MainWindow(QMainWindow):
         combo.setItemDelegate(TagListComboDelegate(self.bridge, combo, view, show_actions=is_tag_list_selector))
 
     def _selected_tag_names_from_editor(self) -> set[str]:
-        return {tag.casefold() for tag in self._normalize_tag_list(self._active_tag_editor().text())}
+        return {tag.casefold() for tag in self._normalize_tag_list(self._tag_editor_text())}
 
     def _effective_gallery_scope_search(self, include_tag_scope: bool = True) -> str:
         base_query = str(getattr(self.bridge, "_current_gallery_search", "") or "").strip()
@@ -12256,7 +12499,7 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         if not tags:
-            tags = self._normalize_tag_list(self._active_tag_editor().text())
+            tags = self._normalize_tag_list(self._tag_editor_text())
         if not tags:
             self.meta_status_lbl.setText("No tags available to import")
             QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
@@ -12446,8 +12689,8 @@ class MainWindow(QMainWindow):
         if not path:
             return
         editor = self._active_tag_editor()
-        next_tags = self._merge_tag_lists(self._normalize_tag_list(editor.text()), [tag_name])
-        editor.setText(", ".join(next_tags))
+        next_tags = self._merge_tag_lists(self._normalize_tag_list(self._tag_editor_text(editor)), [tag_name])
+        self._set_tag_editor_text(", ".join(next_tags), editor)
         try:
             self.bridge.set_media_tags(path, next_tags)
         except Exception:
@@ -12474,12 +12717,12 @@ class MainWindow(QMainWindow):
             self.bulk_status_lbl.setText(f"✓ Removed '{tag_name}' from {len(paths)} selected files")
             QTimer.singleShot(3000, lambda: self.bulk_status_lbl.setText(""))
             self._refresh_bulk_tag_editor_summary()
-            self._refresh_tag_list_scope_counts()
-            return
+        self._refresh_tag_list_scope_counts()
+        return
         remove_key = str(tag_name or "").casefold()
         editor = self._active_tag_editor()
-        next_tags = [tag for tag in self._normalize_tag_list(editor.text()) if tag.casefold() != remove_key]
-        editor.setText(", ".join(next_tags))
+        next_tags = [tag for tag in self._normalize_tag_list(self._tag_editor_text(editor)) if tag.casefold() != remove_key]
+        self._set_tag_editor_text(", ".join(next_tags), editor)
         path = str(getattr(self, "_current_path", "") or "").strip()
         if path:
             try:
@@ -12932,7 +13175,7 @@ class MainWindow(QMainWindow):
             return
 
         is_bulk = len(paths) > 1
-        tags_str = self._active_tag_editor().text()
+        tags_str = self._tag_editor_text()
         tags = self._normalize_tag_list(tags_str)
 
         if not is_bulk:
@@ -13836,7 +14079,7 @@ class MainWindow(QMainWindow):
         """Embed tags and comments from the 'Embedded' UI fields INTO the file."""
         paths = self._current_file_paths()
         if len(paths) > 1:
-            self._embed_bulk_tags_to_files(paths, self._normalize_tag_list(self._active_tag_editor().text()))
+            self._embed_bulk_tags_to_files(paths, self._normalize_tag_list(self._tag_editor_text()))
             return
         if not self._current_path: return
         p = Path(self._current_path)
@@ -14054,7 +14297,7 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(3000, lambda: self.bulk_status_lbl.setText(""))
 
         # Clear the UI text box
-        self._active_tag_editor().setText("")
+        self._set_tag_editor_text("")
         self._refresh_tag_list_scope_counts()
 
     def _save_native_tags(self) -> None:
@@ -14332,12 +14575,14 @@ class MainWindow(QMainWindow):
 
         self.lbl_desc_cap.setVisible(not is_bulk and show_description)
         self.meta_desc.setVisible(not is_bulk and show_description)
+        self.generate_description_btn_row.setVisible(not is_bulk and show_description)
         self.lbl_notes_cap.setVisible(not is_bulk and show_notes)
         self.meta_notes.setVisible(not is_bulk and show_notes)
         
         tags_visible = not is_bulk and ("tags" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "tags", True))
         self.lbl_tags_cap.setVisible(tags_visible)
         self.meta_tags.setVisible(tags_visible)
+        self.generate_tags_btn_row.setVisible(tags_visible)
         self.tag_list_open_btn_row.setVisible(tags_visible)
         self.btn_clear_bulk_tags.setVisible(is_bulk)
         
@@ -14416,7 +14661,7 @@ class MainWindow(QMainWindow):
                 self.meta_ai_raw_paths_edit.setPlainText(data.get("ai_raw_paths_summary", ""))
                 self.meta_embedded_metadata_edit.setPlainText(data.get("embedded_metadata_summary", ""))
                 
-                self.meta_tags.setText(", ".join(data.get("tags", [])))
+                self._set_tag_editor_text(", ".join(data.get("tags", [])), self.meta_tags)
                 exif_date_taken = self._format_editable_datetime(data.get("exif_date_taken"))
                 if exif_date_taken:
                     self.meta_exif_date_taken_edit.setText(exif_date_taken)
@@ -14576,7 +14821,7 @@ class MainWindow(QMainWindow):
             self._sync_sidebar_panel_widths()
         else:
             # Bulk mode
-            self.meta_tags.setText("")
+            self._set_tag_editor_text("", self.meta_tags)
             self._configure_bulk_tag_editor(len(paths))
 
         self.meta_filename_edit.blockSignals(False)
@@ -14722,6 +14967,96 @@ class MainWindow(QMainWindow):
         else:
             self.meta_status_lbl.setText("No OCR text found")
         QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
+
+    def _local_ai_target_paths(self) -> list[str]:
+        paths = self._current_file_paths()
+        if not paths:
+            path = str(getattr(self, "_current_path", "") or "").strip()
+            paths = [path] if path else []
+        return [str(path) for path in paths if str(path or "").strip()]
+
+    def _run_local_ai_captioning(self) -> None:
+        self._run_local_ai_tags()
+
+    def _run_local_ai_tags(self) -> None:
+        paths = self._local_ai_target_paths()
+        if not paths:
+            self.meta_status_lbl.setText("Select one or more media files first.")
+            return
+        if hasattr(self.bridge, "run_local_ai_tags"):
+            self._local_ai_operation = "tags"
+            started = self.bridge.run_local_ai_tags(paths)
+            if not started:
+                self.meta_status_lbl.setText("Local AI tags are already running or no valid files were selected.")
+
+    def _run_local_ai_description(self) -> None:
+        paths = self._local_ai_target_paths()
+        if not paths:
+            self.meta_status_lbl.setText("Select one or more media files first.")
+            return
+        if hasattr(self.bridge, "run_local_ai_descriptions"):
+            self._local_ai_operation = "descriptions"
+            started = self.bridge.run_local_ai_descriptions(paths)
+            if not started:
+                self.meta_status_lbl.setText("Local AI descriptions are already running or no valid files were selected.")
+
+    def _set_local_ai_buttons_enabled(self, enabled: bool) -> None:
+        for btn in (
+            getattr(self, "btn_generate_tags", None),
+            getattr(self, "btn_generate_description", None),
+            getattr(self, "bulk_btn_run_local_ai", None),
+        ):
+            if btn is not None:
+                btn.setEnabled(enabled)
+
+    @Slot(int)
+    def _on_local_ai_captioning_started(self, total: int) -> None:
+        self._set_local_ai_buttons_enabled(False)
+        label = "descriptions" if getattr(self, "_local_ai_operation", "tags") == "descriptions" else "tags"
+        message = f"Running local AI {label} for {int(total or 0)} file(s)..."
+        self.meta_status_lbl.setText(message)
+        if hasattr(self, "bulk_status_lbl"):
+            self.bulk_status_lbl.setText(message)
+
+    @Slot(str, int, int)
+    def _on_local_ai_captioning_progress(self, path: str, current: int, total: int) -> None:
+        name = Path(str(path or "")).name
+        label = "Descriptions" if getattr(self, "_local_ai_operation", "tags") == "descriptions" else "Tags"
+        message = f"Local AI {label} {int(current or 0)}/{int(total or 0)}: {name}"
+        self.meta_status_lbl.setText(message)
+        if hasattr(self, "bulk_status_lbl"):
+            self.bulk_status_lbl.setText(message)
+
+    @Slot(str, list, str, str)
+    def _on_local_ai_captioning_item_finished(self, path: str, tags: list, description: str, error: str) -> None:
+        current_path = str(getattr(self, "_current_path", "") or "")
+        if error:
+            self.meta_status_lbl.setText(f"Local AI Error: {error}")
+            return
+        if current_path and os.path.normcase(os.path.abspath(current_path)) == os.path.normcase(os.path.abspath(str(path or ""))):
+            clean_tags = [str(tag) for tag in (tags or []) if str(tag).strip()]
+            if clean_tags:
+                self._set_tag_editor_text(", ".join(clean_tags), self.meta_tags)
+                self._refresh_tag_list_scope_counts()
+            clean_description = str(description or "").strip()
+            if clean_description:
+                self.meta_desc.setPlainText(clean_description)
+
+    @Slot(int, str)
+    def _on_local_ai_captioning_finished(self, completed: int, error: str) -> None:
+        self._set_local_ai_buttons_enabled(True)
+        if error:
+            self.meta_status_lbl.setText(f"Local AI Error: {error}")
+            if hasattr(self, "bulk_status_lbl"):
+                self.bulk_status_lbl.setText(f"Local AI Error: {error}")
+            return
+        label = "descriptions" if getattr(self, "_local_ai_operation", "tags") == "descriptions" else "tags"
+        message = f"Local AI {label} complete for {int(completed or 0)} file(s)"
+        self.meta_status_lbl.setText(message)
+        if hasattr(self, "bulk_status_lbl"):
+            self.bulk_status_lbl.setText(message)
+        if getattr(self, "_current_paths", None):
+            self._show_metadata_for_path(self._current_paths)
 
     @Slot(bool)
     def _save_text_detected_override_from_toggle(self, checked: bool) -> None:
@@ -15179,8 +15514,8 @@ class MainWindow(QMainWindow):
             "fps": [self.meta_fps_lbl],
             "codec": [self.meta_codec_lbl],
             "audio": [self.meta_audio_lbl],
-            "description": [self.lbl_desc_cap, self.meta_desc],
-            "tags": [self.lbl_tags_cap, self.meta_tags, self.tag_list_open_btn_row],
+            "description": [self.lbl_desc_cap, self.meta_desc, self.generate_description_btn_row],
+            "tags": [self.lbl_tags_cap, self.meta_tags, self.generate_tags_btn_row, self.tag_list_open_btn_row],
             "notes": [self.lbl_notes_cap, self.meta_notes],
             "camera": [self.meta_camera_lbl],
             "location": [self.meta_location_lbl],
@@ -15371,18 +15706,21 @@ class MainWindow(QMainWindow):
         self.meta_sep3.setVisible(False)
         
         
-        self.meta_desc.setVisible("description" in active_fields and self._is_metadata_enabled_for_kind(kind, "description", True))
-        self.lbl_desc_cap.setVisible("description" in active_fields and self._is_metadata_enabled_for_kind(kind, "description", True))
+        description_visible = "description" in active_fields and self._is_metadata_enabled_for_kind(kind, "description", True)
+        self.meta_desc.setVisible(description_visible)
+        self.lbl_desc_cap.setVisible(description_visible)
+        self.generate_description_btn_row.setVisible(description_visible)
         tags_visible = "tags" in active_fields and self._is_metadata_enabled_for_kind(kind, "tags", True)
         self.meta_tags.setVisible(tags_visible)
         self.lbl_tags_cap.setVisible(tags_visible)
+        self.generate_tags_btn_row.setVisible(tags_visible)
         self.tag_list_open_btn_row.setVisible(tags_visible)
         self.meta_notes.setVisible("notes" in active_fields and self._is_metadata_enabled_for_kind(kind, "notes", True))
         self.lbl_notes_cap.setVisible("notes" in active_fields and self._is_metadata_enabled_for_kind(kind, "notes", True))
         
         self.meta_desc.setPlainText("")
         self.meta_notes.setPlainText("")
-        self.meta_tags.setText("")
+        self._set_tag_editor_text("", self.meta_tags)
         self.meta_status_lbl.setText("")
         self._set_metadata_empty_state(True)
         self._sync_tag_list_panel_visibility()
@@ -16431,7 +16769,7 @@ class MainWindow(QMainWindow):
             QPushButton#btnPreviewOverlayPlay:pressed {{
                 background-color: {"rgba(255, 255, 255, 115)" if is_light else "rgba(0, 0, 0, 115)"};
             }}
-            QPushButton#btnSaveMeta, QPushButton#btnUseOcr, QPushButton#btnImportExif, QPushButton#btnMergeHiddenMeta, QPushButton#btnSaveToExif, QPushButton#btnOpenTagList, QPushButton#metaEmptySelectAllButton {{
+            QPushButton#btnSaveMeta, QPushButton#btnUseOcr, QPushButton#btnGenerateTags, QPushButton#btnGenerateDescription, QPushButton#btnImportExif, QPushButton#btnMergeHiddenMeta, QPushButton#btnSaveToExif, QPushButton#btnOpenTagList, QPushButton#metaEmptySelectAllButton {{
                 background-color: {Theme.get_btn_save_bg(accent)};
                 color: {text};
                 border: 1px solid {Theme.get_border(accent)};
@@ -16440,7 +16778,7 @@ class MainWindow(QMainWindow):
                 font-size: 11px;
                 font-weight: 500;
             }}
-            QPushButton#btnSaveMeta:hover, QPushButton#btnUseOcr:hover, QPushButton#btnImportExif:hover, QPushButton#btnMergeHiddenMeta:hover, QPushButton#btnSaveToExif:hover, QPushButton#btnOpenTagList:hover, QPushButton#metaEmptySelectAllButton:hover {{
+            QPushButton#btnSaveMeta:hover, QPushButton#btnUseOcr:hover, QPushButton#btnGenerateTags:hover, QPushButton#btnGenerateDescription:hover, QPushButton#btnImportExif:hover, QPushButton#btnMergeHiddenMeta:hover, QPushButton#btnSaveToExif:hover, QPushButton#btnOpenTagList:hover, QPushButton#metaEmptySelectAllButton:hover {{
                 background-color: {Theme.get_btn_save_hover(accent)};
                 color: {"#000" if is_light else "#fff"};
                 border-color: {accent_str};
@@ -16493,7 +16831,7 @@ class MainWindow(QMainWindow):
                 QPlainTextEdit#bulkTagEditorCommonTagsText, QPlainTextEdit#bulkTagEditorUncommonTagsText {{
                     selection-background-color: {Theme.get_accent_soft(accent)};
                 }}
-                QPushButton#bulkBtnSelectAllGallery, QPushButton#bulkBtnClearTags, QPushButton#bulkBtnSaveMeta, QPushButton#bulkBtnSaveToExif, QPushButton#bulkBtnOpenTagList {{
+                QPushButton#bulkBtnSelectAllGallery, QPushButton#bulkBtnClearTags, QPushButton#bulkBtnRunLocalAI, QPushButton#bulkBtnSaveMeta, QPushButton#bulkBtnSaveToExif, QPushButton#bulkBtnOpenTagList {{
                     background-color: {Theme.get_btn_save_bg(accent)};
                     color: {text};
                     border: 1px solid {Theme.get_border(accent)};
@@ -16502,7 +16840,7 @@ class MainWindow(QMainWindow):
                     font-size: 11px;
                     font-weight: 500;
                 }}
-                QPushButton#bulkBtnSelectAllGallery:hover, QPushButton#bulkBtnClearTags:hover, QPushButton#bulkBtnSaveMeta:hover, QPushButton#bulkBtnSaveToExif:hover, QPushButton#bulkBtnOpenTagList:hover {{
+                QPushButton#bulkBtnSelectAllGallery:hover, QPushButton#bulkBtnClearTags:hover, QPushButton#bulkBtnRunLocalAI:hover, QPushButton#bulkBtnSaveMeta:hover, QPushButton#bulkBtnSaveToExif:hover, QPushButton#bulkBtnOpenTagList:hover {{
                     background-color: {Theme.get_btn_save_hover(accent)};
                     color: {"#000" if is_light else "#fff"};
                     border-color: {accent_str};

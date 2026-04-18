@@ -14,6 +14,7 @@ htmlcov/
 
 # Local runtime data
 data/
+/local_ai_models/
 /logs/*
 !/logs/.gitkeep
 !/logs/*/

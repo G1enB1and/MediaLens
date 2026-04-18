@@ -17,10 +17,10 @@ from PySide6.QtWidgets import (
     QDialog,
     QFrame,
     QFormLayout,
-    QFrame,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
+    QFileDialog,
     QFileIconProvider,
     QLabel,
     QLineEdit,
@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
     QStyleOptionViewItem,
     QStackedWidget,
     QTabBar,
+    QTextEdit,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -2029,16 +2030,239 @@ class DuplicateSettingsPage(SettingsPage):
 class AISettingsPage(SettingsPage):
     def __init__(self, dialog: "SettingsDialog") -> None:
         super().__init__(dialog)
+        from app.mediamanager.ai_captioning.local_captioning import (
+            CAPTION_MODEL_ID,
+            DEFAULT_BAD_WORDS,
+            DEFAULT_CAPTION_PROMPT,
+            DEFAULT_CAPTION_START,
+            TAG_MODEL_ID,
+            project_models_dir,
+        )
+
+        self.defaults = {
+            "models_dir": str(project_models_dir()),
+            "tag_model_id": TAG_MODEL_ID,
+            "caption_model_id": CAPTION_MODEL_ID,
+            "tag_prompt": "",
+            "caption_prompt": DEFAULT_CAPTION_PROMPT,
+            "caption_start": DEFAULT_CAPTION_START,
+            "bad_words": DEFAULT_BAD_WORDS,
+        }
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
         layout.addWidget(_section_title("AI"))
-        layout.addWidget(_description("AI-specific controls are not native yet. This page is ready for future expansion."))
-        placeholder = QLabel("AI-powered settings are coming soon.")
-        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        placeholder.setWordWrap(True)
-        placeholder.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        layout.addWidget(placeholder, 1)
+        layout.addWidget(_description("Local AI tagging and captioning writes directly to MediaLens database tags and descriptions."))
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        layout.addWidget(scroll, 1)
+
+        content = QWidget()
+        scroll.setWidget(content)
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 8, 0)
+        content_layout.setSpacing(12)
+
+        models_group = QGroupBox("Models")
+        models_form = QFormLayout(models_group)
+        models_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        models_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        content_layout.addWidget(models_group)
+
+        models_row = QWidget()
+        models_layout = QHBoxLayout(models_row)
+        models_layout.setContentsMargins(0, 0, 0, 0)
+        models_layout.setSpacing(6)
+        self.models_dir_edit = QLineEdit()
+        self.models_dir_edit.setClearButtonEnabled(True)
+        browse_btn = QPushButton("Browse")
+        browse_btn.clicked.connect(self._browse_models_dir)
+        models_layout.addWidget(self.models_dir_edit, 1)
+        models_layout.addWidget(browse_btn)
+        models_form.addRow("Models Folder", models_row)
+
+        self.device_combo = QComboBox()
+        self.device_combo.addItem("GPU", "gpu")
+        self.device_combo.addItem("CPU", "cpu")
+        models_form.addRow("Device", self.device_combo)
+
+        self.gpu_index_spin = QSpinBox()
+        self.gpu_index_spin.setRange(0, 9)
+        models_form.addRow("GPU Index", self.gpu_index_spin)
+
+        self.load_4bit_toggle = QCheckBox("Load In 4-bit")
+        models_form.addRow("", self.load_4bit_toggle)
+
+        tags_group = QGroupBox("Tags")
+        tags_form = QFormLayout(tags_group)
+        tags_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        tags_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        content_layout.addWidget(tags_group)
+
+        self.tag_model_combo = QComboBox()
+        self.tag_model_combo.addItem("WD SwinV2 Tagger v3", TAG_MODEL_ID)
+        tags_form.addRow("Tag Model", self.tag_model_combo)
+
+        self.tag_write_mode_combo = QComboBox()
+        self.tag_write_mode_combo.addItem("Union Merge", "union")
+        self.tag_write_mode_combo.addItem("Replace Tags", "replace")
+        self.tag_write_mode_combo.addItem("Append Tags", "append")
+        self.tag_write_mode_combo.addItem("Only If Empty", "skip_existing")
+        self.tag_write_mode_combo.setItemData(0, "Append without duplicates", Qt.ItemDataRole.ToolTipRole)
+        self.tag_write_mode_combo.setToolTip("Append without duplicates")
+        tags_form.addRow("Tag Write Rule", self.tag_write_mode_combo)
+
+        self.tag_prompt_edit = QTextEdit()
+        self.tag_prompt_edit.setMinimumHeight(90)
+        self.tag_prompt_edit.setPlaceholderText("Tag prompt and rules.")
+        tags_form.addRow("Tag Prompt", self.tag_prompt_edit)
+
+        self.tags_to_exclude_edit = QLineEdit()
+        self.tags_to_exclude_edit.setPlaceholderText("Comma-separated tags to exclude")
+        tags_form.addRow("Exclude Tags", self.tags_to_exclude_edit)
+
+        self.tag_min_probability_edit = QLineEdit()
+        tags_form.addRow("Tag Min Probability", self.tag_min_probability_edit)
+
+        self.tag_max_tags_spin = QSpinBox()
+        self.tag_max_tags_spin.setRange(1, 500)
+        tags_form.addRow("Number of Tags", self.tag_max_tags_spin)
+
+        descriptions_group = QGroupBox("Descriptions")
+        descriptions_form = QFormLayout(descriptions_group)
+        descriptions_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        descriptions_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        content_layout.addWidget(descriptions_group)
+
+        self.caption_model_combo = QComboBox()
+        self.caption_model_combo.addItem("InternLM XComposer2 VL 1.8B", CAPTION_MODEL_ID)
+        descriptions_form.addRow("Description Model", self.caption_model_combo)
+
+        self.description_write_mode_combo = QComboBox()
+        self.description_write_mode_combo.addItem("Overwrite Description", "overwrite")
+        self.description_write_mode_combo.addItem("Append Description", "append")
+        self.description_write_mode_combo.addItem("Only If Empty", "skip_existing")
+        descriptions_form.addRow("Description Rule", self.description_write_mode_combo)
+
+        self.caption_prompt_edit = QTextEdit()
+        self.caption_prompt_edit.setMinimumHeight(120)
+        self.caption_prompt_edit.setPlaceholderText("Prompt. Use {tags} to insert database tags.")
+        descriptions_form.addRow("Description Prompt", self.caption_prompt_edit)
+
+        self.caption_start_edit = QLineEdit()
+        descriptions_form.addRow("Start Description With", self.caption_start_edit)
+
+        self.bad_words_edit = QLineEdit()
+        descriptions_form.addRow("Discourage", self.bad_words_edit)
+
+        self.max_tokens_spin = QSpinBox()
+        self.max_tokens_spin.setRange(1, 2048)
+        descriptions_form.addRow("Maximum Tokens", self.max_tokens_spin)
+
+        save_btn = QPushButton("Save AI Settings")
+        save_btn.clicked.connect(self._save)
+        content_layout.addWidget(save_btn)
+        content_layout.addStretch(1)
+
+        for widget in (
+            self.models_dir_edit,
+            self.caption_start_edit,
+            self.bad_words_edit,
+            self.tags_to_exclude_edit,
+            self.tag_min_probability_edit,
+        ):
+            widget.editingFinished.connect(self._save)
+        for combo in (
+            self.tag_model_combo,
+            self.caption_model_combo,
+            self.tag_write_mode_combo,
+            self.description_write_mode_combo,
+            self.device_combo,
+        ):
+            combo.currentIndexChanged.connect(self._save)
+        self.tag_prompt_edit.textChanged.connect(self._save)
+        self.caption_prompt_edit.textChanged.connect(self._save)
+        self.tag_max_tags_spin.valueChanged.connect(self._save)
+        self.gpu_index_spin.valueChanged.connect(self._save)
+        self.load_4bit_toggle.toggled.connect(self._save)
+        self.max_tokens_spin.valueChanged.connect(self._save)
+        self.refresh()
+
+    def _setting(self, key: str, default, value_type=None):
+        qkey = key.replace(".", "/")
+        if value_type is None:
+            return self.settings.value(qkey, default)
+        return self.settings.value(qkey, default, type=value_type)
+
+    def _set_combo_data(self, combo: QComboBox, value: str) -> None:
+        idx = combo.findData(value)
+        combo.setCurrentIndex(idx if idx >= 0 else 0)
+
+    def _browse_models_dir(self) -> None:
+        current = self.models_dir_edit.text().strip() or self.defaults["models_dir"]
+        selected = QFileDialog.getExistingDirectory(self, "Select Local AI Models Folder", current)
+        if selected:
+            self.models_dir_edit.setText(selected)
+            self._save()
+
+    def _save(self) -> None:
+        if bool(getattr(self, "_loading", False)):
+            return
+        s = self.settings
+        s.setValue("ai_caption/models_dir", self.models_dir_edit.text().strip() or self.defaults["models_dir"])
+        s.setValue("ai_caption/tag_model_id", self.tag_model_combo.currentData() or self.defaults["tag_model_id"])
+        s.setValue("ai_caption/caption_model_id", self.caption_model_combo.currentData() or self.defaults["caption_model_id"])
+        s.setValue("ai_caption/tag_write_mode", self.tag_write_mode_combo.currentData() or "union")
+        s.setValue("ai_caption/description_write_mode", self.description_write_mode_combo.currentData() or "overwrite")
+        s.setValue("ai_caption/tag_prompt", self.tag_prompt_edit.toPlainText().strip())
+        s.setValue("ai_caption/caption_prompt", self.caption_prompt_edit.toPlainText().strip() or self.defaults["caption_prompt"])
+        s.setValue("ai_caption/caption_start", self.caption_start_edit.text())
+        s.setValue("ai_caption/bad_words", self.bad_words_edit.text())
+        s.setValue("ai_caption/tags_to_exclude", self.tags_to_exclude_edit.text())
+        try:
+            min_probability = float(self.tag_min_probability_edit.text().strip())
+        except Exception:
+            min_probability = 0.35
+        s.setValue("ai_caption/tag_min_probability", max(0.0, min(1.0, min_probability)))
+        s.setValue("ai_caption/tag_max_tags", self.tag_max_tags_spin.value())
+        s.setValue("ai_caption/device", self.device_combo.currentData() or "gpu")
+        s.setValue("ai_caption/gpu_index", self.gpu_index_spin.value())
+        s.setValue("ai_caption/load_in_4_bit", self.load_4bit_toggle.isChecked())
+        s.setValue("ai_caption/max_new_tokens", self.max_tokens_spin.value())
+        s.setValue("ai_caption/min_new_tokens", 1)
+        s.setValue("ai_caption/num_beams", 1)
+        s.setValue("ai_caption/length_penalty", 1.0)
+        s.setValue("ai_caption/do_sample", False)
+        s.setValue("ai_caption/temperature", 1.0)
+        s.setValue("ai_caption/top_k", 50)
+        s.setValue("ai_caption/top_p", 1.0)
+        s.setValue("ai_caption/repetition_penalty", 1.0)
+        s.setValue("ai_caption/no_repeat_ngram_size", 3)
+        s.sync()
+
+    def refresh(self) -> None:
+        self._loading = True
+        try:
+            self.models_dir_edit.setText(str(self._setting("ai_caption.models_dir", self.defaults["models_dir"], str) or self.defaults["models_dir"]))
+            self._set_combo_data(self.tag_model_combo, str(self._setting("ai_caption.tag_model_id", self.defaults["tag_model_id"], str) or self.defaults["tag_model_id"]))
+            self._set_combo_data(self.caption_model_combo, str(self._setting("ai_caption.caption_model_id", self.defaults["caption_model_id"], str) or self.defaults["caption_model_id"]))
+            self._set_combo_data(self.tag_write_mode_combo, str(self._setting("ai_caption.tag_write_mode", "union", str) or "union"))
+            self._set_combo_data(self.description_write_mode_combo, str(self._setting("ai_caption.description_write_mode", "overwrite", str) or "overwrite"))
+            self.tag_prompt_edit.setPlainText(str(self._setting("ai_caption.tag_prompt", self.defaults["tag_prompt"], str) or self.defaults["tag_prompt"]))
+            self.caption_prompt_edit.setPlainText(str(self._setting("ai_caption.caption_prompt", self.defaults["caption_prompt"], str) or self.defaults["caption_prompt"]))
+            self.caption_start_edit.setText(str(self._setting("ai_caption.caption_start", self.defaults["caption_start"], str) or self.defaults["caption_start"]))
+            self.bad_words_edit.setText(str(self._setting("ai_caption.bad_words", self.defaults["bad_words"], str) or self.defaults["bad_words"]))
+            self.tags_to_exclude_edit.setText(str(self._setting("ai_caption.tags_to_exclude", "", str) or ""))
+            self.tag_min_probability_edit.setText(str(self._setting("ai_caption.tag_min_probability", 0.35, float) or 0.35))
+            self.tag_max_tags_spin.setValue(int(self._setting("ai_caption.tag_max_tags", 75, int) or 75))
+            self._set_combo_data(self.device_combo, str(self._setting("ai_caption.device", "gpu", str) or "gpu"))
+            self.gpu_index_spin.setValue(int(self._setting("ai_caption.gpu_index", 0, int) or 0))
+            self.load_4bit_toggle.setChecked(bool(self._setting("ai_caption.load_in_4_bit", False, bool)))
+            self.max_tokens_spin.setValue(int(self._setting("ai_caption.max_new_tokens", 200, int) or 200))
+        finally:
+            self._loading = False
 
 
 def _theme_api():
@@ -2310,7 +2534,7 @@ class SettingsDialog(QDialog):
                 padding: 0 6px;
                 color: {muted};
             }}
-            QLineEdit, QComboBox, QSpinBox, QListWidget#qt_spinbox_lineedit {{
+            QLineEdit, QTextEdit, QComboBox, QSpinBox, QListWidget#qt_spinbox_lineedit {{
                 background-color: {control_bg};
                 color: {text};
                 border: 1px solid {border};
@@ -2319,7 +2543,7 @@ class SettingsDialog(QDialog):
                 selection-background-color: {accent_str};
                 selection-color: {selection_text};
             }}
-            QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{
+            QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBox:focus {{
                 border: 1px solid {accent_str};
             }}
             QComboBox::drop-down {{
