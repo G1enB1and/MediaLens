@@ -2564,6 +2564,9 @@ function deletePathFromUi(path, onDone) {
     if (typeof onDone === 'function') onDone(false);
     return;
   }
+  if (!gPendingScrollAnchor) {
+    gPendingScrollAnchor = captureCurrentGroupScrollAnchor();
+  }
   const finish = (ok) => {
     if (typeof onDone === 'function') onDone(!!ok);
   };
@@ -3375,9 +3378,12 @@ window.__mmx_jumpReviewGroup = function (direction) {
 function captureCurrentGroupScrollAnchor() {
   const main = document.querySelector('main');
   if (!main) return null;
+  const topCard = captureCurrentCardScrollAnchor(main);
+  if (topCard) return topCard;
   const groups = Array.from(document.querySelectorAll('.gallery-group'));
   if (!groups.length) {
     return {
+      type: 'scroll',
       scrollTop: main.scrollTop,
       groupSortValue: null,
       offsetWithinGroup: 0,
@@ -3405,11 +3411,37 @@ function captureCurrentGroupScrollAnchor() {
   const groupRangeEndRaw = Number(best.group.dataset.rangeEnd);
   const groupTopScroll = main.scrollTop + best.topWithinMain;
   return {
+    type: 'group',
     scrollTop: main.scrollTop,
     groupSortValue: Number.isFinite(groupSortValueRaw) ? groupSortValueRaw : null,
     rangeStart: Number.isFinite(groupRangeStartRaw) ? groupRangeStartRaw : null,
     rangeEnd: Number.isFinite(groupRangeEndRaw) ? groupRangeEndRaw : null,
     offsetWithinGroup: Math.max(0, main.scrollTop - groupTopScroll),
+  };
+}
+
+function captureCurrentCardScrollAnchor(mainOverride = null) {
+  const main = mainOverride || document.querySelector('main');
+  if (!main) return null;
+  const cards = Array.from(document.querySelectorAll('.card[data-path]'));
+  if (!cards.length) return null;
+  const mainRect = main.getBoundingClientRect();
+  let best = null;
+  cards.forEach((card) => {
+    const rect = card.getBoundingClientRect();
+    if (rect.bottom < mainRect.top || rect.top > mainRect.bottom) return;
+    const topWithinMain = rect.top - mainRect.top;
+    const distance = Math.abs(topWithinMain);
+    if (!best || distance < best.distance) {
+      best = { card, topWithinMain, distance };
+    }
+  });
+  if (!best) return null;
+  return {
+    type: 'card',
+    path: best.card.getAttribute('data-path') || '',
+    scrollTop: main.scrollTop,
+    offsetWithinCard: best.topWithinMain,
   };
 }
 
@@ -3419,6 +3451,21 @@ function restoreGroupScrollAnchor() {
   if (!anchor) return;
   const main = document.querySelector('main');
   if (!main) return;
+  if (anchor.type === 'card') {
+    const path = String(anchor.path || '');
+    if (path) {
+      const card = document.querySelector(`.card[data-path="${CSS.escape(path)}"]`);
+      if (card) {
+        const mainRect = main.getBoundingClientRect();
+        const cardRect = card.getBoundingClientRect();
+        const currentTopWithinMain = cardRect.top - mainRect.top;
+        main.scrollTop = Math.max(0, main.scrollTop + currentTopWithinMain - (anchor.offsetWithinCard || 0));
+        return;
+      }
+    }
+    main.scrollTop = anchor.scrollTop || 0;
+    return;
+  }
   const groups = Array.from(document.querySelectorAll('.gallery-group'));
   if (!groups.length) {
     main.scrollTop = anchor.scrollTop || 0;
@@ -5766,7 +5813,7 @@ function wireCtxMenu() {
         break;
       case 'ctxDelete':
         if (item && item.path && gBridge) {
-          deletePathFromUi(item.path, (ok) => { if (ok) refreshFromBridge(gBridge); });
+          deletePathFromUi(item.path, (ok) => { if (ok) refreshFromBridge(gBridge, false); });
         }
         break;
       case 'ctxCut':
