@@ -57,6 +57,7 @@ let gGalleryResizeObserver = null;
 let gGalleryLastLayoutWidth = 0;
 let gGalleryLastLayoutHeight = 0;
 let gIsRenderingGallery = false;
+let gLastGalleryRenderSignature = '';
 let gDuplicateKeepOverrides = new Map();
 let gDuplicateDeleteOverrides = new Map();
 let gDuplicateBestOverrides = new Map();
@@ -667,6 +668,7 @@ function clearReviewResultsForPendingScan() {
   gMedia = [];
   gTotal = 0;
   gPage = 0;
+  gLastGalleryRenderSignature = '';
   updateGalleryCountChip(0);
   renderMediaList([], true);
   renderPager();
@@ -3519,7 +3521,38 @@ function restoreGroupScrollAnchor() {
 
 function rerenderCurrentMediaPreservingScroll() {
   gPendingScrollAnchor = captureCurrentGroupScrollAnchor();
+  gLastGalleryRenderSignature = '';
   renderMediaList(gMedia, false);
+}
+
+function computeGalleryRenderSignature(items) {
+  const rows = Array.isArray(items) ? items : [];
+  const parts = [
+    gGalleryViewMode,
+    gGroupBy,
+    getReviewMode(),
+    shouldShowScanWaitingEmptyState() ? 'waiting' : 'ready',
+  ];
+  for (const item of rows) {
+    if (!item) continue;
+    parts.push([
+      item.is_folder ? 'folder' : 'media',
+      item.path || '',
+      item.media_type || '',
+      item.is_hidden ? 'hidden' : 'visible',
+      item.width || '',
+      item.height || '',
+      item.file_size || '',
+      item.modified_time || '',
+      item.thumb_bg_hint || '',
+      item.duplicate_group_key || '',
+      item.duplicate_group_position || '',
+      item.compare_keep_checked ? 'keep' : '',
+      item.compare_delete_checked ? 'delete' : '',
+      item.compare_marked_best ? 'best' : '',
+    ].join('|'));
+  }
+  return parts.join('\n');
 }
 
 function getGalleryLayoutMetrics() {
@@ -5879,6 +5912,19 @@ function renderMediaList(items, scrollToTop = true) {
       finalizeRender();
       return;
     }
+    const nextRenderSignature = computeGalleryRenderSignature(items);
+    if (nextRenderSignature && nextRenderSignature === gLastGalleryRenderSignature && !gPendingScrollAnchor) {
+      gMedia = Array.isArray(items) ? items : [];
+      gMedia.forEach((item, idx) => {
+        item.__galleryIndex = idx;
+      });
+      reconcileSelectionWithVisibleItems(gMedia);
+      renderTimelineRail(gGroupBy === 'date' ? buildGroupedItems(gMedia.filter(item => !item.is_folder)) : []);
+      scheduleTimelineScrollTargetRefresh();
+      prioritizeVisibleMediaLoads(el);
+      finalizeRender();
+      return;
+    }
     if (!el.dataset.internalDropCancelBound) {
       el.addEventListener('dragover', (e) => {
         if (!isInternalGalleryDragEvent(e)) return;
@@ -5940,6 +5986,7 @@ function renderMediaList(items, scrollToTop = true) {
     applyGalleryViewMode(gGalleryViewMode);
 
     el.innerHTML = '';
+    gLastGalleryRenderSignature = nextRenderSignature;
     const main = document.querySelector('main');
     if (scrollToTop && main && !gPendingScrollAnchor) {
       main.scrollTop = 0;
@@ -6654,6 +6701,7 @@ function refreshFromBridge(bridge, resetPage = false) {
       if (gSelectedFolders.length === 0 && !gActiveCollection) {
         gTotal = 0;
         gLastRequestedFullScanKey = '';
+        gLastGalleryRenderSignature = '';
         gSelectAllAfterRefresh = false;
         updateGalleryCountChip(0);
         if (gReviewLoadingActive) endReviewLoading();
