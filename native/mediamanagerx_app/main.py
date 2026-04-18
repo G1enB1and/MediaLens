@@ -4049,6 +4049,7 @@ class Bridge(QObject):
     mediaFileCounted = Signal(str, int)  # request_id, file count
     mediaListed = Signal(str, list)  # request_id, items
     galleryScopeChanged = Signal()
+    galleryFilterSensitiveMetadataChanged = Signal()
     textProcessingStarted = Signal(str, int)  # stage label, total items
     textProcessingProgress = Signal(str, int, int)  # stage label, current, total
     textProcessingFinished = Signal()
@@ -4546,6 +4547,14 @@ class Bridge(QObject):
             return
         self._current_gallery_tag_scope_search = next_search
         self.galleryScopeChanged.emit()
+
+    def _current_gallery_filter_uses_text(self) -> bool:
+        _, text_filter, _, _, _ = self._parse_filter_groups(getattr(self, "_current_gallery_filter", "all"))
+        return text_filter in {"text_detected", "no_text_detected"}
+
+    def _current_gallery_filter_uses_ai(self) -> bool:
+        _, _, _, _, ai_filter = self._parse_filter_groups(getattr(self, "_current_gallery_filter", "all"))
+        return ai_filter in {"ai_generated", "non_ai"}
 
     @Slot(result="QVariantMap")
     def get_navigation_state(self) -> dict:
@@ -7301,6 +7310,8 @@ class Bridge(QObject):
             m = self._ensure_media_record_for_tag_write(path)
             if m:
                 update_user_confirmed_text_detected(self.conn, m["id"], bool(text_present_override))
+                if self._current_gallery_filter_uses_text():
+                    self.galleryFilterSensitiveMetadataChanged.emit()
                 self.galleryScopeChanged.emit()
         except Exception:
             pass
@@ -7403,6 +7414,8 @@ class Bridge(QObject):
                 metadata_families_detected=data.get("metadata_families_detected"),
                 ai_detection_reasons=data.get("ai_detection_reasons"),
             )
+            if self._current_gallery_filter_uses_ai():
+                self.galleryFilterSensitiveMetadataChanged.emit()
             self.galleryScopeChanged.emit()
         except Exception:
             pass

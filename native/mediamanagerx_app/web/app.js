@@ -84,6 +84,7 @@ let gTextProcessingCurrent = 0;
 let gTextProcessingTotal = 0;
 let gRenderTextProcessingToast = null;
 let gRenderScanToast = null;
+let gGalleryFilterMetadataRefreshTimer = 0;
 let gCompareState = { visible: false, left: {}, right: {}, best_path: '', keep_paths: [], delete_paths: [] };
 const TIMELINE_INSET_PX = 20;
 const TIMELINE_THUMB_SIZE_PX = 14;
@@ -6685,6 +6686,17 @@ function refreshFromBridge(bridge, resetPage = false) {
   });
 }
 
+function scheduleFilterSensitiveMetadataRefresh() {
+  if (!gBridge) return;
+  if (gGalleryFilterMetadataRefreshTimer) {
+    clearTimeout(gGalleryFilterMetadataRefreshTimer);
+  }
+  gGalleryFilterMetadataRefreshTimer = window.setTimeout(() => {
+    gGalleryFilterMetadataRefreshTimer = 0;
+    refreshFromBridge(gBridge, false);
+  }, 60);
+}
+
 function nextPage() {
   if (!gBridge) return;
   const tp = totalPages();
@@ -8968,6 +8980,12 @@ async function main() {
         if (!pending) return;
         gPendingMediaListRequests.delete(requestId);
         pending(Array.isArray(items) ? items : []);
+      });
+    }
+
+    if (bridge.galleryFilterSensitiveMetadataChanged) {
+      bridge.galleryFilterSensitiveMetadataChanged.connect(function () {
+        scheduleFilterSensitiveMetadataRefresh();
       });
     }
 
