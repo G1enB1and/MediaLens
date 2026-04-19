@@ -4240,6 +4240,12 @@ class Bridge(QObject):
         self._priority_paths: set[str] = set()
         self._priority_lock = threading.Lock()
 
+        # Scan checkpointing: track which paths have been deep-scanned per scope, persisted to disk.
+        self._checkpoint_path = appdata / "scan_checkpoint.json"
+        self._checkpoint_lock = threading.Lock()
+        self._checkpoint_dirty_count = 0
+        self._scan_checkpoint: dict[str, set[str]] = self._load_scan_checkpoint()
+
         self._compare_paths: dict[str, str] = {"left": "", "right": ""}
         self._compare_keep_paths: set[str] = set()
         self._compare_delete_paths: set[str] = set()
@@ -9282,6 +9288,51 @@ class Bridge(QObject):
         self._disk_cache_by_scope.clear()
         self._last_full_scan_key = ""
         self._warm_scan_keys.clear()
+        with self._checkpoint_lock:
+            self._scan_checkpoint.clear()
+            self._checkpoint_dirty_count = 0
+        try:
+            if self._checkpoint_path.exists():
+                self._checkpoint_path.unlink()
+        except Exception:
+            pass
+
+    def _load_scan_checkpoint(self) -> dict[str, set[str]]:
+        try:
+            if self._checkpoint_path.exists():
+                data = json.loads(self._checkpoint_path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return {str(k): set(v) for k, v in data.items() if isinstance(v, list)}
+        except Exception:
+            pass
+        return {}
+
+    def _save_scan_checkpoint(self) -> None:
+        try:
+            with self._checkpoint_lock:
+                payload = {k: sorted(v) for k, v in self._scan_checkpoint.items()}
+                self._checkpoint_dirty_count = 0
+            self._checkpoint_path.write_text(json.dumps(payload), encoding="utf-8")
+        except Exception as exc:
+            try:
+                self._log(f"Checkpoint save failed: {exc}")
+            except Exception:
+                pass
+
+    def _checkpoint_mark(self, scope_key: str, path: str) -> bool:
+        if not scope_key:
+            return False
+        with self._checkpoint_lock:
+            self._scan_checkpoint.setdefault(scope_key, set()).add(path)
+            self._checkpoint_dirty_count += 1
+            should_flush = self._checkpoint_dirty_count >= 50
+        return should_flush
+
+    def _checkpoint_done_paths(self, scope_key: str) -> set[str]:
+        if not scope_key:
+            return set()
+        with self._checkpoint_lock:
+            return set(self._scan_checkpoint.get(scope_key, set()))
 
     @Slot(list, str)
     def start_scan(self, folders: list, search_query: str = "") -> None:
@@ -9321,7 +9372,7 @@ class Bridge(QObject):
                         self.scanFinished.emit(primary, len(reconciled))
                     else:
                         paths = list(self._disk_cache.values())
-                        self._do_full_scan(paths, self.conn, emit_progress=True)
+                        self._do_full_scan(paths, self.conn, emit_progress=True, scope_key=scan_key)
                         self._last_full_scan_key = scan_key
                         self._warm_scan_keys.add(scan_key)
                         self.scanFinished.emit(primary, len(self._get_reconciled_candidates(folders, "all", search_query)))
@@ -9357,17 +9408,26 @@ class Bridge(QObject):
                     pass
         threading.Thread(target=work, daemon=True).start()
 
-    def _do_full_scan(self, paths: list[Path], conn, emit_progress: bool = True) -> int:
+    def _do_full_scan(self, paths: list[Path], conn, emit_progress: bool = True, scope_key: str = "") -> int:
         from app.mediamanager.db.media_repo import get_media_by_path, upsert_media_item
         from app.mediamanager.metadata.persistence import inspect_and_persist_if_supported
         from app.mediamanager.utils.hashing import calculate_media_content_hash, calculate_image_phash
         from datetime import datetime, timezone
 
-        # Viewport-priority ordering: paths visible in the gallery process first.
+        # Priority + checkpoint-aware ordering: visible paths first, then
+        # unfinished, then already-checkpointed (the per-file skip block below
+        # remains authoritative — checkpoint only changes iteration order).
         with self._priority_lock:
             priority = set(self._priority_paths)
-        if priority:
-            paths = sorted(paths, key=lambda x: 0 if str(x) in priority else 1)
+        done = self._checkpoint_done_paths(scope_key)
+        if priority or done:
+            paths = sorted(
+                paths,
+                key=lambda x: (
+                    0 if str(x) in priority else 1,
+                    0 if str(x) not in done else 1,
+                ),
+            )
         # Mutable copy so we can re-sort the unprocessed tail mid-scan if the
         # visible page changes while we're working.
         paths = list(paths)
@@ -9382,7 +9442,13 @@ class Bridge(QObject):
                     new_priority = set(self._priority_paths)
                 if new_priority != priority:
                     priority = new_priority
-                    tail = sorted(paths[i:], key=lambda x: 0 if str(x) in priority else 1)
+                    tail = sorted(
+                        paths[i:],
+                        key=lambda x: (
+                            0 if str(x) in priority else 1,
+                            0 if str(x) not in done else 1,
+                        ),
+                    )
                     paths[i:] = tail
                     p = paths[i]
             if emit_progress:
@@ -9448,11 +9514,15 @@ class Bridge(QObject):
                 if media_id is not None:
                     inspect_and_persist_if_supported(conn, media_id, str(p), "image" if p.suffix.lower() in IMAGE_EXTS else "video")
                 count += 1
+                if scope_key and self._checkpoint_mark(scope_key, str(p)):
+                    self._save_scan_checkpoint()
             except Exception as exc:
                 try:
                     self._log(f"Background scan item failed for {p}: {exc}")
                 except Exception:
                     pass
+        if scope_key:
+            self._save_scan_checkpoint()
         return count
 
     @Slot(str, result=str)
