@@ -4235,6 +4235,11 @@ class Bridge(QObject):
         self._lightbox_paused_text_processing: bool = False
         self._scan_performance_paused: bool = False
         self._performance_pause_lock = threading.Lock()
+
+        # Viewport-priority scanning: paths currently visible in gallery jump to front of scan queue.
+        self._priority_paths: set[str] = set()
+        self._priority_lock = threading.Lock()
+
         self._compare_paths: dict[str, str] = {"left": "", "right": ""}
         self._compare_keep_paths: set[str] = set()
         self._compare_delete_paths: set[str] = set()
@@ -9333,6 +9338,14 @@ class Bridge(QObject):
         clean_paths = [Path(path) for path in paths if str(path or "").strip()]
         if not clean_paths:
             return
+        # Always refresh the priority set so an in-flight full scan reorders its
+        # tail toward what's now visible on screen.
+        with self._priority_lock:
+            self._priority_paths = {str(p) for p in clean_paths}
+        # If a full scan is already running it will pick up the new priority on
+        # its next re-sort tick — no need to queue another lock-blocked scan.
+        if self._scan_lock.locked():
+            return
         def work():
             try:
                 with self._scan_lock:
@@ -9349,10 +9362,29 @@ class Bridge(QObject):
         from app.mediamanager.metadata.persistence import inspect_and_persist_if_supported
         from app.mediamanager.utils.hashing import calculate_media_content_hash, calculate_image_phash
         from datetime import datetime, timezone
+
+        # Viewport-priority ordering: paths visible in the gallery process first.
+        with self._priority_lock:
+            priority = set(self._priority_paths)
+        if priority:
+            paths = sorted(paths, key=lambda x: 0 if str(x) in priority else 1)
+        # Mutable copy so we can re-sort the unprocessed tail mid-scan if the
+        # visible page changes while we're working.
+        paths = list(paths)
         total, count = len(paths), 0
         for i, p in enumerate(paths):
             self._wait_while_scan_performance_paused()
             if self._scan_abort: break
+            # Every 25 files, check if the priority set changed (e.g. user paged
+            # the gallery) and reorder the remaining tail accordingly.
+            if i and i % 25 == 0:
+                with self._priority_lock:
+                    new_priority = set(self._priority_paths)
+                if new_priority != priority:
+                    priority = new_priority
+                    tail = sorted(paths[i:], key=lambda x: 0 if str(x) in priority else 1)
+                    paths[i:] = tail
+                    p = paths[i]
             if emit_progress:
                 self.scanProgress.emit(p.name, int(((i + 1) / total) * 100) if total > 0 else 100)
             try:
