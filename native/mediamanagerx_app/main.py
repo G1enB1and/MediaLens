@@ -7459,6 +7459,7 @@ class Bridge(QObject):
             DEFAULT_BAD_WORDS,
             DEFAULT_CAPTION_PROMPT,
             DEFAULT_CAPTION_START,
+            GEMMA4_MODEL_ID,
             TAG_MODEL_ID,
             LocalAiSettings,
         )
@@ -7466,11 +7467,11 @@ class Bridge(QObject):
         models_dir = Path(str(self.settings.value("ai_caption/models_dir", self._local_ai_models_dir_default(), type=str) or self._local_ai_models_dir_default()))
         tag_model_id = str(self.settings.value("ai_caption/tag_model_id", TAG_MODEL_ID, type=str) or TAG_MODEL_ID)
         caption_model_id = str(self.settings.value("ai_caption/caption_model_id", CAPTION_MODEL_ID, type=str) or CAPTION_MODEL_ID)
-        if tag_model_id != TAG_MODEL_ID:
+        if tag_model_id not in {TAG_MODEL_ID, GEMMA4_MODEL_ID}:
             self._log(f"Unsupported local AI tag model '{tag_model_id}' was reset to '{TAG_MODEL_ID}'.")
             tag_model_id = TAG_MODEL_ID
             self.settings.setValue("ai_caption/tag_model_id", TAG_MODEL_ID)
-        if caption_model_id != CAPTION_MODEL_ID:
+        if caption_model_id not in {CAPTION_MODEL_ID, GEMMA4_MODEL_ID}:
             self._log(f"Unsupported local AI description model '{caption_model_id}' was reset to '{CAPTION_MODEL_ID}'.")
             caption_model_id = CAPTION_MODEL_ID
             self.settings.setValue("ai_caption/caption_model_id", CAPTION_MODEL_ID)
@@ -7585,15 +7586,33 @@ class Bridge(QObject):
             "no_repeat_ngram_size": int(ai_settings.no_repeat_ngram_size),
         }
 
+    def _local_ai_worker_command(self, operation: str, ai_settings) -> tuple[str, str]:
+        from app.mediamanager.ai_captioning.local_captioning import GEMMA4_MODEL_ID
+
+        selected_model = ai_settings.tag_model_id if operation == "tags" else ai_settings.caption_model_id
+        if selected_model != GEMMA4_MODEL_ID:
+            return sys.executable, "app.mediamanager.ai_captioning.local_captioning"
+
+        configured = str(self.settings.value("ai_caption/gemma_python", "", type=str) or "").strip()
+        project_root = Path(__file__).resolve().parents[2]
+        default_python = project_root / ".venv-gemma" / "Scripts" / "python.exe"
+        python_path = Path(configured) if configured else default_python
+        if not python_path.is_file():
+            raise RuntimeError(
+                "Gemma 4 is not installed yet. Install the optional Gemma 4 local AI package before using this model."
+            )
+        return str(python_path), "app.mediamanager.ai_captioning.gemma_worker"
+
     def _run_local_ai_worker_process(self, operation: str, source_path: Path, ai_settings, tags: list[str] | None = None) -> dict:
         timeout_seconds = int(self.settings.value("ai_caption/item_timeout_seconds", 900, type=int) or 900)
         timeout_seconds = max(30, timeout_seconds)
         operation_label = "description" if operation == "description" else "tags"
         project_root = Path(__file__).resolve().parents[2]
+        python_exe, worker_module = self._local_ai_worker_command(operation, ai_settings)
         command = [
-            sys.executable,
+            python_exe,
             "-m",
-            "app.mediamanager.ai_captioning.local_captioning",
+            worker_module,
             "--operation",
             operation,
             "--source",

@@ -2035,6 +2035,7 @@ class AISettingsPage(SettingsPage):
             DEFAULT_BAD_WORDS,
             DEFAULT_CAPTION_PROMPT,
             DEFAULT_CAPTION_START,
+            GEMMA4_MODEL_ID,
             TAG_MODEL_ID,
             project_models_dir,
         )
@@ -2103,6 +2104,7 @@ class AISettingsPage(SettingsPage):
 
         self.tag_model_combo = QComboBox()
         self.tag_model_combo.addItem("WD SwinV2 Tagger v3", TAG_MODEL_ID)
+        self.tag_model_combo.addItem("Gemma 4 E2B Instruct", GEMMA4_MODEL_ID)
         tags_form.addRow("Tag Model", self.tag_model_combo)
 
         self.tag_write_mode_combo = QComboBox()
@@ -2138,6 +2140,7 @@ class AISettingsPage(SettingsPage):
 
         self.caption_model_combo = QComboBox()
         self.caption_model_combo.addItem("InternLM XComposer2 VL 1.8B", CAPTION_MODEL_ID)
+        self.caption_model_combo.addItem("Gemma 4 E2B Instruct", GEMMA4_MODEL_ID)
         descriptions_form.addRow("Description Model", self.caption_model_combo)
 
         self.description_write_mode_combo = QComboBox()

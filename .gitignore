@@ -22,6 +22,8 @@ data/
 
 # Local env/editor
 .venv/
+.venv-*/
+.pip-tmp/
 .env
 .python-version
 .DS_Store

@@ -1,0 +1,12 @@
+# Optional experimental dependencies for the Gemma 4 local AI model.
+# Install these into a separate .venv-gemma runtime so InternLM remains on
+# requirements-local-ai.txt and cannot be broken by newer Transformers changes.
+huggingface-hub>=1.11.0
+transformers>=5.5.4
+accelerate>=1.13.0
+sentencepiece==0.2.0
+einops==0.8.1
+torch==2.6.0; platform_system != "Windows"
+torchvision==0.21.0; platform_system != "Windows"
+https://download.pytorch.org/whl/cu124/torch-2.6.0%2Bcu124-cp312-cp312-win_amd64.whl; platform_system == "Windows" and python_version == "3.12"
+https://download.pytorch.org/whl/cu124/torchvision-0.21.0%2Bcu124-cp312-cp312-win_amd64.whl; platform_system == "Windows" and python_version == "3.12"
