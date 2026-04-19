@@ -1,6 +1,38 @@
 # Change Log
 
-## v1.1.26 (Current)
+## v1.1.27 (Current)
+
+### Summary
+
+This release makes local AI setup easier to understand and manage. MediaLens now gives clearer model install status, simpler setup wording, and direct install or uninstall controls without exposing backend details users do not need.
+
+### Highlights
+
+- Local AI Models and Status is now available from the View menu whenever you want to check model readiness.
+- Each local AI model now has clearer status, size, purpose, install, and uninstall controls in one dedicated window.
+- The Python bootstrap and model install checks are more reliable, so MediaLens only treats a model as installed when the needed files are actually present.
+
+### Added
+
+- Added an Uninstall action for installed local AI models in the Local AI Models window.
+- Added clearer per-model Description, Size, and Status presentation in the Local AI Models window.
+- Added hand cursors and tighter button sizing for Local AI Models actions.
+
+### Changed
+
+- Changed the Local AI Models window to follow the app's light or dark theme and accent color more closely.
+- Changed installed model status to use a simple checkmark label instead of a bordered badge that looked too much like a button.
+- Changed AI Settings to show simpler local AI model status and hide model size there, leaving size details in the Local AI Models window.
+- Changed the Python bootstrap install path to use a verified NuGet Python package for more predictable first-run model setup.
+- Changed model readiness checks so a runtime alone is not enough; required model files must also be present before the model appears installed.
+
+### Removed
+
+- Removed technical runtime, backend, and model-location wording from the user-facing AI setup surfaces.
+
+---
+
+## v1.1.26
 
 ### Summary
 
