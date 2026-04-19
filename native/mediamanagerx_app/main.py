@@ -37,6 +37,10 @@ LEGACY_APP_NAME = "MediaManagerX"
 LEGACY_APP_ORGANIZATION = "G1enB1and"
 UPDATE_VERSION_URL = "https://raw.githubusercontent.com/G1enB1and/MediaLens/main/VERSION"
 UPDATE_INSTALLER_URL = "https://github.com/G1enB1and/MediaLens/releases/latest/download/MediaLens_Setup.exe"
+LOCAL_AI_PYTHON_VERSION = "3.12.10"
+LOCAL_AI_PYTHON_INSTALLER_NAME = f"python-{LOCAL_AI_PYTHON_VERSION}-amd64.exe"
+LOCAL_AI_PYTHON_INSTALLER_URL = f"https://www.python.org/ftp/python/{LOCAL_AI_PYTHON_VERSION}/{LOCAL_AI_PYTHON_INSTALLER_NAME}"
+LOCAL_AI_PYTHON_INSTALLER_MD5 = "5eddb0b6f12c852725de071ae681dde4"
 
 
 def _append_env_flag(name: str, flag: str) -> None:
@@ -7480,6 +7484,20 @@ class Bridge(QObject):
             return _appdata_runtime_dir() / "ai-runtimes"
         return Path(__file__).resolve().parents[2]
 
+    def _local_ai_python_bootstrap_root(self) -> Path:
+        configured = str(self.settings.value("ai_caption/python_bootstrap_root", "", type=str) or "").strip()
+        if configured:
+            return Path(configured)
+        return _appdata_runtime_dir() / "python" / f"cpython-{LOCAL_AI_PYTHON_VERSION}"
+
+    def _local_ai_python_bootstrap_exe(self) -> Path:
+        if os.name == "nt":
+            return self._local_ai_python_bootstrap_root() / "python.exe"
+        return self._local_ai_python_bootstrap_root() / "bin" / "python"
+
+    def _local_ai_bootstrap_download_dir(self) -> Path:
+        return _appdata_runtime_dir() / "python-bootstrap"
+
     def _local_ai_requirements_path(self, spec) -> Path:
         source_root = self._local_ai_worker_source_root()
         candidates = [
@@ -7528,7 +7546,139 @@ class Bridge(QObject):
             "runtime_python": str(python_path),
             "runtime_dir": str(Path(python_path).parent.parent),
             "requirements_file": str(requirements_path),
+            "python_bootstrap": str(self._local_ai_python_bootstrap_exe()),
         }
+
+    @staticmethod
+    def _verify_python_can_create_venvs(command: list[str]) -> str:
+        result = subprocess.run(
+            [*command, "-c", "import venv, sys; print(sys.executable)"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(str(result.stderr or result.stdout or "Python cannot create virtual environments.").strip())
+        return str(result.stdout.strip() or command[0])
+
+    def _local_ai_bundled_python_installer(self) -> Path | None:
+        source_root = self._local_ai_worker_source_root()
+        candidates = [
+            source_root / "tools" / "python" / LOCAL_AI_PYTHON_INSTALLER_NAME,
+            source_root / "_internal" / "tools" / "python" / LOCAL_AI_PYTHON_INSTALLER_NAME,
+            Path(sys.executable).resolve().parent / "tools" / "python" / LOCAL_AI_PYTHON_INSTALLER_NAME if bool(getattr(sys, "frozen", False)) else Path(),
+        ]
+        for candidate in candidates:
+            if candidate and candidate.is_file():
+                return candidate
+        return None
+
+    @staticmethod
+    def _file_md5(path: Path) -> str:
+        digest = hashlib.md5()
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def _download_local_ai_python_installer(self, emit_status) -> Path:
+        download_dir = self._local_ai_bootstrap_download_dir()
+        download_dir.mkdir(parents=True, exist_ok=True)
+        installer_path = download_dir / LOCAL_AI_PYTHON_INSTALLER_NAME
+        if installer_path.is_file() and self._file_md5(installer_path).lower() == LOCAL_AI_PYTHON_INSTALLER_MD5:
+            return installer_path
+        temp_path = installer_path.with_suffix(".download")
+        if temp_path.exists():
+            temp_path.unlink()
+        request = urllib.request.Request(
+            LOCAL_AI_PYTHON_INSTALLER_URL,
+            headers={"User-Agent": f"MediaLens/{__version__}"},
+        )
+        emit_status(f"Downloading Python {LOCAL_AI_PYTHON_VERSION} bootstrap...")
+        with urllib.request.urlopen(request, timeout=45) as response:
+            total = int(response.headers.get("Content-Length") or 0)
+            received = 0
+            last_emit = 0.0
+            with open(temp_path, "wb") as handle:
+                while True:
+                    chunk = response.read(1024 * 512)
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+                    received += len(chunk)
+                    if time.monotonic() - last_emit >= 1.0:
+                        last_emit = time.monotonic()
+                        if total:
+                            percent = int(round((received / total) * 100))
+                            emit_status(f"Downloading Python bootstrap: {percent}% ({received // (1024 * 1024)} MB / {total // (1024 * 1024)} MB)")
+                        else:
+                            emit_status(f"Downloading Python bootstrap: {received // (1024 * 1024)} MB")
+        actual_md5 = self._file_md5(temp_path).lower()
+        if actual_md5 != LOCAL_AI_PYTHON_INSTALLER_MD5:
+            temp_path.unlink(missing_ok=True)
+            raise RuntimeError("Downloaded Python bootstrap did not match the expected checksum.")
+        if installer_path.exists():
+            installer_path.unlink()
+        temp_path.replace(installer_path)
+        return installer_path
+
+    def _ensure_local_ai_python_bootstrap(self, emit_status) -> str:
+        bootstrap_python = self._local_ai_python_bootstrap_exe()
+        if bootstrap_python.is_file():
+            try:
+                return self._verify_python_can_create_venvs([str(bootstrap_python)])
+            except Exception:
+                pass
+        if os.name != "nt":
+            return self._find_local_ai_bootstrap_python()
+
+        installer_path = self._local_ai_bundled_python_installer()
+        if installer_path is None:
+            installer_path = self._download_local_ai_python_installer(emit_status)
+        else:
+            if self._file_md5(installer_path).lower() != LOCAL_AI_PYTHON_INSTALLER_MD5:
+                raise RuntimeError("Bundled Python bootstrap did not match the expected checksum.")
+            emit_status(f"Using bundled Python {LOCAL_AI_PYTHON_VERSION} bootstrap...")
+
+        target_dir = self._local_ai_python_bootstrap_root()
+        target_dir.mkdir(parents=True, exist_ok=True)
+        emit_status(f"Installing Python {LOCAL_AI_PYTHON_VERSION} bootstrap...")
+        command = [
+            str(installer_path),
+            "/quiet",
+            "InstallAllUsers=0",
+            f"TargetDir={target_dir}",
+            "Include_launcher=0",
+            "Include_pip=1",
+            "Include_test=0",
+            "Include_tcltk=0",
+            "Include_doc=0",
+            "Shortcuts=0",
+            "AssociateFiles=0",
+            "PrependPath=0",
+            "SimpleInstall=1",
+        ]
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=600,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
+        )
+        if result.returncode != 0:
+            detail = str(result.stderr or result.stdout or "").strip()
+            raise RuntimeError(f"Python bootstrap install failed with exit code {result.returncode}. {detail}")
+        if not bootstrap_python.is_file():
+            raise RuntimeError("Python bootstrap install finished, but python.exe was not found.")
+        emit_status(f"Python {LOCAL_AI_PYTHON_VERSION} bootstrap is ready.")
+        return self._verify_python_can_create_venvs([str(bootstrap_python)])
 
     def _find_local_ai_bootstrap_python(self) -> str:
         candidates: list[list[str]] = []
@@ -7540,18 +7690,7 @@ class Bridge(QObject):
             candidates.extend([["python3"], ["python"]])
         for command in candidates:
             try:
-                result = subprocess.run(
-                    [*command, "-c", "import venv, sys; print(sys.executable)"],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=15,
-                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
-                )
-                if result.returncode == 0:
-                    return str(result.stdout.strip() or command[0])
+                return self._verify_python_can_create_venvs(command)
             except Exception:
                 continue
         return ""
@@ -7583,6 +7722,10 @@ class Bridge(QObject):
 
         def work() -> None:
             payload = self._local_ai_status_payload_for_spec(spec)
+            def emit_install_status(message: str) -> None:
+                payload.update({"state": "installing", "running": True, "message": str(message or "").strip()})
+                self.localAiModelInstallStatus.emit(spec.settings_key, dict(payload))
+
             try:
                 requirements_path = self._local_ai_requirements_path(spec)
                 if not requirements_path.is_file():
@@ -7590,11 +7733,11 @@ class Bridge(QObject):
                 python_path = self._local_ai_runtime_python_path(spec)
                 runtime_dir = Path(python_path).parent.parent
                 runtime_dir.parent.mkdir(parents=True, exist_ok=True)
-                bootstrap_python = self._find_local_ai_bootstrap_python()
+                bootstrap_python = self._ensure_local_ai_python_bootstrap(emit_install_status)
                 if not bootstrap_python:
                     raise RuntimeError(
-                        "MediaLens could not find Python on this computer to create the model runtime. "
-                        "Install Python 3.12, then try again."
+                        "MediaLens could not prepare the Python bootstrap needed to create the model runtime. "
+                        "Check your internet connection, then try again."
                     )
                 commands = [
                     ([bootstrap_python, "-m", "venv", str(runtime_dir)], f"Creating {spec.install_label} runtime..."),

@@ -24,6 +24,7 @@ data/
 .venv/
 .venv-*/
 .pip-tmp/
+/tools/python/*.exe
 .env
 .python-version
 .DS_Store

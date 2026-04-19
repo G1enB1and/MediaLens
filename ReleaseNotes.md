@@ -8,6 +8,7 @@ This release makes local AI support more reliable and ready for future model exp
 
 - Use Gemma 4, InternLM XComposer2, and WD SwinV2 side by side with cleaner separation behind the scenes.
 - See whether local AI models are installed from the new Local AI Models setup window or from AI settings, and install missing model support from either place.
+- Install local AI support without separately installing Python first; MediaLens now prepares its own Python bootstrap as needed.
 - Write description prompts with more control: tags are only included when `{tags}` is used, and starter text is handled as a model instruction.
 - Get clearer local AI progress and error feedback during long-running generation.
 

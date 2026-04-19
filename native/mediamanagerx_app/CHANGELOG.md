@@ -20,6 +20,7 @@ This release makes local AI model support much more dependable and flexible. Med
 - Added separate optional dependency files for WD SwinV2, InternLM XComposer2, and Gemma 4 runtimes.
 - Added AI settings status for the selected tag and description models, including an install action when the model runtime is missing.
 - Added a Local AI Models setup dialog that appears after installing or updating MediaLens and shows install status for each optional model runtime.
+- Added a managed Python bootstrap for local AI model installs so MediaLens can create per-model runtimes without requiring users to install Python themselves.
 - Added `{starter}` support for description prompts so users can place the starter text exactly where they want it.
 
 ### Changed
