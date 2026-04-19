@@ -7459,19 +7459,19 @@ class Bridge(QObject):
             DEFAULT_BAD_WORDS,
             DEFAULT_CAPTION_PROMPT,
             DEFAULT_CAPTION_START,
-            GEMMA4_MODEL_ID,
             TAG_MODEL_ID,
             LocalAiSettings,
         )
+        from app.mediamanager.ai_captioning.model_registry import model_ids_for_kind
 
         models_dir = Path(str(self.settings.value("ai_caption/models_dir", self._local_ai_models_dir_default(), type=str) or self._local_ai_models_dir_default()))
         tag_model_id = str(self.settings.value("ai_caption/tag_model_id", TAG_MODEL_ID, type=str) or TAG_MODEL_ID)
         caption_model_id = str(self.settings.value("ai_caption/caption_model_id", CAPTION_MODEL_ID, type=str) or CAPTION_MODEL_ID)
-        if tag_model_id not in {TAG_MODEL_ID, GEMMA4_MODEL_ID}:
+        if tag_model_id not in model_ids_for_kind("tagger"):
             self._log(f"Unsupported local AI tag model '{tag_model_id}' was reset to '{TAG_MODEL_ID}'.")
             tag_model_id = TAG_MODEL_ID
             self.settings.setValue("ai_caption/tag_model_id", TAG_MODEL_ID)
-        if caption_model_id not in {CAPTION_MODEL_ID, GEMMA4_MODEL_ID}:
+        if caption_model_id not in model_ids_for_kind("captioner"):
             self._log(f"Unsupported local AI description model '{caption_model_id}' was reset to '{CAPTION_MODEL_ID}'.")
             caption_model_id = CAPTION_MODEL_ID
             self.settings.setValue("ai_caption/caption_model_id", CAPTION_MODEL_ID)
@@ -7587,21 +7587,29 @@ class Bridge(QObject):
         }
 
     def _local_ai_worker_command(self, operation: str, ai_settings) -> tuple[str, str]:
-        from app.mediamanager.ai_captioning.local_captioning import GEMMA4_MODEL_ID
+        from app.mediamanager.ai_captioning.model_registry import (
+            current_python_matches_runtime,
+            default_python_for_runtime,
+            model_spec,
+        )
 
+        kind = "tagger" if operation == "tags" else "captioner"
         selected_model = ai_settings.tag_model_id if operation == "tags" else ai_settings.caption_model_id
-        if selected_model != GEMMA4_MODEL_ID:
-            return sys.executable, "app.mediamanager.ai_captioning.local_captioning"
-
-        configured = str(self.settings.value("ai_caption/gemma_python", "", type=str) or "").strip()
+        spec = model_spec(selected_model, kind)
+        configured = str(self.settings.value(f"ai_caption/runtime_python/{spec.settings_key}", "", type=str) or "").strip()
+        if not configured and spec.settings_key == "gemma4":
+            configured = str(self.settings.value("ai_caption/gemma_python", "", type=str) or "").strip()
         project_root = Path(__file__).resolve().parents[2]
-        default_python = project_root / ".venv-gemma" / "Scripts" / "python.exe"
+        default_python = default_python_for_runtime(project_root, spec)
         python_path = Path(configured) if configured else default_python
         if not python_path.is_file():
-            raise RuntimeError(
-                "Gemma 4 is not installed yet. Install the optional Gemma 4 local AI package before using this model."
-            )
-        return str(python_path), "app.mediamanager.ai_captioning.gemma_worker"
+            if current_python_matches_runtime(spec) or not configured:
+                python_path = Path(sys.executable)
+            else:
+                raise RuntimeError(
+                    f"{spec.install_label} is not installed yet. Install this local AI model before using it."
+                )
+        return str(python_path), spec.worker_module
 
     def _run_local_ai_worker_process(self, operation: str, source_path: Path, ai_settings, tags: list[str] | None = None) -> dict:
         timeout_seconds = int(self.settings.value("ai_caption/item_timeout_seconds", 900, type=int) or 900)
@@ -7721,7 +7729,7 @@ class Bridge(QObject):
 
     @Slot(result=list)
     def list_local_ai_models(self) -> list:
-        from app.mediamanager.ai_captioning.local_captioning import available_models
+        from app.mediamanager.ai_captioning.model_registry import available_models
 
         return available_models()
 

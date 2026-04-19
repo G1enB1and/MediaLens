@@ -1,0 +1,8 @@
+# Optional dependencies for the WD SwinV2 Tagger v3 local AI model.
+# Install into .venv-wd-swinv2 so this model can run without affecting other
+# local AI model runtimes.
+Pillow>=10.0.0
+numpy>=1.26.0
+huggingface-hub==0.29.1
+onnxruntime==1.20.1
+

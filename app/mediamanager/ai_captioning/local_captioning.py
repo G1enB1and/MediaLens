@@ -16,10 +16,12 @@ from typing import Callable, Iterable
 from PIL import Image as PilImage
 from PIL.ImageOps import exif_transpose
 
-
-TAG_MODEL_ID = "SmilingWolf/wd-swinv2-tagger-v3"
-CAPTION_MODEL_ID = "internlm/internlm-xcomposer2-vl-1_8b"
-GEMMA4_MODEL_ID = "google/gemma-4-E2B-it"
+from app.mediamanager.ai_captioning.model_registry import (
+    CAPTION_MODEL_ID,
+    GEMMA4_MODEL_ID,
+    TAG_MODEL_ID,
+    available_models,
+)
 
 DEFAULT_CAPTION_PROMPT = (
     "Please provide a description of this image in natural language paragraph style. "
@@ -81,15 +83,6 @@ class DependencyMissingError(RuntimeError):
 
 def project_models_dir() -> Path:
     return Path(__file__).resolve().parents[3] / "local_ai_models"
-
-
-def available_models() -> list[dict[str, str]]:
-    return [
-        {"id": TAG_MODEL_ID, "kind": "tagger", "label": "WD SwinV2 Tagger v3"},
-        {"id": GEMMA4_MODEL_ID, "kind": "tagger", "label": "Gemma 4 E2B Instruct"},
-        {"id": CAPTION_MODEL_ID, "kind": "captioner", "label": "InternLM XComposer2 VL 1.8B"},
-        {"id": GEMMA4_MODEL_ID, "kind": "captioner", "label": "Gemma 4 E2B Instruct"},
-    ]
 
 
 def _split_escaped_csv(text: str) -> list[str]:

@@ -13,8 +13,7 @@ from typing import Any
 from PIL import Image as PilImage
 from PIL.ImageOps import exif_transpose
 
-
-GEMMA4_MODEL_ID = "google/gemma-4-E2B-it"
+from app.mediamanager.ai_captioning.model_registry import GEMMA4_MODEL_ID
 
 
 def _settings_from_json(raw: str) -> dict[str, Any]:
