@@ -22,6 +22,7 @@ import html
 import shlex
 import traceback
 import zipfile
+import base64
 import urllib.error
 import urllib.request
 import uuid
@@ -38,9 +39,9 @@ LEGACY_APP_ORGANIZATION = "G1enB1and"
 UPDATE_VERSION_URL = "https://raw.githubusercontent.com/G1enB1and/MediaLens/main/VERSION"
 UPDATE_INSTALLER_URL = "https://github.com/G1enB1and/MediaLens/releases/latest/download/MediaLens_Setup.exe"
 LOCAL_AI_PYTHON_VERSION = "3.12.10"
-LOCAL_AI_PYTHON_INSTALLER_NAME = f"python-{LOCAL_AI_PYTHON_VERSION}-amd64.exe"
-LOCAL_AI_PYTHON_INSTALLER_URL = f"https://www.python.org/ftp/python/{LOCAL_AI_PYTHON_VERSION}/{LOCAL_AI_PYTHON_INSTALLER_NAME}"
-LOCAL_AI_PYTHON_INSTALLER_MD5 = "5eddb0b6f12c852725de071ae681dde4"
+LOCAL_AI_PYTHON_PACKAGE_NAME = f"python.{LOCAL_AI_PYTHON_VERSION}.nupkg"
+LOCAL_AI_PYTHON_PACKAGE_URL = f"https://api.nuget.org/v3-flatcontainer/python/{LOCAL_AI_PYTHON_VERSION}/{LOCAL_AI_PYTHON_PACKAGE_NAME}"
+LOCAL_AI_PYTHON_PACKAGE_SHA512 = "u9pNz2iKlCEbYtUJaKkbOPMF0LjR7NkCafdKhvigpPzrt8oWKgdTpHaR6z3wyWQAm9PYGUxv0Zr66NX9AeHMDw=="
 
 
 def _append_env_flag(name: str, flag: str) -> None:
@@ -7521,14 +7522,24 @@ class Bridge(QObject):
     def _local_ai_status_payload_for_spec(self, spec) -> dict:
         python_path = self._local_ai_runtime_python_path(spec)
         requirements_path = self._local_ai_requirements_path(spec)
+        configured = str(self.settings.value(f"ai_caption/runtime_python/{spec.settings_key}", "", type=str) or "").strip()
+        if not configured and spec.settings_key == "gemma4":
+            configured = str(self.settings.value("ai_caption/gemma_python", "", type=str) or "").strip()
         installed = python_path.is_file()
+        dev_fallback = False
+        if not installed and not bool(getattr(sys, "frozen", False)) and not configured:
+            installed = True
+            dev_fallback = True
         running = spec.settings_key in self._local_ai_model_installs
         if running:
             state = "installing"
             message = f"Installing {spec.install_label}..."
         elif installed:
             state = "installed"
-            message = "Installed. Model files may download on first use if they are not already available."
+            if dev_fallback:
+                message = "Available through the current development Python. Packaged installs use the managed model runtime."
+            else:
+                message = "Installed. Model files may download on first use if they are not already available."
         else:
             state = "not_installed"
             message = "Not installed. Install this model before using it."
@@ -7542,6 +7553,7 @@ class Bridge(QObject):
             "state": state,
             "installed": installed,
             "running": running,
+            "dev_fallback": dev_fallback,
             "message": message,
             "runtime_python": str(python_path),
             "runtime_dir": str(Path(python_path).parent.parent),
@@ -7568,9 +7580,9 @@ class Bridge(QObject):
     def _local_ai_bundled_python_installer(self) -> Path | None:
         source_root = self._local_ai_worker_source_root()
         candidates = [
-            source_root / "tools" / "python" / LOCAL_AI_PYTHON_INSTALLER_NAME,
-            source_root / "_internal" / "tools" / "python" / LOCAL_AI_PYTHON_INSTALLER_NAME,
-            Path(sys.executable).resolve().parent / "tools" / "python" / LOCAL_AI_PYTHON_INSTALLER_NAME if bool(getattr(sys, "frozen", False)) else Path(),
+            source_root / "tools" / "python" / LOCAL_AI_PYTHON_PACKAGE_NAME,
+            source_root / "_internal" / "tools" / "python" / LOCAL_AI_PYTHON_PACKAGE_NAME,
+            Path(sys.executable).resolve().parent / "tools" / "python" / LOCAL_AI_PYTHON_PACKAGE_NAME if bool(getattr(sys, "frozen", False)) else Path(),
         ]
         for candidate in candidates:
             if candidate and candidate.is_file():
@@ -7578,24 +7590,30 @@ class Bridge(QObject):
         return None
 
     @staticmethod
-    def _file_md5(path: Path) -> str:
-        digest = hashlib.md5()
+    def _file_sha512_base64(path: Path) -> str:
+        digest = hashlib.sha512()
         with open(path, "rb") as handle:
             for chunk in iter(lambda: handle.read(1024 * 1024), b""):
                 digest.update(chunk)
-        return digest.hexdigest()
+        return base64.b64encode(digest.digest()).decode("ascii")
 
-    def _download_local_ai_python_installer(self, emit_status) -> Path:
+    def _verify_local_ai_python_package(self, path: Path) -> None:
+        actual = self._file_sha512_base64(path)
+        if actual != LOCAL_AI_PYTHON_PACKAGE_SHA512:
+            raise RuntimeError("Python bootstrap package did not match the expected checksum.")
+
+    def _download_local_ai_python_package(self, emit_status) -> Path:
         download_dir = self._local_ai_bootstrap_download_dir()
         download_dir.mkdir(parents=True, exist_ok=True)
-        installer_path = download_dir / LOCAL_AI_PYTHON_INSTALLER_NAME
-        if installer_path.is_file() and self._file_md5(installer_path).lower() == LOCAL_AI_PYTHON_INSTALLER_MD5:
-            return installer_path
-        temp_path = installer_path.with_suffix(".download")
+        package_path = download_dir / LOCAL_AI_PYTHON_PACKAGE_NAME
+        if package_path.is_file():
+            self._verify_local_ai_python_package(package_path)
+            return package_path
+        temp_path = package_path.with_suffix(".download")
         if temp_path.exists():
             temp_path.unlink()
         request = urllib.request.Request(
-            LOCAL_AI_PYTHON_INSTALLER_URL,
+            LOCAL_AI_PYTHON_PACKAGE_URL,
             headers={"User-Agent": f"MediaLens/{__version__}"},
         )
         emit_status(f"Downloading Python {LOCAL_AI_PYTHON_VERSION} bootstrap...")
@@ -7617,14 +7635,41 @@ class Bridge(QObject):
                             emit_status(f"Downloading Python bootstrap: {percent}% ({received // (1024 * 1024)} MB / {total // (1024 * 1024)} MB)")
                         else:
                             emit_status(f"Downloading Python bootstrap: {received // (1024 * 1024)} MB")
-        actual_md5 = self._file_md5(temp_path).lower()
-        if actual_md5 != LOCAL_AI_PYTHON_INSTALLER_MD5:
-            temp_path.unlink(missing_ok=True)
-            raise RuntimeError("Downloaded Python bootstrap did not match the expected checksum.")
-        if installer_path.exists():
-            installer_path.unlink()
-        temp_path.replace(installer_path)
-        return installer_path
+        self._verify_local_ai_python_package(temp_path)
+        if package_path.exists():
+            package_path.unlink()
+        temp_path.replace(package_path)
+        return package_path
+
+    def _extract_local_ai_python_package(self, package_path: Path, emit_status) -> None:
+        self._verify_local_ai_python_package(package_path)
+        target_dir = self._local_ai_python_bootstrap_root()
+        temp_dir = target_dir.with_name(f"{target_dir.name}.extracting")
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir)
+        if target_dir.exists() and not self._local_ai_python_bootstrap_exe().is_file():
+            shutil.rmtree(target_dir)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        emit_status(f"Extracting Python {LOCAL_AI_PYTHON_VERSION} bootstrap...")
+        try:
+            with zipfile.ZipFile(package_path, "r") as archive:
+                for member in archive.infolist():
+                    name = member.filename.replace("\\", "/")
+                    if not name.startswith("tools/") or name.endswith("/"):
+                        continue
+                    relative = Path(*name.split("/")[1:])
+                    if not relative.parts:
+                        continue
+                    target = temp_dir / relative
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    with archive.open(member) as source, open(target, "wb") as dest:
+                        shutil.copyfileobj(source, dest)
+            if target_dir.exists():
+                shutil.rmtree(target_dir)
+            temp_dir.replace(target_dir)
+        except Exception:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise
 
     def _ensure_local_ai_python_bootstrap(self, emit_status) -> str:
         bootstrap_python = self._local_ai_python_bootstrap_exe()
@@ -7636,45 +7681,14 @@ class Bridge(QObject):
         if os.name != "nt":
             return self._find_local_ai_bootstrap_python()
 
-        installer_path = self._local_ai_bundled_python_installer()
-        if installer_path is None:
-            installer_path = self._download_local_ai_python_installer(emit_status)
+        package_path = self._local_ai_bundled_python_installer()
+        if package_path is None:
+            package_path = self._download_local_ai_python_package(emit_status)
         else:
-            if self._file_md5(installer_path).lower() != LOCAL_AI_PYTHON_INSTALLER_MD5:
-                raise RuntimeError("Bundled Python bootstrap did not match the expected checksum.")
+            self._verify_local_ai_python_package(package_path)
             emit_status(f"Using bundled Python {LOCAL_AI_PYTHON_VERSION} bootstrap...")
 
-        target_dir = self._local_ai_python_bootstrap_root()
-        target_dir.mkdir(parents=True, exist_ok=True)
-        emit_status(f"Installing Python {LOCAL_AI_PYTHON_VERSION} bootstrap...")
-        command = [
-            str(installer_path),
-            "/quiet",
-            "InstallAllUsers=0",
-            f"TargetDir={target_dir}",
-            "Include_launcher=0",
-            "Include_pip=1",
-            "Include_test=0",
-            "Include_tcltk=0",
-            "Include_doc=0",
-            "Shortcuts=0",
-            "AssociateFiles=0",
-            "PrependPath=0",
-            "SimpleInstall=1",
-        ]
-        result = subprocess.run(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=600,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
-        )
-        if result.returncode != 0:
-            detail = str(result.stderr or result.stdout or "").strip()
-            raise RuntimeError(f"Python bootstrap install failed with exit code {result.returncode}. {detail}")
+        self._extract_local_ai_python_package(package_path, emit_status)
         if not bootstrap_python.is_file():
             raise RuntimeError("Python bootstrap install finished, but python.exe was not found.")
         emit_status(f"Python {LOCAL_AI_PYTHON_VERSION} bootstrap is ready.")

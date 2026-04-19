@@ -2416,9 +2416,12 @@ class LocalAiSetupDialog(QDialog):
 
         if hasattr(self.bridge, "localAiModelInstallStatus"):
             self.bridge.localAiModelInstallStatus.connect(self._on_install_status)
+        if hasattr(self.bridge, "accentColorChanged"):
+            self.bridge.accentColorChanged.connect(lambda _value: self._apply_theme())
 
         self._build_rows()
         self.refresh_statuses()
+        self._apply_theme()
 
     def _unique_model_specs(self):
         from app.mediamanager.ai_captioning.model_registry import MODEL_SPECS
@@ -2462,6 +2465,15 @@ class LocalAiSetupDialog(QDialog):
             name.setFont(name_font)
             layout.addWidget(name, 0, 0)
 
+            status_badge = QLabel("Checking")
+            status_badge.setObjectName("localAiStatusBadge")
+            badge_font = status_badge.font()
+            badge_font.setPointSize(max(badge_font.pointSize() + 2, 12))
+            badge_font.setBold(True)
+            status_badge.setFont(badge_font)
+            status_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(status_badge, 0, 1)
+
             capability = QLabel(f"Used for: {self._capabilities_label(kinds)}")
             layout.addWidget(capability, 1, 0)
 
@@ -2478,14 +2490,16 @@ class LocalAiSetupDialog(QDialog):
             layout.addWidget(status, 4, 0)
 
             install_btn = QPushButton("Install")
+            install_btn.setObjectName("localAiInstallButton")
             install_btn.clicked.connect(lambda _checked=False, s=spec: self._install_model(s))
-            layout.addWidget(install_btn, 0, 1, 2, 1)
+            layout.addWidget(install_btn, 1, 1)
             layout.setColumnStretch(0, 1)
 
             self.rows_layout.addWidget(frame)
             self._rows[status_key] = {
                 "spec": spec,
                 "status": status,
+                "badge": status_badge,
                 "button": install_btn,
                 "frame": frame,
             }
@@ -2510,9 +2524,27 @@ class LocalAiSetupDialog(QDialog):
         if not row:
             return
         label = row["status"]
+        badge = row["badge"]
         button = row["button"]
+        frame = row["frame"]
         state = str(status.get("state") or "").strip()
         message = str(status.get("message") or "").strip() or "Status unavailable."
+        if state == "installed":
+            badge.setText("Installed")
+        elif state == "installing":
+            badge.setText("Installing")
+        elif state == "error":
+            badge.setText("Error")
+        elif state == "not_installed":
+            badge.setText("Not installed")
+        else:
+            badge.setText("Unknown")
+        frame.setProperty("installState", state or "unknown")
+        badge.setProperty("installState", state or "unknown")
+        frame.style().unpolish(frame)
+        frame.style().polish(frame)
+        badge.style().unpolish(badge)
+        badge.style().polish(badge)
         label.setText(message)
         button.setVisible(state in {"not_installed", "error", "installing"})
         button.setEnabled(state in {"not_installed", "error"})
@@ -2527,6 +2559,135 @@ class LocalAiSetupDialog(QDialog):
 
     def _on_install_status(self, status_key: str, payload: dict) -> None:
         self._apply_status(str(status_key or ""), dict(payload or {}))
+
+    def _apply_theme(self) -> None:
+        Theme = _theme_api()
+        accent = QColor(str(self.bridge.settings.value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT))
+        if not accent.isValid():
+            accent = QColor(Theme.ACCENT_DEFAULT)
+        Theme.set_theme_mode(str(self.bridge.settings.value("ui/theme_mode", "dark", type=str) or "dark"))
+        bg = Theme.get_bg(accent)
+        control_bg = Theme.get_control_bg(accent)
+        sidebar_bg = Theme.get_sidebar_bg(accent)
+        border = Theme.get_border(accent)
+        text = Theme.get_text_color()
+        muted = Theme.get_text_muted()
+        hover = Theme.get_btn_save_hover(accent)
+        accent_soft = Theme.get_accent_soft(accent)
+        accent_str = accent.name()
+        selection_text = "#000000" if SettingsProxyStyle._contrast_ratio(accent, QColor("#000000")) >= SettingsProxyStyle._contrast_ratio(accent, QColor("#ffffff")) else "#ffffff"
+        installed_bg = Theme.mix(control_bg, QColor("#2f8f46"), 0.20 if Theme.get_is_light() else 0.24)
+        installed_fg = "#145523" if Theme.get_is_light() else "#bdf5ca"
+        missing_bg = Theme.mix(control_bg, QColor("#c9563d"), 0.22 if Theme.get_is_light() else 0.26)
+        missing_fg = "#7c1f11" if Theme.get_is_light() else "#ffd1c7"
+        installing_bg = Theme.mix(control_bg, accent, 0.22 if Theme.get_is_light() else 0.26)
+        error_bg = Theme.mix(control_bg, QColor("#d33f49"), 0.24 if Theme.get_is_light() else 0.28)
+        error_fg = "#8a111a" if Theme.get_is_light() else "#ffd0d4"
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {bg};
+                color: {text};
+            }}
+            QLabel {{
+                color: {text};
+            }}
+            QLabel#localAiSetupTitle {{
+                color: {text};
+            }}
+            QScrollArea {{
+                background: transparent;
+                border: none;
+            }}
+            QScrollArea QWidget {{
+                background: transparent;
+            }}
+            QFrame#localAiModelRow {{
+                background-color: {sidebar_bg};
+                border: 1px solid {border};
+                border-radius: 8px;
+            }}
+            QFrame#localAiModelRow[installState="not_installed"] {{
+                border-color: {missing_fg};
+            }}
+            QFrame#localAiModelRow[installState="error"] {{
+                border-color: {error_fg};
+            }}
+            QLabel#localAiStatusBadge {{
+                color: {text};
+                background-color: {control_bg};
+                border: 1px solid {border};
+                border-radius: 6px;
+                padding: 5px 10px;
+                min-width: 112px;
+            }}
+            QLabel#localAiStatusBadge[installState="installed"] {{
+                color: {installed_fg};
+                background-color: {installed_bg};
+                border-color: {installed_fg};
+            }}
+            QLabel#localAiStatusBadge[installState="not_installed"] {{
+                color: {missing_fg};
+                background-color: {missing_bg};
+                border-color: {missing_fg};
+            }}
+            QLabel#localAiStatusBadge[installState="installing"] {{
+                color: {selection_text};
+                background-color: {accent_str};
+                border-color: {accent_str};
+            }}
+            QLabel#localAiStatusBadge[installState="error"] {{
+                color: {error_fg};
+                background-color: {error_bg};
+                border-color: {error_fg};
+            }}
+            QPushButton {{
+                background-color: {Theme.get_btn_save_bg(accent)};
+                color: {text};
+                border: 1px solid {border};
+                border-radius: 6px;
+                padding: 6px 12px;
+                min-height: 26px;
+            }}
+            QPushButton:hover {{
+                background-color: {hover};
+                border-color: {accent_str};
+            }}
+            QPushButton:pressed {{
+                background-color: {Theme.mix(hover, accent, 0.12)};
+                border-color: {accent_str};
+            }}
+            QPushButton:disabled {{
+                color: {muted};
+                background-color: {control_bg};
+                border-color: {border};
+            }}
+            QPushButton#localAiInstallButton {{
+                background-color: {accent_soft};
+                border-color: {accent_str};
+                font-weight: 600;
+            }}
+            QPushButton#localAiInstallButton:hover {{
+                background-color: {hover};
+                border-color: {accent_str};
+            }}
+            QScrollBar:vertical {{
+                background: {Theme.get_scrollbar_track(accent)};
+                width: 10px;
+                margin: 0;
+                border: none;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {Theme.get_scrollbar_thumb(accent)};
+                border-radius: 5px;
+                min-height: 28px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {Theme.get_scrollbar_thumb_hover(accent)};
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0;
+            }}
+        """)
 
 
 def _theme_api():

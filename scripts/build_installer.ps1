@@ -120,7 +120,7 @@ Write-Host "Bundled media tools:"
 Write-Host "  ffmpeg: $ffmpegExe"
 Write-Host "  ffprobe: $ffprobeExe"
 
-$pythonBootstrapName = "python-3.12.10-amd64.exe"
+$pythonBootstrapName = "python.3.12.10.nupkg"
 $pythonBootstrapSource = Join-Path $repoRoot "tools\python\$pythonBootstrapName"
 if (Test-Path -LiteralPath $pythonBootstrapSource -PathType Leaf) {
     $pythonBootstrapDest = Join-Path $distDir "tools\python"
@@ -129,7 +129,7 @@ if (Test-Path -LiteralPath $pythonBootstrapSource -PathType Leaf) {
     Write-Host "Bundled local AI Python bootstrap: $pythonBootstrapSource"
 }
 else {
-    Write-Host "Local AI Python bootstrap not bundled; installed apps will download it on first model install."
+    Write-Host "Local AI Python bootstrap package not bundled; installed apps will download it on first model install."
 }
 
 $qtConfSource = Join-Path $repoRoot "qt.conf"
