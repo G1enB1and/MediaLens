@@ -107,6 +107,19 @@ def _dedupe_preserve_order(values: Iterable[str]) -> list[str]:
     return out
 
 
+def build_description_prompt(prompt_template: str, tags: Iterable[str], caption_start: str) -> str:
+    prompt = str(prompt_template or DEFAULT_CAPTION_PROMPT)
+    clean_tags = ", ".join(str(tag).strip() for tag in tags if str(tag).strip())
+    clean_start = " ".join(str(caption_start or "").split())
+    if "{tags}" in prompt:
+        prompt = prompt.replace("{tags}", clean_tags)
+    if "{starter}" in prompt:
+        prompt = prompt.replace("{starter}", clean_start)
+    elif clean_start:
+        prompt = f"{prompt.rstrip()}\nStart your description with: {clean_start}"
+    return prompt.strip()
+
+
 def _resolve_local_or_remote_model(models_dir: Path, model_id: str, marker_names: Iterable[str]) -> str:
     models_dir = Path(models_dir)
     candidate = models_dir / model_id
@@ -365,10 +378,10 @@ class XComposer2Captioner:
                 out.append(self.tokenizer(words, add_special_tokens=False).input_ids)
         return out or None
 
-    def _prepare_inputs(self, source_path: Path, prompt: str, caption_start: str):
+    def _prepare_inputs(self, source_path: Path, prompt: str):
         torch = self.torch
         pil_image = _open_local_ai_image(source_path, "RGB")
-        text = self._format_prompt(prompt) + caption_start
+        text = self._format_prompt(prompt)
         processed_image = self.model.vis_processor(pil_image).unsqueeze(0).to(self.device)
         if self.device.type == "cuda":
             processed_image = processed_image.to(dtype=self.dtype)
@@ -391,8 +404,8 @@ class XComposer2Captioner:
         return {"inputs_embeds": input_embeddings, "im_mask": image_mask, "eos_token_id": eos_token_id}
 
     def generate(self, source_path: Path, tags: list[str], settings: LocalAiSettings) -> str:
-        prompt = settings.caption_prompt.replace("{tags}", ", ".join(tags))
-        inputs = self._prepare_inputs(source_path, prompt, settings.caption_start)
+        prompt = build_description_prompt(settings.caption_prompt, tags, settings.caption_start)
+        inputs = self._prepare_inputs(source_path, prompt)
         with self.torch.inference_mode():
             generated = self.model.generate(
                 **inputs,
@@ -414,8 +427,6 @@ class XComposer2Captioner:
         formatted_prompt = self._format_prompt(prompt)
         if text.startswith(formatted_prompt):
             text = text[len(formatted_prompt):].strip()
-        if settings.caption_start.strip() and not text.startswith(settings.caption_start.strip()):
-            text = f"{settings.caption_start.strip()} {text}".strip()
         return " ".join(text.split())
 
 

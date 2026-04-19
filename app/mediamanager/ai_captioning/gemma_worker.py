@@ -13,6 +13,7 @@ from typing import Any
 from PIL import Image as PilImage
 from PIL.ImageOps import exif_transpose
 
+from app.mediamanager.ai_captioning.local_captioning import DEFAULT_CAPTION_PROMPT, build_description_prompt
 from app.mediamanager.ai_captioning.model_registry import GEMMA4_MODEL_ID
 
 
@@ -195,13 +196,10 @@ def _run_cli() -> int:
             print(json.dumps({"ok": True, "tags": tags}, ensure_ascii=False), flush=True)
             return 0
         tags = [str(tag) for tag in json.loads(args.tags_json or "[]") if str(tag).strip()]
-        prompt_template = str(settings.get("caption_prompt") or "Please describe this image. Use these tags as context: {tags}")
-        prompt = prompt_template.replace("{tags}", ", ".join(tags))
+        prompt_template = str(settings.get("caption_prompt") or DEFAULT_CAPTION_PROMPT)
+        prompt = build_description_prompt(prompt_template, tags, str(settings.get("caption_start") or ""))
         with contextlib.redirect_stdout(sys.stderr):
             description = _generate_text(args.source, prompt, settings, max(1, int(settings.get("max_new_tokens") or 200)))
-        caption_start = str(settings.get("caption_start") or "").strip()
-        if caption_start and not description.startswith(caption_start):
-            description = f"{caption_start} {description}".strip()
         print(json.dumps({"ok": True, "description": description}, ensure_ascii=False), flush=True)
         return 0
     except Exception as exc:

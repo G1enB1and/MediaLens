@@ -2153,7 +2153,7 @@ class AISettingsPage(SettingsPage):
 
         self.caption_prompt_edit = QTextEdit()
         self.caption_prompt_edit.setMinimumHeight(120)
-        self.caption_prompt_edit.setPlaceholderText("Prompt. Use {tags} to insert database tags.")
+        self.caption_prompt_edit.setPlaceholderText("Prompt. Use {tags} to insert tags and {starter} to place the starter.")
         descriptions_form.addRow("Description Prompt", self.caption_prompt_edit)
 
         self.caption_start_edit = QLineEdit()
