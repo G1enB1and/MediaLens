@@ -4075,6 +4075,7 @@ class Bridge(QObject):
     manualOcrFinished = Signal(str, str, str)  # path, text, error
     localAiCaptioningStarted = Signal(int)
     localAiCaptioningProgress = Signal(str, int, int)
+    localAiCaptioningStatus = Signal(str)
     localAiCaptioningItemFinished = Signal(str, list, str, str)
     localAiCaptioningFinished = Signal(int, str)
     scannerStatusChanged = Signal(str, "QVariantMap")
@@ -4115,6 +4116,7 @@ class Bridge(QObject):
         self._local_ai_lock = threading.Lock()
         self._local_ai_cancel = threading.Event()
         self._local_ai_processes: set[subprocess.Popen] = set()
+        self._local_ai_shutting_down = False
         
         appdata = _appdata_runtime_dir()
         _migrate_legacy_debugging_logs(appdata)
@@ -7527,6 +7529,7 @@ class Bridge(QObject):
             if self._local_ai_running:
                 return False
             self._local_ai_running = True
+            self._local_ai_shutting_down = False
             self._local_ai_cancel.clear()
             return True
 
@@ -7534,6 +7537,23 @@ class Bridge(QObject):
         with self._local_ai_lock:
             self._local_ai_running = False
             self._local_ai_cancel.clear()
+
+    def _emit_local_ai_signal(self, signal, *args) -> bool:
+        if self._local_ai_shutting_down:
+            return False
+        try:
+            signal.emit(*args)
+            return True
+        except RuntimeError as exc:
+            if "already deleted" not in str(exc):
+                self._log(f"Local AI signal emit failed: {exc}")
+            return False
+        except Exception as exc:
+            self._log(f"Local AI signal emit failed: {exc}")
+            return False
+
+    def _emit_local_ai_status(self, message: str) -> None:
+        self._emit_local_ai_signal(self.localAiCaptioningStatus, str(message or "").strip())
 
     def _local_ai_settings_payload(self, ai_settings) -> dict:
         return {
@@ -7568,6 +7588,7 @@ class Bridge(QObject):
     def _run_local_ai_worker_process(self, operation: str, source_path: Path, ai_settings, tags: list[str] | None = None) -> dict:
         timeout_seconds = int(self.settings.value("ai_caption/item_timeout_seconds", 900, type=int) or 900)
         timeout_seconds = max(30, timeout_seconds)
+        operation_label = "description" if operation == "description" else "tags"
         project_root = Path(__file__).resolve().parents[2]
         command = [
             sys.executable,
@@ -7596,6 +7617,7 @@ class Bridge(QObject):
         with self._local_ai_lock:
             self._local_ai_processes.add(process)
         started = time.monotonic()
+        last_status = 0.0
         try:
             while process.poll() is None:
                 if self._local_ai_cancel.is_set():
@@ -7609,6 +7631,12 @@ class Bridge(QObject):
                         except Exception:
                             pass
                     raise RuntimeError("Local AI scan was canceled.")
+                elapsed = time.monotonic() - started
+                if elapsed - last_status >= 5.0:
+                    last_status = elapsed
+                    self._emit_local_ai_status(
+                        f"Generating {operation_label}: still working ({int(elapsed)}s elapsed, timeout {timeout_seconds}s)"
+                    )
                 if time.monotonic() - started > timeout_seconds:
                     process.kill()
                     try:
@@ -7631,13 +7659,37 @@ class Bridge(QObject):
             except Exception:
                 continue
         if not isinstance(payload, dict):
-            detail = stderr.strip() or stdout.strip() or f"worker exited with code {process.returncode}"
-            raise RuntimeError(detail[-500:])
+            raise RuntimeError(self._local_ai_worker_failure_message(process.returncode, stdout, stderr))
         if not payload.get("ok"):
             raise RuntimeError(str(payload.get("error") or "Local AI worker failed."))
         return payload
 
+    @staticmethod
+    def _local_ai_worker_failure_message(returncode: int | None, stdout: str, stderr: str) -> str:
+        combined = "\n".join(part for part in (stdout, stderr) if str(part or "").strip())
+        lines = []
+        for raw_line in combined.replace("\r", "\n").splitlines():
+            line = " ".join(str(raw_line or "").split()).strip()
+            if not line:
+                continue
+            lowered = line.lower()
+            if "loading weights:" in lowered or "it/s]" in lowered:
+                continue
+            if "you are using a model of type" in lowered:
+                continue
+            if "set max length" in lowered:
+                continue
+            if line.startswith("{") and line.endswith("}"):
+                continue
+            lines.append(line)
+        if lines:
+            return lines[-1][-500:]
+        if returncode:
+            return f"Local AI worker exited without a result (exit code {returncode})."
+        return "Local AI worker exited without a result."
+
     def cancel_local_ai_captioning(self) -> None:
+        self._local_ai_shutting_down = True
         self._local_ai_cancel.set()
         with self._local_ai_lock:
             processes = list(self._local_ai_processes)
@@ -7670,7 +7722,7 @@ class Bridge(QObject):
             completed = 0
             error = ""
             item_errors: list[str] = []
-            self.localAiCaptioningStarted.emit(len(clean_paths))
+            self._emit_local_ai_signal(self.localAiCaptioningStarted, len(clean_paths))
             try:
                 ai_settings = self._local_ai_caption_settings()
                 ai_settings.models_dir.mkdir(parents=True, exist_ok=True)
@@ -7678,7 +7730,7 @@ class Bridge(QObject):
                     if self._local_ai_cancel.is_set():
                         error = "Local AI scan was canceled."
                         break
-                    self.localAiCaptioningProgress.emit(raw_path, index, len(clean_paths))
+                    self._emit_local_ai_signal(self.localAiCaptioningProgress, raw_path, index, len(clean_paths))
                     try:
                         media = self._ensure_media_record_for_tag_write(raw_path)
                         if not media:
@@ -7690,13 +7742,13 @@ class Bridge(QObject):
                             raise RuntimeError("Local AI generated no tags.")
                         apply_tags_to_database(self.conn, raw_path, tags, ai_settings)
                         completed += 1
-                        self.localAiCaptioningItemFinished.emit(raw_path, tags, "", "")
+                        self._emit_local_ai_signal(self.localAiCaptioningItemFinished, raw_path, tags, "", "")
                     except Exception as item_exc:
                         item_error = str(item_exc) or "Local AI captioning failed."
                         item_errors.append(f"{Path(raw_path).name}: {item_error}")
                         self._log(f"Local AI tag generation failed for {raw_path}: {item_error}")
-                        self.localAiCaptioningItemFinished.emit(raw_path, [], "", item_error)
-                self.galleryScopeChanged.emit()
+                        self._emit_local_ai_signal(self.localAiCaptioningItemFinished, raw_path, [], "", item_error)
+                self._emit_local_ai_signal(self.galleryScopeChanged)
                 if item_errors and completed <= 0:
                     error = item_errors[0]
             except Exception as exc:
@@ -7704,7 +7756,7 @@ class Bridge(QObject):
                 self._log(f"Local AI tag generation failed: {error}")
             finally:
                 self._finish_local_ai()
-                self.localAiCaptioningFinished.emit(completed, error)
+                self._emit_local_ai_signal(self.localAiCaptioningFinished, completed, error)
 
         threading.Thread(target=work, daemon=True, name="local-ai-captioning").start()
         return True
@@ -7722,7 +7774,7 @@ class Bridge(QObject):
             completed = 0
             error = ""
             item_errors: list[str] = []
-            self.localAiCaptioningStarted.emit(len(clean_paths))
+            self._emit_local_ai_signal(self.localAiCaptioningStarted, len(clean_paths))
             try:
                 ai_settings = self._local_ai_caption_settings()
                 ai_settings.models_dir.mkdir(parents=True, exist_ok=True)
@@ -7730,7 +7782,7 @@ class Bridge(QObject):
                     if self._local_ai_cancel.is_set():
                         error = "Local AI scan was canceled."
                         break
-                    self.localAiCaptioningProgress.emit(raw_path, index, len(clean_paths))
+                    self._emit_local_ai_signal(self.localAiCaptioningProgress, raw_path, index, len(clean_paths))
                     try:
                         media = self._ensure_media_record_for_tag_write(raw_path)
                         if not media:
@@ -7743,13 +7795,13 @@ class Bridge(QObject):
                             raise RuntimeError("Local AI generated no description.")
                         apply_description_to_database(self.conn, raw_path, description, ai_settings)
                         completed += 1
-                        self.localAiCaptioningItemFinished.emit(raw_path, [], description, "")
+                        self._emit_local_ai_signal(self.localAiCaptioningItemFinished, raw_path, [], description, "")
                     except Exception as item_exc:
                         item_error = str(item_exc) or "Local AI description generation failed."
                         item_errors.append(f"{Path(raw_path).name}: {item_error}")
                         self._log(f"Local AI description generation failed for {raw_path}: {item_error}")
-                        self.localAiCaptioningItemFinished.emit(raw_path, [], "", item_error)
-                self.galleryScopeChanged.emit()
+                        self._emit_local_ai_signal(self.localAiCaptioningItemFinished, raw_path, [], "", item_error)
+                self._emit_local_ai_signal(self.galleryScopeChanged)
                 if item_errors and completed <= 0:
                     error = item_errors[0]
             except Exception as exc:
@@ -7757,7 +7809,7 @@ class Bridge(QObject):
                 self._log(f"Local AI description generation failed: {error}")
             finally:
                 self._finish_local_ai()
-                self.localAiCaptioningFinished.emit(completed, error)
+                self._emit_local_ai_signal(self.localAiCaptioningFinished, completed, error)
 
         threading.Thread(target=work, daemon=True, name="local-ai-description").start()
         return True
@@ -9220,6 +9272,7 @@ class MainWindow(QMainWindow):
         self.bridge.manualOcrFinished.connect(self._on_manual_ocr_finished)
         self.bridge.localAiCaptioningStarted.connect(self._on_local_ai_captioning_started)
         self.bridge.localAiCaptioningProgress.connect(self._on_local_ai_captioning_progress)
+        self.bridge.localAiCaptioningStatus.connect(self._on_local_ai_captioning_status)
         self.bridge.localAiCaptioningItemFinished.connect(self._on_local_ai_captioning_item_finished)
         self.bridge.localAiCaptioningFinished.connect(self._on_local_ai_captioning_finished)
         self._current_accent = Theme.ACCENT_DEFAULT
@@ -15268,12 +15321,34 @@ class MainWindow(QMainWindow):
         if hasattr(self, "bulk_status_lbl"):
             self.bulk_status_lbl.setText(message)
 
+    @Slot(str)
+    def _on_local_ai_captioning_status(self, message: str) -> None:
+        clean = str(message or "").strip()
+        if not clean:
+            return
+        self.meta_status_lbl.setText(clean)
+        self._set_local_ai_progress_text(clean)
+        if hasattr(self, "bulk_status_lbl"):
+            self.bulk_status_lbl.setText(clean)
+
+    @staticmethod
+    def _format_local_ai_error(error: str) -> str:
+        clean = " ".join(str(error or "").replace("\r", " ").replace("\n", " ").split()).strip()
+        if not clean:
+            return "Local AI failed."
+        if len(clean) > 360:
+            clean = clean[:357].rstrip() + "..."
+        return clean
+
     @Slot(str, list, str, str)
     def _on_local_ai_captioning_item_finished(self, path: str, tags: list, description: str, error: str) -> None:
         current_path = str(getattr(self, "_current_path", "") or "")
         if error:
-            self.meta_status_lbl.setText(f"Local AI Error: {error}")
-            self._set_local_ai_progress_text(f"Error: {error}")
+            clean_error = self._format_local_ai_error(error)
+            self.meta_status_lbl.setText(f"Local AI Error: {clean_error}")
+            self._set_local_ai_progress_text(f"Error: {clean_error}")
+            if hasattr(self, "bulk_status_lbl"):
+                self.bulk_status_lbl.setText(f"Local AI Error: {clean_error}")
             return
         total = int(getattr(self, "_local_ai_total", 0) or 0)
         completed = min(total, int(getattr(self, "_local_ai_completed", 0) or 0) + 1) if total else 0
@@ -15292,10 +15367,11 @@ class MainWindow(QMainWindow):
     def _on_local_ai_captioning_finished(self, completed: int, error: str) -> None:
         self._set_local_ai_buttons_enabled(True)
         if error:
-            self.meta_status_lbl.setText(f"Local AI Error: {error}")
-            self._set_local_ai_progress_text(f"Error: {error}")
+            clean_error = self._format_local_ai_error(error)
+            self.meta_status_lbl.setText(f"Local AI Error: {clean_error}")
+            self._set_local_ai_progress_text(f"Error: {clean_error}")
             if hasattr(self, "bulk_status_lbl"):
-                self.bulk_status_lbl.setText(f"Local AI Error: {error}")
+                self.bulk_status_lbl.setText(f"Local AI Error: {clean_error}")
             return
         label = "descriptions" if getattr(self, "_local_ai_operation", "tags") == "descriptions" else "tags"
         message = f"Local AI {label} complete for {int(completed or 0)} file(s)"
