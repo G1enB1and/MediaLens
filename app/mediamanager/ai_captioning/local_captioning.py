@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import csv
+import argparse
+import contextlib
+import json
+import os
 import re
 import sqlite3
 import sys
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -14,6 +19,7 @@ from PIL.ImageOps import exif_transpose
 
 TAG_MODEL_ID = "SmilingWolf/wd-swinv2-tagger-v3"
 CAPTION_MODEL_ID = "internlm/internlm-xcomposer2-vl-1_8b"
+GEMMA4_MODEL_ID = "google/gemma-4-E2B-it"
 
 DEFAULT_CAPTION_PROMPT = (
     "Please provide a description of this image in natural language paragraph style. "
@@ -128,6 +134,30 @@ def _hf_download(models_dir: Path, model_id: str, filename: str) -> str:
     return huggingface_hub.hf_hub_download(model_id, filename=filename, local_dir=str(local_dir))
 
 
+def _ensure_hf_modules_cache(models_dir: Path) -> None:
+    cache_dir = Path(models_dir) / ".hf_modules_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("HF_MODULES_CACHE", str(cache_dir))
+
+
+def _open_local_ai_image(source_path: Path, mode: str = "RGB") -> PilImage.Image:
+    source_path = Path(source_path)
+    PilImage.MAX_IMAGE_PIXELS = None
+    try:
+        with PilImage.open(source_path) as image:
+            image.load()
+            return exif_transpose(image).convert(mode)
+    except Exception as first_exc:
+        try:
+            data = source_path.read_bytes()
+            with PilImage.open(BytesIO(data)) as image:
+                image.load()
+                return exif_transpose(image).convert(mode)
+        except Exception as second_exc:
+            message = str(first_exc) or str(second_exc) or "unknown image decode error"
+            raise RuntimeError(f"Could not open image for local AI ({source_path.name}): {message}") from second_exc
+
+
 class WdSwinV2Tagger:
     def __init__(self, settings: LocalAiSettings) -> None:
         try:
@@ -157,8 +187,7 @@ class WdSwinV2Tagger:
                     self.rating_indices.add(index)
 
     def _prepare_image(self, source_path: Path):
-        PilImage.MAX_IMAGE_PIXELS = None
-        image = exif_transpose(PilImage.open(source_path)).convert("RGBA")
+        image = _open_local_ai_image(source_path, "RGBA")
         canvas = PilImage.new("RGBA", image.size, (255, 255, 255))
         canvas.alpha_composite(image)
         image = canvas.convert("RGB")
@@ -193,33 +222,57 @@ class WdSwinV2Tagger:
 
 class XComposer2Captioner:
     def __init__(self, settings: LocalAiSettings) -> None:
+        _ensure_hf_modules_cache(settings.models_dir)
         try:
             import torch
-            from transformers import AutoModelForCausalLM, AutoTokenizer
+            from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
         except Exception as exc:
             raise DependencyMissingError("torch and transformers are required for XComposer2 captions.") from exc
 
         self.torch = torch
+        self.config_class = AutoConfig
         self.tokenizer_class = AutoTokenizer
         self.model_class = AutoModelForCausalLM
         self.device = self._device(settings)
         self.dtype = torch.float16 if self.device.type == "cuda" else torch.float32
         model_id = _resolve_local_or_remote_model(settings.models_dir, settings.caption_model_id, ["config.json"])
         self._patch_local_xcomposer_clip_path(Path(model_id), settings.models_dir)
+        config = AutoConfig.from_pretrained(model_id, trust_remote_code=True)
+        self._patch_xcomposer_config(config, Path(model_id))
         self.tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
-        load_args = {"trust_remote_code": True, "use_safetensors": True}
+        load_args = {"trust_remote_code": True, "use_safetensors": True, "low_cpu_mem_usage": False}
         if self.device.type == "cuda":
-            load_args["torch_dtype"] = self.dtype
-        self.model = AutoModelForCausalLM.from_pretrained(model_id, **load_args)
+            load_args["dtype"] = self.dtype
+        self.model = AutoModelForCausalLM.from_pretrained(model_id, config=config, **load_args)
+        if hasattr(self.model, "generation_config") and hasattr(self.model.config, "max_length"):
+            try:
+                self.model.generation_config.max_length = int(self.model.config.max_length)
+                delattr(self.model.config, "max_length")
+            except Exception:
+                pass
         self.model.eval()
         self.model.to(self.device)
         self._patch_clip_vision_forward()
+
+    @staticmethod
+    def _patch_xcomposer_config(config, model_path: Path) -> None:
+        raw_config = {}
+        config_path = model_path / "config.json"
+        if config_path.is_file():
+            try:
+                raw_config = json.loads(config_path.read_text(encoding="utf-8"))
+            except Exception:
+                raw_config = {}
+        for key, default in (("max_length", 4096), ("img_size", 490)):
+            if not hasattr(config, key):
+                setattr(config, key, raw_config.get(key, default))
 
     @staticmethod
     def _patch_local_xcomposer_clip_path(model_path: Path, models_dir: Path) -> None:
         if not model_path.is_dir():
             return
         build_mlp = model_path / "build_mlp.py"
+        modeling = model_path / "modeling_internlm_xcomposer2.py"
         local_clip = Path(models_dir) / "openai" / "clip-vit-large-patch14-336"
         if not build_mlp.is_file() or not (local_clip / "config.json").is_file():
             return
@@ -228,7 +281,44 @@ class XComposer2Captioner:
             remote_line = "vision_tower = 'openai/clip-vit-large-patch14-336'"
             local_line = f"vision_tower = {str(local_clip).replace(chr(92), '/')!r}"
             if remote_line in text:
-                build_mlp.write_text(text.replace(remote_line, local_line), encoding="utf-8")
+                text = text.replace(remote_line, local_line)
+            text = text.replace("return CLIPVisionTower(vision_tower, delay_load=True)", "return CLIPVisionTower(vision_tower)")
+            eager_init = "        self.load_model()\n        self.resize_pos()"
+            lazy_init = "        # Load lazily after Transformers finishes model construction.\n        pass"
+            if eager_init in text:
+                text = text.replace(eager_init, lazy_init)
+            eager_loaded = "        self.is_loaded = True"
+            lazy_loaded = "        self.is_loaded = True\n        self.resize_pos()"
+            if lazy_loaded not in text and eager_loaded in text:
+                text = text.replace(eager_loaded, lazy_loaded)
+            old_cache_line = "            past_length = past_key_values[0][0].shape[2]"
+            new_cache_line = (
+                "            past_length = past_key_values.get_seq_length() "
+                "if hasattr(past_key_values, 'get_seq_length') else past_key_values[0][0].shape[2]"
+            )
+            old_model_cache_line = "            past_key_values_length = past_key_values[0][0].shape[2]"
+            new_model_cache_line = (
+                "            past_key_values_length = past_key_values.get_seq_length() "
+                "if hasattr(past_key_values, 'get_seq_length') else past_key_values[0][0].shape[2]"
+            )
+            if old_cache_line in text:
+                text = text.replace(old_cache_line, new_cache_line)
+            build_mlp.write_text(text, encoding="utf-8")
+            for py_file in model_path.glob("modeling_*.py"):
+                modeling_text = py_file.read_text(encoding="utf-8")
+                if old_cache_line in modeling_text:
+                    modeling_text = modeling_text.replace(old_cache_line, new_cache_line)
+                if old_model_cache_line in modeling_text:
+                    modeling_text = modeling_text.replace(old_model_cache_line, new_model_cache_line)
+                modeling_text = modeling_text.replace(
+                    "'past_key_values': past_key_values,",
+                    "'past_key_values': None if kwargs.get('use_cache') is False else past_key_values,",
+                )
+                modeling_text = modeling_text.replace(
+                    "        for idx, decoder_layer in enumerate(self.layers):",
+                    "        if hasattr(past_key_values, 'get_seq_length'):\n            past_key_values = None\n\n        for idx, decoder_layer in enumerate(self.layers):",
+                )
+                py_file.write_text(modeling_text, encoding="utf-8")
         except Exception:
             pass
 
@@ -288,12 +378,14 @@ class XComposer2Captioner:
 
     def _prepare_inputs(self, source_path: Path, prompt: str, caption_start: str):
         torch = self.torch
-        PilImage.MAX_IMAGE_PIXELS = None
-        pil_image = exif_transpose(PilImage.open(source_path)).convert("RGB")
+        pil_image = _open_local_ai_image(source_path, "RGB")
         text = self._format_prompt(prompt) + caption_start
         processed_image = self.model.vis_processor(pil_image).unsqueeze(0).to(self.device)
         if self.device.type == "cuda":
             processed_image = processed_image.to(dtype=self.dtype)
+        if hasattr(self.model, "vit") and hasattr(self.model.vit, "is_loaded") and not self.model.vit.is_loaded:
+            self.model.vit.load_model()
+            self.model.vit.to(self.device)
         image_embeddings, *_ = self.model.img2emb(processed_image)
         input_embeddings_parts = []
         image_mask_parts = []
@@ -330,6 +422,7 @@ class XComposer2Captioner:
                 top_p=float(settings.top_p),
                 repetition_penalty=float(settings.repetition_penalty),
                 no_repeat_ngram_size=max(0, int(settings.no_repeat_ngram_size)),
+                use_cache=False,
             )
         text = self.tokenizer.batch_decode(generated, skip_special_tokens=True)[0]
         text = text.split("[UNUSED_TOKEN_145]")[0].strip()
@@ -341,20 +434,165 @@ class XComposer2Captioner:
         return " ".join(text.split())
 
 
+class Gemma4MultimodalModel:
+    def __init__(self, settings: LocalAiSettings) -> None:
+        _ensure_hf_modules_cache(settings.models_dir)
+        try:
+            import torch
+            import transformers
+            from transformers import AutoProcessor
+        except Exception as exc:
+            raise DependencyMissingError("torch, transformers, and accelerate are required for Gemma 4 local AI.") from exc
+
+        self.torch = torch
+        self.device = self._device(settings)
+        model_id = _resolve_local_or_remote_model(settings.models_dir, GEMMA4_MODEL_ID, ["config.json", "model.safetensors"])
+        self.processor = AutoProcessor.from_pretrained(model_id)
+        model_class = getattr(transformers, "AutoModelForMultimodalLM", None) or getattr(transformers, "AutoModelForImageTextToText", None)
+        if model_class is None:
+            raise DependencyMissingError("This transformers version does not include a Gemma 4 image-text model loader.")
+        load_args = {"dtype": "auto"}
+        if self.device.type == "cuda":
+            load_args["device_map"] = {"": int(self.device.index or 0)}
+        self.model = model_class.from_pretrained(model_id, **load_args)
+        if self.device.type != "cuda":
+            self.model.to(self.device)
+        self.model.eval()
+
+    def _device(self, settings: LocalAiSettings):
+        torch = self.torch
+        if str(settings.device or "").lower() == "gpu" and torch.cuda.is_available():
+            return torch.device(f"cuda:{max(0, int(settings.gpu_index))}")
+        return torch.device("cpu")
+
+    @staticmethod
+    def _clean_response(text: object) -> str:
+        if isinstance(text, dict):
+            for key in ("answer", "content", "text", "response"):
+                if key in text:
+                    return Gemma4MultimodalModel._clean_response(text.get(key))
+            return " ".join(str(value) for value in text.values() if str(value).strip()).strip()
+        if isinstance(text, (list, tuple)):
+            return " ".join(Gemma4MultimodalModel._clean_response(part) for part in text if str(part).strip()).strip()
+        clean = str(text or "").strip()
+        clean = re.sub(r"<\|channel\>thought.*?<channel\|>", "", clean, flags=re.DOTALL)
+        clean = re.sub(r"<\|.*?\|>", "", clean)
+        return " ".join(clean.split())
+
+    def _generate_text(self, source_path: Path, prompt: str, settings: LocalAiSettings, max_new_tokens: int) -> str:
+        image = _open_local_ai_image(source_path, "RGB")
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": image},
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ]
+        inputs = self.processor.apply_chat_template(
+            messages,
+            tokenize=True,
+            return_dict=True,
+            return_tensors="pt",
+            add_generation_prompt=True,
+            enable_thinking=False,
+        )
+        inputs = {key: value.to(self.model.device) if hasattr(value, "to") else value for key, value in inputs.items()}
+        input_len = inputs["input_ids"].shape[-1]
+        generation_args = {
+            "max_new_tokens": max(1, int(max_new_tokens)),
+            "do_sample": bool(settings.do_sample),
+            "temperature": float(settings.temperature),
+            "top_k": int(settings.top_k),
+            "top_p": float(settings.top_p),
+            "repetition_penalty": float(settings.repetition_penalty),
+        }
+        with self.torch.inference_mode():
+            output_ids = self.model.generate(**inputs, **generation_args)
+        response = self.processor.decode(output_ids[0][input_len:], skip_special_tokens=False)
+        try:
+            parsed = self.processor.parse_response(response)
+        except Exception:
+            parsed = response
+        text = self._clean_response(parsed)
+        if not text:
+            raise RuntimeError("Gemma 4 returned an empty response.")
+        return text
+
+    def generate_tags(self, source_path: Path, settings: LocalAiSettings) -> list[str]:
+        extra_rules = str(settings.tag_prompt or "").strip()
+        prompt = (
+            "Generate concise searchable tags for this image. Return only comma-separated tags, "
+            "with no sentence, numbering, markdown, or explanation. "
+            f"Use at most {max(1, int(settings.tag_max_tags))} tags."
+        )
+        if extra_rules:
+            prompt = f"{prompt}\nRules: {extra_rules}"
+        raw = self._generate_text(
+            source_path,
+            prompt,
+            settings,
+            max_new_tokens=max(32, min(512, int(settings.tag_max_tags) * 5)),
+        )
+        json_match = re.search(r"\[[^\]]+\]", raw)
+        if json_match:
+            try:
+                parsed = json.loads(json_match.group(0))
+                if isinstance(parsed, list):
+                    raw = ", ".join(str(item) for item in parsed)
+            except Exception:
+                pass
+        raw = re.sub(r"^(tags?|keywords?)\s*:\s*", "", raw, flags=re.IGNORECASE).strip()
+        raw = raw.replace("\n", ",")
+        tags = []
+        for part in re.split(r"[,;|]", raw):
+            tag = re.sub(r"^[\-\*\d\.\)\s]+", "", part).strip().strip("\"'")
+            if tag:
+                tags.append(tag)
+        excluded = {tag.casefold() for tag in _split_escaped_csv(settings.tags_to_exclude)}
+        tags = [tag for tag in _dedupe_preserve_order(tags) if tag.casefold() not in excluded]
+        tags = tags[: max(1, int(settings.tag_max_tags))]
+        if not tags:
+            raise RuntimeError(f"Gemma 4 returned no parseable tags. Raw response: {raw[:240]}")
+        return tags
+
+    def generate_description(self, source_path: Path, tags: list[str], settings: LocalAiSettings) -> str:
+        prompt = settings.caption_prompt.replace("{tags}", ", ".join(tags))
+        text = self._generate_text(source_path, prompt, settings, max_new_tokens=max(1, int(settings.max_new_tokens)))
+        if settings.caption_start.strip() and not text.startswith(settings.caption_start.strip()):
+            text = f"{settings.caption_start.strip()} {text}".strip()
+        text = " ".join(text.split())
+        if not text:
+            raise RuntimeError("Gemma 4 returned no description.")
+        return text
+
+
 class LocalAiCaptioningService:
     def __init__(self, settings: LocalAiSettings, log: Callable[[str], None] | None = None) -> None:
         self.settings = settings
         self.log = log or (lambda _msg: None)
         self._tagger: WdSwinV2Tagger | None = None
         self._captioner: XComposer2Captioner | None = None
+        self._gemma4: Gemma4MultimodalModel | None = None
+
+    def _get_gemma4(self) -> Gemma4MultimodalModel:
+        if self._gemma4 is None:
+            self.log(f"Loading local AI Gemma 4 model: {GEMMA4_MODEL_ID}")
+            self._gemma4 = Gemma4MultimodalModel(self.settings)
+        return self._gemma4
 
     def _get_tagger(self) -> WdSwinV2Tagger:
+        if self.settings.tag_model_id == GEMMA4_MODEL_ID:
+            return self._get_gemma4()
         if self._tagger is None:
             self.log(f"Loading local AI tagger: {self.settings.tag_model_id}")
             self._tagger = WdSwinV2Tagger(self.settings)
         return self._tagger
 
     def _get_captioner(self) -> XComposer2Captioner:
+        if self.settings.caption_model_id == GEMMA4_MODEL_ID:
+            return self._get_gemma4()
         if self._captioner is None:
             self.log(f"Loading local AI caption model: {self.settings.caption_model_id}")
             self._captioner = XComposer2Captioner(self.settings)
@@ -367,10 +605,16 @@ class LocalAiCaptioningService:
         return LocalAiResult(path=str(original_path or source_path), tags=tags, description=description)
 
     def generate_tags(self, source_path: str | Path) -> list[str]:
-        return self._get_tagger().generate(Path(source_path), self.settings)
+        tagger = self._get_tagger()
+        if isinstance(tagger, Gemma4MultimodalModel):
+            return tagger.generate_tags(Path(source_path), self.settings)
+        return tagger.generate(Path(source_path), self.settings)
 
     def generate_description(self, source_path: str | Path, tags: list[str]) -> str:
-        return self._get_captioner().generate(Path(source_path), tags, self.settings)
+        captioner = self._get_captioner()
+        if isinstance(captioner, Gemma4MultimodalModel):
+            return captioner.generate_description(Path(source_path), tags, self.settings)
+        return captioner.generate(Path(source_path), tags, self.settings)
 
 
 def apply_result_to_database(conn: sqlite3.Connection, result: LocalAiResult, settings: LocalAiSettings) -> None:
@@ -422,3 +666,40 @@ def apply_tags_to_database(conn: sqlite3.Connection, path: str, tags: list[str],
 
 def apply_description_to_database(conn: sqlite3.Connection, path: str, description: str, settings: LocalAiSettings) -> None:
     apply_result_to_database(conn, LocalAiResult(str(path), [], description), settings)
+
+
+def _settings_from_json(raw: str) -> LocalAiSettings:
+    payload = json.loads(raw or "{}")
+    if "models_dir" in payload:
+        payload["models_dir"] = Path(payload["models_dir"])
+    return LocalAiSettings(**payload)
+
+
+def _run_cli() -> int:
+    parser = argparse.ArgumentParser(description="Run one isolated MediaLens local AI captioning task.")
+    parser.add_argument("--operation", choices=("tags", "description"), required=True)
+    parser.add_argument("--source", required=True)
+    parser.add_argument("--settings-json", required=True)
+    parser.add_argument("--tags-json", default="[]")
+    args = parser.parse_args()
+
+    try:
+        settings = _settings_from_json(args.settings_json)
+        service = LocalAiCaptioningService(settings, lambda message: print(message, file=sys.stderr, flush=True))
+        if args.operation == "tags":
+            with contextlib.redirect_stdout(sys.stderr):
+                tags = service.generate_tags(Path(args.source))
+            print(json.dumps({"ok": True, "tags": tags}, ensure_ascii=False), flush=True)
+            return 0
+        tags = json.loads(args.tags_json or "[]")
+        with contextlib.redirect_stdout(sys.stderr):
+            description = service.generate_description(Path(args.source), [str(tag) for tag in tags])
+        print(json.dumps({"ok": True, "description": description}, ensure_ascii=False), flush=True)
+        return 0
+    except Exception as exc:
+        print(json.dumps({"ok": False, "error": str(exc) or exc.__class__.__name__}, ensure_ascii=False), flush=True)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(_run_cli())

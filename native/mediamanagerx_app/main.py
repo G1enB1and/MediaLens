@@ -4112,6 +4112,9 @@ class Bridge(QObject):
         self._local_ai_service = None
         self._local_ai_service_key = ""
         self._local_ai_running = False
+        self._local_ai_lock = threading.Lock()
+        self._local_ai_cancel = threading.Event()
+        self._local_ai_processes: set[subprocess.Popen] = set()
         
         appdata = _appdata_runtime_dir()
         _migrate_legacy_debugging_logs(appdata)
@@ -7459,10 +7462,20 @@ class Bridge(QObject):
         )
 
         models_dir = Path(str(self.settings.value("ai_caption/models_dir", self._local_ai_models_dir_default(), type=str) or self._local_ai_models_dir_default()))
+        tag_model_id = str(self.settings.value("ai_caption/tag_model_id", TAG_MODEL_ID, type=str) or TAG_MODEL_ID)
+        caption_model_id = str(self.settings.value("ai_caption/caption_model_id", CAPTION_MODEL_ID, type=str) or CAPTION_MODEL_ID)
+        if tag_model_id != TAG_MODEL_ID:
+            self._log(f"Unsupported local AI tag model '{tag_model_id}' was reset to '{TAG_MODEL_ID}'.")
+            tag_model_id = TAG_MODEL_ID
+            self.settings.setValue("ai_caption/tag_model_id", TAG_MODEL_ID)
+        if caption_model_id != CAPTION_MODEL_ID:
+            self._log(f"Unsupported local AI description model '{caption_model_id}' was reset to '{CAPTION_MODEL_ID}'.")
+            caption_model_id = CAPTION_MODEL_ID
+            self.settings.setValue("ai_caption/caption_model_id", CAPTION_MODEL_ID)
         return LocalAiSettings(
             models_dir=models_dir,
-            tag_model_id=str(self.settings.value("ai_caption/tag_model_id", TAG_MODEL_ID, type=str) or TAG_MODEL_ID),
-            caption_model_id=str(self.settings.value("ai_caption/caption_model_id", CAPTION_MODEL_ID, type=str) or CAPTION_MODEL_ID),
+            tag_model_id=tag_model_id,
+            caption_model_id=caption_model_id,
             tag_min_probability=float(self.settings.value("ai_caption/tag_min_probability", 0.35, type=float) or 0.35),
             tag_max_tags=int(self.settings.value("ai_caption/tag_max_tags", 75, type=int) or 75),
             tags_to_exclude=str(self.settings.value("ai_caption/tags_to_exclude", "", type=str) or ""),
@@ -7509,6 +7522,132 @@ class Bridge(QObject):
             self._local_ai_service.settings = ai_settings
         return self._local_ai_service
 
+    def _try_start_local_ai(self) -> bool:
+        with self._local_ai_lock:
+            if self._local_ai_running:
+                return False
+            self._local_ai_running = True
+            self._local_ai_cancel.clear()
+            return True
+
+    def _finish_local_ai(self) -> None:
+        with self._local_ai_lock:
+            self._local_ai_running = False
+            self._local_ai_cancel.clear()
+
+    def _local_ai_settings_payload(self, ai_settings) -> dict:
+        return {
+            "models_dir": str(ai_settings.models_dir),
+            "tag_model_id": str(ai_settings.tag_model_id),
+            "caption_model_id": str(ai_settings.caption_model_id),
+            "tag_min_probability": float(ai_settings.tag_min_probability),
+            "tag_max_tags": int(ai_settings.tag_max_tags),
+            "tags_to_exclude": str(ai_settings.tags_to_exclude),
+            "tag_prompt": str(ai_settings.tag_prompt),
+            "tag_write_mode": str(ai_settings.tag_write_mode),
+            "caption_prompt": str(ai_settings.caption_prompt),
+            "caption_start": str(ai_settings.caption_start),
+            "description_write_mode": str(ai_settings.description_write_mode),
+            "device": str(ai_settings.device),
+            "gpu_index": int(ai_settings.gpu_index),
+            "load_in_4_bit": bool(ai_settings.load_in_4_bit),
+            "bad_words": str(ai_settings.bad_words),
+            "forced_words": str(ai_settings.forced_words),
+            "min_new_tokens": int(ai_settings.min_new_tokens),
+            "max_new_tokens": int(ai_settings.max_new_tokens),
+            "num_beams": int(ai_settings.num_beams),
+            "length_penalty": float(ai_settings.length_penalty),
+            "do_sample": bool(ai_settings.do_sample),
+            "temperature": float(ai_settings.temperature),
+            "top_k": int(ai_settings.top_k),
+            "top_p": float(ai_settings.top_p),
+            "repetition_penalty": float(ai_settings.repetition_penalty),
+            "no_repeat_ngram_size": int(ai_settings.no_repeat_ngram_size),
+        }
+
+    def _run_local_ai_worker_process(self, operation: str, source_path: Path, ai_settings, tags: list[str] | None = None) -> dict:
+        timeout_seconds = int(self.settings.value("ai_caption/item_timeout_seconds", 900, type=int) or 900)
+        timeout_seconds = max(30, timeout_seconds)
+        project_root = Path(__file__).resolve().parents[2]
+        command = [
+            sys.executable,
+            "-m",
+            "app.mediamanager.ai_captioning.local_captioning",
+            "--operation",
+            operation,
+            "--source",
+            str(source_path),
+            "--settings-json",
+            json.dumps(self._local_ai_settings_payload(ai_settings), ensure_ascii=False),
+        ]
+        if tags is not None:
+            command.extend(["--tags-json", json.dumps(tags, ensure_ascii=False)])
+        popen_kwargs = dict(
+            cwd=str(project_root),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if _WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS:
+            popen_kwargs.update(_WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS)
+        process = subprocess.Popen(command, **popen_kwargs)
+        with self._local_ai_lock:
+            self._local_ai_processes.add(process)
+        started = time.monotonic()
+        try:
+            while process.poll() is None:
+                if self._local_ai_cancel.is_set():
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except Exception:
+                        process.kill()
+                        try:
+                            process.wait(timeout=5)
+                        except Exception:
+                            pass
+                    raise RuntimeError("Local AI scan was canceled.")
+                if time.monotonic() - started > timeout_seconds:
+                    process.kill()
+                    try:
+                        process.wait(timeout=5)
+                    except Exception:
+                        pass
+                    raise TimeoutError(f"Local AI timed out after {timeout_seconds} seconds on {source_path.name}.")
+                time.sleep(0.25)
+            stdout, stderr = process.communicate(timeout=5)
+        finally:
+            with self._local_ai_lock:
+                self._local_ai_processes.discard(process)
+        if stderr.strip():
+            self._log(f"Local AI worker stderr for {source_path}: {stderr.strip()[-2000:]}")
+        payload = None
+        for line in reversed([line.strip() for line in stdout.splitlines() if line.strip()]):
+            try:
+                payload = json.loads(line)
+                break
+            except Exception:
+                continue
+        if not isinstance(payload, dict):
+            detail = stderr.strip() or stdout.strip() or f"worker exited with code {process.returncode}"
+            raise RuntimeError(detail[-500:])
+        if not payload.get("ok"):
+            raise RuntimeError(str(payload.get("error") or "Local AI worker failed."))
+        return payload
+
+    def cancel_local_ai_captioning(self) -> None:
+        self._local_ai_cancel.set()
+        with self._local_ai_lock:
+            processes = list(self._local_ai_processes)
+        for process in processes:
+            try:
+                if process.poll() is None:
+                    process.terminate()
+            except Exception:
+                pass
+
     @Slot(result=list)
     def list_local_ai_models(self) -> list:
         from app.mediamanager.ai_captioning.local_captioning import available_models
@@ -7522,41 +7661,49 @@ class Bridge(QObject):
     @Slot(list, result=bool)
     def run_local_ai_tags(self, paths: list) -> bool:
         clean_paths = [str(path or "").strip() for path in (paths or []) if str(path or "").strip()]
-        if not clean_paths or self._local_ai_running:
+        if not clean_paths or not self._try_start_local_ai():
             return False
 
         def work() -> None:
             from app.mediamanager.ai_captioning.local_captioning import apply_tags_to_database
 
-            self._local_ai_running = True
             completed = 0
             error = ""
+            item_errors: list[str] = []
             self.localAiCaptioningStarted.emit(len(clean_paths))
             try:
                 ai_settings = self._local_ai_caption_settings()
                 ai_settings.models_dir.mkdir(parents=True, exist_ok=True)
-                service = self._local_ai_service_for_settings(ai_settings)
                 for index, raw_path in enumerate(clean_paths, start=1):
+                    if self._local_ai_cancel.is_set():
+                        error = "Local AI scan was canceled."
+                        break
                     self.localAiCaptioningProgress.emit(raw_path, index, len(clean_paths))
                     try:
                         media = self._ensure_media_record_for_tag_write(raw_path)
                         if not media:
                             raise FileNotFoundError("Selected media record could not be created.")
                         source_path = self._local_ai_source_path(Path(raw_path))
-                        tags = service.generate_tags(source_path)
+                        result = self._run_local_ai_worker_process("tags", source_path, ai_settings)
+                        tags = [str(tag) for tag in (result.get("tags") or []) if str(tag).strip()]
+                        if not tags:
+                            raise RuntimeError("Local AI generated no tags.")
                         apply_tags_to_database(self.conn, raw_path, tags, ai_settings)
                         completed += 1
                         self.localAiCaptioningItemFinished.emit(raw_path, tags, "", "")
                     except Exception as item_exc:
                         item_error = str(item_exc) or "Local AI captioning failed."
+                        item_errors.append(f"{Path(raw_path).name}: {item_error}")
                         self._log(f"Local AI tag generation failed for {raw_path}: {item_error}")
                         self.localAiCaptioningItemFinished.emit(raw_path, [], "", item_error)
                 self.galleryScopeChanged.emit()
+                if item_errors and completed <= 0:
+                    error = item_errors[0]
             except Exception as exc:
                 error = str(exc) or "Local AI tag generation failed."
                 self._log(f"Local AI tag generation failed: {error}")
             finally:
-                self._local_ai_running = False
+                self._finish_local_ai()
                 self.localAiCaptioningFinished.emit(completed, error)
 
         threading.Thread(target=work, daemon=True, name="local-ai-captioning").start()
@@ -7565,22 +7712,24 @@ class Bridge(QObject):
     @Slot(list, result=bool)
     def run_local_ai_descriptions(self, paths: list) -> bool:
         clean_paths = [str(path or "").strip() for path in (paths or []) if str(path or "").strip()]
-        if not clean_paths or self._local_ai_running:
+        if not clean_paths or not self._try_start_local_ai():
             return False
 
         def work() -> None:
             from app.mediamanager.ai_captioning.local_captioning import apply_description_to_database
             from app.mediamanager.db.tags_repo import list_media_tags
 
-            self._local_ai_running = True
             completed = 0
             error = ""
+            item_errors: list[str] = []
             self.localAiCaptioningStarted.emit(len(clean_paths))
             try:
                 ai_settings = self._local_ai_caption_settings()
                 ai_settings.models_dir.mkdir(parents=True, exist_ok=True)
-                service = self._local_ai_service_for_settings(ai_settings)
                 for index, raw_path in enumerate(clean_paths, start=1):
+                    if self._local_ai_cancel.is_set():
+                        error = "Local AI scan was canceled."
+                        break
                     self.localAiCaptioningProgress.emit(raw_path, index, len(clean_paths))
                     try:
                         media = self._ensure_media_record_for_tag_write(raw_path)
@@ -7588,20 +7737,26 @@ class Bridge(QObject):
                             raise FileNotFoundError("Selected media record could not be created.")
                         source_path = self._local_ai_source_path(Path(raw_path))
                         tags = list_media_tags(self.conn, int(media["id"]))
-                        description = service.generate_description(source_path, tags)
+                        result = self._run_local_ai_worker_process("description", source_path, ai_settings, tags)
+                        description = str(result.get("description") or "").strip()
+                        if not str(description or "").strip():
+                            raise RuntimeError("Local AI generated no description.")
                         apply_description_to_database(self.conn, raw_path, description, ai_settings)
                         completed += 1
                         self.localAiCaptioningItemFinished.emit(raw_path, [], description, "")
                     except Exception as item_exc:
                         item_error = str(item_exc) or "Local AI description generation failed."
+                        item_errors.append(f"{Path(raw_path).name}: {item_error}")
                         self._log(f"Local AI description generation failed for {raw_path}: {item_error}")
                         self.localAiCaptioningItemFinished.emit(raw_path, [], "", item_error)
                 self.galleryScopeChanged.emit()
+                if item_errors and completed <= 0:
+                    error = item_errors[0]
             except Exception as exc:
                 error = str(exc) or "Local AI description generation failed."
                 self._log(f"Local AI description generation failed: {error}")
             finally:
-                self._local_ai_running = False
+                self._finish_local_ai()
                 self.localAiCaptioningFinished.emit(completed, error)
 
         threading.Thread(target=work, daemon=True, name="local-ai-description").start()
@@ -10335,6 +10490,7 @@ class MainWindow(QMainWindow):
         self.generate_description_btn_row = QWidget()
         self.generate_description_btn_row.setObjectName("generateDescriptionButtonRow")
         self.generate_description_btn_row.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.generate_description_btn_row.setMinimumWidth(0)
         generate_description_btn_layout = QHBoxLayout(self.generate_description_btn_row)
         generate_description_btn_layout.setContentsMargins(0, 0, 0, 0)
         generate_description_btn_layout.setSpacing(0)
@@ -10346,6 +10502,13 @@ class MainWindow(QMainWindow):
         self.btn_generate_description.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.btn_generate_description.clicked.connect(self._run_local_ai_description)
         generate_description_btn_layout.addWidget(self.btn_generate_description)
+        self.generate_description_progress_lbl = QLabel("")
+        self.generate_description_progress_lbl.setObjectName("localAiProgressLabel")
+        self.generate_description_progress_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.generate_description_progress_lbl.setWordWrap(True)
+        self.generate_description_progress_lbl.setVisible(False)
+        self.generate_description_progress_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.generate_description_progress_lbl.setMinimumWidth(0)
 
         self.lbl_tags_cap = QLabel("Tags (comma separated):")
         self.meta_tags = QTextEdit()
@@ -10358,6 +10521,7 @@ class MainWindow(QMainWindow):
         self.generate_tags_btn_row = QWidget()
         self.generate_tags_btn_row.setObjectName("generateTagsButtonRow")
         self.generate_tags_btn_row.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.generate_tags_btn_row.setMinimumWidth(0)
         generate_tags_btn_layout = QHBoxLayout(self.generate_tags_btn_row)
         generate_tags_btn_layout.setContentsMargins(0, 0, 0, 0)
         generate_tags_btn_layout.setSpacing(0)
@@ -10369,6 +10533,13 @@ class MainWindow(QMainWindow):
         self.btn_generate_tags.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.btn_generate_tags.clicked.connect(self._run_local_ai_tags)
         generate_tags_btn_layout.addWidget(self.btn_generate_tags)
+        self.generate_tags_progress_lbl = QLabel("")
+        self.generate_tags_progress_lbl.setObjectName("localAiProgressLabel")
+        self.generate_tags_progress_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.generate_tags_progress_lbl.setWordWrap(True)
+        self.generate_tags_progress_lbl.setVisible(False)
+        self.generate_tags_progress_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.generate_tags_progress_lbl.setMinimumWidth(0)
 
         self.tag_list_open_btn_row = QWidget()
         self.tag_list_open_btn_row.setObjectName("tagListOpenButtonRow")
@@ -10508,6 +10679,9 @@ class MainWindow(QMainWindow):
         self.meta_status_lbl = QLabel("")
         self.meta_status_lbl.setObjectName("metaStatusLabel")
         self.meta_status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.meta_status_lbl.setWordWrap(True)
+        self.meta_status_lbl.setMinimumWidth(0)
+        self.meta_status_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         right_layout.addWidget(self.meta_status_lbl)
 
         self.bulk_editor_panel = QWidget(self.right_workspace_stack)
@@ -12073,6 +12247,8 @@ class MainWindow(QMainWindow):
         if hasattr(self, "preview_image_lbl"):
             self.preview_image_lbl.setFixedWidth(available_w)
         for wrapper in [
+            getattr(self, "generate_description_btn_row", None),
+            getattr(self, "generate_tags_btn_row", None),
             getattr(self, "tag_list_open_btn_row", None),
         ]:
             if wrapper is None:
@@ -12082,6 +12258,19 @@ class MainWindow(QMainWindow):
             wrapper.setFixedWidth(available_w)
             wrapper.setSizePolicy(QSizePolicy.Policy.Ignored, wrapper.sizePolicy().verticalPolicy())
             wrapper.updateGeometry()
+        for label in [
+            getattr(self, "generate_description_progress_lbl", None),
+            getattr(self, "generate_tags_progress_lbl", None),
+            getattr(self, "meta_status_lbl", None),
+            getattr(self, "bulk_status_lbl", None),
+        ]:
+            if label is None:
+                continue
+            label.setMinimumWidth(0)
+            label.setMaximumWidth(16777215)
+            label.setFixedWidth(available_w)
+            label.setSizePolicy(QSizePolicy.Policy.Ignored, label.sizePolicy().verticalPolicy())
+            label.updateGeometry()
         active_container = self.bulk_scroll_container if self._is_bulk_editor_active() and hasattr(self, "bulk_scroll_container") else self.scroll_container
         for widget in active_container.findChildren(QWidget):
             if not isinstance(widget, (QLineEdit, QTextEdit, QPlainTextEdit)):
@@ -14576,6 +14765,9 @@ class MainWindow(QMainWindow):
         self.lbl_desc_cap.setVisible(not is_bulk and show_description)
         self.meta_desc.setVisible(not is_bulk and show_description)
         self.generate_description_btn_row.setVisible(not is_bulk and show_description)
+        self.generate_description_progress_lbl.setVisible(
+            not is_bulk and show_description and bool(self.generate_description_progress_lbl.text().strip())
+        )
         self.lbl_notes_cap.setVisible(not is_bulk and show_notes)
         self.meta_notes.setVisible(not is_bulk and show_notes)
         
@@ -14583,6 +14775,7 @@ class MainWindow(QMainWindow):
         self.lbl_tags_cap.setVisible(tags_visible)
         self.meta_tags.setVisible(tags_visible)
         self.generate_tags_btn_row.setVisible(tags_visible)
+        self.generate_tags_progress_lbl.setVisible(tags_visible and bool(self.generate_tags_progress_lbl.text().strip()))
         self.tag_list_open_btn_row.setVisible(tags_visible)
         self.btn_clear_bulk_tags.setVisible(is_bulk)
         
@@ -14978,6 +15171,39 @@ class MainWindow(QMainWindow):
     def _run_local_ai_captioning(self) -> None:
         self._run_local_ai_tags()
 
+    def _local_ai_progress_label(self):
+        operation = str(getattr(self, "_local_ai_operation", "tags") or "tags")
+        if operation == "descriptions":
+            return getattr(self, "generate_description_progress_lbl", None)
+        return getattr(self, "generate_tags_progress_lbl", None)
+
+    def _set_local_ai_progress_text(self, text: str, operation: str | None = None) -> None:
+        operation = str(operation or getattr(self, "_local_ai_operation", "tags") or "tags")
+        label = getattr(self, "generate_description_progress_lbl", None) if operation == "descriptions" else getattr(self, "generate_tags_progress_lbl", None)
+        if label is None:
+            return
+        clean_text = str(text or "").strip()
+        label.setText(clean_text)
+        if clean_text:
+            if operation == "descriptions":
+                visible = self.generate_description_btn_row.isVisible()
+            else:
+                visible = self.generate_tags_btn_row.isVisible()
+            label.setVisible(bool(visible))
+        else:
+            label.setVisible(False)
+        try:
+            self._sync_sidebar_panel_widths()
+        except Exception:
+            pass
+
+    def _local_ai_progress_message(self, current: int, total: int) -> str:
+        total = max(0, int(total or 0))
+        current = max(0, min(int(current or 0), total))
+        percent = int(round((current / total) * 100)) if total else 0
+        label = "description" if getattr(self, "_local_ai_operation", "tags") == "descriptions" else "tags"
+        return f"Generating {label}: {percent}% ({current}/{total})"
+
     def _run_local_ai_tags(self) -> None:
         paths = self._local_ai_target_paths()
         if not paths:
@@ -14985,8 +15211,13 @@ class MainWindow(QMainWindow):
             return
         if hasattr(self.bridge, "run_local_ai_tags"):
             self._local_ai_operation = "tags"
+            self._local_ai_total = len(paths)
+            self._local_ai_completed = 0
+            self._set_local_ai_progress_text("", "descriptions")
+            self._set_local_ai_progress_text(self._local_ai_progress_message(0, len(paths)), "tags")
             started = self.bridge.run_local_ai_tags(paths)
             if not started:
+                self._set_local_ai_progress_text("", "tags")
                 self.meta_status_lbl.setText("Local AI tags are already running or no valid files were selected.")
 
     def _run_local_ai_description(self) -> None:
@@ -14996,8 +15227,13 @@ class MainWindow(QMainWindow):
             return
         if hasattr(self.bridge, "run_local_ai_descriptions"):
             self._local_ai_operation = "descriptions"
+            self._local_ai_total = len(paths)
+            self._local_ai_completed = 0
+            self._set_local_ai_progress_text("", "tags")
+            self._set_local_ai_progress_text(self._local_ai_progress_message(0, len(paths)), "descriptions")
             started = self.bridge.run_local_ai_descriptions(paths)
             if not started:
+                self._set_local_ai_progress_text("", "descriptions")
                 self.meta_status_lbl.setText("Local AI descriptions are already running or no valid files were selected.")
 
     def _set_local_ai_buttons_enabled(self, enabled: bool) -> None:
@@ -15012,9 +15248,12 @@ class MainWindow(QMainWindow):
     @Slot(int)
     def _on_local_ai_captioning_started(self, total: int) -> None:
         self._set_local_ai_buttons_enabled(False)
+        self._local_ai_total = int(total or 0)
+        self._local_ai_completed = 0
         label = "descriptions" if getattr(self, "_local_ai_operation", "tags") == "descriptions" else "tags"
         message = f"Running local AI {label} for {int(total or 0)} file(s)..."
         self.meta_status_lbl.setText(message)
+        self._set_local_ai_progress_text(self._local_ai_progress_message(0, int(total or 0)))
         if hasattr(self, "bulk_status_lbl"):
             self.bulk_status_lbl.setText(message)
 
@@ -15024,6 +15263,8 @@ class MainWindow(QMainWindow):
         label = "Descriptions" if getattr(self, "_local_ai_operation", "tags") == "descriptions" else "Tags"
         message = f"Local AI {label} {int(current or 0)}/{int(total or 0)}: {name}"
         self.meta_status_lbl.setText(message)
+        completed_before_current = max(0, int(current or 0) - 1)
+        self._set_local_ai_progress_text(self._local_ai_progress_message(completed_before_current, int(total or 0)))
         if hasattr(self, "bulk_status_lbl"):
             self.bulk_status_lbl.setText(message)
 
@@ -15032,7 +15273,12 @@ class MainWindow(QMainWindow):
         current_path = str(getattr(self, "_current_path", "") or "")
         if error:
             self.meta_status_lbl.setText(f"Local AI Error: {error}")
+            self._set_local_ai_progress_text(f"Error: {error}")
             return
+        total = int(getattr(self, "_local_ai_total", 0) or 0)
+        completed = min(total, int(getattr(self, "_local_ai_completed", 0) or 0) + 1) if total else 0
+        self._local_ai_completed = completed
+        self._set_local_ai_progress_text(self._local_ai_progress_message(completed, total))
         if current_path and os.path.normcase(os.path.abspath(current_path)) == os.path.normcase(os.path.abspath(str(path or ""))):
             clean_tags = [str(tag) for tag in (tags or []) if str(tag).strip()]
             if clean_tags:
@@ -15047,12 +15293,16 @@ class MainWindow(QMainWindow):
         self._set_local_ai_buttons_enabled(True)
         if error:
             self.meta_status_lbl.setText(f"Local AI Error: {error}")
+            self._set_local_ai_progress_text(f"Error: {error}")
             if hasattr(self, "bulk_status_lbl"):
                 self.bulk_status_lbl.setText(f"Local AI Error: {error}")
             return
         label = "descriptions" if getattr(self, "_local_ai_operation", "tags") == "descriptions" else "tags"
         message = f"Local AI {label} complete for {int(completed or 0)} file(s)"
         self.meta_status_lbl.setText(message)
+        total = int(getattr(self, "_local_ai_total", completed) or completed or 0)
+        self._local_ai_completed = int(completed or 0)
+        self._set_local_ai_progress_text(f"Complete: 100% ({int(completed or 0)}/{total})")
         if hasattr(self, "bulk_status_lbl"):
             self.bulk_status_lbl.setText(message)
         if getattr(self, "_current_paths", None):
@@ -15514,8 +15764,19 @@ class MainWindow(QMainWindow):
             "fps": [self.meta_fps_lbl],
             "codec": [self.meta_codec_lbl],
             "audio": [self.meta_audio_lbl],
-            "description": [self.lbl_desc_cap, self.meta_desc, self.generate_description_btn_row],
-            "tags": [self.lbl_tags_cap, self.meta_tags, self.generate_tags_btn_row, self.tag_list_open_btn_row],
+            "description": [
+                self.lbl_desc_cap,
+                self.meta_desc,
+                self.generate_description_btn_row,
+                self.generate_description_progress_lbl,
+            ],
+            "tags": [
+                self.lbl_tags_cap,
+                self.meta_tags,
+                self.generate_tags_btn_row,
+                self.generate_tags_progress_lbl,
+                self.tag_list_open_btn_row,
+            ],
             "notes": [self.lbl_notes_cap, self.meta_notes],
             "camera": [self.meta_camera_lbl],
             "location": [self.meta_location_lbl],
@@ -15710,10 +15971,14 @@ class MainWindow(QMainWindow):
         self.meta_desc.setVisible(description_visible)
         self.lbl_desc_cap.setVisible(description_visible)
         self.generate_description_btn_row.setVisible(description_visible)
+        self.generate_description_progress_lbl.setVisible(
+            description_visible and bool(self.generate_description_progress_lbl.text().strip())
+        )
         tags_visible = "tags" in active_fields and self._is_metadata_enabled_for_kind(kind, "tags", True)
         self.meta_tags.setVisible(tags_visible)
         self.lbl_tags_cap.setVisible(tags_visible)
         self.generate_tags_btn_row.setVisible(tags_visible)
+        self.generate_tags_progress_lbl.setVisible(tags_visible and bool(self.generate_tags_progress_lbl.text().strip()))
         self.tag_list_open_btn_row.setVisible(tags_visible)
         self.meta_notes.setVisible("notes" in active_fields and self._is_metadata_enabled_for_kind(kind, "notes", True))
         self.lbl_notes_cap.setVisible("notes" in active_fields and self._is_metadata_enabled_for_kind(kind, "notes", True))
@@ -15721,6 +15986,8 @@ class MainWindow(QMainWindow):
         self.meta_desc.setPlainText("")
         self.meta_notes.setPlainText("")
         self._set_tag_editor_text("", self.meta_tags)
+        self._set_local_ai_progress_text("", "tags")
+        self._set_local_ai_progress_text("", "descriptions")
         self.meta_status_lbl.setText("")
         self._set_metadata_empty_state(True)
         self._sync_tag_list_panel_visibility()
@@ -16728,6 +16995,14 @@ class MainWindow(QMainWindow):
                 padding: 4px;
                 color: {text};
             }}
+            QLabel#localAiProgressLabel {{
+                color: {text_muted};
+                background: transparent;
+                border: none;
+                padding: 2px 0px 6px 0px;
+                font-size: 11px;
+                font-weight: 500;
+            }}
             QPushButton#btnClosePreview {{
                 background-color: {Theme.get_control_bg(accent)};
                 border: 1px solid {Theme.get_border(accent)};
@@ -17205,6 +17480,10 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self._save_splitter_state()
+        try:
+            self.bridge.cancel_local_ai_captioning()
+        except Exception:
+            pass
         super().closeEvent(event)
 
     def open_settings(self) -> None:

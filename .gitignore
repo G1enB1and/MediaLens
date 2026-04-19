@@ -26,6 +26,9 @@ data/
 .python-version
 .DS_Store
 
+# Claude Code worktrees (nested git repos — must not be tracked)
+.claude/worktrees/
+
 # Build artifacts
 /build/
 /dist/

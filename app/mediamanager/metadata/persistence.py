@@ -4,6 +4,7 @@ import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from typing import Iterable
 
 from app.mediamanager.db.ai_metadata_repo import PARSER_VERSION, replace_media_ai_metadata
@@ -186,6 +187,35 @@ def _merge_embedded_metadata_values(existing, incoming):
     return [existing, incoming]
 
 
+def _json_safe_metadata_value(value: Any):
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, (bytes, bytearray)):
+        for encoding in ("utf-8", "utf-16le", "latin-1"):
+            try:
+                return bytes(value).decode(encoding, errors="replace").rstrip("\x00")
+            except Exception:
+                continue
+        return bytes(value).hex()
+    if hasattr(value, "numerator") and hasattr(value, "denominator"):
+        try:
+            return float(value)
+        except Exception:
+            return str(value)
+    if isinstance(value, dict):
+        return {str(key): _json_safe_metadata_value(child) for key, child in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe_metadata_value(item) for item in value]
+    try:
+        import numpy as np
+
+        if isinstance(value, np.generic):
+            return value.item()
+    except Exception:
+        pass
+    return value
+
+
 def _extract_embedded_metadata_payload(inspection: InspectionResult) -> dict:
     payload: dict = {}
     for result in inspection.parsed:
@@ -197,7 +227,7 @@ def _extract_embedded_metadata_payload(inspection: InspectionResult) -> dict:
             payload["paths"] = _merge_embedded_metadata_values(payload.get("paths"), list(result.extracted_paths))
         if result.warnings:
             payload["warnings"] = _merge_embedded_metadata_values(payload.get("warnings"), list(result.warnings))
-    return payload
+    return _json_safe_metadata_value(payload)
 
 
 def inspect_and_persist_file(
