@@ -21,6 +21,9 @@ class LocalAiModelSpec:
     venv_dir: str
     settings_key: str
     install_label: str
+    requirements_file: str
+    description: str
+    estimated_size: str
 
 
 MODEL_SPECS: tuple[LocalAiModelSpec, ...] = (
@@ -32,6 +35,9 @@ MODEL_SPECS: tuple[LocalAiModelSpec, ...] = (
         venv_dir=".venv-wd-swinv2",
         settings_key="wd_swinv2",
         install_label="WD SwinV2 Tagger v3",
+        requirements_file="requirements-local-ai-wd-swinv2.txt",
+        description="Fast searchable tag generation for images.",
+        estimated_size="About 1-2 GB after dependencies and model files",
     ),
     LocalAiModelSpec(
         id=GEMMA4_MODEL_ID,
@@ -41,6 +47,9 @@ MODEL_SPECS: tuple[LocalAiModelSpec, ...] = (
         venv_dir=".venv-gemma",
         settings_key="gemma4",
         install_label="Gemma 4",
+        requirements_file="requirements-local-ai-gemma.txt",
+        description="General vision-language model for tags and descriptions.",
+        estimated_size="Several GB after dependencies and model files",
     ),
     LocalAiModelSpec(
         id=CAPTION_MODEL_ID,
@@ -50,6 +59,9 @@ MODEL_SPECS: tuple[LocalAiModelSpec, ...] = (
         venv_dir=".venv-internlm-xcomposer2",
         settings_key="internlm_xcomposer2",
         install_label="InternLM XComposer2 VL 1.8B",
+        requirements_file="requirements-local-ai-internlm-xcomposer2.txt",
+        description="Image description generation using your description prompt.",
+        estimated_size="Several GB after dependencies and model files",
     ),
     LocalAiModelSpec(
         id=GEMMA4_MODEL_ID,
@@ -59,12 +71,24 @@ MODEL_SPECS: tuple[LocalAiModelSpec, ...] = (
         venv_dir=".venv-gemma",
         settings_key="gemma4",
         install_label="Gemma 4",
+        requirements_file="requirements-local-ai-gemma.txt",
+        description="General vision-language model for tags and descriptions.",
+        estimated_size="Several GB after dependencies and model files",
     ),
 )
 
 
 def available_models() -> list[dict[str, str]]:
-    return [{"id": spec.id, "kind": spec.kind, "label": spec.label} for spec in MODEL_SPECS]
+    return [
+        {
+            "id": spec.id,
+            "kind": spec.kind,
+            "label": spec.label,
+            "description": spec.description,
+            "estimated_size": spec.estimated_size,
+        }
+        for spec in MODEL_SPECS
+    ]
 
 
 def model_ids_for_kind(kind: str) -> set[str]:
@@ -90,4 +114,3 @@ def current_python_matches_runtime(spec: LocalAiModelSpec) -> bool:
     # or install the model-specific interpreter paths directly.
     exe = Path(sys.executable).resolve()
     return bool(re.search(rf"{re.escape(spec.venv_dir)}(?:$|[\\/])", str(exe), flags=re.IGNORECASE))
-

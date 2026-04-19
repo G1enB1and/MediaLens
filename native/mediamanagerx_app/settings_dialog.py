@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QProxyStyle,
     QPushButton,
     QRadioButton,
@@ -2036,12 +2037,12 @@ class AISettingsPage(SettingsPage):
             DEFAULT_CAPTION_PROMPT,
             DEFAULT_CAPTION_START,
             TAG_MODEL_ID,
-            project_models_dir,
         )
         from app.mediamanager.ai_captioning.model_registry import MODEL_SPECS
+        models_dir_default = self.bridge._local_ai_models_dir_default() if hasattr(self.bridge, "_local_ai_models_dir_default") else ""
 
         self.defaults = {
-            "models_dir": str(project_models_dir()),
+            "models_dir": models_dir_default,
             "tag_model_id": TAG_MODEL_ID,
             "caption_model_id": CAPTION_MODEL_ID,
             "tag_prompt": "",
@@ -2108,6 +2109,18 @@ class AISettingsPage(SettingsPage):
                 self.tag_model_combo.addItem(spec.label, spec.id)
         tags_form.addRow("Tag Model", self.tag_model_combo)
 
+        self.tag_model_status_label = QLabel("")
+        self.tag_model_status_label.setWordWrap(True)
+        self.tag_model_install_btn = QPushButton("Install Model")
+        self.tag_model_install_btn.clicked.connect(lambda: self._install_selected_ai_model("tagger"))
+        tag_model_status_row = QWidget()
+        tag_model_status_layout = QHBoxLayout(tag_model_status_row)
+        tag_model_status_layout.setContentsMargins(0, 0, 0, 0)
+        tag_model_status_layout.setSpacing(8)
+        tag_model_status_layout.addWidget(self.tag_model_status_label, 1)
+        tag_model_status_layout.addWidget(self.tag_model_install_btn)
+        tags_form.addRow("Status", tag_model_status_row)
+
         self.tag_write_mode_combo = QComboBox()
         self.tag_write_mode_combo.addItem("Union Merge", "union")
         self.tag_write_mode_combo.addItem("Replace Tags", "replace")
@@ -2144,6 +2157,18 @@ class AISettingsPage(SettingsPage):
             if spec.kind == "captioner":
                 self.caption_model_combo.addItem(spec.label, spec.id)
         descriptions_form.addRow("Description Model", self.caption_model_combo)
+
+        self.caption_model_status_label = QLabel("")
+        self.caption_model_status_label.setWordWrap(True)
+        self.caption_model_install_btn = QPushButton("Install Model")
+        self.caption_model_install_btn.clicked.connect(lambda: self._install_selected_ai_model("captioner"))
+        caption_model_status_row = QWidget()
+        caption_model_status_layout = QHBoxLayout(caption_model_status_row)
+        caption_model_status_layout.setContentsMargins(0, 0, 0, 0)
+        caption_model_status_layout.setSpacing(8)
+        caption_model_status_layout.addWidget(self.caption_model_status_label, 1)
+        caption_model_status_layout.addWidget(self.caption_model_install_btn)
+        descriptions_form.addRow("Status", caption_model_status_row)
 
         self.description_write_mode_combo = QComboBox()
         self.description_write_mode_combo.addItem("Overwrite Description", "overwrite")
@@ -2187,6 +2212,10 @@ class AISettingsPage(SettingsPage):
             self.device_combo,
         ):
             combo.currentIndexChanged.connect(self._save)
+        self.tag_model_combo.currentIndexChanged.connect(lambda _index: self._refresh_ai_model_statuses())
+        self.caption_model_combo.currentIndexChanged.connect(lambda _index: self._refresh_ai_model_statuses())
+        if hasattr(self.bridge, "localAiModelInstallStatus"):
+            self.bridge.localAiModelInstallStatus.connect(self._on_local_ai_model_install_status)
         self.tag_prompt_edit.textChanged.connect(self._save)
         self.caption_prompt_edit.textChanged.connect(self._save)
         self.tag_max_tags_spin.valueChanged.connect(self._save)
@@ -2204,6 +2233,72 @@ class AISettingsPage(SettingsPage):
     def _set_combo_data(self, combo: QComboBox, value: str) -> None:
         idx = combo.findData(value)
         combo.setCurrentIndex(idx if idx >= 0 else 0)
+
+    def _selected_ai_model_id(self, kind: str) -> str:
+        combo = self.tag_model_combo if kind == "tagger" else self.caption_model_combo
+        return str(combo.currentData() or "")
+
+    def _apply_ai_model_status(self, kind: str, status: dict) -> None:
+        label = self.tag_model_status_label if kind == "tagger" else self.caption_model_status_label
+        button = self.tag_model_install_btn if kind == "tagger" else self.caption_model_install_btn
+        state = str(status.get("state") or "").strip()
+        description = str(status.get("description") or "").strip()
+        size = str(status.get("estimated_size") or "").strip()
+        message = str(status.get("message") or "").strip()
+        parts = []
+        if description:
+            parts.append(description)
+        if size:
+            parts.append(size)
+        if message:
+            parts.append(message)
+        label.setText("\n".join(parts) if parts else "Status unavailable.")
+        button.setVisible(state in {"not_installed", "error", "installing"})
+        button.setEnabled(state in {"not_installed", "error"})
+        button.setText("Installing..." if state == "installing" else "Install Model")
+
+    def _refresh_ai_model_statuses(self) -> None:
+        if bool(getattr(self, "_loading", False)):
+            return
+        for kind in ("tagger", "captioner"):
+            model_id = self._selected_ai_model_id(kind)
+            if not model_id:
+                continue
+            if hasattr(self.bridge, "get_local_ai_model_status"):
+                try:
+                    self._apply_ai_model_status(kind, dict(self.bridge.get_local_ai_model_status(model_id, kind) or {}))
+                except Exception as exc:
+                    self._apply_ai_model_status(kind, {"state": "error", "message": str(exc) or "Could not read model status."})
+
+    def _install_selected_ai_model(self, kind: str) -> None:
+        model_id = self._selected_ai_model_id(kind)
+        if not model_id or not hasattr(self.bridge, "install_local_ai_model"):
+            return
+        status = dict(self.bridge.get_local_ai_model_status(model_id, kind) or {}) if hasattr(self.bridge, "get_local_ai_model_status") else {}
+        label = str(status.get("label") or "this model")
+        size = str(status.get("estimated_size") or "").strip()
+        message = f"Install {label} local AI support?"
+        if size:
+            message = f"{message}\n\nEstimated size: {size}"
+        message = f"{message}\n\nThis downloads packages and model files from the internet as needed."
+        reply = QMessageBox.question(self, "Install AI Model", message, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        started = bool(self.bridge.install_local_ai_model(model_id, kind))
+        if not started:
+            self._refresh_ai_model_statuses()
+
+    def _on_local_ai_model_install_status(self, status_key: str, payload: dict) -> None:
+        payload = dict(payload or {})
+        for kind in ("tagger", "captioner"):
+            current = {}
+            if hasattr(self.bridge, "get_local_ai_model_status"):
+                try:
+                    current = dict(self.bridge.get_local_ai_model_status(self._selected_ai_model_id(kind), kind) or {})
+                except Exception:
+                    current = {}
+            if str(current.get("settings_key") or "") == str(status_key or ""):
+                self._apply_ai_model_status(kind, payload)
 
     def _browse_models_dir(self) -> None:
         current = self.models_dir_edit.text().strip() or self.defaults["models_dir"]
@@ -2268,6 +2363,170 @@ class AISettingsPage(SettingsPage):
             self.max_tokens_spin.setValue(int(self._setting("ai_caption.max_new_tokens", 200, int) or 200))
         finally:
             self._loading = False
+        self._refresh_ai_model_statuses()
+
+
+class LocalAiSetupDialog(QDialog):
+    def __init__(self, main_window: QWidget, focus_kind: str = "") -> None:
+        super().__init__(main_window)
+        self.main_window = main_window
+        self.bridge = main_window.bridge
+        self.focus_kind = str(focus_kind or "").strip()
+        self.setWindowTitle("Local AI Models")
+        self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+        self.resize(760, 540)
+        self.setModal(False)
+        self._rows: dict[str, dict[str, object]] = {}
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(12)
+
+        title = QLabel("Local AI Models")
+        title.setObjectName("localAiSetupTitle")
+        title_font = title.font()
+        title_font.setPointSize(max(title_font.pointSize() + 4, 14))
+        title_font.setBold(True)
+        title.setFont(title_font)
+        root.addWidget(title)
+
+        intro = QLabel("Install the local AI models you want to use. Each model has its own isolated runtime so installing one model does not change another model.")
+        intro.setWordWrap(True)
+        root.addWidget(intro)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        content = QWidget()
+        self.rows_layout = QVBoxLayout(content)
+        self.rows_layout.setContentsMargins(0, 0, 0, 0)
+        self.rows_layout.setSpacing(10)
+        scroll.setWidget(content)
+        root.addWidget(scroll, 1)
+
+        buttons = QHBoxLayout()
+        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn.clicked.connect(self.refresh_statuses)
+        self.close_btn = QPushButton("Close")
+        self.close_btn.clicked.connect(self.close)
+        buttons.addWidget(self.refresh_btn)
+        buttons.addStretch(1)
+        buttons.addWidget(self.close_btn)
+        root.addLayout(buttons)
+
+        if hasattr(self.bridge, "localAiModelInstallStatus"):
+            self.bridge.localAiModelInstallStatus.connect(self._on_install_status)
+
+        self._build_rows()
+        self.refresh_statuses()
+
+    def _unique_model_specs(self):
+        from app.mediamanager.ai_captioning.model_registry import MODEL_SPECS
+
+        rows: dict[str, dict[str, object]] = {}
+        for spec in MODEL_SPECS:
+            row = rows.setdefault(
+                spec.settings_key,
+                {
+                    "spec": spec,
+                    "kinds": set(),
+                },
+            )
+            row["kinds"].add(spec.kind)
+        return rows
+
+    @staticmethod
+    def _capabilities_label(kinds: set[str]) -> str:
+        labels = []
+        if "tagger" in kinds:
+            labels.append("tags")
+        if "captioner" in kinds:
+            labels.append("descriptions")
+        return ", ".join(labels) if labels else "local AI"
+
+    def _build_rows(self) -> None:
+        for status_key, item in self._unique_model_specs().items():
+            spec = item["spec"]
+            kinds = item["kinds"]
+            frame = QFrame()
+            frame.setObjectName("localAiModelRow")
+            frame.setFrameShape(QFrame.Shape.StyledPanel)
+            layout = QGridLayout(frame)
+            layout.setContentsMargins(12, 12, 12, 12)
+            layout.setHorizontalSpacing(10)
+            layout.setVerticalSpacing(6)
+
+            name = QLabel(spec.label)
+            name_font = name.font()
+            name_font.setBold(True)
+            name.setFont(name_font)
+            layout.addWidget(name, 0, 0)
+
+            capability = QLabel(f"Used for: {self._capabilities_label(kinds)}")
+            layout.addWidget(capability, 1, 0)
+
+            description = QLabel(str(spec.description or ""))
+            description.setWordWrap(True)
+            layout.addWidget(description, 2, 0)
+
+            size = QLabel(str(spec.estimated_size or ""))
+            size.setWordWrap(True)
+            layout.addWidget(size, 3, 0)
+
+            status = QLabel("Checking status...")
+            status.setWordWrap(True)
+            layout.addWidget(status, 4, 0)
+
+            install_btn = QPushButton("Install")
+            install_btn.clicked.connect(lambda _checked=False, s=spec: self._install_model(s))
+            layout.addWidget(install_btn, 0, 1, 2, 1)
+            layout.setColumnStretch(0, 1)
+
+            self.rows_layout.addWidget(frame)
+            self._rows[status_key] = {
+                "spec": spec,
+                "status": status,
+                "button": install_btn,
+                "frame": frame,
+            }
+        self.rows_layout.addStretch(1)
+
+    def refresh_statuses(self) -> None:
+        for status_key, row in self._rows.items():
+            spec = row["spec"]
+            status = self._status_for_spec(spec)
+            self._apply_status(status_key, status)
+
+    def _status_for_spec(self, spec) -> dict:
+        if not hasattr(self.bridge, "get_local_ai_model_status"):
+            return {"state": "error", "message": "Local AI status is not available in this build."}
+        try:
+            return dict(self.bridge.get_local_ai_model_status(spec.id, spec.kind) or {})
+        except Exception as exc:
+            return {"state": "error", "message": str(exc) or "Could not read model status."}
+
+    def _apply_status(self, status_key: str, status: dict) -> None:
+        row = self._rows.get(status_key)
+        if not row:
+            return
+        label = row["status"]
+        button = row["button"]
+        state = str(status.get("state") or "").strip()
+        message = str(status.get("message") or "").strip() or "Status unavailable."
+        label.setText(message)
+        button.setVisible(state in {"not_installed", "error", "installing"})
+        button.setEnabled(state in {"not_installed", "error"})
+        button.setText("Installing..." if state == "installing" else "Install")
+
+    def _install_model(self, spec) -> None:
+        if not hasattr(self.bridge, "install_local_ai_model"):
+            self._apply_status(spec.settings_key, {"state": "error", "message": "Model installation is not available in this build."})
+            return
+        self.bridge.install_local_ai_model(spec.id, spec.kind)
+        self.refresh_statuses()
+
+    def _on_install_status(self, status_key: str, payload: dict) -> None:
+        self._apply_status(str(status_key or ""), dict(payload or {}))
 
 
 def _theme_api():

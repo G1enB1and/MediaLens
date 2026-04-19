@@ -4,7 +4,7 @@ try:
     with open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "VERSION"), "r") as f:
         __version__ = f.read().strip()
 except Exception:
-    __version__ = "v1.1.25"
+    __version__ = "v1.1.26"
 
 
 import sys
@@ -258,7 +258,7 @@ from PySide6.QtWebEngineCore import QWebEnginePage
 from PySide6.QtSvg import QSvgRenderer
 from native.mediamanagerx_app import review_groups
 from native.mediamanagerx_app.video_overlay import LightboxVideoOverlay, VideoRequest
-from native.mediamanagerx_app.settings_dialog import SettingsDialog
+from native.mediamanagerx_app.settings_dialog import LocalAiSetupDialog, SettingsDialog
 from PySide6.QtCore import QSortFilterProxyModel, QModelIndex
 
 
@@ -4078,6 +4078,7 @@ class Bridge(QObject):
     localAiCaptioningStatus = Signal(str)
     localAiCaptioningItemFinished = Signal(str, list, str, str)
     localAiCaptioningFinished = Signal(int, str)
+    localAiModelInstallStatus = Signal(str, "QVariantMap")
     scannerStatusChanged = Signal(str, "QVariantMap")
     progressToastsRevealRequested = Signal()
     
@@ -4117,6 +4118,7 @@ class Bridge(QObject):
         self._local_ai_cancel = threading.Event()
         self._local_ai_processes: set[subprocess.Popen] = set()
         self._local_ai_shutting_down = False
+        self._local_ai_model_installs: set[str] = set()
         
         appdata = _appdata_runtime_dir()
         _migrate_legacy_debugging_logs(appdata)
@@ -7449,9 +7451,195 @@ class Bridge(QObject):
         raise RuntimeError("No video preview image is available for local AI captioning.")
 
     def _local_ai_models_dir_default(self) -> str:
+        if bool(getattr(sys, "frozen", False)):
+            return str(_appdata_runtime_dir() / "local_ai_models")
         from app.mediamanager.ai_captioning.local_captioning import project_models_dir
 
         return str(project_models_dir())
+
+    def _local_ai_worker_source_root(self) -> Path:
+        roots: list[Path] = []
+        meipass = str(getattr(sys, "_MEIPASS", "") or "").strip()
+        if meipass:
+            roots.append(Path(meipass))
+        if bool(getattr(sys, "frozen", False)):
+            roots.append(Path(sys.executable).resolve().parent)
+            roots.append(Path(sys.executable).resolve().parent / "_internal")
+        roots.append(Path(__file__).resolve().parents[2])
+
+        for root in roots:
+            if (root / "app" / "mediamanager" / "ai_captioning" / "model_registry.py").is_file():
+                return root
+        return roots[0] if roots else Path(__file__).resolve().parents[2]
+
+    def _local_ai_runtime_root(self) -> Path:
+        configured = str(self.settings.value("ai_caption/runtime_root", "", type=str) or "").strip()
+        if configured:
+            return Path(configured)
+        if bool(getattr(sys, "frozen", False)):
+            return _appdata_runtime_dir() / "ai-runtimes"
+        return Path(__file__).resolve().parents[2]
+
+    def _local_ai_requirements_path(self, spec) -> Path:
+        source_root = self._local_ai_worker_source_root()
+        candidates = [
+            source_root / spec.requirements_file,
+            source_root / "_internal" / spec.requirements_file,
+            Path(__file__).resolve().parents[2] / spec.requirements_file,
+        ]
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+        return candidates[0]
+
+    def _local_ai_runtime_python_path(self, spec) -> Path:
+        from app.mediamanager.ai_captioning.model_registry import default_python_for_runtime
+
+        configured = str(self.settings.value(f"ai_caption/runtime_python/{spec.settings_key}", "", type=str) or "").strip()
+        if not configured and spec.settings_key == "gemma4":
+            configured = str(self.settings.value("ai_caption/gemma_python", "", type=str) or "").strip()
+        return Path(configured) if configured else default_python_for_runtime(self._local_ai_runtime_root(), spec)
+
+    def _local_ai_status_payload_for_spec(self, spec) -> dict:
+        python_path = self._local_ai_runtime_python_path(spec)
+        requirements_path = self._local_ai_requirements_path(spec)
+        installed = python_path.is_file()
+        running = spec.settings_key in self._local_ai_model_installs
+        if running:
+            state = "installing"
+            message = f"Installing {spec.install_label}..."
+        elif installed:
+            state = "installed"
+            message = "Installed. Model files may download on first use if they are not already available."
+        else:
+            state = "not_installed"
+            message = "Not installed. Install this model before using it."
+        return {
+            "id": spec.id,
+            "kind": spec.kind,
+            "label": spec.label,
+            "settings_key": spec.settings_key,
+            "description": spec.description,
+            "estimated_size": spec.estimated_size,
+            "state": state,
+            "installed": installed,
+            "running": running,
+            "message": message,
+            "runtime_python": str(python_path),
+            "runtime_dir": str(Path(python_path).parent.parent),
+            "requirements_file": str(requirements_path),
+        }
+
+    def _find_local_ai_bootstrap_python(self) -> str:
+        candidates: list[list[str]] = []
+        if not bool(getattr(sys, "frozen", False)) and Path(sys.executable).is_file():
+            candidates.append([sys.executable])
+        if os.name == "nt":
+            candidates.extend([["py", "-3.12"], ["py", "-3"], ["python"]])
+        else:
+            candidates.extend([["python3"], ["python"]])
+        for command in candidates:
+            try:
+                result = subprocess.run(
+                    [*command, "-c", "import venv, sys; print(sys.executable)"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=15,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
+                )
+                if result.returncode == 0:
+                    return str(result.stdout.strip() or command[0])
+            except Exception:
+                continue
+        return ""
+
+    @Slot(str, str, result="QVariantMap")
+    def get_local_ai_model_status(self, model_id: str, kind: str) -> dict:
+        try:
+            from app.mediamanager.ai_captioning.model_registry import model_spec
+
+            return self._local_ai_status_payload_for_spec(model_spec(str(model_id), str(kind)))
+        except Exception as exc:
+            return {"state": "error", "installed": False, "running": False, "message": str(exc) or "Could not read model status."}
+
+    @Slot(str, str, result=bool)
+    def install_local_ai_model(self, model_id: str, kind: str) -> bool:
+        try:
+            from app.mediamanager.ai_captioning.model_registry import model_spec
+
+            spec = model_spec(str(model_id), str(kind))
+        except Exception as exc:
+            self.localAiModelInstallStatus.emit(str(model_id), {"state": "error", "message": str(exc) or "Unknown model."})
+            return False
+        if spec.settings_key in self._local_ai_model_installs:
+            self.localAiModelInstallStatus.emit(spec.settings_key, self._local_ai_status_payload_for_spec(spec))
+            return False
+
+        self._local_ai_model_installs.add(spec.settings_key)
+        self.localAiModelInstallStatus.emit(spec.settings_key, self._local_ai_status_payload_for_spec(spec))
+
+        def work() -> None:
+            payload = self._local_ai_status_payload_for_spec(spec)
+            try:
+                requirements_path = self._local_ai_requirements_path(spec)
+                if not requirements_path.is_file():
+                    raise RuntimeError(f"Install instructions for {spec.install_label} were not found.")
+                python_path = self._local_ai_runtime_python_path(spec)
+                runtime_dir = Path(python_path).parent.parent
+                runtime_dir.parent.mkdir(parents=True, exist_ok=True)
+                bootstrap_python = self._find_local_ai_bootstrap_python()
+                if not bootstrap_python:
+                    raise RuntimeError(
+                        "MediaLens could not find Python on this computer to create the model runtime. "
+                        "Install Python 3.12, then try again."
+                    )
+                commands = [
+                    ([bootstrap_python, "-m", "venv", str(runtime_dir)], f"Creating {spec.install_label} runtime..."),
+                    ([str(python_path), "-m", "pip", "install", "--upgrade", "pip"], "Updating package installer..."),
+                    ([str(python_path), "-m", "pip", "install", "-r", str(requirements_path)], f"Installing {spec.install_label} support..."),
+                ]
+                for command, message in commands:
+                    payload.update({"state": "installing", "running": True, "message": message})
+                    self.localAiModelInstallStatus.emit(spec.settings_key, dict(payload))
+                    process = subprocess.Popen(
+                        command,
+                        cwd=str(self._local_ai_worker_source_root()),
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
+                    )
+                    assert process.stdout is not None
+                    last_emit = 0.0
+                    last_line = message
+                    for line in process.stdout:
+                        clean = " ".join(str(line or "").split()).strip()
+                        if clean:
+                            last_line = clean[-240:]
+                        if time.monotonic() - last_emit >= 1.0:
+                            last_emit = time.monotonic()
+                            payload.update({"state": "installing", "running": True, "message": last_line})
+                            self.localAiModelInstallStatus.emit(spec.settings_key, dict(payload))
+                    returncode = process.wait()
+                    if returncode != 0:
+                        raise RuntimeError(f"{message} failed. {last_line}")
+                payload = self._local_ai_status_payload_for_spec(spec)
+                payload.update({"state": "installed", "installed": True, "running": False, "message": f"{spec.install_label} is installed."})
+                self.localAiModelInstallStatus.emit(spec.settings_key, payload)
+            except Exception as exc:
+                payload.update({"state": "error", "installed": False, "running": False, "message": str(exc) or "Model installation failed."})
+                self.localAiModelInstallStatus.emit(spec.settings_key, payload)
+                self._log(f"Local AI model install failed for {spec.install_label}: {payload['message']}")
+            finally:
+                self._local_ai_model_installs.discard(spec.settings_key)
+
+        threading.Thread(target=work, daemon=True, name=f"local-ai-install-{spec.settings_key}").start()
+        return True
 
     def _local_ai_caption_settings(self):
         from app.mediamanager.ai_captioning.local_captioning import (
@@ -7599,11 +7787,11 @@ class Bridge(QObject):
         configured = str(self.settings.value(f"ai_caption/runtime_python/{spec.settings_key}", "", type=str) or "").strip()
         if not configured and spec.settings_key == "gemma4":
             configured = str(self.settings.value("ai_caption/gemma_python", "", type=str) or "").strip()
-        project_root = Path(__file__).resolve().parents[2]
-        default_python = default_python_for_runtime(project_root, spec)
+        runtime_root = self._local_ai_runtime_root()
+        default_python = default_python_for_runtime(runtime_root, spec)
         python_path = Path(configured) if configured else default_python
         if not python_path.is_file():
-            if current_python_matches_runtime(spec) or not configured:
+            if not bool(getattr(sys, "frozen", False)) and (current_python_matches_runtime(spec) or not configured):
                 python_path = Path(sys.executable)
             else:
                 raise RuntimeError(
@@ -7615,7 +7803,7 @@ class Bridge(QObject):
         timeout_seconds = int(self.settings.value("ai_caption/item_timeout_seconds", 900, type=int) or 900)
         timeout_seconds = max(30, timeout_seconds)
         operation_label = "description" if operation == "description" else "tags"
-        project_root = Path(__file__).resolve().parents[2]
+        project_root = self._local_ai_worker_source_root()
         python_exe, worker_module = self._local_ai_worker_command(operation, ai_settings)
         command = [
             python_exe,
@@ -7630,6 +7818,8 @@ class Bridge(QObject):
         ]
         if tags is not None:
             command.extend(["--tags-json", json.dumps(tags, ensure_ascii=False)])
+        child_env = os.environ.copy()
+        child_env["PYTHONPATH"] = str(project_root) + (os.pathsep + child_env["PYTHONPATH"] if child_env.get("PYTHONPATH") else "")
         popen_kwargs = dict(
             cwd=str(project_root),
             stdout=subprocess.PIPE,
@@ -7637,6 +7827,7 @@ class Bridge(QObject):
             text=True,
             encoding="utf-8",
             errors="replace",
+            env=child_env,
         )
         if _WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS:
             popen_kwargs.update(_WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS)
@@ -9306,6 +9497,7 @@ class MainWindow(QMainWindow):
         self._folder_history: list[str] = []
         self._folder_history_index: int = -1
         self._settings_dialog: SettingsDialog | None = None
+        self._local_ai_setup_dialog: LocalAiSetupDialog | None = None
         self._suppress_tree_selection_history = False
         self._tree_root_path: str = ""
         self._pending_tree_sync_path: str = ""
@@ -15289,6 +15481,8 @@ class MainWindow(QMainWindow):
         if not paths:
             self.meta_status_lbl.setText("Select one or more media files first.")
             return
+        if not self._ensure_local_ai_model_ready("tagger"):
+            return
         if hasattr(self.bridge, "run_local_ai_tags"):
             self._local_ai_operation = "tags"
             self._local_ai_total = len(paths)
@@ -15304,6 +15498,8 @@ class MainWindow(QMainWindow):
         paths = self._local_ai_target_paths()
         if not paths:
             self.meta_status_lbl.setText("Select one or more media files first.")
+            return
+        if not self._ensure_local_ai_model_ready("captioner"):
             return
         if hasattr(self.bridge, "run_local_ai_descriptions"):
             self._local_ai_operation = "descriptions"
@@ -17597,6 +17793,57 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    def open_local_ai_setup(self, focus_kind: str = "") -> None:
+        try:
+            if self._local_ai_setup_dialog is None:
+                self._local_ai_setup_dialog = LocalAiSetupDialog(self, focus_kind)
+            else:
+                self._local_ai_setup_dialog.focus_kind = str(focus_kind or "")
+                self._local_ai_setup_dialog.refresh_statuses()
+            self._local_ai_setup_dialog.show()
+            self._local_ai_setup_dialog.raise_()
+            self._local_ai_setup_dialog.activateWindow()
+        except Exception as exc:
+            try:
+                self.bridge._log(f"Failed to open local AI setup dialog: {exc}")
+            except Exception:
+                pass
+
+    def maybe_show_local_ai_setup_onboarding(self) -> None:
+        key = "ai_caption/setup_dialog_seen_version"
+        seen_version = str(self.bridge.settings.value(key, "", type=str) or "")
+        if seen_version == __version__:
+            return
+        self.bridge.settings.setValue(key, __version__)
+        self.open_local_ai_setup()
+
+    def _selected_local_ai_model_status(self, kind: str) -> dict:
+        if not hasattr(self.bridge, "get_local_ai_model_status"):
+            return {"state": "error", "message": "Local AI setup is not available in this build."}
+        try:
+            from app.mediamanager.ai_captioning.local_captioning import CAPTION_MODEL_ID, TAG_MODEL_ID
+
+            setting_key = "ai_caption/tag_model_id" if kind == "tagger" else "ai_caption/caption_model_id"
+            default_model_id = TAG_MODEL_ID if kind == "tagger" else CAPTION_MODEL_ID
+            model_id = str(self.bridge.settings.value(setting_key, default_model_id, type=str) or default_model_id)
+            return dict(self.bridge.get_local_ai_model_status(model_id, kind) or {})
+        except Exception as exc:
+            return {"state": "error", "message": str(exc) or "Could not read local AI model status."}
+
+    def _ensure_local_ai_model_ready(self, kind: str) -> bool:
+        status = self._selected_local_ai_model_status(kind)
+        if bool(status.get("installed")) and str(status.get("state") or "") == "installed":
+            return True
+        label = str(status.get("label") or "selected local AI model")
+        state = str(status.get("state") or "").strip()
+        if state == "installing":
+            message = f"{label} is still installing. Check Local AI Models for progress."
+        else:
+            message = f"{label} needs to be installed before this can run."
+        self.meta_status_lbl.setText(message)
+        self.open_local_ai_setup(kind)
+        return False
+
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if event.type() == QEvent.Type.Resize:
             watched_viewports = {
@@ -18350,6 +18597,7 @@ def main() -> None:
         QTimer.singleShot(4000, _finish_splash)
 
     win.show()
+    QTimer.singleShot(900, win.maybe_show_local_ai_setup_onboarding)
 
     if splash is None:
         pass

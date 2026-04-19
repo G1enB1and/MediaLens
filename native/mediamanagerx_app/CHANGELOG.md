@@ -1,6 +1,41 @@
 # Change Log
 
-## v1.1.25 (Current)
+## v1.1.26 (Current)
+
+### Summary
+
+This release makes local AI model support much more dependable and flexible. MediaLens now isolates each AI model in its own worker process and runtime, so adding or testing new models is less likely to break models that already work.
+
+### Highlights
+
+- Gemma 4, InternLM XComposer2, and WD SwinV2 can now work side by side without sharing fragile dependency stacks.
+- Description prompts now behave more naturally, with tags and starter text included only through prompt instructions instead of being forced onto the final response.
+- Local AI failures and long-running generation are handled more clearly, with safer subprocess cleanup when the app closes.
+
+### Added
+
+- Added Gemma 4 E2B Instruct as an optional local AI model for tags and descriptions.
+- Added a local AI model registry so each model can define its own worker module, runtime folder, and user-facing dropdown label.
+- Added separate worker subprocess entry points for WD SwinV2 tag generation and InternLM XComposer2 description generation.
+- Added separate optional dependency files for WD SwinV2, InternLM XComposer2, and Gemma 4 runtimes.
+- Added AI settings status for the selected tag and description models, including an install action when the model runtime is missing.
+- Added a Local AI Models setup dialog that appears after installing or updating MediaLens and shows install status for each optional model runtime.
+- Added `{starter}` support for description prompts so users can place the starter text exactly where they want it.
+
+### Changed
+
+- Changed local AI execution so each model can run in its own virtual environment instead of sharing one dependency set.
+- Changed installed builds to store optional local AI runtimes under `%APPDATA%\MediaLens\ai-runtimes` instead of the app install folder.
+- Changed Generate Tags and Generate Description to open Local AI Models setup when the selected model runtime is not installed.
+- Changed description prompt handling so `{tags}` is opt-in; tags are only inserted when the prompt includes the `{tags}` placeholder.
+- Changed `Start Description With` so it is passed to the model as an instruction instead of being prepended to the generated response.
+- Changed InternLM XComposer2 loading back to the working legacy path after the Gemma integration work showed it requires a different runtime approach.
+- Changed local AI progress and error handling to give clearer in-app updates during long-running generation and failures.
+- Changed app shutdown handling so active local AI worker subprocesses are canceled and terminated more safely.
+
+---
+
+## v1.1.25
 
 ### Summary
 

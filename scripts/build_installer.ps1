@@ -1,12 +1,14 @@
 [CmdletBinding()]
-param()
+param(
+    [switch]$Clean
+)
 
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $pyInstallerExe = Join-Path $repoRoot ".venv\Scripts\pyinstaller.exe"
 $pyiWorkRoot = Join-Path $repoRoot ".pyinstaller-temp"
-$pyiWorkDir = Join-Path $pyiWorkRoot ([Guid]::NewGuid().ToString("N"))
+$pyiWorkDir = Join-Path $pyiWorkRoot "MediaLens"
 $pyiDistRoot = Join-Path $repoRoot ".pyinstaller-dist"
 $pyiDistDir = Join-Path $pyiDistRoot ([Guid]::NewGuid().ToString("N"))
 $distDir = Join-Path $pyiDistDir "MediaLens"
@@ -47,6 +49,11 @@ if (-not (Test-Path $isccExe)) {
     throw "Inno Setup compiler not found at '$isccExe'."
 }
 
+if ($Clean -and (Test-Path $pyiWorkDir)) {
+    Write-Host "Removing cached PyInstaller work directory..."
+    Remove-Item -LiteralPath $pyiWorkDir -Recurse -Force
+}
+
 Write-Host "Building MediaLens bundle with project .venv PyInstaller..."
 New-Item -ItemType Directory -Path $pyiWorkDir -Force | Out-Null
 New-Item -ItemType Directory -Path $pyiDistDir -Force | Out-Null
@@ -57,6 +64,50 @@ if ($LASTEXITCODE -ne 0) {
 
 if (-not (Test-Path $distDir)) {
     throw "Expected application bundle at '$distDir' was not created."
+}
+
+$bundledWorkerRegistry = @(
+    (Join-Path $distDir "_internal\app\mediamanager\ai_captioning\model_registry.py"),
+    (Join-Path $distDir "app\mediamanager\ai_captioning\model_registry.py")
+) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+if (-not $bundledWorkerRegistry) {
+    throw "PyInstaller bundle is missing local AI worker source files. Check MediaLens.spec datas."
+}
+
+$bundledRequirements = @(
+    "requirements-local-ai-wd-swinv2.txt",
+    "requirements-local-ai-internlm-xcomposer2.txt",
+    "requirements-local-ai-gemma.txt"
+)
+foreach ($requirementsFile in $bundledRequirements) {
+    $matches = @(
+        (Join-Path $distDir "_internal\$requirementsFile"),
+        (Join-Path $distDir $requirementsFile)
+    ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
+    if ($matches.Count -eq 0) {
+        throw "PyInstaller bundle is missing '$requirementsFile'. Check MediaLens.spec datas."
+    }
+}
+
+$forbiddenLocalAiPackages = @(
+    "accelerate",
+    "huggingface_hub",
+    "onnxruntime",
+    "safetensors",
+    "sentencepiece",
+    "tokenizers",
+    "torch",
+    "torchvision",
+    "transformers"
+)
+foreach ($packageName in $forbiddenLocalAiPackages) {
+    $matches = @(
+        (Join-Path $distDir "_internal\$packageName"),
+        (Join-Path $distDir "$packageName")
+    ) | Where-Object { Test-Path -LiteralPath $_ }
+    if ($matches.Count -gt 0) {
+        throw "PyInstaller bundle unexpectedly includes local AI runtime package '$packageName'. Keep model dependencies in per-model runtimes."
+    }
 }
 
 $ffmpegExe = Resolve-RequiredMediaTool -Name "ffmpeg" -EnvVar "MEDIALENS_FFMPEG_PATH"
