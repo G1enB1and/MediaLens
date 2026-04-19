@@ -4,7 +4,7 @@ try:
     with open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "VERSION"), "r") as f:
         __version__ = f.read().strip()
 except Exception:
-    __version__ = "v1.1.27"
+    __version__ = "v1.1.28"
 
 
 import sys
@@ -7993,12 +7993,12 @@ class Bridge(QObject):
         }
 
     def _local_ai_default_settings_payload_for_spec(self, spec) -> dict:
-        ai_settings = self._local_ai_caption_settings()
+        payload = self._local_ai_settings_payload(self._local_ai_caption_settings())
         if spec.kind == "tagger":
-            ai_settings.tag_model_id = spec.id
+            payload["tag_model_id"] = spec.id
         else:
-            ai_settings.caption_model_id = spec.id
-        return self._local_ai_settings_payload(ai_settings)
+            payload["caption_model_id"] = spec.id
+        return payload
 
     def _local_ai_worker_command(self, operation: str, ai_settings) -> tuple[str, str]:
         from app.mediamanager.ai_captioning.model_registry import (

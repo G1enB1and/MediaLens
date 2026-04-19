@@ -2523,6 +2523,11 @@ class LocalAiSetupDialog(QDialog):
                 detail.setWordWrap(True)
                 detail.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
                 metadata_layout.addWidget(detail)
+            message_label = QLabel("")
+            message_label.setObjectName("localAiModelInstallMessage")
+            message_label.setWordWrap(True)
+            message_label.setVisible(False)
+            metadata_layout.addWidget(message_label)
             details_layout.addWidget(metadata)
             layout.addWidget(details_panel, 0, 0)
 
@@ -2569,6 +2574,7 @@ class LocalAiSetupDialog(QDialog):
                 "badge": status_badge,
                 "button": install_btn,
                 "uninstall_button": uninstall_btn,
+                "message": message_label,
                 "frame": frame,
             }
         self.rows_layout.addStretch(1)
@@ -2594,8 +2600,10 @@ class LocalAiSetupDialog(QDialog):
         badge = row["badge"]
         button = row["button"]
         uninstall_button = row["uninstall_button"]
+        message_label = row["message"]
         frame = row["frame"]
         state = str(status.get("state") or "").strip()
+        message = str(status.get("message") or "").strip()
         Theme = _theme_api()
         is_light = Theme.get_is_light()
         ok_color = "#238636" if is_light else "#7ee787"
@@ -2622,6 +2630,14 @@ class LocalAiSetupDialog(QDialog):
         button.setText("Installing..." if state == "installing" else "Install")
         uninstall_button.setVisible(state == "installed")
         uninstall_button.setEnabled(state == "installed")
+        if state in {"installing", "error"} and message:
+            message_label.setText(message)
+            message_label.setProperty("installState", state)
+            message_label.setVisible(True)
+            message_label.style().unpolish(message_label)
+            message_label.style().polish(message_label)
+        else:
+            message_label.setVisible(False)
 
     def _install_model(self, spec) -> None:
         if not hasattr(self.bridge, "install_local_ai_model"):
@@ -2704,6 +2720,13 @@ class LocalAiSetupDialog(QDialog):
                 font-weight: 700;
             }}
             QLabel#localAiStatusBadge[installState="error"] {{
+                color: {error_fg};
+            }}
+            QLabel#localAiModelInstallMessage {{
+                color: {muted};
+                padding-top: 4px;
+            }}
+            QLabel#localAiModelInstallMessage[installState="error"] {{
                 color: {error_fg};
             }}
             QPushButton {{

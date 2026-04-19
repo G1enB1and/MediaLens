@@ -1,6 +1,29 @@
 # Change Log
 
-## v1.1.27 (Current)
+## v1.1.28 (Current)
+
+### Summary
+
+This release fixes a local AI setup failure in the v1.1.27 installer. Model installation can now proceed correctly, and setup errors show useful details in the Local AI Models window instead of only showing a generic error.
+
+### Highlights
+
+- Fixed local AI model installs failing immediately with an internal settings error.
+- Local AI Models now shows install progress and error details directly in the setup window.
+- Added a developer-only script to point dev runs and installed runs at the same local AI model folders.
+
+### Added
+
+- Added `scripts/use_installed_local_ai_paths.ps1` for local development machines that should share installed MediaLens AI folders.
+- Added a compact install progress/error message line to the Local AI Models window.
+
+### Changed
+
+- Changed local AI install preload settings so MediaLens copies the selected model into the worker payload instead of mutating immutable settings.
+
+---
+
+## v1.1.27
 
 ### Summary
 
