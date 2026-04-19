@@ -7525,9 +7525,11 @@ class Bridge(QObject):
         configured = str(self.settings.value(f"ai_caption/runtime_python/{spec.settings_key}", "", type=str) or "").strip()
         if not configured and spec.settings_key == "gemma4":
             configured = str(self.settings.value("ai_caption/gemma_python", "", type=str) or "").strip()
-        installed = python_path.is_file()
+        models_dir = Path(str(self.settings.value("ai_caption/models_dir", self._local_ai_models_dir_default(), type=str) or self._local_ai_models_dir_default()))
+        model_files_installed = self._local_ai_model_files_installed(models_dir, spec.id)
+        installed = python_path.is_file() and model_files_installed
         dev_fallback = False
-        if not installed and not bool(getattr(sys, "frozen", False)) and not configured:
+        if not installed and model_files_installed and not bool(getattr(sys, "frozen", False)) and not configured:
             installed = True
             dev_fallback = True
         running = spec.settings_key in self._local_ai_model_installs
@@ -7536,10 +7538,7 @@ class Bridge(QObject):
             message = f"Installing {spec.install_label}..."
         elif installed:
             state = "installed"
-            if dev_fallback:
-                message = "Available through the current development Python. Packaged installs use the managed model runtime."
-            else:
-                message = "Installed. Model files may download on first use if they are not already available."
+            message = "Installed."
         else:
             state = "not_installed"
             message = "Not installed. Install this model before using it."
@@ -7554,12 +7553,30 @@ class Bridge(QObject):
             "installed": installed,
             "running": running,
             "dev_fallback": dev_fallback,
+            "model_files_installed": model_files_installed,
             "message": message,
             "runtime_python": str(python_path),
             "runtime_dir": str(Path(python_path).parent.parent),
+            "location": str(Path(python_path).parent.parent),
             "requirements_file": str(requirements_path),
             "python_bootstrap": str(self._local_ai_python_bootstrap_exe()),
         }
+
+    def _local_ai_model_files_installed(self, models_dir: Path, model_id: str) -> bool:
+        from app.mediamanager.ai_captioning.model_registry import CAPTION_MODEL_ID, GEMMA4_MODEL_ID, TAG_MODEL_ID
+
+        local_dir = Path(models_dir) / model_id
+        if model_id == TAG_MODEL_ID:
+            return (local_dir / "model.onnx").is_file() and (local_dir / "selected_tags.csv").is_file()
+        if model_id == CAPTION_MODEL_ID:
+            clip_dir = Path(models_dir) / "openai" / "clip-vit-large-patch14-336"
+            return (local_dir / "config.json").is_file() and any(local_dir.glob("*.safetensors")) and (clip_dir / "config.json").is_file()
+        if model_id == GEMMA4_MODEL_ID:
+            if (local_dir / "config.json").is_file() and any(local_dir.glob("*.safetensors")):
+                return True
+            hf_home = Path(models_dir) / "gemma4_runtime" / "hf_home"
+            return any((snapshot / "config.json").is_file() and any(snapshot.glob("*.safetensors")) for snapshot in hf_home.glob("hub/models--google--gemma-4-E2B-it/snapshots/*"))
+        return (local_dir / "config.json").is_file()
 
     @staticmethod
     def _verify_python_can_create_venvs(command: list[str]) -> str:
@@ -7757,6 +7774,20 @@ class Bridge(QObject):
                     ([bootstrap_python, "-m", "venv", str(runtime_dir)], f"Creating {spec.install_label} runtime..."),
                     ([str(python_path), "-m", "pip", "install", "--upgrade", "pip"], "Updating package installer..."),
                     ([str(python_path), "-m", "pip", "install", "-r", str(requirements_path)], f"Installing {spec.install_label} support..."),
+                    (
+                        [
+                            str(python_path),
+                            "-m",
+                            spec.worker_module,
+                            "--operation",
+                            "preload",
+                            "--source",
+                            str(Path(__file__).resolve()),
+                            "--settings-json",
+                            json.dumps(self._local_ai_default_settings_payload_for_spec(spec), ensure_ascii=False),
+                        ],
+                        f"Downloading {spec.install_label} model files...",
+                    ),
                 ]
                 for command, message in commands:
                     payload.update({"state": "installing", "running": True, "message": message})
@@ -7797,6 +7828,36 @@ class Bridge(QObject):
 
         threading.Thread(target=work, daemon=True, name=f"local-ai-install-{spec.settings_key}").start()
         return True
+
+    @Slot(str, str, result=bool)
+    def uninstall_local_ai_model(self, model_id: str, kind: str) -> bool:
+        try:
+            from app.mediamanager.ai_captioning.model_registry import model_spec
+
+            spec = model_spec(str(model_id), str(kind))
+        except Exception as exc:
+            self.localAiModelInstallStatus.emit(str(model_id), {"state": "error", "message": str(exc) or "Unknown model."})
+            return False
+        if spec.settings_key in self._local_ai_model_installs:
+            self.localAiModelInstallStatus.emit(spec.settings_key, {"state": "error", "message": "This model is currently installing."})
+            return False
+
+        try:
+            models_dir = Path(str(self.settings.value("ai_caption/models_dir", self._local_ai_models_dir_default(), type=str) or self._local_ai_models_dir_default()))
+            targets = [self._local_ai_runtime_python_path(spec).parent.parent, models_dir / spec.id]
+            if spec.id == "internlm/internlm-xcomposer2-vl-1_8b":
+                targets.append(models_dir / "openai" / "clip-vit-large-patch14-336")
+            if spec.id == "google/gemma-4-E2B-it":
+                targets.append(models_dir / "gemma4_runtime")
+            for target in targets:
+                if target.exists():
+                    shutil.rmtree(target)
+            self.localAiModelInstallStatus.emit(spec.settings_key, self._local_ai_status_payload_for_spec(spec))
+            return True
+        except Exception as exc:
+            self.localAiModelInstallStatus.emit(spec.settings_key, {"state": "error", "message": str(exc) or "Uninstall failed."})
+            self._log(f"Local AI model uninstall failed for {spec.install_label}: {exc}")
+            return False
 
     def _local_ai_caption_settings(self):
         from app.mediamanager.ai_captioning.local_captioning import (
@@ -7930,6 +7991,14 @@ class Bridge(QObject):
             "repetition_penalty": float(ai_settings.repetition_penalty),
             "no_repeat_ngram_size": int(ai_settings.no_repeat_ngram_size),
         }
+
+    def _local_ai_default_settings_payload_for_spec(self, spec) -> dict:
+        ai_settings = self._local_ai_caption_settings()
+        if spec.kind == "tagger":
+            ai_settings.tag_model_id = spec.id
+        else:
+            ai_settings.caption_model_id = spec.id
+        return self._local_ai_settings_payload(ai_settings)
 
     def _local_ai_worker_command(self, operation: str, ai_settings) -> tuple[str, str]:
         from app.mediamanager.ai_captioning.model_registry import (
@@ -9809,6 +9878,11 @@ class MainWindow(QMainWindow):
         self.act_show_dismissed_progress_toasts = QAction("Show Hidden Progress Toasts", self)
         self.act_show_dismissed_progress_toasts.triggered.connect(self.bridge.reveal_progress_toasts)
         view_menu.addAction(self.act_show_dismissed_progress_toasts)
+
+        view_menu.addSeparator()
+        self.act_show_ai_models_status = QAction("Show AI Models and Status", self)
+        self.act_show_ai_models_status.triggered.connect(lambda: self.open_local_ai_setup())
+        view_menu.addAction(self.act_show_ai_models_status)
 
         view_menu.addSeparator()
 

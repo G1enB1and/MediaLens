@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import html
 import json
 import sys
 from datetime import datetime
@@ -2101,6 +2102,9 @@ class AISettingsPage(SettingsPage):
         tags_form = QFormLayout(tags_group)
         tags_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         tags_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        tags_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        tags_form.setVerticalSpacing(5)
+        tags_form.setHorizontalSpacing(12)
         content_layout.addWidget(tags_group)
 
         self.tag_model_combo = QComboBox()
@@ -2109,8 +2113,15 @@ class AISettingsPage(SettingsPage):
                 self.tag_model_combo.addItem(spec.label, spec.id)
         tags_form.addRow("Tag Model", self.tag_model_combo)
 
+        self.tag_model_description_label = QLabel("")
+        self.tag_model_description_label.setWordWrap(True)
+        self.tag_model_description_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.tag_model_description_label.setMinimumHeight(22)
+        self.tag_model_description_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.tag_model_status_label = QLabel("")
-        self.tag_model_status_label.setWordWrap(True)
+        self.tag_model_status_label.setObjectName("aiSettingsModelStatus")
+        self.tag_model_status_label.setTextFormat(Qt.TextFormat.RichText)
+        self.tag_model_status_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.tag_model_install_btn = QPushButton("Install Model")
         self.tag_model_install_btn.clicked.connect(lambda: self._install_selected_ai_model("tagger"))
         tag_model_status_row = QWidget()
@@ -2119,6 +2130,7 @@ class AISettingsPage(SettingsPage):
         tag_model_status_layout.setSpacing(8)
         tag_model_status_layout.addWidget(self.tag_model_status_label, 1)
         tag_model_status_layout.addWidget(self.tag_model_install_btn)
+        tags_form.addRow("Description", self.tag_model_description_label)
         tags_form.addRow("Status", tag_model_status_row)
 
         self.tag_write_mode_combo = QComboBox()
@@ -2150,6 +2162,9 @@ class AISettingsPage(SettingsPage):
         descriptions_form = QFormLayout(descriptions_group)
         descriptions_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         descriptions_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        descriptions_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        descriptions_form.setVerticalSpacing(5)
+        descriptions_form.setHorizontalSpacing(12)
         content_layout.addWidget(descriptions_group)
 
         self.caption_model_combo = QComboBox()
@@ -2158,8 +2173,15 @@ class AISettingsPage(SettingsPage):
                 self.caption_model_combo.addItem(spec.label, spec.id)
         descriptions_form.addRow("Description Model", self.caption_model_combo)
 
+        self.caption_model_description_label = QLabel("")
+        self.caption_model_description_label.setWordWrap(True)
+        self.caption_model_description_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.caption_model_description_label.setMinimumHeight(22)
+        self.caption_model_description_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.caption_model_status_label = QLabel("")
-        self.caption_model_status_label.setWordWrap(True)
+        self.caption_model_status_label.setObjectName("aiSettingsModelStatus")
+        self.caption_model_status_label.setTextFormat(Qt.TextFormat.RichText)
+        self.caption_model_status_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.caption_model_install_btn = QPushButton("Install Model")
         self.caption_model_install_btn.clicked.connect(lambda: self._install_selected_ai_model("captioner"))
         caption_model_status_row = QWidget()
@@ -2168,6 +2190,7 @@ class AISettingsPage(SettingsPage):
         caption_model_status_layout.setSpacing(8)
         caption_model_status_layout.addWidget(self.caption_model_status_label, 1)
         caption_model_status_layout.addWidget(self.caption_model_install_btn)
+        descriptions_form.addRow("Description", self.caption_model_description_label)
         descriptions_form.addRow("Status", caption_model_status_row)
 
         self.description_write_mode_combo = QComboBox()
@@ -2239,20 +2262,32 @@ class AISettingsPage(SettingsPage):
         return str(combo.currentData() or "")
 
     def _apply_ai_model_status(self, kind: str, status: dict) -> None:
-        label = self.tag_model_status_label if kind == "tagger" else self.caption_model_status_label
+        description_label = self.tag_model_description_label if kind == "tagger" else self.caption_model_description_label
+        status_label = self.tag_model_status_label if kind == "tagger" else self.caption_model_status_label
         button = self.tag_model_install_btn if kind == "tagger" else self.caption_model_install_btn
         state = str(status.get("state") or "").strip()
         description = str(status.get("description") or "").strip()
-        size = str(status.get("estimated_size") or "").strip()
         message = str(status.get("message") or "").strip()
-        parts = []
-        if description:
-            parts.append(description)
-        if size:
-            parts.append(size)
-        if message:
-            parts.append(message)
-        label.setText("\n".join(parts) if parts else "Status unavailable.")
+        Theme = _theme_api()
+        is_light = Theme.get_is_light()
+        ok_color = "#238636" if is_light else "#7ee787"
+        bad_color = "#c62828" if is_light else "#ff7b72"
+        if state == "installed":
+            status_text = f'<span style="color:{ok_color};">✓</span> Installed'
+        elif state == "installing":
+            status_text = "Installing..."
+        elif state == "not_installed":
+            status_text = f'<span style="color:{bad_color};">✕</span> Not installed'
+        elif state == "error":
+            clean_error = html.escape(message) if message else "Error"
+            status_text = f'<span style="color:{bad_color};">✕</span> {clean_error}'
+        else:
+            status_text = html.escape(message or "Status unavailable")
+        description_label.setText(description or "No description available.")
+        status_label.setText(status_text)
+        status_label.setProperty("installState", state or "unknown")
+        status_label.style().unpolish(status_label)
+        status_label.style().polish(status_label)
         button.setVisible(state in {"not_installed", "error", "installing"})
         button.setEnabled(state in {"not_installed", "error"})
         button.setText("Installing..." if state == "installing" else "Install Model")
@@ -2390,7 +2425,7 @@ class LocalAiSetupDialog(QDialog):
         title.setFont(title_font)
         root.addWidget(title)
 
-        intro = QLabel("Install the local AI models you want to use. Each model has its own isolated runtime so installing one model does not change another model.")
+        intro = QLabel("Install the local AI models you want to use.")
         intro.setWordWrap(True)
         root.addWidget(intro)
 
@@ -2406,8 +2441,10 @@ class LocalAiSetupDialog(QDialog):
 
         buttons = QHBoxLayout()
         self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.refresh_btn.clicked.connect(self.refresh_statuses)
         self.close_btn = QPushButton("Close")
+        self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.close_btn.clicked.connect(self.close)
         buttons.addWidget(self.refresh_btn)
         buttons.addStretch(1)
@@ -2455,52 +2492,83 @@ class LocalAiSetupDialog(QDialog):
             frame.setObjectName("localAiModelRow")
             frame.setFrameShape(QFrame.Shape.StyledPanel)
             layout = QGridLayout(frame)
-            layout.setContentsMargins(12, 12, 12, 12)
-            layout.setHorizontalSpacing(10)
-            layout.setVerticalSpacing(6)
+            layout.setContentsMargins(16, 14, 16, 14)
+            layout.setHorizontalSpacing(20)
+            layout.setVerticalSpacing(0)
 
+            details_panel = QWidget()
+            details_layout = QVBoxLayout(details_panel)
+            details_layout.setContentsMargins(0, 0, 0, 0)
+            details_layout.setSpacing(0)
             name = QLabel(spec.label)
+            name.setObjectName("localAiModelName")
             name_font = name.font()
             name_font.setBold(True)
             name.setFont(name_font)
-            layout.addWidget(name, 0, 0)
+            details_layout.addWidget(name)
+
+            metadata = QWidget()
+            metadata_layout = QVBoxLayout(metadata)
+            metadata_layout.setContentsMargins(0, 8, 0, 0)
+            metadata_layout.setSpacing(3)
+            detail_rows = (
+                ("Use", self._capabilities_label(kinds)),
+                ("Description", str(spec.description or "")),
+                ("Size", str(spec.estimated_size or "")),
+            )
+            for label, value in detail_rows:
+                detail = QLabel(f"<b>{html.escape(label)}:</b> {html.escape(value)}")
+                detail.setObjectName("localAiModelDetails")
+                detail.setTextFormat(Qt.TextFormat.RichText)
+                detail.setWordWrap(True)
+                detail.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+                metadata_layout.addWidget(detail)
+            details_layout.addWidget(metadata)
+            layout.addWidget(details_panel, 0, 0)
+
+            actions_panel = QWidget()
+            actions_layout = QVBoxLayout(actions_panel)
+            actions_layout.setContentsMargins(0, 0, 0, 0)
+            actions_layout.setSpacing(8)
+            actions_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight)
 
             status_badge = QLabel("Checking")
             status_badge.setObjectName("localAiStatusBadge")
+            status_badge.setTextFormat(Qt.TextFormat.RichText)
             badge_font = status_badge.font()
-            badge_font.setPointSize(max(badge_font.pointSize() + 2, 12))
             badge_font.setBold(True)
             status_badge.setFont(badge_font)
-            status_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            layout.addWidget(status_badge, 0, 1)
-
-            capability = QLabel(f"Used for: {self._capabilities_label(kinds)}")
-            layout.addWidget(capability, 1, 0)
-
-            description = QLabel(str(spec.description or ""))
-            description.setWordWrap(True)
-            layout.addWidget(description, 2, 0)
-
-            size = QLabel(str(spec.estimated_size or ""))
-            size.setWordWrap(True)
-            layout.addWidget(size, 3, 0)
-
-            status = QLabel("Checking status...")
-            status.setWordWrap(True)
-            layout.addWidget(status, 4, 0)
+            status_badge.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            status_badge.setMinimumWidth(178)
+            actions_layout.addWidget(status_badge)
 
             install_btn = QPushButton("Install")
             install_btn.setObjectName("localAiInstallButton")
+            install_btn.setFixedHeight(28)
+            install_btn.setMinimumWidth(178)
+            install_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             install_btn.clicked.connect(lambda _checked=False, s=spec: self._install_model(s))
-            layout.addWidget(install_btn, 1, 1)
+            actions_layout.addWidget(install_btn)
+
+            uninstall_btn = QPushButton("Uninstall")
+            uninstall_btn.setObjectName("localAiUninstallButton")
+            uninstall_btn.setFixedHeight(28)
+            uninstall_btn.setMinimumWidth(178)
+            uninstall_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            uninstall_btn.clicked.connect(lambda _checked=False, s=spec: self._uninstall_model(s))
+            actions_layout.addWidget(uninstall_btn)
+            actions_layout.addStretch(1)
+
+            layout.addWidget(actions_panel, 0, 1)
             layout.setColumnStretch(0, 1)
+            layout.setColumnMinimumWidth(1, 178)
 
             self.rows_layout.addWidget(frame)
             self._rows[status_key] = {
                 "spec": spec,
-                "status": status,
                 "badge": status_badge,
                 "button": install_btn,
+                "uninstall_button": uninstall_btn,
                 "frame": frame,
             }
         self.rows_layout.addStretch(1)
@@ -2523,20 +2591,23 @@ class LocalAiSetupDialog(QDialog):
         row = self._rows.get(status_key)
         if not row:
             return
-        label = row["status"]
         badge = row["badge"]
         button = row["button"]
+        uninstall_button = row["uninstall_button"]
         frame = row["frame"]
         state = str(status.get("state") or "").strip()
-        message = str(status.get("message") or "").strip() or "Status unavailable."
+        Theme = _theme_api()
+        is_light = Theme.get_is_light()
+        ok_color = "#238636" if is_light else "#7ee787"
+        bad_color = "#c62828" if is_light else "#ff7b72"
         if state == "installed":
-            badge.setText("Installed")
+            badge.setText(f'<span style="color:{ok_color};">✓</span> Installed')
         elif state == "installing":
             badge.setText("Installing")
         elif state == "error":
-            badge.setText("Error")
+            badge.setText(f'<span style="color:{bad_color};">✕</span> Error')
         elif state == "not_installed":
-            badge.setText("Not installed")
+            badge.setText(f'<span style="color:{bad_color};">✕</span> Not installed')
         else:
             badge.setText("Unknown")
         frame.setProperty("installState", state or "unknown")
@@ -2545,16 +2616,34 @@ class LocalAiSetupDialog(QDialog):
         frame.style().polish(frame)
         badge.style().unpolish(badge)
         badge.style().polish(badge)
-        label.setText(message)
+        badge.setVisible(state in {"installed", "error"})
         button.setVisible(state in {"not_installed", "error", "installing"})
         button.setEnabled(state in {"not_installed", "error"})
         button.setText("Installing..." if state == "installing" else "Install")
+        uninstall_button.setVisible(state == "installed")
+        uninstall_button.setEnabled(state == "installed")
 
     def _install_model(self, spec) -> None:
         if not hasattr(self.bridge, "install_local_ai_model"):
             self._apply_status(spec.settings_key, {"state": "error", "message": "Model installation is not available in this build."})
             return
         self.bridge.install_local_ai_model(spec.id, spec.kind)
+        self.refresh_statuses()
+
+    def _uninstall_model(self, spec) -> None:
+        if not hasattr(self.bridge, "uninstall_local_ai_model"):
+            self._apply_status(spec.settings_key, {"state": "error", "message": "Model uninstall is not available in this build."})
+            return
+        reply = QMessageBox.question(
+            self,
+            "Uninstall AI Model",
+            f"Uninstall {spec.label}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self.bridge.uninstall_local_ai_model(spec.id, spec.kind)
         self.refresh_statuses()
 
     def _on_install_status(self, status_key: str, payload: dict) -> None:
@@ -2575,13 +2664,7 @@ class LocalAiSetupDialog(QDialog):
         hover = Theme.get_btn_save_hover(accent)
         accent_soft = Theme.get_accent_soft(accent)
         accent_str = accent.name()
-        selection_text = "#000000" if SettingsProxyStyle._contrast_ratio(accent, QColor("#000000")) >= SettingsProxyStyle._contrast_ratio(accent, QColor("#ffffff")) else "#ffffff"
-        installed_bg = Theme.mix(control_bg, QColor("#2f8f46"), 0.20 if Theme.get_is_light() else 0.24)
-        installed_fg = "#145523" if Theme.get_is_light() else "#bdf5ca"
-        missing_bg = Theme.mix(control_bg, QColor("#c9563d"), 0.22 if Theme.get_is_light() else 0.26)
         missing_fg = "#7c1f11" if Theme.get_is_light() else "#ffd1c7"
-        installing_bg = Theme.mix(control_bg, accent, 0.22 if Theme.get_is_light() else 0.26)
-        error_bg = Theme.mix(control_bg, QColor("#d33f49"), 0.24 if Theme.get_is_light() else 0.28)
         error_fg = "#8a111a" if Theme.get_is_light() else "#ffd0d4"
         self.setStyleSheet(f"""
             QDialog {{
@@ -2614,39 +2697,22 @@ class LocalAiSetupDialog(QDialog):
             }}
             QLabel#localAiStatusBadge {{
                 color: {text};
-                background-color: {control_bg};
-                border: 1px solid {border};
-                border-radius: 6px;
-                padding: 5px 10px;
-                min-width: 112px;
-            }}
-            QLabel#localAiStatusBadge[installState="installed"] {{
-                color: {installed_fg};
-                background-color: {installed_bg};
-                border-color: {installed_fg};
-            }}
-            QLabel#localAiStatusBadge[installState="not_installed"] {{
-                color: {missing_fg};
-                background-color: {missing_bg};
-                border-color: {missing_fg};
-            }}
-            QLabel#localAiStatusBadge[installState="installing"] {{
-                color: {selection_text};
-                background-color: {accent_str};
-                border-color: {accent_str};
+                background: transparent;
+                border: none;
+                padding: 0;
+                font-size: 15px;
+                font-weight: 700;
             }}
             QLabel#localAiStatusBadge[installState="error"] {{
                 color: {error_fg};
-                background-color: {error_bg};
-                border-color: {error_fg};
             }}
             QPushButton {{
                 background-color: {Theme.get_btn_save_bg(accent)};
                 color: {text};
                 border: 1px solid {border};
                 border-radius: 6px;
-                padding: 6px 12px;
-                min-height: 26px;
+                padding: 3px 10px;
+                min-height: 24px;
             }}
             QPushButton:hover {{
                 background-color: {hover};
@@ -2665,10 +2731,19 @@ class LocalAiSetupDialog(QDialog):
                 background-color: {accent_soft};
                 border-color: {accent_str};
                 font-weight: 600;
+                min-height: 28px;
+                max-height: 28px;
             }}
-            QPushButton#localAiInstallButton:hover {{
+            QPushButton#localAiInstallButton:hover, QPushButton#localAiUninstallButton:hover {{
                 background-color: {hover};
                 border-color: {accent_str};
+            }}
+            QPushButton#localAiUninstallButton {{
+                background-color: {Theme.get_btn_save_bg(accent)};
+                border-color: {border};
+                font-weight: 600;
+                min-height: 28px;
+                max-height: 28px;
             }}
             QScrollBar:vertical {{
                 background: {Theme.get_scrollbar_track(accent)};
@@ -2834,6 +2909,13 @@ class SettingsDialog(QDialog):
         popup_hover = Theme.mix(popup_bg, accent, 0.12 if Theme.get_is_light() else 0.16)
         close_bg = Theme.get_btn_save_bg(accent)
         close_hover = Theme.get_btn_save_hover(accent)
+        installed_bg = Theme.mix(control_bg, QColor("#2f8f46"), 0.20 if Theme.get_is_light() else 0.24)
+        installed_fg = "#145523" if Theme.get_is_light() else "#bdf5ca"
+        missing_bg = Theme.mix(control_bg, QColor("#c9563d"), 0.22 if Theme.get_is_light() else 0.26)
+        missing_fg = "#7c1f11" if Theme.get_is_light() else "#ffd1c7"
+        installing_bg = Theme.mix(control_bg, accent, 0.22 if Theme.get_is_light() else 0.26)
+        error_bg = Theme.mix(control_bg, QColor("#d33f49"), 0.24 if Theme.get_is_light() else 0.28)
+        error_fg = "#8a111a" if Theme.get_is_light() else "#ffd0d4"
         
         for btn in self.findChildren(QPushButton):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -2857,6 +2939,17 @@ class SettingsDialog(QDialog):
             }}
             QLabel#settingsDescription {{
                 color: {muted};
+            }}
+            QLabel#aiSettingsModelStatus {{
+                font-size: 13px;
+                font-weight: 700;
+                color: {text};
+                border: none;
+                padding: 0;
+                background: transparent;
+            }}
+            QLabel#aiSettingsModelStatus[installState="installing"] {{
+                color: {accent_str};
             }}
             QLabel#settingsFieldTitle {{
                 font-size: 14px;

@@ -22,6 +22,7 @@ This release makes local AI model support much more dependable and flexible. Med
 - Added a Local AI Models setup dialog that appears after installing or updating MediaLens and shows install status for each optional model runtime.
 - Added a managed Python bootstrap for local AI model installs so MediaLens can create per-model runtimes without requiring users to install Python themselves.
 - Added clearer local AI model download size estimates based on the actual model files and major runtime packages.
+- Added a View menu action to open Local AI Models and Status at any time.
 - Added `{starter}` support for description prompts so users can place the starter text exactly where they want it.
 
 ### Changed
@@ -29,6 +30,7 @@ This release makes local AI model support much more dependable and flexible. Med
 - Changed local AI execution so each model can run in its own virtual environment instead of sharing one dependency set.
 - Changed installed builds to store optional local AI runtimes under `%APPDATA%\MediaLens\ai-runtimes` instead of the app install folder.
 - Changed Generate Tags and Generate Description to open Local AI Models setup when the selected model runtime is not installed.
+- Changed AI Settings model status details into separate Description, Size, Status, and Location rows.
 - Changed description prompt handling so `{tags}` is opt-in; tags are only inserted when the prompt includes the `{tags}` placeholder.
 - Changed `Start Description With` so it is passed to the model as an instruction instead of being prepended to the generated response.
 - Changed InternLM XComposer2 loading back to the working legacy path after the Gemma integration work showed it requires a different runtime approach.

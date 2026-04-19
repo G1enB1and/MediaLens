@@ -37,7 +37,7 @@ MODEL_SPECS: tuple[LocalAiModelSpec, ...] = (
         install_label="WD SwinV2 Tagger v3",
         requirements_file="requirements-local-ai-wd-swinv2.txt",
         description="Fast searchable tag generation for images.",
-        estimated_size="Approx. 0.6 GB download total (runtime packages plus 467 MB model files on first use).",
+        estimated_size="Approx. 0.6 GB",
     ),
     LocalAiModelSpec(
         id=GEMMA4_MODEL_ID,
@@ -49,7 +49,7 @@ MODEL_SPECS: tuple[LocalAiModelSpec, ...] = (
         install_label="Gemma 4",
         requirements_file="requirements-local-ai-gemma.txt",
         description="General vision-language model for tags and descriptions.",
-        estimated_size="Approx. 13.0 GB download total (10.3 GB model files plus 2.6 GB Torch runtime).",
+        estimated_size="Approx. 13.0 GB",
     ),
     LocalAiModelSpec(
         id=CAPTION_MODEL_ID,
@@ -61,7 +61,7 @@ MODEL_SPECS: tuple[LocalAiModelSpec, ...] = (
         install_label="InternLM XComposer2 VL 1.8B",
         requirements_file="requirements-local-ai-internlm-xcomposer2.txt",
         description="Image description generation using your description prompt.",
-        estimated_size="Approx. 7.6 GB download total (4.9 GB model files plus 2.6 GB Torch runtime).",
+        estimated_size="Approx. 7.6 GB",
     ),
     LocalAiModelSpec(
         id=GEMMA4_MODEL_ID,
@@ -73,7 +73,7 @@ MODEL_SPECS: tuple[LocalAiModelSpec, ...] = (
         install_label="Gemma 4",
         requirements_file="requirements-local-ai-gemma.txt",
         description="General vision-language model for tags and descriptions.",
-        estimated_size="Approx. 13.0 GB download total (10.3 GB model files plus 2.6 GB Torch runtime).",
+        estimated_size="Approx. 13.0 GB",
     ),
 )
 

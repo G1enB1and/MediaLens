@@ -172,7 +172,7 @@ def _split_tags(raw: str, settings: dict[str, Any]) -> list[str]:
 
 def _run_cli() -> int:
     parser = argparse.ArgumentParser(description="Run one isolated MediaLens Gemma 4 local AI task.")
-    parser.add_argument("--operation", choices=("tags", "description"), required=True)
+    parser.add_argument("--operation", choices=("tags", "description", "preload"), required=True)
     parser.add_argument("--source", required=True)
     parser.add_argument("--settings-json", required=True)
     parser.add_argument("--tags-json", default="[]")
@@ -180,6 +180,11 @@ def _run_cli() -> int:
 
     try:
         settings = _settings_from_json(args.settings_json)
+        if args.operation == "preload":
+            with contextlib.redirect_stdout(sys.stderr):
+                _load_model(settings)
+            print(json.dumps({"ok": True}, ensure_ascii=False), flush=True)
+            return 0
         if args.operation == "tags":
             prompt = (
                 "Generate concise searchable tags for this image. Return only comma-separated tags, "
