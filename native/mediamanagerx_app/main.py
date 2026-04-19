@@ -4,7 +4,7 @@ try:
     with open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "VERSION"), "r") as f:
         __version__ = f.read().strip()
 except Exception:
-    __version__ = "v1.1.28"
+    __version__ = "v1.1.29"
 
 
 import sys
@@ -7511,6 +7511,13 @@ class Bridge(QObject):
                 return candidate
         return candidates[0]
 
+    def _local_ai_worker_launcher(self, python_path: str | Path, worker_module: str) -> tuple[list[str], Path, str]:
+        source_root = self._local_ai_worker_source_root()
+        worker_script = source_root / Path(*str(worker_module).split(".")).with_suffix(".py")
+        if worker_script.is_file():
+            return [str(python_path), str(worker_script)], self._local_ai_runtime_root(), ""
+        return [str(python_path), "-m", str(worker_module)], source_root, str(source_root)
+
     def _local_ai_runtime_python_path(self, spec) -> Path:
         from app.mediamanager.ai_captioning.model_registry import default_python_for_runtime
 
@@ -7774,20 +7781,6 @@ class Bridge(QObject):
                     ([bootstrap_python, "-m", "venv", str(runtime_dir)], f"Creating {spec.install_label} runtime..."),
                     ([str(python_path), "-m", "pip", "install", "--upgrade", "pip"], "Updating package installer..."),
                     ([str(python_path), "-m", "pip", "install", "-r", str(requirements_path)], f"Installing {spec.install_label} support..."),
-                    (
-                        [
-                            str(python_path),
-                            "-m",
-                            spec.worker_module,
-                            "--operation",
-                            "preload",
-                            "--source",
-                            str(Path(__file__).resolve()),
-                            "--settings-json",
-                            json.dumps(self._local_ai_default_settings_payload_for_spec(spec), ensure_ascii=False),
-                        ],
-                        f"Downloading {spec.install_label} model files...",
-                    ),
                 ]
                 for command, message in commands:
                     payload.update({"state": "installing", "running": True, "message": message})
@@ -7815,7 +7808,56 @@ class Bridge(QObject):
                             self.localAiModelInstallStatus.emit(spec.settings_key, dict(payload))
                     returncode = process.wait()
                     if returncode != 0:
-                        raise RuntimeError(f"{message} failed. {last_line}")
+                        raise RuntimeError(f"{message} failed ({self._local_ai_exit_code_text(returncode)}). {last_line}")
+                models_dir = Path(str(self.settings.value("ai_caption/models_dir", self._local_ai_models_dir_default(), type=str) or self._local_ai_models_dir_default()))
+                if self._local_ai_model_files_installed(models_dir, spec.id):
+                    payload.update({"state": "installing", "running": True, "message": f"{spec.install_label} model files are already present."})
+                    self.localAiModelInstallStatus.emit(spec.settings_key, dict(payload))
+                else:
+                    message = f"Downloading {spec.install_label} model files..."
+                    launcher, worker_cwd, worker_pythonpath = self._local_ai_worker_launcher(python_path, spec.worker_module)
+                    command = [
+                        *launcher,
+                        "--operation",
+                        "preload",
+                        "--source",
+                        str(Path(__file__).resolve()),
+                        "--settings-json",
+                        json.dumps(self._local_ai_default_settings_payload_for_spec(spec), ensure_ascii=False),
+                    ]
+                    payload.update({"state": "installing", "running": True, "message": message})
+                    self.localAiModelInstallStatus.emit(spec.settings_key, dict(payload))
+                    child_env = os.environ.copy()
+                    if worker_pythonpath:
+                        child_env["PYTHONPATH"] = worker_pythonpath + (os.pathsep + child_env["PYTHONPATH"] if child_env.get("PYTHONPATH") else "")
+                    process = subprocess.Popen(
+                        command,
+                        cwd=str(worker_cwd),
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        env=child_env,
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
+                    )
+                    assert process.stdout is not None
+                    last_emit = 0.0
+                    last_line = message
+                    for line in process.stdout:
+                        clean = " ".join(str(line or "").split()).strip()
+                        if clean:
+                            last_line = clean[-240:]
+                        if time.monotonic() - last_emit >= 1.0:
+                            last_emit = time.monotonic()
+                            payload.update({"state": "installing", "running": True, "message": last_line})
+                            self.localAiModelInstallStatus.emit(spec.settings_key, dict(payload))
+                    returncode = process.wait()
+                    if returncode != 0:
+                        if self._local_ai_model_files_installed(models_dir, spec.id):
+                            self._log(f"Local AI model preload failed for {spec.install_label}, but required model files are present ({self._local_ai_exit_code_text(returncode)}): {last_line}")
+                        else:
+                            raise RuntimeError(f"{message} failed ({self._local_ai_exit_code_text(returncode)}). {last_line}")
                 payload = self._local_ai_status_payload_for_spec(spec)
                 payload.update({"state": "installed", "installed": True, "running": False, "message": f"{spec.install_label} is installed."})
                 self.localAiModelInstallStatus.emit(spec.settings_key, payload)
@@ -8029,12 +8071,10 @@ class Bridge(QObject):
         timeout_seconds = int(self.settings.value("ai_caption/item_timeout_seconds", 900, type=int) or 900)
         timeout_seconds = max(30, timeout_seconds)
         operation_label = "description" if operation == "description" else "tags"
-        project_root = self._local_ai_worker_source_root()
         python_exe, worker_module = self._local_ai_worker_command(operation, ai_settings)
+        launcher, worker_cwd, worker_pythonpath = self._local_ai_worker_launcher(python_exe, worker_module)
         command = [
-            python_exe,
-            "-m",
-            worker_module,
+            *launcher,
             "--operation",
             operation,
             "--source",
@@ -8045,9 +8085,10 @@ class Bridge(QObject):
         if tags is not None:
             command.extend(["--tags-json", json.dumps(tags, ensure_ascii=False)])
         child_env = os.environ.copy()
-        child_env["PYTHONPATH"] = str(project_root) + (os.pathsep + child_env["PYTHONPATH"] if child_env.get("PYTHONPATH") else "")
+        if worker_pythonpath:
+            child_env["PYTHONPATH"] = worker_pythonpath + (os.pathsep + child_env["PYTHONPATH"] if child_env.get("PYTHONPATH") else "")
         popen_kwargs = dict(
-            cwd=str(project_root),
+            cwd=str(worker_cwd),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -8109,6 +8150,14 @@ class Bridge(QObject):
         return payload
 
     @staticmethod
+    def _local_ai_exit_code_text(returncode: int | None) -> str:
+        if returncode is None:
+            return "no exit code"
+        if os.name == "nt":
+            return f"exit code {returncode} / 0x{returncode & 0xFFFFFFFF:08X}"
+        return f"exit code {returncode}"
+
+    @staticmethod
     def _local_ai_worker_failure_message(returncode: int | None, stdout: str, stderr: str) -> str:
         combined = "\n".join(part for part in (stdout, stderr) if str(part or "").strip())
         lines = []
@@ -8129,7 +8178,7 @@ class Bridge(QObject):
         if lines:
             return lines[-1][-500:]
         if returncode:
-            return f"Local AI worker exited without a result (exit code {returncode})."
+            return f"Local AI worker exited without a result ({Bridge._local_ai_exit_code_text(returncode)})."
         return "Local AI worker exited without a result."
 
     def cancel_local_ai_captioning(self) -> None:

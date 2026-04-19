@@ -1,6 +1,30 @@
 # Change Log
 
-## v1.1.28 (Current)
+## v1.1.29 (Current)
+
+### Summary
+
+This release fixes local AI install and preload failures in installed builds. MediaLens now launches each model worker from its own isolated runtime path, skips model downloads when required files are already present, repairs stale InternLM support paths, and reports clearer install errors when a preload really fails.
+
+### Highlights
+
+- Existing local AI model files are now detected before MediaLens tries to download them again.
+- Install can finish cleanly after creating the runtime even when the model files were already present.
+- Local AI workers no longer inherit the packaged app's internal Python package path, preventing installed-build dependency conflicts with per-model virtual environments.
+- InternLM XComposer2 can recover when its local CLIP path was previously patched to an old development model folder.
+- A failed preload/download now includes a clearer process exit code, and no longer leaves a false error if the required model files are confirmed on disk.
+
+### Changed
+
+- Changed local AI model installation to skip the preload/download step when model files are already installed.
+- Changed local AI worker startup to launch direct worker scripts from the model runtime directory instead of importing through the packaged app bundle.
+- Changed local AI install completion to re-check model files after preload failures before reporting an error.
+- Changed InternLM XComposer2 path repair so stale local CLIP paths are replaced with the currently configured model folder.
+- Changed local AI worker failure messages to include Windows exit-code details when available.
+
+---
+
+## v1.1.28
 
 ### Summary
 

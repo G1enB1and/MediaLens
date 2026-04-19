@@ -6,7 +6,10 @@ import json
 import sys
 from pathlib import Path
 
-from app.mediamanager.ai_captioning.local_captioning import LocalAiSettings, XComposer2Captioner
+try:
+    from app.mediamanager.ai_captioning.local_captioning import LocalAiSettings, XComposer2Captioner
+except ModuleNotFoundError:
+    from local_captioning import LocalAiSettings, XComposer2Captioner
 
 
 def _settings_from_json(raw: str) -> LocalAiSettings:

@@ -16,12 +16,20 @@ from typing import Callable, Iterable
 from PIL import Image as PilImage
 from PIL.ImageOps import exif_transpose
 
-from app.mediamanager.ai_captioning.model_registry import (
-    CAPTION_MODEL_ID,
-    GEMMA4_MODEL_ID,
-    TAG_MODEL_ID,
-    available_models,
-)
+try:
+    from app.mediamanager.ai_captioning.model_registry import (
+        CAPTION_MODEL_ID,
+        GEMMA4_MODEL_ID,
+        TAG_MODEL_ID,
+        available_models,
+    )
+except ModuleNotFoundError:
+    from model_registry import (
+        CAPTION_MODEL_ID,
+        GEMMA4_MODEL_ID,
+        TAG_MODEL_ID,
+        available_models,
+    )
 
 DEFAULT_CAPTION_PROMPT = (
     "Please provide a description of this image in natural language paragraph style. "
@@ -280,10 +288,14 @@ class XComposer2Captioner:
         try:
             XComposer2Captioner._repair_local_xcomposer_files(model_path)
             text = build_mlp.read_text(encoding="utf-8")
-            remote_line = "vision_tower = 'openai/clip-vit-large-patch14-336'"
             local_line = f"vision_tower = {str(local_clip).replace(chr(92), '/')!r}"
-            if remote_line in text:
-                build_mlp.write_text(text.replace(remote_line, local_line), encoding="utf-8")
+            updated = re.sub(
+                r"vision_tower\s*=\s*['\"][^'\"]*clip-vit-large-patch14-336['\"]",
+                local_line,
+                text,
+            )
+            if updated != text:
+                build_mlp.write_text(updated, encoding="utf-8")
         except Exception:
             pass
 

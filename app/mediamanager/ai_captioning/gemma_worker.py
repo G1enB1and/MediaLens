@@ -13,8 +13,12 @@ from typing import Any
 from PIL import Image as PilImage
 from PIL.ImageOps import exif_transpose
 
-from app.mediamanager.ai_captioning.local_captioning import DEFAULT_CAPTION_PROMPT, build_description_prompt
-from app.mediamanager.ai_captioning.model_registry import GEMMA4_MODEL_ID
+try:
+    from app.mediamanager.ai_captioning.local_captioning import DEFAULT_CAPTION_PROMPT, build_description_prompt
+    from app.mediamanager.ai_captioning.model_registry import GEMMA4_MODEL_ID
+except ModuleNotFoundError:
+    from local_captioning import DEFAULT_CAPTION_PROMPT, build_description_prompt
+    from model_registry import GEMMA4_MODEL_ID
 
 
 def _settings_from_json(raw: str) -> dict[str, Any]:
