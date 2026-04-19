@@ -2143,7 +2143,7 @@ class AISettingsPage(SettingsPage):
         tags_form.addRow("Tag Write Rule", self.tag_write_mode_combo)
 
         self.tag_prompt_edit = QTextEdit()
-        self.tag_prompt_edit.setMinimumHeight(90)
+        self.tag_prompt_edit.setFixedHeight(80)
         self.tag_prompt_edit.setPlaceholderText("Tag prompt and rules.")
         tags_form.addRow("Tag Prompt", self.tag_prompt_edit)
 
@@ -2200,7 +2200,7 @@ class AISettingsPage(SettingsPage):
         descriptions_form.addRow("Description Rule", self.description_write_mode_combo)
 
         self.caption_prompt_edit = QTextEdit()
-        self.caption_prompt_edit.setMinimumHeight(120)
+        self.caption_prompt_edit.setFixedHeight(80)
         self.caption_prompt_edit.setPlaceholderText("Prompt. Use {tags} to insert tags and {starter} to place the starter.")
         descriptions_form.addRow("Description Prompt", self.caption_prompt_edit)
 
@@ -2439,6 +2439,11 @@ class LocalAiSetupDialog(QDialog):
         scroll.setWidget(content)
         root.addWidget(scroll, 1)
 
+        self.skip_startup_cb = QCheckBox("Don't show on startup (Can still open from View menu)")
+        self.skip_startup_cb.setChecked(bool(self.bridge.settings.value("ai_caption/setup_dialog_skip_startup", False, type=bool)))
+        self.skip_startup_cb.toggled.connect(lambda checked: self.bridge.settings.setValue("ai_caption/setup_dialog_skip_startup", checked))
+        root.addWidget(self.skip_startup_cb)
+
         buttons = QHBoxLayout()
         self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -2558,10 +2563,10 @@ class LocalAiSetupDialog(QDialog):
             uninstall_btn = QPushButton("Uninstall")
             uninstall_btn.setObjectName("localAiUninstallButton")
             uninstall_btn.setFixedHeight(28)
-            uninstall_btn.setMinimumWidth(178)
+            uninstall_btn.setMaximumWidth(100)
             uninstall_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             uninstall_btn.clicked.connect(lambda _checked=False, s=spec: self._uninstall_model(s))
-            actions_layout.addWidget(uninstall_btn)
+            actions_layout.addWidget(uninstall_btn, 0, Qt.AlignmentFlag.AlignRight)
             actions_layout.addStretch(1)
 
             layout.addWidget(actions_panel, 0, 1)
@@ -2682,6 +2687,11 @@ class LocalAiSetupDialog(QDialog):
         accent_str = accent.name()
         missing_fg = "#7c1f11" if Theme.get_is_light() else "#ffd1c7"
         error_fg = "#8a111a" if Theme.get_is_light() else "#ffd0d4"
+        _check_dir = (Path(__file__).with_name("web") / "scrollbar_arrows").as_posix()
+        _lum_r = accent.redF(); _lum_g = accent.greenF(); _lum_b = accent.blueF()
+        def _lin(c): return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+        _accent_lum = 0.2126 * _lin(_lum_r) + 0.7152 * _lin(_lum_g) + 0.0722 * _lin(_lum_b)
+        check_svg = f"{_check_dir}/{'check-dark.svg' if _accent_lum > 0.179 else 'check.svg'}"
         self.setStyleSheet(f"""
             QDialog {{
                 background-color: {bg};
@@ -2706,7 +2716,7 @@ class LocalAiSetupDialog(QDialog):
                 border-radius: 8px;
             }}
             QFrame#localAiModelRow[installState="not_installed"] {{
-                border-color: {missing_fg};
+                border-color: {border};
             }}
             QFrame#localAiModelRow[installState="error"] {{
                 border-color: {error_fg};
@@ -2728,6 +2738,25 @@ class LocalAiSetupDialog(QDialog):
             }}
             QLabel#localAiModelInstallMessage[installState="error"] {{
                 color: {error_fg};
+            }}
+            QCheckBox {{
+                color: {text};
+                spacing: 8px;
+            }}
+            QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+                border-radius: 4px;
+                border: 1px solid {border};
+                background-color: {control_bg};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {accent_str};
+                border-color: {accent_str};
+                image: url("{check_svg}");
+            }}
+            QCheckBox::indicator:hover {{
+                border-color: {accent_str};
             }}
             QPushButton {{
                 background-color: {Theme.get_btn_save_bg(accent)};

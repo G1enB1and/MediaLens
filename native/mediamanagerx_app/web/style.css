@@ -2769,18 +2769,6 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   min-height: 0;
 }
 
-#lightboxImg {
-  border-radius: 8px;
-}
-
-#lightboxImg {
-  filter: drop-shadow(0 20px 40px rgba(0, 0, 0, 0.5));
-}
-
-.light-mode #lightboxImg {
-  filter: drop-shadow(0 15px 35px rgba(0, 0, 0, 0.15));
-}
-
 #lightboxVideo {
   display: none;
   background: #000;

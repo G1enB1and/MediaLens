@@ -11036,7 +11036,7 @@ class MainWindow(QMainWindow):
         self.lbl_desc_cap = QLabel("Description:")
         self.meta_desc = QTextEdit()
         self.meta_desc.setPlaceholderText("Add a description...")
-        self.meta_desc.setMaximumHeight(90)
+        self.meta_desc.setMaximumHeight(130)
         self.meta_desc.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
 
         self.generate_description_btn_row = QWidget()
@@ -11065,7 +11065,7 @@ class MainWindow(QMainWindow):
         self.lbl_tags_cap = QLabel("Tags (comma separated):")
         self.meta_tags = QTextEdit()
         self.meta_tags.setPlaceholderText("tag1, tag2...")
-        self.meta_tags.setMaximumHeight(78)
+        self.meta_tags.setMaximumHeight(118)
         self.meta_tags.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.meta_tags.textChanged.connect(self._save_native_tags)
         self.meta_tags.textChanged.connect(lambda: self._refresh_tag_list_rows_state())
@@ -18095,7 +18095,29 @@ class MainWindow(QMainWindow):
         if seen_version == __version__:
             return
         self.bridge.settings.setValue(key, __version__)
+        if self.bridge.settings.value("ai_caption/setup_dialog_skip_startup", False, type=bool):
+            return
+        if self._all_local_ai_models_installed():
+            return
         self.open_local_ai_setup()
+
+    def _all_local_ai_models_installed(self) -> bool:
+        if not hasattr(self.bridge, "get_local_ai_model_status"):
+            return False
+        try:
+            from app.mediamanager.ai_captioning.model_registry import MODEL_SPECS
+
+            seen: set[str] = set()
+            for spec in MODEL_SPECS:
+                if spec.settings_key in seen:
+                    continue
+                seen.add(spec.settings_key)
+                status = dict(self.bridge.get_local_ai_model_status(spec.id, spec.kind) or {})
+                if status.get("state") != "installed":
+                    return False
+            return bool(seen)
+        except Exception:
+            return False
 
     def _selected_local_ai_model_status(self, kind: str) -> dict:
         if not hasattr(self.bridge, "get_local_ai_model_status"):
