@@ -4246,12 +4246,6 @@ class Bridge(QObject):
         self._checkpoint_dirty_count = 0
         self._scan_checkpoint: dict[str, set[str]] = self._load_scan_checkpoint()
 
-        # Two-phase scan: phase 1 = stat-only diff, phase 2 = deep work on changed files only.
-        # Disable with MEDIALENS_TWO_PHASE_SCAN=0 to fall back to original single-pass behavior.
-        self._two_phase_scan_enabled = str(
-            os.environ.get("MEDIALENS_TWO_PHASE_SCAN", "1")
-        ).strip().lower() not in {"0", "false", "no", "off"}
-
         self._compare_paths: dict[str, str] = {"left": "", "right": ""}
         self._compare_keep_paths: set[str] = set()
         self._compare_delete_paths: set[str] = set()
@@ -9340,52 +9334,6 @@ class Bridge(QObject):
         with self._checkpoint_lock:
             return set(self._scan_checkpoint.get(scope_key, set()))
 
-    def _identify_changed_paths(self, entries: list[dict]) -> list[Path]:
-        """Phase-1 stat-only sweep: return only paths that need a deep scan.
-
-        A path is considered "changed" if it is missing from the DB, has a
-        different size or mtime, or is missing required fields (content_hash,
-        dimensions, phash for images). Same logic as _scope_scan_is_warm but
-        returns the offending paths instead of a bool.
-        """
-        changed: list[Path] = []
-        for entry in entries:
-            if entry.get("is_folder"):
-                continue
-            path_str = str(entry.get("path") or "").strip()
-            if not path_str:
-                continue
-            try:
-                p = Path(path_str)
-                if not p.exists() or not p.is_file():
-                    continue
-                stat = p.stat()
-                current_mtime = datetime.fromtimestamp(
-                    stat.st_mtime,
-                    tz=timezone.utc,
-                ).replace(microsecond=0).isoformat()
-            except Exception:
-                changed.append(Path(path_str))
-                continue
-            needs_deep = False
-            if int(entry.get("file_size") or 0) != int(stat.st_size):
-                needs_deep = True
-            elif str(entry.get("modified_time") or "") != current_mtime:
-                needs_deep = True
-            elif not str(entry.get("content_hash") or "").strip():
-                needs_deep = True
-            elif not (entry.get("width") and entry.get("height")):
-                needs_deep = True
-            elif (
-                str(entry.get("media_type") or "") == "image"
-                and Path(path_str).suffix.lower() != ".svg"
-                and not str(entry.get("phash") or "").strip()
-            ):
-                needs_deep = True
-            if needs_deep:
-                changed.append(p)
-        return changed
-
     @Slot(list, str)
     def start_scan(self, folders: list, search_query: str = "") -> None:
         if not folders:
@@ -9423,15 +9371,8 @@ class Bridge(QObject):
                         self._warm_scan_keys.add(scan_key)
                         self.scanFinished.emit(primary, len(reconciled))
                     else:
-                        # Two-phase: stat-only sweep first to find what actually
-                        # changed. Falls back to full disk-cache scan if disabled.
-                        if self._two_phase_scan_enabled:
-                            changed = self._identify_changed_paths(reconciled)
-                            paths = changed if changed else []
-                        else:
-                            paths = list(self._disk_cache.values())
-                        if paths:
-                            self._do_full_scan(paths, self.conn, emit_progress=True, scope_key=scan_key)
+                        paths = list(self._disk_cache.values())
+                        self._do_full_scan(paths, self.conn, emit_progress=True, scope_key=scan_key)
                         self._last_full_scan_key = scan_key
                         self._warm_scan_keys.add(scan_key)
                         self.scanFinished.emit(primary, len(self._get_reconciled_candidates(folders, "all", search_query)))
