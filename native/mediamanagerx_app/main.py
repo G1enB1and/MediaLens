@@ -9341,7 +9341,7 @@ class Bridge(QObject):
         with self._checkpoint_lock:
             return set(self._scan_checkpoint.get(scope_key, set()))
 
-    def _identify_changed_paths(self, disk_paths: list[Path]) -> list[Path]:
+    def _identify_changed_paths(self, disk_paths: list[Path], emit_progress: bool = False) -> list[Path]:
         """Phase-1 sweep: return only disk paths that need a deep scan.
 
         Mirrors the skip block in _do_full_scan exactly — same data source
@@ -9352,7 +9352,14 @@ class Bridge(QObject):
         """
         from app.mediamanager.db.media_repo import get_media_by_path
         changed: list[Path] = []
-        for p in disk_paths:
+        total = len(disk_paths)
+        for i, p in enumerate(disk_paths):
+            if emit_progress and total > 0 and (i == 0 or (i + 1) % 50 == 0 or (i + 1) == total):
+                phase_percent = max(1, min(99, int(((i + 1) / total) * 100)))
+                try:
+                    self.scanProgress.emit("Checking for changes...", phase_percent)
+                except Exception:
+                    pass
             try:
                 if not p.exists() or not p.is_file():
                     continue
@@ -9414,11 +9421,11 @@ class Bridge(QObject):
         self._cancel_text_processing()
         self._scan_abort = True
         def work():
+            primary = folders[0] if folders else ""
+            emitted_finish = False
             try:
                 time.sleep(0.1)
                 self._scan_abort = False
-                primary = folders[0] if folders else ""
-                self.scanStarted.emit(primary)
                 with self._scan_lock:
                     # Always refresh the reconciled scope first so a newly selected root
                     # cannot accidentally inherit stale paths from a previous disk cache.
@@ -9427,14 +9434,16 @@ class Bridge(QObject):
                         self._last_full_scan_key = scan_key
                         self._warm_scan_keys.add(scan_key)
                         self.scanFinished.emit(primary, len(reconciled))
+                        emitted_finish = True
                     else:
+                        self.scanStarted.emit(primary)
                         disk_paths = list(self._disk_cache.values())
                         # Two-phase: a stat+DB-lookup sweep narrows the work to
                         # just the files that actually changed. On any error,
                         # fall back to scanning everything so correctness wins.
                         if self._two_phase_scan_enabled:
                             try:
-                                paths = self._identify_changed_paths(disk_paths)
+                                paths = self._identify_changed_paths(disk_paths, emit_progress=True)
                             except Exception as exc:
                                 try:
                                     self._log(f"Two-phase phase-1 failed, falling back to full scan: {exc}")
@@ -9448,12 +9457,23 @@ class Bridge(QObject):
                         self._last_full_scan_key = scan_key
                         self._warm_scan_keys.add(scan_key)
                         self.scanFinished.emit(primary, len(self._get_reconciled_candidates(folders, "all", search_query)))
+                        emitted_finish = True
                 self._ensure_background_text_processing(list(folders), None)
             except Exception as exc:
                 try:
                     self._log(f"Background scan failed: {exc}")
                 except Exception:
                     pass
+            finally:
+                # Belt-and-suspenders: guarantee scanFinished fires even if the
+                # scan crashed mid-flight. Without this, the JS toast would be
+                # stuck "Initializing..." forever because gScanActive is never
+                # cleared (no scanFinished = no handler = no flag reset).
+                if not emitted_finish:
+                    try:
+                        self.scanFinished.emit(primary, 0)
+                    except Exception:
+                        pass
         threading.Thread(target=work, daemon=True).start()
 
     @Slot(list)

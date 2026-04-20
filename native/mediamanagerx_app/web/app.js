@@ -86,6 +86,7 @@ let gTextProcessingCurrent = 0;
 let gTextProcessingTotal = 0;
 let gRenderTextProcessingToast = null;
 let gRenderScanToast = null;
+let gScanToastGeneration = 0;
 let gGalleryFilterMetadataRefreshTimer = 0;
 let gCompareState = { visible: false, left: {}, right: {}, best_path: '', keep_paths: [], delete_paths: [] };
 const TIMELINE_INSET_PX = 20;
@@ -2042,7 +2043,9 @@ function wireScanIndicator() {
 
   if (gBridge.scanStarted) {
     gBridge.scanStarted.connect(() => {
+      gScanToastGeneration += 1;
       gScanManuallyHidden = false;
+      gScanActive = true;
       bar.style.width = '0%';
       file.textContent = 'Initializing...';
       render();
@@ -2051,11 +2054,18 @@ function wireScanIndicator() {
 
   if (gBridge.scanFinished) {
     gBridge.scanFinished.connect(() => {
-      render();
+      const finishedGeneration = gScanToastGeneration;
       file.textContent = 'Finished';
       bar.style.width = '100%';
+      render();
       setTimeout(() => {
-        render();
+        if (finishedGeneration !== gScanToastGeneration) {
+          if (gRenderScanToast) gRenderScanToast();
+          return;
+        }
+        gScanActive = false;
+        gAwaitingScanResults = false;
+        if (gRenderScanToast) gRenderScanToast();
       }, 2000);
     });
   }
@@ -8901,6 +8911,14 @@ async function main() {
         const selectedFolders = currentSelectedFolderSet();
         const matchesCurrentSelection = !normalizedFinishedFolder || selectedFolders.size === 0 || selectedFolders.has(normalizedFinishedFolder);
         if (!matchesCurrentSelection) {
+          // Stale-folder scanFinished (e.g. a prior in-flight scan completing
+          // after the user changed scope, or Phase 3 finishing with zero
+          // progress emissions). Clear scan-active so the toast can dismiss —
+          // any newer scan still in flight will re-raise it via its own
+          // scanStarted. Only skip the gallery refresh, not the flag reset.
+          gScanActive = false;
+          gAwaitingScanResults = false;
+          if (gRenderScanToast) gRenderScanToast();
           return;
         }
         const currentReviewSignature = isDuplicateModeActive() ? computeReviewRenderSignature(gMedia) : '';
@@ -8909,16 +8927,19 @@ async function main() {
           gAwaitingScanResults = false;
           gTotal = count || gTotal || 0;
           refreshGalleryFileCountChip();
+          if (gRenderScanToast) gRenderScanToast();
           return;
         }
         if (isDuplicateModeActive() && gReviewLoadingActive && !gAwaitingScanResults) {
           gScanActive = false;
+          if (gRenderScanToast) gRenderScanToast();
           return;
         }
         if (isDuplicateModeActive() && !gReviewLoadingActive && !gAwaitingScanResults && Array.isArray(gMedia) && gMedia.length > 0) {
           gScanActive = false;
           gTotal = count || gTotal || 0;
           refreshGalleryFileCountChip();
+          if (gRenderScanToast) gRenderScanToast();
           return;
         }
         if (gReviewLoadingActive && isDuplicateModeActive()) {
@@ -8927,6 +8948,7 @@ async function main() {
         gScanActive = false;
         gAwaitingScanResults = false;
         gTotal = count || 0;
+        if (gRenderScanToast) gRenderScanToast();
         const tp = totalPages();
         if (gPage >= tp) gPage = Math.max(0, tp - 1);
         refreshFromBridge(bridge, false);
