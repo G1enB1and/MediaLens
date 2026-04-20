@@ -9257,37 +9257,86 @@ class Bridge(QObject):
             return self._build_duplicate_entries(entries, sort_by)
         return self._sort_gallery_entries(entries, sort_by)
 
-    def _scope_scan_is_warm(self, entries: list[dict]) -> bool:
+    def _evaluate_scan_scope(
+        self,
+        entries: list[dict],
+        primary: str = "",
+        *,
+        emit_progress: bool = False,
+        show_progress_after_s: float = 0.75,
+    ) -> tuple[bool, list[Path], bool]:
+        """Single-pass scope evaluation.
+
+        Returns:
+        - is_warm: every file is still up to date and fully scanned
+        - changed_paths: files that need a deep scan
+        - progress_started: whether this pass emitted scanStarted/scanProgress
+        """
         media_entries = [entry for entry in entries if not entry.get("is_folder")]
         if not media_entries:
-            return True
-        for entry in media_entries:
-            path = str(entry.get("path") or "").strip()
+            return True, [], False
+
+        changed_paths: list[Path] = []
+        is_warm = True
+        progress_started = False
+        started_at = time.monotonic()
+        total = len(media_entries)
+
+        for i, entry in enumerate(media_entries):
+            if emit_progress and not progress_started and (time.monotonic() - started_at) >= show_progress_after_s:
+                try:
+                    self.scanStarted.emit(primary)
+                    progress_started = True
+                except Exception:
+                    progress_started = False
+            if progress_started and total > 0 and (i == 0 or (i + 1) % 50 == 0 or (i + 1) == total):
+                phase_percent = max(1, min(99, int(((i + 1) / total) * 100)))
+                try:
+                    self.scanProgress.emit("Checking for changes...", phase_percent)
+                except Exception:
+                    pass
+
+            raw_path = entry.get("_real_path") or entry.get("path") or ""
+            path = str(raw_path).strip()
             if not path:
-                return False
+                is_warm = False
+                continue
+            p = raw_path if isinstance(raw_path, Path) else Path(path)
             try:
-                p = Path(path)
-                if not p.exists() or not p.is_file():
-                    return False
                 stat = p.stat()
+                if not p.is_file():
+                    is_warm = False
+                    changed_paths.append(p)
+                    continue
                 current_mtime = datetime.fromtimestamp(
                     stat.st_mtime,
                     tz=timezone.utc,
                 ).replace(microsecond=0).isoformat()
             except Exception:
-                return False
+                is_warm = False
+                changed_paths.append(p)
+                continue
+
+            needs_deep_scan = False
             if int(entry.get("file_size") or 0) != int(stat.st_size):
-                return False
-            if str(entry.get("modified_time") or "") != current_mtime:
-                return False
-            if not str(entry.get("content_hash") or "").strip():
-                return False
-            if not (entry.get("width") and entry.get("height")):
-                return False
-            if str(entry.get("media_type") or "") == "image" and Path(path).suffix.lower() != ".svg":
-                if not str(entry.get("phash") or "").strip():
-                    return False
-        return True
+                needs_deep_scan = True
+            elif str(entry.get("modified_time") or "") != current_mtime:
+                needs_deep_scan = True
+            elif not str(entry.get("content_hash") or "").strip():
+                needs_deep_scan = True
+            elif not (entry.get("width") and entry.get("height")):
+                needs_deep_scan = True
+            else:
+                suffix = p.suffix.lower()
+                if str(entry.get("media_type") or "") == "image" and suffix != ".svg":
+                    if not str(entry.get("phash") or "").strip():
+                        needs_deep_scan = True
+
+            if needs_deep_scan:
+                is_warm = False
+                changed_paths.append(p)
+
+        return is_warm, changed_paths, progress_started
 
     def _invalidate_scan_caches(self) -> None:
         self._disk_cache = {}
@@ -9341,63 +9390,6 @@ class Bridge(QObject):
         with self._checkpoint_lock:
             return set(self._scan_checkpoint.get(scope_key, set()))
 
-    def _identify_changed_paths(self, disk_paths: list[Path], emit_progress: bool = False) -> list[Path]:
-        """Phase-1 sweep: return only disk paths that need a deep scan.
-
-        Mirrors the skip block in _do_full_scan exactly — same data source
-        (raw Path objects from the disk walk), same DB query (get_media_by_path),
-        same skip predicate — so a path flagged here matches what the deep scan
-        would have processed anyway. When in doubt (any exception), the path is
-        included so _do_full_scan remains authoritative.
-        """
-        from app.mediamanager.db.media_repo import get_media_by_path
-        changed: list[Path] = []
-        total = len(disk_paths)
-        for i, p in enumerate(disk_paths):
-            if emit_progress and total > 0 and (i == 0 or (i + 1) % 50 == 0 or (i + 1) == total):
-                phase_percent = max(1, min(99, int(((i + 1) / total) * 100)))
-                try:
-                    self.scanProgress.emit("Checking for changes...", phase_percent)
-                except Exception:
-                    pass
-            try:
-                if not p.exists() or not p.is_file():
-                    continue
-                stat = p.stat()
-                current_mtime = datetime.fromtimestamp(
-                    stat.st_mtime, tz=timezone.utc
-                ).replace(microsecond=0).isoformat()
-            except Exception:
-                changed.append(p)
-                continue
-            try:
-                existing = get_media_by_path(self.conn, str(p))
-            except Exception:
-                changed.append(p)
-                continue
-            if not existing:
-                changed.append(p)
-                continue
-            # Same predicate as _do_full_scan's per-file skip block.
-            if int(existing.get("file_size") or 0) != int(stat.st_size):
-                changed.append(p)
-                continue
-            if str(existing.get("modified_time") or "") != current_mtime:
-                changed.append(p)
-                continue
-            if not str(existing.get("content_hash") or "").strip():
-                changed.append(p)
-                continue
-            if not (existing.get("width") and existing.get("height")):
-                changed.append(p)
-                continue
-            suffix = p.suffix.lower()
-            if suffix in IMAGE_EXTS and suffix != ".svg":
-                if not str(existing.get("phash") or "").strip():
-                    changed.append(p)
-                    continue
-        return changed
-
     @Slot(list, str)
     def start_scan(self, folders: list, search_query: str = "") -> None:
         if not folders:
@@ -9427,36 +9419,34 @@ class Bridge(QObject):
                 time.sleep(0.1)
                 self._scan_abort = False
                 with self._scan_lock:
-                    # Always refresh the reconciled scope first so a newly selected root
-                    # cannot accidentally inherit stale paths from a previous disk cache.
-                    reconciled = self._get_reconciled_candidates(folders, "all", search_query)
-                    if self._scope_scan_is_warm(reconciled):
+                    # Always evaluate scanner scope against the full folder tree,
+                    # independent of the current search filter, so change
+                    # detection is correct and stable.
+                    reconciled_scope = self._get_reconciled_candidates(folders, "all", "")
+                    is_warm, changed_paths, progress_started = self._evaluate_scan_scope(
+                        reconciled_scope,
+                        primary,
+                        emit_progress=self._two_phase_scan_enabled,
+                    )
+                    if is_warm:
                         self._last_full_scan_key = scan_key
                         self._warm_scan_keys.add(scan_key)
-                        self.scanFinished.emit(primary, len(reconciled))
+                        finish_count = len(reconciled_scope) if not str(search_query or "").strip() else len(self._get_reconciled_candidates(folders, "all", search_query))
+                        self.scanFinished.emit(primary, finish_count)
                         emitted_finish = True
                     else:
-                        self.scanStarted.emit(primary)
-                        disk_paths = list(self._disk_cache.values())
-                        # Two-phase: a stat+DB-lookup sweep narrows the work to
-                        # just the files that actually changed. On any error,
-                        # fall back to scanning everything so correctness wins.
                         if self._two_phase_scan_enabled:
-                            try:
-                                paths = self._identify_changed_paths(disk_paths, emit_progress=True)
-                            except Exception as exc:
-                                try:
-                                    self._log(f"Two-phase phase-1 failed, falling back to full scan: {exc}")
-                                except Exception:
-                                    pass
-                                paths = disk_paths
+                            paths = changed_paths
                         else:
-                            paths = disk_paths
+                            paths = list(self._disk_cache.values())
                         if paths:
+                            if not progress_started:
+                                self.scanStarted.emit(primary)
                             self._do_full_scan(paths, self.conn, emit_progress=True, scope_key=scan_key)
                         self._last_full_scan_key = scan_key
                         self._warm_scan_keys.add(scan_key)
-                        self.scanFinished.emit(primary, len(self._get_reconciled_candidates(folders, "all", search_query)))
+                        finish_count = len(reconciled_scope) if not str(search_query or "").strip() else len(self._get_reconciled_candidates(folders, "all", search_query))
+                        self.scanFinished.emit(primary, finish_count)
                         emitted_finish = True
                 self._ensure_background_text_processing(list(folders), None)
             except Exception as exc:
