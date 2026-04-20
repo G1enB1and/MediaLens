@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m py_compile native/mediamanagerx_app/main.py)",
+      "Bash(py -3.12 --version)",
+      "Bash(py -3.12 -m py_compile native/mediamanagerx_app/main.py)",
+      "Bash(py -3.12 -m py_compile app/mediamanager/db/connect.py)"
+    ]
+  }
+}
