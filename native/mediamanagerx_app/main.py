@@ -4246,6 +4246,13 @@ class Bridge(QObject):
         self._checkpoint_dirty_count = 0
         self._scan_checkpoint: dict[str, set[str]] = self._load_scan_checkpoint()
 
+        # Two-phase scan: phase 1 = stat+DB-lookup diff, phase 2 = deep work on changed files only.
+        # Disable with MEDIALENS_TWO_PHASE_SCAN=0 to fall back to scanning the entire disk cache
+        # (the original single-pass behavior) — useful if the two-phase code ever misclassifies.
+        self._two_phase_scan_enabled = str(
+            os.environ.get("MEDIALENS_TWO_PHASE_SCAN", "1")
+        ).strip().lower() not in {"0", "false", "no", "off"}
+
         self._compare_paths: dict[str, str] = {"left": "", "right": ""}
         self._compare_keep_paths: set[str] = set()
         self._compare_delete_paths: set[str] = set()
@@ -9334,6 +9341,56 @@ class Bridge(QObject):
         with self._checkpoint_lock:
             return set(self._scan_checkpoint.get(scope_key, set()))
 
+    def _identify_changed_paths(self, disk_paths: list[Path]) -> list[Path]:
+        """Phase-1 sweep: return only disk paths that need a deep scan.
+
+        Mirrors the skip block in _do_full_scan exactly — same data source
+        (raw Path objects from the disk walk), same DB query (get_media_by_path),
+        same skip predicate — so a path flagged here matches what the deep scan
+        would have processed anyway. When in doubt (any exception), the path is
+        included so _do_full_scan remains authoritative.
+        """
+        from app.mediamanager.db.media_repo import get_media_by_path
+        changed: list[Path] = []
+        for p in disk_paths:
+            try:
+                if not p.exists() or not p.is_file():
+                    continue
+                stat = p.stat()
+                current_mtime = datetime.fromtimestamp(
+                    stat.st_mtime, tz=timezone.utc
+                ).replace(microsecond=0).isoformat()
+            except Exception:
+                changed.append(p)
+                continue
+            try:
+                existing = get_media_by_path(self.conn, str(p))
+            except Exception:
+                changed.append(p)
+                continue
+            if not existing:
+                changed.append(p)
+                continue
+            # Same predicate as _do_full_scan's per-file skip block.
+            if int(existing.get("file_size") or 0) != int(stat.st_size):
+                changed.append(p)
+                continue
+            if str(existing.get("modified_time") or "") != current_mtime:
+                changed.append(p)
+                continue
+            if not str(existing.get("content_hash") or "").strip():
+                changed.append(p)
+                continue
+            if not (existing.get("width") and existing.get("height")):
+                changed.append(p)
+                continue
+            suffix = p.suffix.lower()
+            if suffix in IMAGE_EXTS and suffix != ".svg":
+                if not str(existing.get("phash") or "").strip():
+                    changed.append(p)
+                    continue
+        return changed
+
     @Slot(list, str)
     def start_scan(self, folders: list, search_query: str = "") -> None:
         if not folders:
@@ -9371,8 +9428,23 @@ class Bridge(QObject):
                         self._warm_scan_keys.add(scan_key)
                         self.scanFinished.emit(primary, len(reconciled))
                     else:
-                        paths = list(self._disk_cache.values())
-                        self._do_full_scan(paths, self.conn, emit_progress=True, scope_key=scan_key)
+                        disk_paths = list(self._disk_cache.values())
+                        # Two-phase: a stat+DB-lookup sweep narrows the work to
+                        # just the files that actually changed. On any error,
+                        # fall back to scanning everything so correctness wins.
+                        if self._two_phase_scan_enabled:
+                            try:
+                                paths = self._identify_changed_paths(disk_paths)
+                            except Exception as exc:
+                                try:
+                                    self._log(f"Two-phase phase-1 failed, falling back to full scan: {exc}")
+                                except Exception:
+                                    pass
+                                paths = disk_paths
+                        else:
+                            paths = disk_paths
+                        if paths:
+                            self._do_full_scan(paths, self.conn, emit_progress=True, scope_key=scan_key)
                         self._last_full_scan_key = scan_key
                         self._warm_scan_keys.add(scan_key)
                         self.scanFinished.emit(primary, len(self._get_reconciled_candidates(folders, "all", search_query)))
