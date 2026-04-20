@@ -1,6 +1,33 @@
 # Change Log
 
-## v1.1.29 (Current)
+## v1.1.30 (Current)
+
+### Summary
+
+This release makes large folders feel significantly faster and more responsive during scanning. MediaLens now avoids unnecessary work by detecting changes more efficiently, prioritizing visible content, and resuming scans more intelligently.
+
+### Highlights
+
+- Large folders now spend far less time checking for changes before the gallery becomes usable.
+- Visible media is scanned first, so on-screen content loads and updates sooner.
+- Scans resume more gracefully after interruptions, reducing wasted work.
+
+### Added
+
+- Added checkpoint-based scan resume so interrupted scans continue from prior progress instead of restarting.
+
+### Changed
+
+- Reworked scan evaluation to use a single-pass change detection instead of multiple full-folder checks.
+- Optimized change detection by comparing against preloaded in-memory data instead of per-file database queries.
+- Limited deep scanning to only files that actually changed instead of reprocessing entire folders.
+- Prioritized currently visible gallery items during scanning.
+- Switched to thread-local SQLite connections to eliminate cross-thread scanner errors.
+- Improved animated GIF lightbox rendering to avoid CPU-heavy styling that could impact playback.
+
+---
+
+## v1.1.29
 
 ### Summary
 
