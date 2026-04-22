@@ -28,6 +28,8 @@ DEFAULT_CAPTION_PROMPT = (
 try:
     from app.mediamanager.ai_captioning.gemma_gguf import GEMMA_GGUF_BACKEND_ID
     from app.mediamanager.ai_captioning.gemma_gguf_prompting import (
+        build_bf16_description_prompt,
+        build_bf16_rewrite_prompt,
         build_gguf_description_prompt,
         build_gguf_rewrite_prompt,
         build_user_description_prompt,
@@ -41,6 +43,8 @@ try:
 except ModuleNotFoundError:
     from gemma_gguf import GEMMA_GGUF_BACKEND_ID
     from gemma_gguf_prompting import (
+        build_bf16_description_prompt,
+        build_bf16_rewrite_prompt,
         build_gguf_description_prompt,
         build_gguf_rewrite_prompt,
         build_user_description_prompt,
@@ -164,6 +168,14 @@ def _gguf_enabled(settings: dict[str, Any]) -> bool:
     return backend == GEMMA_GGUF_BACKEND_ID and model_path.is_file() and mmproj_path.is_file() and server_path.is_file()
 
 
+def _gemma_profile_quantization(settings: dict[str, Any]) -> str:
+    return str(settings.get("gemma_profile_quantization") or settings.get("gemma_quantization") or "").strip().upper()
+
+
+def _bf16_like_gemma_profile(settings: dict[str, Any]) -> bool:
+    return _gemma_profile_quantization(settings) in {"BF16", "F16"}
+
+
 def _gguf_cli_path(settings: dict[str, Any]) -> Path:
     server_path = Path(str(settings.get("gemma_llama_server") or "").strip())
     if server_path.is_file():
@@ -241,6 +253,8 @@ def _start_gguf_server(settings: dict[str, Any]):
         "-np",
         "1",
         "--jinja",
+        "--reasoning",
+        "off",
         "--reasoning-budget",
         "0",
     ]
@@ -304,6 +318,8 @@ def _gguf_cli_completion(source_path: str, prompt: str, settings: dict[str, Any]
         "-t",
         str(threads),
         "--jinja",
+        "--reasoning",
+        "off",
         "--no-warmup",
         "--reasoning-budget",
         "0",
@@ -396,7 +412,11 @@ def _extract_final_description(text: str, settings: dict[str, Any]) -> str:
 
 
 def _repair_gguf_description(source_path: str, raw_text: str, settings: dict[str, Any], max_new_tokens: int) -> str:
-    rewrite_prompt = build_gguf_rewrite_prompt(str(settings.get("caption_start") or ""), raw_text)
+    rewrite_prompt = (
+        build_bf16_rewrite_prompt(str(settings.get("caption_start") or ""), raw_text)
+        if _bf16_like_gemma_profile(settings)
+        else build_gguf_rewrite_prompt(str(settings.get("caption_start") or ""), raw_text)
+    )
     repaired = _generate_text(source_path, rewrite_prompt, settings, max_new_tokens)
     return _extract_final_description(repaired, settings)
 
@@ -505,10 +525,18 @@ def _run_cli() -> int:
         inference_settings = settings
         if _gguf_enabled(settings):
             inference_settings = tune_gguf_description_settings(settings)
-            prompt = build_gguf_description_prompt(
-                str(settings.get("caption_prompt") or DEFAULT_CAPTION_PROMPT),
-                tags,
-                str(settings.get("caption_start") or ""),
+            prompt = (
+                build_bf16_description_prompt(
+                    str(settings.get("caption_prompt") or DEFAULT_CAPTION_PROMPT),
+                    tags,
+                    str(settings.get("caption_start") or ""),
+                )
+                if _bf16_like_gemma_profile(settings)
+                else build_gguf_description_prompt(
+                    str(settings.get("caption_prompt") or DEFAULT_CAPTION_PROMPT),
+                    tags,
+                    str(settings.get("caption_start") or ""),
+                )
             )
         else:
             prompt_template = str(settings.get("caption_prompt") or DEFAULT_CAPTION_PROMPT)

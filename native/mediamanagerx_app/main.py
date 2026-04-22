@@ -7565,6 +7565,8 @@ class Bridge(QObject):
             installed = True
             dev_fallback = True
         running = spec.settings_key in self._local_ai_model_installs
+        profile_download_id = str(getattr(self, "_local_ai_profile_downloads", {}).get(spec.settings_key, "") or "").strip()
+        profile_downloading = bool(profile_download_id)
         if running:
             state = "installing"
             message = f"Installing {spec.install_label}..."
@@ -7577,6 +7579,11 @@ class Bridge(QObject):
         runtime_probe = self._local_ai_probe_runtime(spec) if installed else {}
         runtime_summary = self._local_ai_runtime_summary(runtime_probe)
         runtime_details_html = self._local_ai_runtime_details_html(runtime_probe)
+        gemma_downloaded_profiles: list[str] = []
+        selected_profile_id = ""
+        if spec.settings_key == "gemma4":
+            gemma_downloaded_profiles = self._local_ai_gemma_downloaded_profile_ids(models_dir)
+            selected_profile_id = str(self.settings.value("ai_caption/gemma_selected_profile_id", "", type=str) or "").strip()
         return {
             "id": spec.id,
             "kind": spec.kind,
@@ -7589,6 +7596,7 @@ class Bridge(QObject):
             "running": running,
             "dev_fallback": dev_fallback,
             "model_files_installed": model_files_installed,
+            "model_files_cached": model_files_installed,
             "message": message,
             "runtime_python": str(python_path),
             "runtime_dir": str(Path(python_path).parent.parent),
@@ -7598,7 +7606,32 @@ class Bridge(QObject):
             "runtime_probe": runtime_probe,
             "runtime_summary": runtime_summary,
             "runtime_details_html": runtime_details_html,
+            "gemma_downloaded_profiles": gemma_downloaded_profiles,
+            "gemma_selected_profile_id": selected_profile_id,
+            "gemma_profile_downloading": profile_downloading,
+            "gemma_profile_downloading_id": profile_download_id,
         }
+
+    def _local_ai_model_cache_targets(self, models_dir: Path, spec) -> list[Path]:
+        targets = [Path(models_dir) / spec.id]
+        if spec.id == "internlm/internlm-xcomposer2-vl-1_8b":
+            targets.append(Path(models_dir) / "openai" / "clip-vit-large-patch14-336")
+        if spec.id == "google/gemma-4-E2B-it":
+            targets.append(Path(models_dir) / "gemma_gguf")
+            targets.append(Path(models_dir) / "gemma4_runtime")
+        return targets
+
+    def _local_ai_gemma_downloaded_profile_ids(self, models_dir: Path) -> list[str]:
+        from app.mediamanager.ai_captioning.gemma_gguf import gemma_profile_is_installed, gemma_profile_options
+
+        downloaded: list[str] = []
+        for profile in gemma_profile_options():
+            try:
+                if gemma_profile_is_installed(models_dir, profile):
+                    downloaded.append(profile.id)
+            except Exception:
+                continue
+        return downloaded
 
     def _local_ai_model_files_installed(self, models_dir: Path, model_id: str) -> bool:
         from app.mediamanager.ai_captioning.model_registry import CAPTION_MODEL_ID, GEMMA4_MODEL_ID, TAG_MODEL_ID
@@ -7827,7 +7860,7 @@ class Bridge(QObject):
         return result
 
     @staticmethod
-    def _download_file(url: str, destination: Path, emit_status) -> Path:
+    def _download_file(url: str, destination: Path, emit_status, should_cancel=None) -> Path:
         destination = Path(destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
         temp_path = destination.with_suffix(destination.suffix + ".download")
@@ -7837,26 +7870,33 @@ class Bridge(QObject):
             str(url),
             headers={"User-Agent": f"MediaLens/{__version__}"},
         )
-        with urllib.request.urlopen(request, timeout=90) as response:
-            total = int(response.headers.get("Content-Length") or 0)
-            received = 0
-            last_emit = 0.0
-            with open(temp_path, "wb") as handle:
-                while True:
-                    chunk = response.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    handle.write(chunk)
-                    received += len(chunk)
-                    if time.monotonic() - last_emit >= 1.0:
-                        last_emit = time.monotonic()
-                        if total:
-                            emit_status(
-                                f"Downloading {destination.name}: {int(round((received / total) * 100))}% "
-                                f"({received // (1024 * 1024)} MB / {total // (1024 * 1024)} MB)"
-                            )
-                        else:
-                            emit_status(f"Downloading {destination.name}: {received // (1024 * 1024)} MB")
+        try:
+            with urllib.request.urlopen(request, timeout=90) as response:
+                total = int(response.headers.get("Content-Length") or 0)
+                received = 0
+                last_emit = 0.0
+                with open(temp_path, "wb") as handle:
+                    while True:
+                        if callable(should_cancel) and should_cancel():
+                            raise RuntimeError("Download canceled.")
+                        chunk = response.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        handle.write(chunk)
+                        received += len(chunk)
+                        if time.monotonic() - last_emit >= 1.0:
+                            last_emit = time.monotonic()
+                            if total:
+                                emit_status(
+                                    f"Downloading {destination.name}: {int(round((received / total) * 100))}% "
+                                    f"({received // (1024 * 1024)} MB / {total // (1024 * 1024)} MB)"
+                                )
+                            else:
+                                emit_status(f"Downloading {destination.name}: {received // (1024 * 1024)} MB")
+        except Exception:
+            if temp_path.exists():
+                temp_path.unlink(missing_ok=True)
+            raise
         if destination.exists():
             destination.unlink()
         temp_path.replace(destination)
@@ -7914,9 +7954,13 @@ class Bridge(QObject):
         return server_path
 
     def _choose_gemma_gguf_profile(self):
-        from app.mediamanager.ai_captioning.gemma_gguf import choose_best_gemma_profile
+        from app.mediamanager.ai_captioning.gemma_gguf import choose_best_gemma_profile, gemma_profile_by_id
 
         vram = self._local_ai_detect_nvidia_vram()
+        selected_profile_id = str(self.settings.value("ai_caption/gemma_selected_profile_id", "", type=str) or "").strip()
+        selected_profile = gemma_profile_by_id(selected_profile_id) if selected_profile_id else None
+        if selected_profile is not None:
+            return selected_profile, vram
         return choose_best_gemma_profile(vram.get("total_vram_gb"), vram.get("free_vram_gb")), vram
 
     def _ensure_gemma_gguf_profile_downloaded(self, models_dir: Path, profile, emit_status) -> tuple[Path, Path]:
@@ -7936,6 +7980,74 @@ class Bridge(QObject):
         if not mmproj_path.is_file():
             emit_status(f"Downloading {profile.label} vision projector...")
             self._download_file(profile.mmproj_url, mmproj_path, emit_status)
+        return model_path, mmproj_path
+
+    def _download_gemma_gguf_profile_concurrent(self, models_dir: Path, profile, emit_install_status, payload: dict) -> tuple[Path, Path]:
+        from app.mediamanager.ai_captioning.gemma_gguf import (
+            gemma_profile_install_dir,
+            gemma_profile_mmproj_path,
+            gemma_profile_model_path,
+        )
+
+        install_dir = gemma_profile_install_dir(models_dir, profile)
+        model_path = gemma_profile_model_path(models_dir, profile)
+        mmproj_path = gemma_profile_mmproj_path(models_dir, profile)
+        install_dir.mkdir(parents=True, exist_ok=True)
+        errors: list[Exception] = []
+        lock = threading.Lock()
+        download_messages: dict[str, str] = {}
+
+        def emit_download_status(kind: str, message: str) -> None:
+            with lock:
+                download_messages[kind] = str(message or "").strip()
+                payload.update(
+                    {
+                        "running": True,
+                        "download_message": "\n".join(text for text in download_messages.values() if text),
+                        "download_messages": dict(download_messages),
+                        "gemma_profile_downloading": True,
+                        "gemma_profile_downloading_id": profile.id,
+                    }
+                )
+                self.localAiModelInstallStatus.emit("gemma4", dict(payload))
+
+        cancel_check = lambda: bool(getattr(self, "_local_ai_profile_download_cancel", {}).get("gemma4"))
+
+        def download_one(kind: str, url: str, destination: Path) -> None:
+            try:
+                self._download_file(url, destination, lambda message: emit_download_status(kind, message), cancel_check)
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                with lock:
+                    download_messages.pop(kind, None)
+                    payload.update(
+                        {
+                            "download_message": "\n".join(text for text in download_messages.values() if text),
+                            "download_messages": dict(download_messages),
+                            "gemma_profile_downloading": bool(download_messages),
+                            "gemma_profile_downloading_id": profile.id if download_messages else "",
+                        }
+                    )
+                    self.localAiModelInstallStatus.emit("gemma4", dict(payload))
+
+        workers: list[threading.Thread] = []
+        if not model_path.is_file():
+            workers.append(threading.Thread(target=download_one, args=("model", profile.model_url, model_path), daemon=True, name=f"gemma-model-{profile.id}"))
+        if not mmproj_path.is_file():
+            workers.append(threading.Thread(target=download_one, args=("mmproj", profile.mmproj_url, mmproj_path), daemon=True, name=f"gemma-mmproj-{profile.id}"))
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join()
+        if errors:
+            raise errors[0]
+        with lock:
+            payload["download_message"] = ""
+            payload["download_messages"] = {}
+            payload["gemma_profile_downloading"] = False
+            payload["gemma_profile_downloading_id"] = ""
+            self.localAiModelInstallStatus.emit("gemma4", dict(payload))
         return model_path, mmproj_path
 
     def _configure_gemma_gguf_settings(self, profile, runtime_dir: Path, models_dir: Path, vram_info: dict[str, object]) -> dict[str, str | int]:
@@ -7971,15 +8083,29 @@ class Bridge(QObject):
         }
 
     def _local_ai_gemma_probe(self, spec) -> dict:
-        from app.mediamanager.ai_captioning.gemma_gguf import GEMMA_GGUF_BACKEND_ID, gemma_profile_by_id
+        from app.mediamanager.ai_captioning.gemma_gguf import (
+            GEMMA_GGUF_BACKEND_ID,
+            gemma_profile_by_id,
+            gemma_profile_install_dir,
+            gemma_profile_is_installed,
+            gemma_profile_mmproj_path,
+            gemma_profile_model_path,
+        )
 
         python_path = self._local_ai_runtime_python_path(spec)
         requested_device = str(self.settings.value("ai_caption/device", "gpu", type=str) or "gpu").strip().lower() or "gpu"
-        profile = gemma_profile_by_id(str(self.settings.value("ai_caption/gemma_profile_id", "", type=str) or ""))
         backend = str(self.settings.value("ai_caption/gemma_backend", "", type=str) or "").strip().lower()
         server_path = Path(str(self.settings.value("ai_caption/gemma_llama_server", "", type=str) or "").strip())
+        configured_profile = gemma_profile_by_id(str(self.settings.value("ai_caption/gemma_profile_id", "", type=str) or ""))
+        selected_profile = gemma_profile_by_id(str(self.settings.value("ai_caption/gemma_selected_profile_id", "", type=str) or ""))
+        models_dir = Path(str(self.settings.value("ai_caption/models_dir", self._local_ai_models_dir_default(), type=str) or self._local_ai_models_dir_default()))
+        profile = configured_profile
         model_path = Path(str(self.settings.value("ai_caption/gemma_model_path", "", type=str) or "").strip())
         mmproj_path = Path(str(self.settings.value("ai_caption/gemma_mmproj_path", "", type=str) or "").strip())
+        if selected_profile and gemma_profile_is_installed(models_dir, selected_profile):
+            profile = selected_profile
+            model_path = gemma_profile_model_path(models_dir, selected_profile)
+            mmproj_path = gemma_profile_mmproj_path(models_dir, selected_profile)
         ctx_size = int(self.settings.value("ai_caption/gemma_ctx_size", 2048, type=int) or 2048)
         vram = self._local_ai_detect_nvidia_vram()
         selected_device = "cpu"
@@ -8105,7 +8231,12 @@ class Bridge(QObject):
         now = time.monotonic()
         cached = self._local_ai_runtime_status_cache.get(cache_key)
         if not force and cached and (now - cached[0]) < LOCAL_AI_STATUS_CACHE_TTL_SECONDS:
-            return dict(cached[1])
+            cached_payload = dict(cached[1])
+            if cache_key != "gemma4":
+                return cached_payload
+            selected_profile_id = str(self.settings.value("ai_caption/gemma_selected_profile_id", "", type=str) or "").strip()
+            if str(cached_payload.get("profile_id") or "").strip() == selected_profile_id:
+                return cached_payload
 
         backend = self._local_ai_runtime_backend(spec)
         if backend == "gguf":
@@ -8322,6 +8453,24 @@ class Bridge(QObject):
         python_path = self._local_ai_runtime_python_path(spec)
         runtime_dir = Path(python_path).parent.parent
         runtime_dir.parent.mkdir(parents=True, exist_ok=True)
+        profile, vram_info = self._choose_gemma_gguf_profile()
+        emit_install_status(
+            f"Selected {profile.label} for {float(vram_info.get('total_vram_gb') or 0.0):.1f} GB VRAM "
+            f"({float(vram_info.get('free_vram_gb') or 0.0):.1f} GB free)."
+        )
+        models_dir = Path(str(self.settings.value("ai_caption/models_dir", self._local_ai_models_dir_default(), type=str) or self._local_ai_models_dir_default()))
+        download_error: list[Exception] = []
+        download_done = threading.Event()
+
+        def download_worker() -> None:
+            try:
+                self._download_gemma_gguf_profile_concurrent(models_dir, profile, emit_install_status, payload)
+            except Exception as exc:
+                download_error.append(exc)
+            finally:
+                download_done.set()
+
+        threading.Thread(target=download_worker, daemon=True, name=f"gemma-download-{profile.id}").start()
         bootstrap_python = self._ensure_local_ai_python_bootstrap(emit_install_status)
         if not bootstrap_python:
             raise RuntimeError(
@@ -8342,14 +8491,11 @@ class Bridge(QObject):
                 raise RuntimeError(f"{message} failed ({self._local_ai_exit_code_text(returncode)}). {last_line}")
         self.settings.setValue("ai_caption/runtime_python/gemma4", str(python_path))
         self.settings.setValue("ai_caption/gemma_python", str(python_path))
-        profile, vram_info = self._choose_gemma_gguf_profile()
-        emit_install_status(
-            f"Selected {profile.label} for {float(vram_info.get('total_vram_gb') or 0.0):.1f} GB VRAM "
-            f"({float(vram_info.get('free_vram_gb') or 0.0):.1f} GB free)."
-        )
         self._ensure_gemma_llama_cpp_runtime(runtime_dir, emit_install_status)
-        models_dir = Path(str(self.settings.value("ai_caption/models_dir", self._local_ai_models_dir_default(), type=str) or self._local_ai_models_dir_default()))
-        self._ensure_gemma_gguf_profile_downloaded(models_dir, profile, emit_install_status)
+        emit_install_status("Waiting for model downloads to finish...")
+        download_done.wait()
+        if download_error:
+            raise download_error[0]
         configured = self._configure_gemma_gguf_settings(profile, runtime_dir, models_dir, vram_info)
         message = f"Validating {configured['profile_label']} runtime..."
         payload.update({"state": "installing", "running": True, "message": message})
@@ -8547,12 +8693,7 @@ class Bridge(QObject):
 
         try:
             models_dir = Path(str(self.settings.value("ai_caption/models_dir", self._local_ai_models_dir_default(), type=str) or self._local_ai_models_dir_default()))
-            targets = [self._local_ai_runtime_python_path(spec).parent.parent, models_dir / spec.id]
-            if spec.id == "internlm/internlm-xcomposer2-vl-1_8b":
-                targets.append(models_dir / "openai" / "clip-vit-large-patch14-336")
-            if spec.id == "google/gemma-4-E2B-it":
-                targets.append(models_dir / "gemma4_runtime")
-                targets.append(models_dir / "gemma_gguf")
+            targets = [self._local_ai_runtime_python_path(spec).parent.parent]
             for target in targets:
                 if target.exists():
                     shutil.rmtree(target)
@@ -8578,6 +8719,141 @@ class Bridge(QObject):
         except Exception as exc:
             self.localAiModelInstallStatus.emit(spec.settings_key, {"state": "error", "message": str(exc) or "Uninstall failed."})
             self._log(f"Local AI model uninstall failed for {spec.install_label}: {exc}")
+            return False
+
+    @Slot(str, str, result=bool)
+    def delete_local_ai_model_files(self, model_id: str, kind: str) -> bool:
+        try:
+            from app.mediamanager.ai_captioning.model_registry import model_spec
+
+            spec = model_spec(str(model_id), str(kind))
+        except Exception as exc:
+            self.localAiModelInstallStatus.emit(str(model_id), {"state": "error", "message": str(exc) or "Unknown model."})
+            return False
+        if spec.settings_key in self._local_ai_model_installs:
+            self.localAiModelInstallStatus.emit(spec.settings_key, {"state": "error", "message": "This model is currently installing."})
+            return False
+        try:
+            models_dir = Path(str(self.settings.value("ai_caption/models_dir", self._local_ai_models_dir_default(), type=str) or self._local_ai_models_dir_default()))
+            for target in self._local_ai_model_cache_targets(models_dir, spec):
+                if target.exists():
+                    shutil.rmtree(target)
+            self._local_ai_runtime_status_cache.pop(spec.settings_key, None)
+            self.localAiModelInstallStatus.emit(spec.settings_key, self._local_ai_status_payload_for_spec(spec))
+            return True
+        except Exception as exc:
+            self.localAiModelInstallStatus.emit(spec.settings_key, {"state": "error", "message": str(exc) or "Delete model files failed."})
+            self._log(f"Local AI model file delete failed for {spec.install_label}: {exc}")
+            return False
+
+    @Slot(str, result=bool)
+    def download_gemma_profile_files(self, profile_id: str) -> bool:
+        try:
+            from app.mediamanager.ai_captioning.gemma_gguf import gemma_profile_by_id
+            from app.mediamanager.ai_captioning.model_registry import GEMMA4_MODEL_ID, model_spec
+
+            spec = model_spec(GEMMA4_MODEL_ID, "captioner")
+            profile = gemma_profile_by_id(str(profile_id or "").strip())
+            if profile is None:
+                raise RuntimeError("Unknown Gemma profile.")
+        except Exception as exc:
+            self.localAiModelInstallStatus.emit("gemma4", {"state": "error", "message": str(exc) or "Unknown Gemma profile."})
+            return False
+        if spec.settings_key in self._local_ai_model_installs:
+            self.localAiModelInstallStatus.emit(spec.settings_key, {"state": "error", "message": "Gemma is currently busy."})
+            return False
+
+        downloads = getattr(self, "_local_ai_profile_downloads", None)
+        if downloads is None:
+            downloads = {}
+            self._local_ai_profile_downloads = downloads
+        cancel_flags = getattr(self, "_local_ai_profile_download_cancel", None)
+        if cancel_flags is None:
+            cancel_flags = {}
+            self._local_ai_profile_download_cancel = cancel_flags
+        downloads[spec.settings_key] = profile.id
+        cancel_flags[spec.settings_key] = False
+        payload = self._local_ai_status_payload_for_spec(spec)
+        payload.update(
+            {
+                "running": True,
+                "message": f"Downloading {profile.label}...",
+                "gemma_profile_downloading": True,
+                "gemma_profile_downloading_id": profile.id,
+                "download_messages": {},
+                "download_message": "",
+            }
+        )
+        self.localAiModelInstallStatus.emit(spec.settings_key, dict(payload))
+
+        def work() -> None:
+            try:
+                models_dir = Path(str(self.settings.value("ai_caption/models_dir", self._local_ai_models_dir_default(), type=str) or self._local_ai_models_dir_default()))
+                self._download_gemma_gguf_profile_concurrent(models_dir, profile, None, payload)
+                refreshed = self._local_ai_status_payload_for_spec(spec)
+                refreshed.update(
+                    {
+                        "message": f"{profile.label} is downloaded.",
+                        "state": refreshed.get("state") or "not_installed",
+                        "running": False,
+                        "gemma_profile_downloading": False,
+                        "gemma_profile_downloading_id": "",
+                        "download_messages": {},
+                        "download_message": "",
+                    }
+                )
+                self.localAiModelInstallStatus.emit(spec.settings_key, refreshed)
+            except Exception as exc:
+                payload.update(
+                    {
+                        "state": "error",
+                        "running": False,
+                        "message": str(exc) or "Gemma profile download failed.",
+                        "gemma_profile_downloading": False,
+                        "gemma_profile_downloading_id": "",
+                    }
+                )
+                self.localAiModelInstallStatus.emit(spec.settings_key, dict(payload))
+                self._log(f"Gemma profile download failed for {profile.label}: {payload['message']}")
+            finally:
+                getattr(self, "_local_ai_profile_downloads", {}).pop(spec.settings_key, None)
+                getattr(self, "_local_ai_profile_download_cancel", {}).pop(spec.settings_key, None)
+
+        threading.Thread(target=work, daemon=True, name=f"gemma-profile-download-{profile.id}").start()
+        return True
+
+    @Slot(result=bool)
+    def cancel_gemma_profile_download(self) -> bool:
+        downloads = getattr(self, "_local_ai_profile_downloads", {})
+        if not downloads.get("gemma4"):
+            return False
+        cancel_flags = getattr(self, "_local_ai_profile_download_cancel", None)
+        if cancel_flags is None:
+            cancel_flags = {}
+            self._local_ai_profile_download_cancel = cancel_flags
+        cancel_flags["gemma4"] = True
+        return True
+
+    @Slot(str, result=bool)
+    def delete_gemma_profile_files(self, profile_id: str) -> bool:
+        try:
+            from app.mediamanager.ai_captioning.gemma_gguf import gemma_profile_by_id, gemma_profile_install_dir
+            from app.mediamanager.ai_captioning.model_registry import GEMMA4_MODEL_ID, model_spec
+
+            spec = model_spec(GEMMA4_MODEL_ID, "captioner")
+            profile = gemma_profile_by_id(str(profile_id or "").strip())
+            if profile is None:
+                raise RuntimeError("Unknown Gemma profile.")
+            models_dir = Path(str(self.settings.value("ai_caption/models_dir", self._local_ai_models_dir_default(), type=str) or self._local_ai_models_dir_default()))
+            target = gemma_profile_install_dir(models_dir, profile)
+            if target.exists():
+                shutil.rmtree(target)
+            self._local_ai_runtime_status_cache.pop(spec.settings_key, None)
+            self.localAiModelInstallStatus.emit(spec.settings_key, self._local_ai_status_payload_for_spec(spec))
+            return True
+        except Exception as exc:
+            self.localAiModelInstallStatus.emit("gemma4", {"state": "error", "message": str(exc) or "Delete Gemma profile failed."})
+            self._log(f"Gemma profile delete failed for {profile_id}: {exc}")
             return False
 
     def _local_ai_caption_settings(self):
@@ -8699,6 +8975,14 @@ class Bridge(QObject):
         self._emit_local_ai_signal(self.localAiCaptioningStatus, str(message or "").strip())
 
     def _local_ai_settings_payload(self, ai_settings) -> dict:
+        from app.mediamanager.ai_captioning.gemma_gguf import (
+            GEMMA_GGUF_BACKEND_ID,
+            gemma_profile_by_id,
+            gemma_profile_is_installed,
+            gemma_profile_mmproj_path,
+            gemma_profile_model_path,
+        )
+
         payload = {
             "models_dir": str(ai_settings.models_dir),
             "tag_model_id": str(ai_settings.tag_model_id),
@@ -8742,6 +9026,14 @@ class Bridge(QObject):
                 payload[key] = int(self.settings.value(settings_key, default, type=int) or default)
             else:
                 payload[key] = str(self.settings.value(settings_key, default, type=str) or default)
+        backend = str(payload.get("gemma_backend") or "").strip().lower()
+        selected_profile = gemma_profile_by_id(str(self.settings.value("ai_caption/gemma_selected_profile_id", "", type=str) or "").strip())
+        if backend == GEMMA_GGUF_BACKEND_ID and selected_profile and gemma_profile_is_installed(ai_settings.models_dir, selected_profile):
+            payload["gemma_profile_id"] = selected_profile.id
+            payload["gemma_profile_label"] = selected_profile.label
+            payload["gemma_profile_quantization"] = selected_profile.quantization
+            payload["gemma_model_path"] = str(gemma_profile_model_path(ai_settings.models_dir, selected_profile))
+            payload["gemma_mmproj_path"] = str(gemma_profile_mmproj_path(ai_settings.models_dir, selected_profile))
         return payload
 
     def _local_ai_default_settings_payload_for_spec(self, spec) -> dict:
@@ -19064,13 +19356,20 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-    def open_local_ai_setup(self, focus_kind: str = "") -> None:
+    def open_local_ai_setup(self, focus_kind: str = "", show_advanced: bool = False) -> None:
         try:
+            reopen_settings = bool(self._settings_dialog is not None and self._settings_dialog.isVisible())
             if self._local_ai_setup_dialog is None:
                 self._local_ai_setup_dialog = LocalAiSetupDialog(self, focus_kind)
+                self._local_ai_setup_dialog.finished.connect(self._on_local_ai_setup_finished)
             else:
                 self._local_ai_setup_dialog.focus_kind = str(focus_kind or "")
                 self._local_ai_setup_dialog.refresh_statuses()
+            self._reopen_settings_after_local_ai_setup = reopen_settings
+            if reopen_settings and self._settings_dialog is not None:
+                self._settings_dialog.hide()
+            if hasattr(self._local_ai_setup_dialog, "_set_advanced_visible"):
+                self._local_ai_setup_dialog._set_advanced_visible(bool(show_advanced))
             self._local_ai_setup_dialog.show()
             self._local_ai_setup_dialog.raise_()
             self._local_ai_setup_dialog.activateWindow()
@@ -19079,6 +19378,16 @@ class MainWindow(QMainWindow):
                 self.bridge._log(f"Failed to open local AI setup dialog: {exc}")
             except Exception:
                 pass
+
+    def _on_local_ai_setup_finished(self, _result: int) -> None:
+        try:
+            if bool(getattr(self, "_reopen_settings_after_local_ai_setup", False)):
+                self._reopen_settings_after_local_ai_setup = False
+                if self._settings_dialog is None:
+                    self._settings_dialog = SettingsDialog(self)
+                self._settings_dialog.open_ai_page()
+        except Exception:
+            pass
 
     def maybe_show_local_ai_setup_onboarding(self) -> None:
         key = "ai_caption/setup_dialog_seen_version"
@@ -19262,7 +19571,7 @@ class MainWindow(QMainWindow):
         widget.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
         widget.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         widget.setMaximumHeight(72)
-        widget.setMinimumHeight(24)
+        widget.setMinimumHeight(40)
         widget.setCursor(Qt.CursorShape.IBeamCursor)
         widget.viewport().setCursor(Qt.CursorShape.IBeamCursor)
 

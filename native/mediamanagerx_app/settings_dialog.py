@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
+    QToolButton,
 )
 
 
@@ -246,6 +247,7 @@ class SelectableRichTextView(QTextEdit):
         self.setUndoRedoEnabled(False)
         self.setAcceptRichText(True)
         self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -2085,7 +2087,6 @@ class AISettingsPage(SettingsPage):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
         layout.addWidget(_section_title("AI"))
-        layout.addWidget(_description("Local AI tagging and captioning writes directly to MediaLens database tags and descriptions."))
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -2097,36 +2098,6 @@ class AISettingsPage(SettingsPage):
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 8, 0)
         content_layout.setSpacing(12)
-
-        models_group = QGroupBox("Models")
-        models_form = QFormLayout(models_group)
-        models_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        models_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
-        content_layout.addWidget(models_group)
-
-        models_row = QWidget()
-        models_layout = QHBoxLayout(models_row)
-        models_layout.setContentsMargins(0, 0, 0, 0)
-        models_layout.setSpacing(6)
-        self.models_dir_edit = QLineEdit()
-        self.models_dir_edit.setClearButtonEnabled(True)
-        browse_btn = QPushButton("Browse")
-        browse_btn.clicked.connect(self._browse_models_dir)
-        models_layout.addWidget(self.models_dir_edit, 1)
-        models_layout.addWidget(browse_btn)
-        models_form.addRow("Models Folder", models_row)
-
-        self.device_combo = QComboBox()
-        self.device_combo.addItem("GPU", "gpu")
-        self.device_combo.addItem("CPU", "cpu")
-        models_form.addRow("Device", self.device_combo)
-
-        self.gpu_index_spin = QSpinBox()
-        self.gpu_index_spin.setRange(0, 9)
-        models_form.addRow("GPU Index", self.gpu_index_spin)
-
-        self.load_4bit_toggle = QCheckBox("Load In 4-bit")
-        models_form.addRow("", self.load_4bit_toggle)
 
         tags_group = QGroupBox("Tags")
         tags_form = QFormLayout(tags_group)
@@ -2154,13 +2125,26 @@ class AISettingsPage(SettingsPage):
         self.tag_model_status_label.setTextFormat(Qt.TextFormat.RichText)
         self.tag_model_status_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.tag_model_status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.tag_model_submodel_combo = QComboBox()
+        self.tag_model_submodel_combo.setVisible(False)
+        self.tag_model_submodel_combo.currentIndexChanged.connect(lambda _index: self._on_gemma_submodel_changed("tagger"))
+        self.tag_model_advanced_btn = QPushButton("Advanced")
+        self.tag_model_advanced_btn.setFlat(True)
+        self.tag_model_advanced_btn.clicked.connect(lambda: self.dialog.main_window.open_local_ai_setup("tagger", show_advanced=True))
         self.tag_model_install_btn = QPushButton("Install Model")
         self.tag_model_install_btn.clicked.connect(lambda: self._install_selected_ai_model("tagger"))
         tag_model_status_row = QWidget()
         tag_model_status_layout = QHBoxLayout(tag_model_status_row)
         tag_model_status_layout.setContentsMargins(0, 0, 0, 0)
         tag_model_status_layout.setSpacing(8)
-        tag_model_status_layout.addWidget(self.tag_model_status_label, 1)
+        tag_model_status_panel = QWidget()
+        tag_model_status_panel_layout = QVBoxLayout(tag_model_status_panel)
+        tag_model_status_panel_layout.setContentsMargins(0, 0, 0, 0)
+        tag_model_status_panel_layout.setSpacing(4)
+        tag_model_status_panel_layout.addWidget(self.tag_model_status_label)
+        tag_model_status_panel_layout.addWidget(self.tag_model_submodel_combo)
+        tag_model_status_panel_layout.addWidget(self.tag_model_advanced_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        tag_model_status_layout.addWidget(tag_model_status_panel, 1)
         tag_model_status_layout.addWidget(self.tag_model_install_btn)
         tags_form.addRow("Description", self.tag_model_description_label)
         tags_form.addRow("Status", tag_model_status_row)
@@ -2216,13 +2200,26 @@ class AISettingsPage(SettingsPage):
         self.caption_model_status_label.setTextFormat(Qt.TextFormat.RichText)
         self.caption_model_status_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.caption_model_status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.caption_model_submodel_combo = QComboBox()
+        self.caption_model_submodel_combo.setVisible(False)
+        self.caption_model_submodel_combo.currentIndexChanged.connect(lambda _index: self._on_gemma_submodel_changed("captioner"))
+        self.caption_model_advanced_btn = QPushButton("Advanced")
+        self.caption_model_advanced_btn.setFlat(True)
+        self.caption_model_advanced_btn.clicked.connect(lambda: self.dialog.main_window.open_local_ai_setup("captioner", show_advanced=True))
         self.caption_model_install_btn = QPushButton("Install Model")
         self.caption_model_install_btn.clicked.connect(lambda: self._install_selected_ai_model("captioner"))
         caption_model_status_row = QWidget()
         caption_model_status_layout = QHBoxLayout(caption_model_status_row)
         caption_model_status_layout.setContentsMargins(0, 0, 0, 0)
         caption_model_status_layout.setSpacing(8)
-        caption_model_status_layout.addWidget(self.caption_model_status_label, 1)
+        caption_model_status_panel = QWidget()
+        caption_model_status_panel_layout = QVBoxLayout(caption_model_status_panel)
+        caption_model_status_panel_layout.setContentsMargins(0, 0, 0, 0)
+        caption_model_status_panel_layout.setSpacing(4)
+        caption_model_status_panel_layout.addWidget(self.caption_model_status_label)
+        caption_model_status_panel_layout.addWidget(self.caption_model_submodel_combo)
+        caption_model_status_panel_layout.addWidget(self.caption_model_advanced_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        caption_model_status_layout.addWidget(caption_model_status_panel, 1)
         caption_model_status_layout.addWidget(self.caption_model_install_btn)
         descriptions_form.addRow("Description", self.caption_model_description_label)
         descriptions_form.addRow("Status", caption_model_status_row)
@@ -2248,6 +2245,24 @@ class AISettingsPage(SettingsPage):
         self.max_tokens_spin.setRange(1, 2048)
         descriptions_form.addRow("Maximum Tokens", self.max_tokens_spin)
 
+        models_group = QGroupBox("Models")
+        models_form = QFormLayout(models_group)
+        models_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        models_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        content_layout.addWidget(models_group)
+
+        models_row = QWidget()
+        models_layout = QHBoxLayout(models_row)
+        models_layout.setContentsMargins(0, 0, 0, 0)
+        models_layout.setSpacing(6)
+        self.models_dir_edit = QLineEdit()
+        self.models_dir_edit.setClearButtonEnabled(True)
+        browse_btn = QPushButton("Browse")
+        browse_btn.clicked.connect(self._browse_models_dir)
+        models_layout.addWidget(self.models_dir_edit, 1)
+        models_layout.addWidget(browse_btn)
+        models_form.addRow("Models Folder", models_row)
+
         save_btn = QPushButton("Save AI Settings")
         save_btn.clicked.connect(self._save)
         content_layout.addWidget(save_btn)
@@ -2266,7 +2281,6 @@ class AISettingsPage(SettingsPage):
             self.caption_model_combo,
             self.tag_write_mode_combo,
             self.description_write_mode_combo,
-            self.device_combo,
         ):
             combo.currentIndexChanged.connect(self._save)
         self.tag_model_combo.currentIndexChanged.connect(lambda _index: self._refresh_ai_model_statuses())
@@ -2276,8 +2290,6 @@ class AISettingsPage(SettingsPage):
         self.tag_prompt_edit.textChanged.connect(self._save)
         self.caption_prompt_edit.textChanged.connect(self._save)
         self.tag_max_tags_spin.valueChanged.connect(self._save)
-        self.gpu_index_spin.valueChanged.connect(self._save)
-        self.load_4bit_toggle.toggled.connect(self._save)
         self.max_tokens_spin.valueChanged.connect(self._save)
         self.refresh()
 
@@ -2295,21 +2307,51 @@ class AISettingsPage(SettingsPage):
         combo = self.tag_model_combo if kind == "tagger" else self.caption_model_combo
         return str(combo.currentData() or "")
 
+    def _status_widgets(self, kind: str):
+        if kind == "tagger":
+            return self.tag_model_description_label, self.tag_model_status_label, self.tag_model_install_btn, self.tag_model_submodel_combo, self.tag_model_advanced_btn
+        return self.caption_model_description_label, self.caption_model_status_label, self.caption_model_install_btn, self.caption_model_submodel_combo, self.caption_model_advanced_btn
+
+    def _populate_gemma_submodels(self, combo: QComboBox, status: dict) -> None:
+        from app.mediamanager.ai_captioning.gemma_gguf import gemma_profile_by_id
+
+        downloaded = list(status.get("gemma_downloaded_profiles") or [])
+        selected_id = str(status.get("gemma_selected_profile_id") or "").strip()
+        with QSignalBlocker(combo):
+            combo.clear()
+            for profile_id in downloaded:
+                profile = gemma_profile_by_id(str(profile_id))
+                if profile is None:
+                    continue
+                combo.addItem(profile.label, profile.id)
+            combo.setVisible(combo.count() > 0)
+            if combo.count() > 0:
+                idx = combo.findData(selected_id)
+                combo.setCurrentIndex(idx if idx >= 0 else 0)
+
+    def _on_gemma_submodel_changed(self, kind: str) -> None:
+        combo = self.tag_model_submodel_combo if kind == "tagger" else self.caption_model_submodel_combo
+        profile_id = str(combo.currentData() or "").strip()
+        if not profile_id:
+            return
+        self.settings.setValue("ai_caption/gemma_selected_profile_id", profile_id)
+        self.settings.sync()
+        self._refresh_ai_model_statuses()
+
     def _apply_ai_model_status(self, kind: str, status: dict) -> None:
-        description_label = self.tag_model_description_label if kind == "tagger" else self.caption_model_description_label
-        status_label = self.tag_model_status_label if kind == "tagger" else self.caption_model_status_label
-        button = self.tag_model_install_btn if kind == "tagger" else self.caption_model_install_btn
+        description_label, status_label, button, submodel_combo, advanced_btn = self._status_widgets(kind)
         state = str(status.get("state") or "").strip()
         description = str(status.get("description") or "").strip()
         message = str(status.get("message") or "").strip()
-        runtime_summary = str(status.get("runtime_summary") or "").strip()
-        runtime_details_html = str(status.get("runtime_details_html") or "").strip()
+        runtime_probe = dict(status.get("runtime_probe") or {})
         Theme = _theme_api()
         is_light = Theme.get_is_light()
         ok_color = "#238636" if is_light else "#7ee787"
         bad_color = "#c62828" if is_light else "#ff7b72"
         if state == "installed":
             status_text = f'<span style="color:{ok_color};">✓</span> Installed'
+            selected_device = str(runtime_probe.get("selected_device") or "").strip().lower()
+            status_text += f'<br><span style="color:{ok_color};">✓</span> GPU' if (selected_device.startswith("cuda") or selected_device == "gpu") else "<br>CPU"
         elif state == "installing":
             status_text = "Installing..."
         elif state == "not_installed":
@@ -2319,20 +2361,16 @@ class AISettingsPage(SettingsPage):
             status_text = f'<span style="color:{bad_color};">✕</span> {clean_error}'
         else:
             status_text = html.escape(message or "Status unavailable")
-        detail_lines: list[str] = []
-        if runtime_summary:
-            detail_lines.append(html.escape(runtime_summary))
-        if runtime_details_html:
-            detail_lines.append(runtime_details_html)
-        elif message and state in {"installed", "installing"}:
-            detail_lines.append(html.escape(message))
-        if detail_lines:
-            status_text = f"{status_text}<br><span style=\"font-size:11px;\">{'<br>'.join(detail_lines)}</span>"
         description_label.setText(description or "No description available.")
         status_label.setText(status_text)
         status_label.setProperty("installState", state or "unknown")
         status_label.style().unpolish(status_label)
         status_label.style().polish(status_label)
+        if str(status.get("settings_key") or "") == "gemma4":
+            self._populate_gemma_submodels(submodel_combo, status)
+        else:
+            submodel_combo.setVisible(False)
+        advanced_btn.setVisible(True)
         button.setVisible(state in {"not_installed", "error", "installing"})
         button.setEnabled(state in {"not_installed", "error"})
         button.setText("Installing..." if state == "installing" else "Install Model")
@@ -2407,9 +2445,6 @@ class AISettingsPage(SettingsPage):
             min_probability = 0.35
         s.setValue("ai_caption/tag_min_probability", max(0.0, min(1.0, min_probability)))
         s.setValue("ai_caption/tag_max_tags", self.tag_max_tags_spin.value())
-        s.setValue("ai_caption/device", self.device_combo.currentData() or "gpu")
-        s.setValue("ai_caption/gpu_index", self.gpu_index_spin.value())
-        s.setValue("ai_caption/load_in_4_bit", self.load_4bit_toggle.isChecked())
         s.setValue("ai_caption/max_new_tokens", self.max_tokens_spin.value())
         s.setValue("ai_caption/min_new_tokens", 1)
         s.setValue("ai_caption/num_beams", 1)
@@ -2437,9 +2472,6 @@ class AISettingsPage(SettingsPage):
             self.tags_to_exclude_edit.setText(str(self._setting("ai_caption.tags_to_exclude", "", str) or ""))
             self.tag_min_probability_edit.setText(str(self._setting("ai_caption.tag_min_probability", 0.35, float) or 0.35))
             self.tag_max_tags_spin.setValue(int(self._setting("ai_caption.tag_max_tags", 75, int) or 75))
-            self._set_combo_data(self.device_combo, str(self._setting("ai_caption.device", "gpu", str) or "gpu"))
-            self.gpu_index_spin.setValue(int(self._setting("ai_caption.gpu_index", 0, int) or 0))
-            self.load_4bit_toggle.setChecked(bool(self._setting("ai_caption.load_in_4_bit", False, bool)))
             self.max_tokens_spin.setValue(int(self._setting("ai_caption.max_new_tokens", 200, int) or 200))
         finally:
             self._loading = False
@@ -2456,14 +2488,21 @@ class LocalAiSetupDialog(QDialog):
         self.focus_kind = str(focus_kind or "").strip()
         self.setWindowTitle("Local AI Models")
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
-        self.resize(760, 540)
+        self.resize(860, 620)
         self.setModal(False)
         self._rows: dict[str, dict[str, object]] = {}
         self._refresh_generation = 0
+        self._advanced_visible = False
+        self._simple_status_message = ""
+        self._simple_status_seconds = 0
+        self._simple_status_timer = QTimer(self)
+        self._simple_status_timer.setInterval(5000)
+        self._simple_status_timer.timeout.connect(self._tick_simple_status)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(12)
+        root.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         title = QLabel("Local AI Models")
         title.setObjectName("localAiSetupTitle")
@@ -2477,6 +2516,21 @@ class LocalAiSetupDialog(QDialog):
         intro.setWordWrap(True)
         root.addWidget(intro)
 
+        self.use_recommended_btn = QPushButton("Use Recommended models")
+        self.use_recommended_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.use_recommended_btn.clicked.connect(self._use_recommended_models)
+        root.addWidget(self.use_recommended_btn)
+
+        self.advanced_toggle_btn = QPushButton("Show Advanced options")
+        self.advanced_toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.advanced_toggle_btn.clicked.connect(self._toggle_advanced_options)
+        root.addWidget(self.advanced_toggle_btn)
+
+        self.simple_status_label = QLabel("")
+        self.simple_status_label.setWordWrap(True)
+        self.simple_status_label.setVisible(False)
+        root.addWidget(self.simple_status_label)
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -2485,24 +2539,13 @@ class LocalAiSetupDialog(QDialog):
         self.rows_layout.setContentsMargins(0, 0, 0, 0)
         self.rows_layout.setSpacing(10)
         scroll.setWidget(content)
-        root.addWidget(scroll, 1)
+        self.advanced_scroll = scroll
+        root.addWidget(scroll)
 
         self.skip_startup_cb = QCheckBox("Don't show on startup (Can still open from View menu)")
         self.skip_startup_cb.setChecked(bool(self.bridge.settings.value("ai_caption/setup_dialog_skip_startup", False, type=bool)))
         self.skip_startup_cb.toggled.connect(lambda checked: self.bridge.settings.setValue("ai_caption/setup_dialog_skip_startup", checked))
         root.addWidget(self.skip_startup_cb)
-
-        buttons = QHBoxLayout()
-        self.refresh_btn = QPushButton("Refresh")
-        self.refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.refresh_btn.clicked.connect(self.refresh_statuses)
-        self.close_btn = QPushButton("Close")
-        self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.close_btn.clicked.connect(self.close)
-        buttons.addWidget(self.refresh_btn)
-        buttons.addStretch(1)
-        buttons.addWidget(self.close_btn)
-        root.addLayout(buttons)
 
         if hasattr(self.bridge, "localAiModelInstallStatus"):
             self.bridge.localAiModelInstallStatus.connect(self._on_install_status)
@@ -2511,6 +2554,7 @@ class LocalAiSetupDialog(QDialog):
         self.statusResolved.connect(self._on_status_resolved)
 
         self._build_rows()
+        self._set_advanced_visible(False)
         self.refresh_statuses()
         self._apply_theme()
 
@@ -2527,7 +2571,8 @@ class LocalAiSetupDialog(QDialog):
                 },
             )
             row["kinds"].add(spec.kind)
-        return rows
+        order = {"gemma4": 0, "wd_swinv2": 1, "internlm_xcomposer2": 2}
+        return dict(sorted(rows.items(), key=lambda item: (order.get(item[0], 99), str(item[0]))))
 
     @staticmethod
     def _capabilities_label(kinds: set[str]) -> str:
@@ -2545,25 +2590,21 @@ class LocalAiSetupDialog(QDialog):
             frame = QFrame()
             frame.setObjectName("localAiModelRow")
             frame.setFrameShape(QFrame.Shape.StyledPanel)
-            layout = QGridLayout(frame)
+            layout = QVBoxLayout(frame)
             layout.setContentsMargins(16, 14, 16, 14)
-            layout.setHorizontalSpacing(20)
-            layout.setVerticalSpacing(0)
+            layout.setSpacing(10)
 
-            details_panel = QWidget()
-            details_layout = QVBoxLayout(details_panel)
-            details_layout.setContentsMargins(0, 0, 0, 0)
-            details_layout.setSpacing(0)
-            details_view = SelectableRichTextView()
-            details_view.setObjectName("localAiModelDetailsView")
-            details_layout.addWidget(details_view)
-            layout.addWidget(details_panel, 0, 0)
-
-            actions_panel = QWidget()
-            actions_layout = QVBoxLayout(actions_panel)
-            actions_layout.setContentsMargins(0, 0, 0, 0)
-            actions_layout.setSpacing(8)
-            actions_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight)
+            header = QWidget()
+            header_layout = QHBoxLayout(header)
+            header_layout.setContentsMargins(0, 0, 0, 0)
+            header_layout.setSpacing(12)
+            title_btn = QPushButton("")
+            title_btn.setObjectName("localAiHeaderButton")
+            title_btn.setCheckable(True)
+            title_btn.setChecked(False)
+            title_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            title_btn.setFlat(True)
+            header_layout.addWidget(title_btn, 1)
 
             status_badge = QLabel("Checking")
             status_badge.setObjectName("localAiStatusBadge")
@@ -2573,7 +2614,90 @@ class LocalAiSetupDialog(QDialog):
             status_badge.setFont(badge_font)
             status_badge.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             status_badge.setMinimumWidth(178)
-            actions_layout.addWidget(status_badge)
+            header_layout.addWidget(status_badge)
+            layout.addWidget(header)
+
+            content_panel = QWidget()
+            content_layout = QGridLayout(content_panel)
+            content_layout.setContentsMargins(0, 0, 0, 0)
+            content_layout.setHorizontalSpacing(20)
+            content_layout.setVerticalSpacing(0)
+            content_panel.setVisible(False)
+
+            details_panel = QWidget()
+            details_layout = QVBoxLayout(details_panel)
+            details_layout.setContentsMargins(0, 0, 0, 0)
+            details_layout.setSpacing(6)
+
+            summary_view = SelectableRichTextView()
+            summary_view.setObjectName("localAiModelDetailsView")
+
+            gemma_profile_row = QWidget()
+            gemma_profile_layout = QGridLayout(gemma_profile_row)
+            gemma_profile_layout.setContentsMargins(0, 0, 0, 0)
+            gemma_profile_layout.setHorizontalSpacing(8)
+            gemma_profile_layout.setVerticalSpacing(6)
+            gemma_profile_label = QLabel("")
+            gemma_profile_label.setObjectName("localAiModelMeta")
+            gemma_profile_combo = QComboBox()
+            gemma_profile_combo.setObjectName("localAiProfileCombo")
+            gemma_profile_combo.setMinimumWidth(420)
+            gemma_profile_size_lbl = QLabel("")
+            gemma_profile_size_lbl.setObjectName("localAiModelMeta")
+            gemma_profile_recommended_lbl = QLabel("")
+            gemma_profile_recommended_lbl.setObjectName("localAiModelRecommended")
+            gemma_profile_download_btn = QPushButton("Download Model")
+            gemma_profile_download_btn.setObjectName("localAiProfileActionButton")
+            gemma_profile_download_btn.setFixedHeight(28)
+            gemma_profile_download_btn.setMinimumWidth(120)
+            gemma_profile_download_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            gemma_profile_delete_btn = QPushButton("Delete Model")
+            gemma_profile_delete_btn.setObjectName("localAiProfileDeleteButton")
+            gemma_profile_delete_btn.setFixedHeight(28)
+            gemma_profile_delete_btn.setMinimumWidth(110)
+            gemma_profile_delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            gemma_profile_layout.addWidget(gemma_profile_label, 0, 0, 1, 4)
+            gemma_profile_layout.addWidget(gemma_profile_combo, 1, 0, 1, 4)
+            gemma_profile_layout.addWidget(gemma_profile_size_lbl, 2, 0)
+            gemma_profile_layout.addWidget(gemma_profile_recommended_lbl, 2, 1)
+            gemma_profile_layout.addWidget(gemma_profile_download_btn, 2, 2)
+            gemma_profile_layout.addWidget(gemma_profile_delete_btn, 2, 3)
+            gemma_profile_layout.setColumnStretch(0, 1)
+            gemma_profile_row.setVisible(False)
+
+            gemma_profile_download_status = SelectableRichTextView()
+            gemma_profile_download_status.setObjectName("localAiModelDetailsView")
+            gemma_profile_download_status.setVisible(False)
+
+            details_toggle_btn = QToolButton()
+            details_toggle_btn.setText("Show technical specs")
+            details_toggle_btn.setCheckable(True)
+            details_toggle_btn.setChecked(False)
+            details_toggle_btn.setObjectName("localAiDetailsToggle")
+            details_toggle_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+
+            details_layout.addWidget(summary_view)
+            details_layout.addWidget(gemma_profile_row)
+            details_layout.addWidget(gemma_profile_download_status)
+            details_layout.addWidget(details_toggle_btn)
+
+            technical_view = SelectableRichTextView()
+            technical_view.setObjectName("localAiTechnicalDetailsView")
+            technical_view.setVisible(False)
+            details_layout.addWidget(technical_view)
+            details_toggle_btn.toggled.connect(
+                lambda checked, view=technical_view, btn=details_toggle_btn: (
+                    view.setVisible(bool(checked)),
+                    btn.setText("Hide technical specs" if checked else "Show technical specs"),
+                )
+            )
+            content_layout.addWidget(details_panel, 0, 0)
+
+            actions_panel = QWidget()
+            actions_layout = QVBoxLayout(actions_panel)
+            actions_layout.setContentsMargins(0, 0, 0, 0)
+            actions_layout.setSpacing(8)
+            actions_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight)
 
             install_btn = QPushButton("Install")
             install_btn.setObjectName("localAiInstallButton")
@@ -2590,42 +2714,319 @@ class LocalAiSetupDialog(QDialog):
             uninstall_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             uninstall_btn.clicked.connect(lambda _checked=False, s=spec: self._uninstall_model(s))
             actions_layout.addWidget(uninstall_btn, 0, Qt.AlignmentFlag.AlignRight)
+
+            delete_btn = QPushButton("Delete Model")
+            delete_btn.setObjectName("localAiDeleteButton")
+            delete_btn.setFixedHeight(28)
+            delete_btn.setMaximumWidth(120)
+            delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            delete_btn.clicked.connect(lambda _checked=False, s=spec: self._delete_model_files(s))
+            actions_layout.addWidget(delete_btn, 0, Qt.AlignmentFlag.AlignRight)
             actions_layout.addStretch(1)
 
-            layout.addWidget(actions_panel, 0, 1)
-            layout.setColumnStretch(0, 1)
-            layout.setColumnMinimumWidth(1, 178)
+            content_layout.addWidget(actions_panel, 0, 1)
+            content_layout.setColumnStretch(0, 1)
+            content_layout.setColumnMinimumWidth(1, 178)
+            layout.addWidget(content_panel)
 
             self.rows_layout.addWidget(frame)
             self._rows[status_key] = {
                 "spec": spec,
                 "kinds": set(kinds),
+                "title_button": title_btn,
                 "badge": status_badge,
                 "button": install_btn,
                 "uninstall_button": uninstall_btn,
-                "details_view": details_view,
+                "delete_button": delete_btn,
+                "content_panel": content_panel,
+                "summary_view": summary_view,
+                "technical_view": technical_view,
+                "details_toggle_button": details_toggle_btn,
+                "gemma_profile_row": gemma_profile_row,
+                "gemma_profile_combo": gemma_profile_combo,
+                "gemma_profile_label": gemma_profile_label,
+                "gemma_profile_size_lbl": gemma_profile_size_lbl,
+                "gemma_profile_recommended_lbl": gemma_profile_recommended_lbl,
+                "gemma_profile_download_btn": gemma_profile_download_btn,
+                "gemma_profile_delete_btn": gemma_profile_delete_btn,
+                "gemma_profile_download_status": gemma_profile_download_status,
                 "frame": frame,
             }
+            title_btn.toggled.connect(lambda checked, key=status_key: self._toggle_row_content(key, checked))
+            if spec.settings_key == "gemma4":
+                self._configure_gemma_profile_controls(row=self._rows[status_key])
         self.rows_layout.addStretch(1)
 
-    def _row_details_html(self, spec, kinds: set[str], status: dict) -> str:
+    def _toggle_row_content(self, status_key: str, checked: bool) -> None:
+        row = self._rows.get(status_key)
+        if not row:
+            return
+        panel = row.get("content_panel")
+        title_btn = row.get("title_button")
+        if panel is not None:
+            panel.setVisible(bool(checked) and self._advanced_visible)
+        if title_btn is not None:
+            spec = row.get("spec")
+            title_btn.setText(self._row_header_text(spec, bool(checked)))
+
+    def _set_advanced_visible(self, visible: bool) -> None:
+        self._advanced_visible = bool(visible)
+        self.advanced_scroll.setVisible(self._advanced_visible)
+        self.advanced_scroll.setMaximumHeight(16777215 if self._advanced_visible else 0)
+        self.advanced_scroll.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding if self._advanced_visible else QSizePolicy.Policy.Fixed,
+        )
+        self.skip_startup_cb.setVisible(True)
+        self.advanced_toggle_btn.setText("Hide Advanced Options" if self._advanced_visible else "Show Advanced options")
+        if self._advanced_visible:
+            self._simple_status_timer.stop()
+            self.simple_status_label.setVisible(False)
+        for row in self._rows.values():
+            panel = row.get("content_panel")
+            title_btn = row.get("title_button")
+            if panel is not None and title_btn is not None:
+                panel.setVisible(self._advanced_visible and bool(title_btn.isChecked()))
+                spec = row.get("spec")
+                title_btn.setText(self._row_header_text(spec, bool(title_btn.isChecked())))
+
+    def _toggle_advanced_options(self) -> None:
+        self._set_advanced_visible(not self._advanced_visible)
+
+    def _recommended_gemma_profile(self):
+        from app.mediamanager.ai_captioning.gemma_gguf import choose_best_gemma_profile
+
+        vram = self.bridge._local_ai_detect_nvidia_vram() if hasattr(self.bridge, "_local_ai_detect_nvidia_vram") else {}
+        return choose_best_gemma_profile(vram.get("total_vram_gb"), vram.get("free_vram_gb"))
+
+    def _simple_recommended_message(self, payload: dict) -> str:
+        download_messages = dict(payload.get("download_messages") or {})
+        state = str(payload.get("state") or "").strip()
+        message = str(payload.get("message") or "").strip()
+        if state == "installed":
+            return "Gemma 4 is setup. No further action needed."
+        if state == "error":
+            return message or "Gemma 4 setup failed."
+        if str(payload.get("download_message") or "").strip() or download_messages:
+            percents: list[int] = []
+            for text in download_messages.values():
+                match = re.search(r"(\d{1,3})%", str(text or ""))
+                if match:
+                    try:
+                        percents.append(max(0, min(100, int(match.group(1)))))
+                    except Exception:
+                        pass
+            if percents:
+                return f"Downloading Gemma 4... {max(percents)}%"
+            return "Downloading Gemma 4..."
+        lower = message.lower()
+        if "validating" in lower or "finalizing" in lower:
+            return "Finalizing Gemma 4..."
+        if any(token in lower for token in ("creating", "installing", "runtime", "python", "package", "support")):
+            return "Preparing Gemma 4..."
+        return "Working on Gemma 4..."
+
+    def _set_simple_status(self, message: str, *, active: bool) -> None:
+        self._simple_status_message = str(message or "").strip()
+        self._simple_status_seconds = 0
+        self.simple_status_label.setText(self._simple_status_message)
+        self.simple_status_label.setVisible(bool(self._simple_status_message))
+        if active:
+            self._simple_status_timer.start()
+        else:
+            self._simple_status_timer.stop()
+
+    def _tick_simple_status(self) -> None:
+        if not self._simple_status_message:
+            self._simple_status_timer.stop()
+            return
+        self._simple_status_seconds += 5
+        self.simple_status_label.setText(f"{self._simple_status_message} Still working...")
+
+    @staticmethod
+    def _row_header_text(spec, expanded: bool) -> str:
+        title = "Gemma 4 (Recommended)" if getattr(spec, "settings_key", "") == "gemma4" else str(getattr(spec, "label", "") or "")
+        return f"{'▾' if expanded else '▸'} {title}"
+
+    def _use_recommended_models(self) -> None:
+        recommended = self._recommended_gemma_profile()
+        self.bridge.settings.setValue("ai_caption/gemma_selected_profile_id", recommended.id)
+        self.bridge.settings.sync()
+        self._set_simple_status(f"Starting {recommended.label}...", active=True)
+        if hasattr(self.bridge, "install_local_ai_model"):
+            self.bridge.install_local_ai_model("google/gemma-4-E2B-it", "captioner")
+
+    def _row_details_html(self, spec, kinds: set[str], status: dict) -> tuple[str, str, str]:
         state = str(status.get("state") or "").strip()
         message = str(status.get("message") or "").strip()
+        download_message = str(status.get("download_message") or "").strip()
+        download_messages = dict(status.get("download_messages") or {})
         runtime_summary = str(status.get("runtime_summary") or "").strip()
         runtime_details_html = str(status.get("runtime_details_html") or "").strip()
-        lines = [
-            f'<div style="font-weight:700; font-size:15px; margin-bottom:8px;">{html.escape(str(spec.label or ""))}</div>',
+        gpu_summary = self._compact_gpu_summary(status)
+        profile_downloading = bool(status.get("gemma_profile_downloading"))
+        summary_lines = [
             f"<b>Use:</b> {html.escape(self._capabilities_label(kinds))}",
             f"<b>Description:</b> {html.escape(str(spec.description or ''))}",
             f"<b>Size:</b> {html.escape(str(spec.estimated_size or ''))}",
+            f"<b>GPU:</b> {html.escape(gpu_summary)}" if gpu_summary else "",
         ]
+        if bool(status.get("model_files_cached")) and state != "installed":
+            summary_lines.append("<b>Model files:</b> Cached locally for faster reinstall")
+        if runtime_summary and state != "installed":
+            summary_lines.append(f"<b>Status:</b> {html.escape(runtime_summary)}")
+        if message and (state in {'installing', 'error'} or profile_downloading or not runtime_summary and not runtime_details_html):
+            summary_lines.append(html.escape(message))
+        download_lines: list[str] = []
+        if download_messages:
+            labels = {"model": "Model", "mmproj": "Vision Projector"}
+            for key in ("model", "mmproj"):
+                value = str(download_messages.get(key) or "").strip()
+                if value:
+                    download_lines.append(f'<div><b>{html.escape(labels.get(key, key.title()))}:</b> {html.escape(value)}</div>')
+        elif download_message:
+            download_lines.append(f"<div>{html.escape(download_message)}</div>")
+        technical_lines = []
         if runtime_summary:
-            lines.append(f"<b>Status:</b> {html.escape(runtime_summary)}")
+            technical_lines.append(f"<b>Status:</b> {html.escape(runtime_summary)}")
         if runtime_details_html:
-            lines.append(runtime_details_html)
-        if message and (state in {'installing', 'error'} or not runtime_summary and not runtime_details_html):
-            lines.append(html.escape(message))
-        return "<br>".join(line for line in lines if line)
+            technical_lines.append(runtime_details_html)
+        return (
+            "<br>".join(line for line in summary_lines if line),
+            (
+                '<div style="margin-top:0;"><b>Downloading...</b></div>'
+                + "".join(download_lines)
+            ) if download_lines else "",
+            "<br>".join(line for line in technical_lines if line),
+        )
+
+    @staticmethod
+    def _compact_gpu_summary(status: dict) -> str:
+        probe = dict(status.get("runtime_probe") or {})
+        backend = str(probe.get("backend") or "").strip().lower()
+        if not probe:
+            return ""
+        selected_device = str(probe.get("selected_device") or "").strip().lower()
+        if backend == "gguf":
+            return "Enabled ✓" if selected_device == "gpu" else "Unavailable ✕"
+        if backend == "onnx":
+            active_provider = str(probe.get("active_provider") or "").strip().lower()
+            providers = [str(name).strip().lower() for name in list(probe.get("available_providers") or []) if str(name).strip()]
+            onnx_gpu_ready = (
+                "cuda" in selected_device
+                or selected_device == "gpu"
+                or "cudaexecutionprovider" in active_provider
+                or "tensorrtexecutionprovider" in active_provider
+                or any(provider in {"cudaexecutionprovider", "tensorrtexecutionprovider"} for provider in providers)
+            )
+            return "Enabled ✓" if onnx_gpu_ready else "Unavailable ✕"
+        return "Enabled ✓" if selected_device.startswith("cuda") or selected_device == "gpu" else "Unavailable ✕"
+
+    def _gemma_profile_ui_data(self):
+        from app.mediamanager.ai_captioning.gemma_gguf import choose_best_gemma_profile, gemma_profile_options
+
+        vram = self.bridge._local_ai_detect_nvidia_vram() if hasattr(self.bridge, "_local_ai_detect_nvidia_vram") else {}
+        recommended = choose_best_gemma_profile(vram.get("total_vram_gb"), vram.get("free_vram_gb"))
+        profiles = tuple(sorted(gemma_profile_options(), key=lambda profile: (profile.approx_total_gb, profile.quality_rank)))
+        return profiles, recommended
+
+    def _configure_gemma_profile_controls(self, row: dict[str, object]) -> None:
+        profiles, recommended = self._gemma_profile_ui_data()
+        combo = row["gemma_profile_combo"]
+        with QSignalBlocker(combo):
+            combo.clear()
+            for profile in profiles:
+                label = f"{profile.label}  |  {profile.approx_total_gb:.1f} GB"
+                if profile.id == recommended.id:
+                    label += "  (Recommended)"
+                combo.addItem(label, profile.id)
+        combo.currentIndexChanged.connect(lambda _index, r=row: self._on_gemma_profile_changed(r))
+        row["gemma_profile_download_btn"].clicked.connect(lambda _checked=False, r=row: self._download_selected_gemma_profile(r))
+        row["gemma_profile_delete_btn"].clicked.connect(lambda _checked=False, r=row: self._delete_selected_gemma_profile(r))
+        self._sync_gemma_profile_controls(row)
+
+    def _sync_gemma_profile_controls(self, row: dict[str, object]) -> None:
+        profiles, recommended = self._gemma_profile_ui_data()
+        by_id = {profile.id: profile for profile in profiles}
+        combo = row["gemma_profile_combo"]
+        downloaded = set((row.get("latest_status") or {}).get("gemma_downloaded_profiles") or [])
+        row["gemma_profile_label"].setText(f"Select Model. ({len(downloaded)} models downloaded)")
+        active_download_id = str((row.get("latest_status") or {}).get("gemma_profile_downloading_id") or "").strip()
+        is_profile_downloading = bool((row.get("latest_status") or {}).get("gemma_profile_downloading"))
+        selected_id = str(self.bridge.settings.value("ai_caption/gemma_selected_profile_id", "", type=str) or "").strip() or recommended.id
+        with QSignalBlocker(combo):
+            current_id = str(combo.currentData() or "")
+            index = combo.findData(selected_id)
+            if index < 0 and current_id:
+                index = combo.findData(current_id)
+            index = max(0, index)
+            combo.setCurrentIndex(index)
+            for idx, profile in enumerate(profiles):
+                label = f"{'✓ ' if profile.id in downloaded else ''}{profile.label}  |  {profile.approx_total_gb:.1f} GB"
+                if profile.id == recommended.id:
+                    label += "  (Recommended)"
+                combo.setItemText(idx, label)
+        profile = by_id.get(str(combo.currentData() or "")) or recommended
+        row["gemma_profile_size_lbl"].setText(f"{profile.approx_total_gb:.1f} GB")
+        row["gemma_profile_recommended_lbl"].setText("Recommended" if profile.id == recommended.id else "")
+        is_downloaded = profile.id in downloaded
+        download_btn = row["gemma_profile_download_btn"]
+        delete_btn = row["gemma_profile_delete_btn"]
+        downloading_selected = is_profile_downloading and profile.id == active_download_id
+        download_btn.setText("Cancel Download" if downloading_selected else "Download Model")
+        if downloading_selected:
+            download_btn.setVisible(True)
+            download_btn.setEnabled(True)
+            delete_btn.setVisible(False)
+            delete_btn.setEnabled(False)
+        elif is_profile_downloading:
+            download_btn.setVisible(False)
+            download_btn.setEnabled(False)
+            delete_btn.setVisible(False)
+            delete_btn.setEnabled(False)
+        else:
+            download_btn.setVisible(not is_downloaded)
+            download_btn.setEnabled(not is_downloaded)
+            delete_btn.setVisible(is_downloaded)
+            delete_btn.setEnabled(is_downloaded)
+
+    def _on_gemma_profile_changed(self, row: dict[str, object]) -> None:
+        combo = row["gemma_profile_combo"]
+        profile_id = str(combo.currentData() or "").strip()
+        self.bridge.settings.setValue("ai_caption/gemma_selected_profile_id", profile_id)
+        self._sync_gemma_profile_controls(row)
+        self.refresh_statuses()
+
+    def _download_selected_gemma_profile(self, row: dict[str, object]) -> None:
+        status = dict(row.get("latest_status") or {})
+        selected_id = str((row["gemma_profile_combo"]).currentData() or "").strip()
+        if bool(status.get("gemma_profile_downloading")) and str(status.get("gemma_profile_downloading_id") or "").strip() == selected_id:
+            if hasattr(self.bridge, "cancel_gemma_profile_download"):
+                self.bridge.cancel_gemma_profile_download()
+            return
+        if not hasattr(self.bridge, "download_gemma_profile_files"):
+            return
+        combo = row["gemma_profile_combo"]
+        profile_id = str(combo.currentData() or "").strip()
+        if profile_id:
+            self.bridge.download_gemma_profile_files(profile_id)
+
+    def _delete_selected_gemma_profile(self, row: dict[str, object]) -> None:
+        if not hasattr(self.bridge, "delete_gemma_profile_files"):
+            return
+        combo = row["gemma_profile_combo"]
+        profile_id = str(combo.currentData() or "").strip()
+        label = combo.currentText().replace("✓ ", "").split("  |  ", 1)[0]
+        reply = QMessageBox.question(
+            self,
+            "Delete Gemma Model",
+            f"Delete downloaded files for {label}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self.bridge.delete_gemma_profile_files(profile_id)
 
     def refresh_statuses(self) -> None:
         self._refresh_generation += 1
@@ -2656,10 +3057,16 @@ class LocalAiSetupDialog(QDialog):
         row = self._rows.get(status_key)
         if not row:
             return
+        row["latest_status"] = dict(status or {})
         badge = row["badge"]
+        title_button = row["title_button"]
         button = row["button"]
         uninstall_button = row["uninstall_button"]
-        details_view = row["details_view"]
+        delete_button = row["delete_button"]
+        summary_view = row["summary_view"]
+        gemma_profile_download_status = row.get("gemma_profile_download_status")
+        technical_view = row["technical_view"]
+        details_toggle_button = row["details_toggle_button"]
         frame = row["frame"]
         spec = row["spec"]
         kinds = set(row.get("kinds") or set())
@@ -2680,20 +3087,44 @@ class LocalAiSetupDialog(QDialog):
             badge.setText("Unknown")
         frame.setProperty("installState", state or "unknown")
         badge.setProperty("installState", state or "unknown")
+        title_button.setText(self._row_header_text(spec, bool(title_button.isChecked())))
         frame.style().unpolish(frame)
         frame.style().polish(frame)
         badge.style().unpolish(badge)
         badge.style().polish(badge)
         badge.setVisible(state in {"installed", "error"})
-        button.setVisible(state in {"not_installed", "error", "installing"})
+        profile_downloading = bool(status.get("gemma_profile_downloading"))
+        button.setVisible(state in {"not_installed", "error", "installing"} and not profile_downloading)
         button.setEnabled(state in {"not_installed", "error"})
         button.setText("Installing..." if state == "installing" else "Install")
         uninstall_button.setVisible(state == "installed")
         uninstall_button.setEnabled(state == "installed")
-        details_view.setProperty("installState", state)
-        details_view.set_rich_text(self._row_details_html(spec, kinds, status))
-        details_view.style().unpolish(details_view)
-        details_view.style().polish(details_view)
+        delete_button.setVisible(state != "installed" and bool(status.get("model_files_cached")))
+        delete_button.setEnabled(state != "installed" and bool(status.get("model_files_cached")))
+        summary_html, download_html, technical_html = self._row_details_html(spec, kinds, status)
+        summary_view.setProperty("installState", state)
+        summary_view.set_rich_text(summary_html)
+        summary_view.style().unpolish(summary_view)
+        summary_view.style().polish(summary_view)
+        if gemma_profile_download_status is not None:
+            gemma_profile_download_status.setProperty("installState", state)
+            gemma_profile_download_status.set_rich_text(download_html)
+            gemma_profile_download_status.setVisible(bool(download_html))
+            gemma_profile_download_status.style().unpolish(gemma_profile_download_status)
+            gemma_profile_download_status.style().polish(gemma_profile_download_status)
+        technical_view.setProperty("installState", state)
+        technical_view.set_rich_text(technical_html)
+        technical_view.setVisible(bool(details_toggle_button.isChecked()) and bool(technical_html))
+        details_toggle_button.setVisible(bool(technical_html))
+        if not technical_html:
+            details_toggle_button.setChecked(False)
+        gemma_row = row.get("gemma_profile_row")
+        if gemma_row is not None:
+            gemma_row.setVisible(spec.settings_key == "gemma4")
+            if spec.settings_key == "gemma4":
+                self._sync_gemma_profile_controls(row)
+        if self._advanced_visible and state == "installing" and not title_button.isChecked():
+            title_button.setChecked(True)
 
     def _install_model(self, spec) -> None:
         if not hasattr(self.bridge, "install_local_ai_model"):
@@ -2718,13 +3149,38 @@ class LocalAiSetupDialog(QDialog):
         self.bridge.uninstall_local_ai_model(spec.id, spec.kind)
         self.refresh_statuses()
 
+    def _delete_model_files(self, spec) -> None:
+        if not hasattr(self.bridge, "delete_local_ai_model_files"):
+            self._apply_status(spec.settings_key, {"state": "error", "message": "Delete model files is not available in this build."})
+            return
+        reply = QMessageBox.question(
+            self,
+            "Delete Model Files",
+            f"Delete cached model files for {spec.label}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self.bridge.delete_local_ai_model_files(spec.id, spec.kind)
+        self.refresh_statuses()
+
     def _on_install_status(self, status_key: str, payload: dict) -> None:
-        self._apply_status(str(status_key or ""), dict(payload or {}))
+        payload = dict(payload or {})
+        self._apply_status(str(status_key or ""), payload)
+        if not self._advanced_visible and str(status_key or "") == "gemma4":
+            active = str(payload.get("state") or "").strip() in {"installing"} or bool(payload.get("gemma_profile_downloading"))
+            self._set_simple_status(self._simple_recommended_message(payload), active=active)
 
     def _on_status_resolved(self, status_key: str, payload: dict, generation: int) -> None:
         if int(generation) != int(self._refresh_generation):
             return
-        self._apply_status(str(status_key or ""), dict(payload or {}))
+        payload = dict(payload or {})
+        self._apply_status(str(status_key or ""), payload)
+        if not self._advanced_visible and str(status_key or "") == "gemma4" and not self.simple_status_label.isVisible():
+            state = str(payload.get("state") or "").strip()
+            if state == "installed":
+                self._set_simple_status("Gemma 4 is setup. No further action needed.", active=False)
 
     def _apply_theme(self) -> None:
         Theme = _theme_api()
@@ -2741,6 +3197,7 @@ class LocalAiSetupDialog(QDialog):
         hover = Theme.get_btn_save_hover(accent)
         accent_soft = Theme.get_accent_soft(accent)
         accent_str = accent.name()
+        accent_text = Theme.mix(text, accent_str, 0.76)
         missing_fg = "#7c1f11" if Theme.get_is_light() else "#ffd1c7"
         error_fg = "#8a111a" if Theme.get_is_light() else "#ffd0d4"
         _check_dir = (Path(__file__).with_name("web") / "scrollbar_arrows").as_posix()
@@ -2758,6 +3215,11 @@ class LocalAiSetupDialog(QDialog):
             }}
             QLabel#localAiSetupTitle {{
                 color: {text};
+            }}
+            QTextEdit#localAiModelDetailsView, QTextEdit#localAiTechnicalDetailsView {{
+                color: {text};
+                background: transparent;
+                border: none;
             }}
             QScrollArea {{
                 background: transparent;
@@ -2787,6 +3249,26 @@ class LocalAiSetupDialog(QDialog):
             }}
             QLabel#localAiStatusBadge[installState="error"] {{
                 color: {error_fg};
+            }}
+            QPushButton#localAiHeaderButton {{
+                background: transparent;
+                border: none;
+                color: {text};
+                padding: 0;
+                min-height: 0;
+                text-align: left;
+                font-size: 15px;
+                font-weight: 700;
+            }}
+            QPushButton#localAiHeaderButton:hover {{
+                color: {text};
+                background: transparent;
+                border: none;
+            }}
+            QPushButton#localAiHeaderButton:pressed {{
+                color: {text};
+                background: transparent;
+                border: none;
             }}
             QLabel#localAiModelInstallMessage {{
                 color: {muted};
@@ -2852,6 +3334,67 @@ class LocalAiSetupDialog(QDialog):
                 font-weight: 600;
                 min-height: 28px;
                 max-height: 28px;
+            }}
+            QPushButton#localAiDeleteButton {{
+                background-color: {control_bg};
+                border-color: {border};
+                color: {muted};
+                font-weight: 600;
+                min-height: 28px;
+                max-height: 28px;
+            }}
+            QPushButton#localAiDeleteButton:hover {{
+                color: {text};
+                border-color: {accent_str};
+                background-color: {hover};
+            }}
+            QPushButton#localAiProfileActionButton, QPushButton#localAiProfileDeleteButton {{
+                background-color: {Theme.get_btn_save_bg(accent)};
+                border-color: {border};
+                font-weight: 600;
+                min-height: 28px;
+                max-height: 28px;
+            }}
+            QPushButton#localAiProfileActionButton:hover, QPushButton#localAiProfileDeleteButton:hover {{
+                background-color: {hover};
+                border-color: {accent_str};
+            }}
+            QComboBox#localAiProfileCombo {{
+                background-color: {Theme.mix(control_bg, "#ffffff", 0.16 if Theme.get_is_light() else 0.12)};
+                border: 1px solid {border};
+                border-radius: 6px;
+                padding: 4px 8px;
+                min-height: 28px;
+            }}
+            QComboBox#localAiProfileCombo:hover {{
+                border-color: {accent_str};
+            }}
+            QComboBox#localAiProfileCombo QAbstractItemView {{
+                background-color: {bg};
+                border: 1px solid {border};
+                selection-background-color: {accent_soft};
+                selection-color: {text};
+            }}
+            QLabel#localAiModelMeta {{
+                color: {muted};
+                font-size: 11px;
+            }}
+            QLabel#localAiModelRecommended {{
+                color: {accent_text};
+                font-size: 11px;
+                font-weight: 700;
+            }}
+            QToolButton#localAiDetailsToggle {{
+                color: {muted};
+                background: transparent;
+                border: none;
+                padding: 0;
+                text-align: left;
+                font-size: 12px;
+                font-weight: 700;
+            }}
+            QToolButton#localAiDetailsToggle:hover {{
+                color: {text};
             }}
             QScrollBar:vertical {{
                 background: {Theme.get_scrollbar_track(accent)};
@@ -2955,6 +3498,13 @@ class SettingsDialog(QDialog):
         self.open()
         self.raise_()
         self.activateWindow()
+
+    def open_ai_page(self) -> None:
+        for index, (title, _page) in enumerate(self._page_defs):
+            if str(title) == "AI":
+                self.category_list.setCurrentRow(index)
+                break
+        self.open_dialog()
 
     def refresh_from_settings(self) -> None:
         current_row = max(self.category_list.currentRow(), 0)

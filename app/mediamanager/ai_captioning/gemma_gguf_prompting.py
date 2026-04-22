@@ -9,6 +9,13 @@ DEFAULT_GGUF_DESCRIPTION_RULES = (
     "Do not output reasoning, analysis, planning, numbered steps, labels, markdown, or quotes.",
 )
 
+DEFAULT_BF16_DESCRIPTION_RULES = (
+    "Return exactly one natural-language image description paragraph.",
+    "Do not output reasoning, analysis, planning, numbered steps, labels, markdown, or quotes.",
+    "Do not repeat the prompt or explain what you will do.",
+    "Do not include headings such as Image Analysis, Subject, Setting, or Execution.",
+)
+
 
 def build_user_description_prompt(prompt_template: str, tags: list[str], caption_start: str) -> str:
     prompt = str(prompt_template or "").strip()
@@ -29,6 +36,12 @@ def build_gguf_description_prompt(prompt_template: str, tags: list[str], caption
     return f"{base_prompt.rstrip()}\n{suffix}".strip()
 
 
+def build_bf16_description_prompt(prompt_template: str, tags: list[str], caption_start: str) -> str:
+    base_prompt = build_user_description_prompt(prompt_template, tags, caption_start)
+    suffix = " ".join(DEFAULT_BF16_DESCRIPTION_RULES)
+    return f"{base_prompt.rstrip()}\n{suffix}".strip()
+
+
 def build_gguf_rewrite_prompt(caption_start: str, draft: str) -> str:
     clean_start = " ".join(str(caption_start or "").split())
     parts = [
@@ -41,6 +54,21 @@ def build_gguf_rewrite_prompt(caption_start: str, draft: str) -> str:
     if clean_start:
         parts.append(f"Begin the paragraph exactly with: {clean_start}")
     parts.append("Draft:")
+    parts.append(str(draft or "").strip())
+    return "\n".join(parts).strip()
+
+
+def build_bf16_rewrite_prompt(caption_start: str, draft: str) -> str:
+    clean_start = " ".join(str(caption_start or "").split())
+    parts = [
+        "Convert the text below into exactly one final image description paragraph.",
+        "Keep only visible image content.",
+        "Remove analysis, headings, bullets, numbered lists, prompt echo, and any explanation of the task.",
+        "Return only the final paragraph.",
+    ]
+    if clean_start:
+        parts.append(f"Begin the paragraph exactly with: {clean_start}")
+    parts.append("Text:")
     parts.append(str(draft or "").strip())
     return "\n".join(parts).strip()
 

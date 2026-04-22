@@ -42,14 +42,14 @@ MODEL_SPECS: tuple[LocalAiModelSpec, ...] = (
     LocalAiModelSpec(
         id=GEMMA4_MODEL_ID,
         kind="tagger",
-        label="Gemma 4 GGUF (Auto)",
+        label="Gemma 4",
         worker_module="app.mediamanager.ai_captioning.gemma_worker",
         venv_dir=".venv-gemma",
         settings_key="gemma4",
-        install_label="Gemma 4 GGUF",
+        install_label="Gemma 4",
         requirements_file="requirements-local-ai-gemma.txt",
-        description="Auto-selects a Gemma GGUF profile based on available GPU VRAM for tags and descriptions.",
-        estimated_size="Approx. 4-9 GB (auto-selected)",
+        description="Instruction-tuned multimodal Gemma 4 model from Google DeepMind for local image understanding and text generation.",
+        estimated_size="Approx. 3-62 GB (depends on selected profile)",
     ),
     LocalAiModelSpec(
         id=CAPTION_MODEL_ID,
@@ -66,14 +66,14 @@ MODEL_SPECS: tuple[LocalAiModelSpec, ...] = (
     LocalAiModelSpec(
         id=GEMMA4_MODEL_ID,
         kind="captioner",
-        label="Gemma 4 GGUF (Auto)",
+        label="Gemma 4",
         worker_module="app.mediamanager.ai_captioning.gemma_worker",
         venv_dir=".venv-gemma",
         settings_key="gemma4",
-        install_label="Gemma 4 GGUF",
+        install_label="Gemma 4",
         requirements_file="requirements-local-ai-gemma.txt",
-        description="Auto-selects a Gemma GGUF profile based on available GPU VRAM for tags and descriptions.",
-        estimated_size="Approx. 4-9 GB (auto-selected)",
+        description="Instruction-tuned multimodal Gemma 4 model from Google DeepMind for local image understanding and text generation.",
+        estimated_size="Approx. 3-62 GB (depends on selected profile)",
     ),
 )
 
