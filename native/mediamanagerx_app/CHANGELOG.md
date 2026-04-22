@@ -1,6 +1,41 @@
 # Change Log
 
-## v1.1.30 (Current)
+## v1.1.31 (Current)
+
+### Summary
+
+This release makes Local AI setup much easier to understand and much more practical to use. MediaLens now guides users toward a recommended Gemma 4 setup, makes model switching and downloads easier to manage, and greatly improves local captioning reliability on GPU systems.
+
+### Highlights
+
+- Gemma 4 now supports multiple downloadable model variants, so you can switch between installed versions without uninstalling and reinstalling each time.
+- Local AI setup now has a simpler recommended flow for most users, while still keeping advanced controls available when needed.
+- Gemma 4 descriptions are far more reliable again, with cleaner output and better handling for GGUF and BF16 model variants.
+
+### Added
+
+- Added a simplified Local AI Models onboarding flow with `Use Recommended models` and expandable advanced options.
+- Added downloadable Gemma 4 sub-model management, including installed-model indicators, per-model download and delete actions, and easier switching between downloaded variants.
+- Added recommended Gemma profile selection based on available VRAM, including larger options for high-VRAM GPUs.
+- Added clearer Gemma profile and download progress presentation inside the Local AI Models window.
+
+### Changed
+
+- Changed Gemma 4 local inference from a single fixed Transformers setup to selectable llama.cpp-based model variants, including GGUF and BF16 options.
+- Changed Gemma 4 prompting and cleanup so image descriptions return normal final paragraphs more reliably instead of reasoning or instruction text.
+- Changed Local AI installation to overlap runtime preparation with model downloads for faster setup.
+- Changed AI model status reporting to better distinguish simple user-facing status from advanced technical details.
+- Changed the Settings `AI` page to use a simpler local AI status presentation and a cleaner handoff into the advanced Local AI Models window.
+- Changed Local AI setup, runtime probing, and installer diagnostics to improve GPU detection, validation, and recovery when CUDA-backed runtimes are available.
+- Changed Local AI status and error text surfaces so important messages are selectable and easier to copy when troubleshooting.
+
+### Removed
+
+- Removed older low-level Local AI controls from the main Settings `AI` page that no longer fit the new guided setup flow.
+
+---
+
+## v1.1.30
 
 ### Summary
 

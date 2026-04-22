@@ -2804,7 +2804,7 @@ class LocalAiSetupDialog(QDialog):
         state = str(payload.get("state") or "").strip()
         message = str(payload.get("message") or "").strip()
         if state == "installed":
-            return "Gemma 4 is setup. No further action needed."
+            return "Gemma 4 is setup. No further action needed.\nYou can start generating descriptions and tags using local private AI anytime now."
         if state == "error":
             return message or "Gemma 4 setup failed."
         if str(payload.get("download_message") or "").strip() or download_messages:
@@ -3180,7 +3180,10 @@ class LocalAiSetupDialog(QDialog):
         if not self._advanced_visible and str(status_key or "") == "gemma4" and not self.simple_status_label.isVisible():
             state = str(payload.get("state") or "").strip()
             if state == "installed":
-                self._set_simple_status("Gemma 4 is setup. No further action needed.", active=False)
+                self._set_simple_status(
+                    "Gemma 4 is setup. No further action needed.\nYou can start generating descriptions and tags using local private AI anytime now.",
+                    active=False,
+                )
 
     def _apply_theme(self) -> None:
         Theme = _theme_api()
