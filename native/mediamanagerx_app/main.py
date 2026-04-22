@@ -12024,12 +12024,15 @@ class MainWindow(QMainWindow):
         self._pending_tree_reroot = False
         if not path_str or not self.left_panel.isVisible():
             return
+        self._suppress_tree_selection_history = True
         try:
             if re_root_tree or not self._tree_root_path:
                 self._set_tree_root(path_str)
             self._sync_tree_to_folder(path_str)
         except Exception as exc:
             self.bridge._log(f"Tree sync failed for {path_str}: {exc}")
+        finally:
+            self._suppress_tree_selection_history = False
 
     def _set_tree_root(self, folder_path: str) -> None:
         if not folder_path:
@@ -12259,6 +12262,13 @@ class MainWindow(QMainWindow):
     def _on_directory_loaded(self, path: str) -> None:
         """Triggered when QFileSystemModel finishes loading a directory's contents."""
         self.bridge._log(f"Tree: Directory loaded: {path}")
+        self._suppress_tree_selection_history = True
+        try:
+            self._on_directory_loaded_impl(path)
+        finally:
+            self._suppress_tree_selection_history = False
+
+    def _on_directory_loaded_impl(self, path: str) -> None:
         self.proxy_model.invalidate()
         
         # If the tree's root index is still invalid, try to fix it now
