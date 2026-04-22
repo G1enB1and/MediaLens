@@ -4246,12 +4246,9 @@ class Bridge(QObject):
         self._checkpoint_dirty_count = 0
         self._scan_checkpoint: dict[str, set[str]] = self._load_scan_checkpoint()
 
-        # Two-phase scan: phase 1 = stat+DB-lookup diff, phase 2 = deep work on changed files only.
-        # Disable with MEDIALENS_TWO_PHASE_SCAN=0 to fall back to scanning the entire disk cache
-        # (the original single-pass behavior) — useful if the two-phase code ever misclassifies.
-        self._two_phase_scan_enabled = str(
-            os.environ.get("MEDIALENS_TWO_PHASE_SCAN", "1")
-        ).strip().lower() not in {"0", "false", "no", "off"}
+        # Set by app.aboutToQuit so daemon threads stop emitting signals before
+        # Qt deletes the Bridge's C++ half during shutdown.
+        self._shutting_down: bool = False
 
         self._compare_paths: dict[str, str] = {"left": "", "right": ""}
         self._compare_keep_paths: set[str] = set()
@@ -8019,6 +8016,21 @@ class Bridge(QObject):
             self._log(f"Local AI signal emit failed: {exc}")
             return False
 
+    def _safe_emit(self, signal, *args) -> bool:
+        """Emit a Bridge signal from a worker thread, swallowing the race where
+        Qt has already deleted the Bridge's C++ half during app shutdown."""
+        if self._shutting_down:
+            return False
+        try:
+            signal.emit(*args)
+            return True
+        except RuntimeError:
+            # "Internal C++ object (Bridge) already deleted" — Qt tore down
+            # before this daemon thread finished. Nothing to do.
+            return False
+        except Exception:
+            return False
+
     def _emit_local_ai_status(self, message: str) -> None:
         self._emit_local_ai_signal(self.localAiCaptioningStatus, str(message or "").strip())
 
@@ -9284,17 +9296,10 @@ class Bridge(QObject):
 
         for i, entry in enumerate(media_entries):
             if emit_progress and not progress_started and (time.monotonic() - started_at) >= show_progress_after_s:
-                try:
-                    self.scanStarted.emit(primary)
-                    progress_started = True
-                except Exception:
-                    progress_started = False
+                progress_started = self._safe_emit(self.scanStarted, primary)
             if progress_started and total > 0 and (i == 0 or (i + 1) % 50 == 0 or (i + 1) == total):
                 phase_percent = max(1, min(99, int(((i + 1) / total) * 100)))
-                try:
-                    self.scanProgress.emit("Checking for changes...", phase_percent)
-                except Exception:
-                    pass
+                self._safe_emit(self.scanProgress, "Checking for changes...", phase_percent)
 
             raw_path = entry.get("_real_path") or entry.get("path") or ""
             path = str(raw_path).strip()
@@ -9402,11 +9407,9 @@ class Bridge(QObject):
                     count = len(self._get_reconciled_candidates(folders, "all", search_query))
                 except Exception:
                     count = 0
-                try:
-                    self.scanFinished.emit(primary, int(count))
-                except Exception:
-                    pass
-                self._ensure_background_text_processing(list(folders), None)
+                self._safe_emit(self.scanFinished, primary, int(count))
+                if not self._shutting_down:
+                    self._ensure_background_text_processing(list(folders), None)
 
             threading.Thread(target=emit_cached_scan_finished, daemon=True).start()
             return
@@ -9426,29 +9429,27 @@ class Bridge(QObject):
                     is_warm, changed_paths, progress_started = self._evaluate_scan_scope(
                         reconciled_scope,
                         primary,
-                        emit_progress=self._two_phase_scan_enabled,
+                        emit_progress=True,
                     )
                     if is_warm:
                         self._last_full_scan_key = scan_key
                         self._warm_scan_keys.add(scan_key)
                         finish_count = len(reconciled_scope) if not str(search_query or "").strip() else len(self._get_reconciled_candidates(folders, "all", search_query))
-                        self.scanFinished.emit(primary, finish_count)
+                        self._safe_emit(self.scanFinished, primary, finish_count)
                         emitted_finish = True
                     else:
-                        if self._two_phase_scan_enabled:
-                            paths = changed_paths
-                        else:
-                            paths = list(self._disk_cache.values())
+                        paths = changed_paths
                         if paths:
                             if not progress_started:
-                                self.scanStarted.emit(primary)
+                                self._safe_emit(self.scanStarted, primary)
                             self._do_full_scan(paths, self.conn, emit_progress=True, scope_key=scan_key)
                         self._last_full_scan_key = scan_key
                         self._warm_scan_keys.add(scan_key)
                         finish_count = len(reconciled_scope) if not str(search_query or "").strip() else len(self._get_reconciled_candidates(folders, "all", search_query))
-                        self.scanFinished.emit(primary, finish_count)
+                        self._safe_emit(self.scanFinished, primary, finish_count)
                         emitted_finish = True
-                self._ensure_background_text_processing(list(folders), None)
+                if not self._shutting_down:
+                    self._ensure_background_text_processing(list(folders), None)
             except Exception as exc:
                 try:
                     self._log(f"Background scan failed: {exc}")
@@ -9461,7 +9462,7 @@ class Bridge(QObject):
                 # cleared (no scanFinished = no handler = no flag reset).
                 if not emitted_finish:
                     try:
-                        self.scanFinished.emit(primary, 0)
+                        self._safe_emit(self.scanFinished, primary, 0)
                     except Exception:
                         pass
         threading.Thread(target=work, daemon=True).start()
@@ -9534,7 +9535,7 @@ class Bridge(QObject):
                     paths[i:] = tail
                     p = paths[i]
             if emit_progress:
-                self.scanProgress.emit(p.name, int(((i + 1) / total) * 100) if total > 0 else 100)
+                self._safe_emit(self.scanProgress, p.name, int(((i + 1) / total) * 100) if total > 0 else 100)
             try:
                 stat = p.stat()
                 existing, skip = get_media_by_path(conn, str(p)), False
@@ -19062,6 +19063,15 @@ def main() -> None:
         _log_dpi_state(app, win.bridge._log)
     except Exception:
         pass
+
+    def _mark_bridge_shutting_down() -> None:
+        try:
+            win.bridge._shutting_down = True
+            win.bridge._scan_abort = True
+            win.bridge._local_ai_shutting_down = True
+        except Exception:
+            pass
+    app.aboutToQuit.connect(_mark_bridge_shutting_down)
 
     splash_closed = False
 
