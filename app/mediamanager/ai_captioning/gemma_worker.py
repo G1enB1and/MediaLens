@@ -183,6 +183,18 @@ def _gguf_cli_path(settings: dict[str, Any]) -> Path:
     return Path()
 
 
+def _gguf_runtime_launch_context(settings: dict[str, Any]) -> tuple[dict[str, str], str | None]:
+    env = os.environ.copy()
+    server_path = Path(str(settings.get("gemma_llama_server") or "").strip())
+    runtime_dir = server_path.parent if server_path.is_file() else None
+    if runtime_dir is not None:
+        runtime_dir_str = str(runtime_dir)
+        existing_path = str(env.get("PATH") or "")
+        env["PATH"] = runtime_dir_str + (os.pathsep + existing_path if existing_path else "")
+        return env, runtime_dir_str
+    return env, None
+
+
 def _encode_image_data_uri(source_path: str | Path) -> str:
     source_path = Path(source_path)
     mime_type, _encoding = mimetypes.guess_type(str(source_path))
@@ -258,7 +270,7 @@ def _start_gguf_server(settings: dict[str, Any]):
         "--reasoning-budget",
         "0",
     ]
-    env = os.environ.copy()
+    env, runtime_cwd = _gguf_runtime_launch_context(settings)
     process = __import__("subprocess").Popen(
         command,
         stdout=__import__("subprocess").PIPE,
@@ -266,6 +278,8 @@ def _start_gguf_server(settings: dict[str, Any]):
         text=True,
         encoding="utf-8",
         errors="replace",
+        cwd=runtime_cwd,
+        env=env,
         creationflags=getattr(__import__("subprocess"), "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
     _wait_for_server_ready(process, port)
@@ -330,6 +344,7 @@ def _gguf_cli_completion(source_path: str, prompt: str, settings: dict[str, Any]
         "--top-p",
         str(float(settings.get("top_p") or 1.0)),
     ]
+    env, runtime_cwd = _gguf_runtime_launch_context(settings)
     completed = subprocess.run(
         command,
         stdout=subprocess.PIPE,
@@ -338,6 +353,8 @@ def _gguf_cli_completion(source_path: str, prompt: str, settings: dict[str, Any]
         encoding="utf-8",
         errors="replace",
         timeout=max(120, max_new_tokens * 2),
+        cwd=runtime_cwd,
+        env=env,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
     combined = "\n".join(part for part in (completed.stdout, completed.stderr) if str(part or "").strip())
