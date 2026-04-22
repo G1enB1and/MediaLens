@@ -238,6 +238,35 @@ METADATA_SETTINGS_CONFIG: dict[str, dict] = {
     },
 }
 
+
+class SelectableRichTextView(QTextEdit):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setReadOnly(True)
+        self.setUndoRedoEnabled(False)
+        self.setAcceptRichText(True)
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.DefaultContextMenu)
+        self.setStyleSheet("background: transparent; border: none; padding: 0;")
+
+    def set_rich_text(self, text: str) -> None:
+        self.setHtml(str(text or ""))
+        self._update_height()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_height()
+
+    def _update_height(self) -> None:
+        document = self.document()
+        document.setTextWidth(max(0, self.viewport().width() - 2))
+        margins = self.contentsMargins()
+        height = int(document.size().height() + margins.top() + margins.bottom() + (self.frameWidth() * 2) + 6)
+        self.setFixedHeight(max(24, height))
+
 DUPLICATE_RULE_POLICIES = [
     (
         "duplicate.rules.crop_policy",
@@ -2525,38 +2554,9 @@ class LocalAiSetupDialog(QDialog):
             details_layout = QVBoxLayout(details_panel)
             details_layout.setContentsMargins(0, 0, 0, 0)
             details_layout.setSpacing(0)
-            name = QLabel(spec.label)
-            name.setObjectName("localAiModelName")
-            name_font = name.font()
-            name_font.setBold(True)
-            name.setFont(name_font)
-            details_layout.addWidget(name)
-
-            metadata = QWidget()
-            metadata_layout = QVBoxLayout(metadata)
-            metadata_layout.setContentsMargins(0, 8, 0, 0)
-            metadata_layout.setSpacing(3)
-            detail_rows = (
-                ("Use", self._capabilities_label(kinds)),
-                ("Description", str(spec.description or "")),
-                ("Size", str(spec.estimated_size or "")),
-            )
-            for label, value in detail_rows:
-                detail = QLabel(f"<b>{html.escape(label)}:</b> {html.escape(value)}")
-                detail.setObjectName("localAiModelDetails")
-                detail.setTextFormat(Qt.TextFormat.RichText)
-                detail.setWordWrap(True)
-                detail.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-                detail.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-                metadata_layout.addWidget(detail)
-            message_label = QLabel("")
-            message_label.setObjectName("localAiModelInstallMessage")
-            message_label.setTextFormat(Qt.TextFormat.RichText)
-            message_label.setWordWrap(True)
-            message_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            message_label.setVisible(False)
-            metadata_layout.addWidget(message_label)
-            details_layout.addWidget(metadata)
+            details_view = SelectableRichTextView()
+            details_view.setObjectName("localAiModelDetailsView")
+            details_layout.addWidget(details_view)
             layout.addWidget(details_panel, 0, 0)
 
             actions_panel = QWidget()
@@ -2599,13 +2599,33 @@ class LocalAiSetupDialog(QDialog):
             self.rows_layout.addWidget(frame)
             self._rows[status_key] = {
                 "spec": spec,
+                "kinds": set(kinds),
                 "badge": status_badge,
                 "button": install_btn,
                 "uninstall_button": uninstall_btn,
-                "message": message_label,
+                "details_view": details_view,
                 "frame": frame,
             }
         self.rows_layout.addStretch(1)
+
+    def _row_details_html(self, spec, kinds: set[str], status: dict) -> str:
+        state = str(status.get("state") or "").strip()
+        message = str(status.get("message") or "").strip()
+        runtime_summary = str(status.get("runtime_summary") or "").strip()
+        runtime_details_html = str(status.get("runtime_details_html") or "").strip()
+        lines = [
+            f'<div style="font-weight:700; font-size:15px; margin-bottom:8px;">{html.escape(str(spec.label or ""))}</div>',
+            f"<b>Use:</b> {html.escape(self._capabilities_label(kinds))}",
+            f"<b>Description:</b> {html.escape(str(spec.description or ''))}",
+            f"<b>Size:</b> {html.escape(str(spec.estimated_size or ''))}",
+        ]
+        if runtime_summary:
+            lines.append(f"<b>Status:</b> {html.escape(runtime_summary)}")
+        if runtime_details_html:
+            lines.append(runtime_details_html)
+        if message and (state in {'installing', 'error'} or not runtime_summary and not runtime_details_html):
+            lines.append(html.escape(message))
+        return "<br>".join(line for line in lines if line)
 
     def refresh_statuses(self) -> None:
         self._refresh_generation += 1
@@ -2639,12 +2659,11 @@ class LocalAiSetupDialog(QDialog):
         badge = row["badge"]
         button = row["button"]
         uninstall_button = row["uninstall_button"]
-        message_label = row["message"]
+        details_view = row["details_view"]
         frame = row["frame"]
+        spec = row["spec"]
+        kinds = set(row.get("kinds") or set())
         state = str(status.get("state") or "").strip()
-        message = str(status.get("message") or "").strip()
-        runtime_summary = str(status.get("runtime_summary") or "").strip()
-        runtime_details_html = str(status.get("runtime_details_html") or "").strip()
         Theme = _theme_api()
         is_light = Theme.get_is_light()
         ok_color = "#238636" if is_light else "#7ee787"
@@ -2671,21 +2690,10 @@ class LocalAiSetupDialog(QDialog):
         button.setText("Installing..." if state == "installing" else "Install")
         uninstall_button.setVisible(state == "installed")
         uninstall_button.setEnabled(state == "installed")
-        details: list[str] = []
-        if runtime_summary:
-            details.append(f"<b>Status:</b> {html.escape(runtime_summary)}")
-        if runtime_details_html:
-            details.append(runtime_details_html)
-        if message and (state in {"installing", "error"} or not details):
-            details.append(html.escape(message))
-        if details:
-            message_label.setText("<br>".join(details))
-            message_label.setProperty("installState", state)
-            message_label.setVisible(True)
-            message_label.style().unpolish(message_label)
-            message_label.style().polish(message_label)
-        else:
-            message_label.setVisible(False)
+        details_view.setProperty("installState", state)
+        details_view.set_rich_text(self._row_details_html(spec, kinds, status))
+        details_view.style().unpolish(details_view)
+        details_view.style().polish(details_view)
 
     def _install_model(self, spec) -> None:
         if not hasattr(self.bridge, "install_local_ai_model"):

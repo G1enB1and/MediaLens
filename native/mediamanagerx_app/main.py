@@ -207,12 +207,15 @@ from PySide6.QtGui import (
     QImage,
     QImageReader,
     QIcon,
+    QKeySequence,
     QMovie,
     QPainter,
     QPainterPath,
     QPalette,
     QCursor,
     QPixmap,
+    QGuiApplication,
+    QTextOption,
     QMouseEvent,
     QPen,
     QDragEnterEvent,
@@ -220,6 +223,7 @@ from PySide6.QtGui import (
     QDragLeaveEvent,
     QDropEvent,
     QEnterEvent,
+    QShortcut,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -7598,6 +7602,7 @@ class Bridge(QObject):
 
     def _local_ai_model_files_installed(self, models_dir: Path, model_id: str) -> bool:
         from app.mediamanager.ai_captioning.model_registry import CAPTION_MODEL_ID, GEMMA4_MODEL_ID, TAG_MODEL_ID
+        from app.mediamanager.ai_captioning.gemma_gguf import gemma_profile_by_id, gemma_profile_is_installed
 
         local_dir = Path(models_dir) / model_id
         if model_id == TAG_MODEL_ID:
@@ -7606,6 +7611,9 @@ class Bridge(QObject):
             clip_dir = Path(models_dir) / "openai" / "clip-vit-large-patch14-336"
             return (local_dir / "config.json").is_file() and any(local_dir.glob("*.safetensors")) and (clip_dir / "config.json").is_file()
         if model_id == GEMMA4_MODEL_ID:
+            profile = gemma_profile_by_id(str(self.settings.value("ai_caption/gemma_profile_id", "", type=str) or ""))
+            if profile and gemma_profile_is_installed(models_dir, profile):
+                return True
             if (local_dir / "config.json").is_file() and any(local_dir.glob("*.safetensors")):
                 return True
             hf_home = Path(models_dir) / "gemma4_runtime" / "hf_home"
@@ -7760,9 +7768,278 @@ class Bridge(QObject):
                 continue
         return ""
 
+    def _local_ai_detect_nvidia_vram(self) -> dict[str, object]:
+        result: dict[str, object] = {
+            "available": False,
+            "gpu_name": "",
+            "driver_version": "",
+            "total_vram_gb": 0.0,
+            "free_vram_gb": 0.0,
+            "reason": "",
+        }
+        if os.name != "nt":
+            result["reason"] = "NVIDIA VRAM detection is implemented for Windows only."
+            return result
+        try:
+            completed = subprocess.run(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=name,driver_version,memory.total,memory.free",
+                    "--format=csv,noheader,nounits",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=8,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except Exception as exc:
+            result["reason"] = str(exc) or exc.__class__.__name__
+            return result
+        if completed.returncode != 0:
+            result["reason"] = str(completed.stderr or completed.stdout or "nvidia-smi failed").strip()
+            return result
+        first_line = next((line.strip() for line in str(completed.stdout or "").splitlines() if line.strip()), "")
+        if not first_line:
+            result["reason"] = "nvidia-smi returned no GPU rows."
+            return result
+        parts = [part.strip() for part in first_line.split(",")]
+        if len(parts) < 4:
+            result["reason"] = f"Unexpected nvidia-smi output: {first_line}"
+            return result
+        try:
+            total_gb = round(float(parts[2]) / 1024.0, 2)
+            free_gb = round(float(parts[3]) / 1024.0, 2)
+        except Exception as exc:
+            result["reason"] = f"Could not parse VRAM values: {exc}"
+            return result
+        result.update(
+            {
+                "available": True,
+                "gpu_name": parts[0],
+                "driver_version": parts[1],
+                "total_vram_gb": total_gb,
+                "free_vram_gb": free_gb,
+            }
+        )
+        return result
+
     @staticmethod
-    def _local_ai_runtime_backend(spec) -> str:
-        return "onnx" if str(getattr(spec, "settings_key", "") or "") == "wd_swinv2" else "torch"
+    def _download_file(url: str, destination: Path, emit_status) -> Path:
+        destination = Path(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = destination.with_suffix(destination.suffix + ".download")
+        if temp_path.exists():
+            temp_path.unlink()
+        request = urllib.request.Request(
+            str(url),
+            headers={"User-Agent": f"MediaLens/{__version__}"},
+        )
+        with urllib.request.urlopen(request, timeout=90) as response:
+            total = int(response.headers.get("Content-Length") or 0)
+            received = 0
+            last_emit = 0.0
+            with open(temp_path, "wb") as handle:
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+                    received += len(chunk)
+                    if time.monotonic() - last_emit >= 1.0:
+                        last_emit = time.monotonic()
+                        if total:
+                            emit_status(
+                                f"Downloading {destination.name}: {int(round((received / total) * 100))}% "
+                                f"({received // (1024 * 1024)} MB / {total // (1024 * 1024)} MB)"
+                            )
+                        else:
+                            emit_status(f"Downloading {destination.name}: {received // (1024 * 1024)} MB")
+        if destination.exists():
+            destination.unlink()
+        temp_path.replace(destination)
+        return destination
+
+    def _local_ai_gemma_llama_dir(self, runtime_dir: Path) -> Path:
+        return Path(runtime_dir) / "llama.cpp"
+
+    def _local_ai_gemma_llama_server_path(self, runtime_dir: Path) -> Path:
+        return self._local_ai_gemma_llama_dir(runtime_dir) / "llama-server.exe"
+
+    @staticmethod
+    def _extract_zip_into(archive_path: Path, target_dir: Path) -> None:
+        with zipfile.ZipFile(archive_path, "r") as archive:
+            archive.extractall(target_dir)
+
+    def _ensure_gemma_llama_cpp_runtime(self, runtime_dir: Path, emit_status) -> Path:
+        from app.mediamanager.ai_captioning.gemma_gguf import (
+            LLAMA_CPP_WINDOWS_CUDA12_BIN_URL,
+            LLAMA_CPP_WINDOWS_CUDA12_BIN_ZIP,
+            LLAMA_CPP_WINDOWS_CUDA12_URL,
+            LLAMA_CPP_WINDOWS_CUDA12_ZIP,
+        )
+
+        llama_dir = self._local_ai_gemma_llama_dir(runtime_dir)
+        server_path = self._local_ai_gemma_llama_server_path(runtime_dir)
+        if server_path.is_file():
+            return server_path
+        llama_dir.mkdir(parents=True, exist_ok=True)
+        bin_archive_path = llama_dir / LLAMA_CPP_WINDOWS_CUDA12_BIN_ZIP
+        archive_path = llama_dir / LLAMA_CPP_WINDOWS_CUDA12_ZIP
+        emit_status("Downloading llama.cpp CUDA binaries...")
+        self._download_file(LLAMA_CPP_WINDOWS_CUDA12_BIN_URL, bin_archive_path, emit_status)
+        emit_status("Downloading llama.cpp CUDA runtime libraries...")
+        self._download_file(LLAMA_CPP_WINDOWS_CUDA12_URL, archive_path, emit_status)
+        temp_dir = llama_dir.with_name(f"{llama_dir.name}.extracting")
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        emit_status("Extracting llama.cpp CUDA files...")
+        try:
+            self._extract_zip_into(bin_archive_path, temp_dir)
+            self._extract_zip_into(archive_path, temp_dir)
+            server_candidates = list(temp_dir.rglob("llama-server.exe"))
+            if not server_candidates:
+                raise RuntimeError("llama.cpp archives were extracted, but llama-server.exe was not found in the release contents.")
+            extracted_root = server_candidates[0].parent
+            if llama_dir.exists():
+                shutil.rmtree(llama_dir, ignore_errors=True)
+            extracted_root.replace(llama_dir)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        if not server_path.is_file():
+            raise RuntimeError("llama.cpp runtime install completed, but llama-server.exe was not found.")
+        return server_path
+
+    def _choose_gemma_gguf_profile(self):
+        from app.mediamanager.ai_captioning.gemma_gguf import choose_best_gemma_profile
+
+        vram = self._local_ai_detect_nvidia_vram()
+        return choose_best_gemma_profile(vram.get("total_vram_gb"), vram.get("free_vram_gb")), vram
+
+    def _ensure_gemma_gguf_profile_downloaded(self, models_dir: Path, profile, emit_status) -> tuple[Path, Path]:
+        from app.mediamanager.ai_captioning.gemma_gguf import (
+            gemma_profile_install_dir,
+            gemma_profile_mmproj_path,
+            gemma_profile_model_path,
+        )
+
+        install_dir = gemma_profile_install_dir(models_dir, profile)
+        model_path = gemma_profile_model_path(models_dir, profile)
+        mmproj_path = gemma_profile_mmproj_path(models_dir, profile)
+        install_dir.mkdir(parents=True, exist_ok=True)
+        if not model_path.is_file():
+            emit_status(f"Downloading {profile.label} model weights...")
+            self._download_file(profile.model_url, model_path, emit_status)
+        if not mmproj_path.is_file():
+            emit_status(f"Downloading {profile.label} vision projector...")
+            self._download_file(profile.mmproj_url, mmproj_path, emit_status)
+        return model_path, mmproj_path
+
+    def _configure_gemma_gguf_settings(self, profile, runtime_dir: Path, models_dir: Path, vram_info: dict[str, object]) -> dict[str, str | int]:
+        from app.mediamanager.ai_captioning.gemma_gguf import (
+            GEMMA_GGUF_BACKEND_ID,
+            gemma_profile_mmproj_path,
+            gemma_profile_model_path,
+        )
+
+        model_path = gemma_profile_model_path(models_dir, profile)
+        mmproj_path = gemma_profile_mmproj_path(models_dir, profile)
+        server_path = self._local_ai_gemma_llama_server_path(runtime_dir)
+        ctx_size = int(profile.recommended_ctx)
+        self.settings.setValue("ai_caption/gemma_backend", GEMMA_GGUF_BACKEND_ID)
+        self.settings.setValue("ai_caption/gemma_profile_id", profile.id)
+        self.settings.setValue("ai_caption/gemma_profile_label", profile.label)
+        self.settings.setValue("ai_caption/gemma_model_path", str(model_path))
+        self.settings.setValue("ai_caption/gemma_mmproj_path", str(mmproj_path))
+        self.settings.setValue("ai_caption/gemma_llama_server", str(server_path))
+        self.settings.setValue("ai_caption/gemma_ctx_size", ctx_size)
+        self.settings.setValue("ai_caption/gemma_gpu_layers", 999)
+        self.settings.setValue("ai_caption/gemma_detected_total_vram_gb", float(vram_info.get("total_vram_gb") or 0.0))
+        self.settings.setValue("ai_caption/gemma_detected_free_vram_gb", float(vram_info.get("free_vram_gb") or 0.0))
+        self.settings.sync()
+        return {
+            "backend": GEMMA_GGUF_BACKEND_ID,
+            "profile_id": profile.id,
+            "profile_label": profile.label,
+            "model_path": str(model_path),
+            "mmproj_path": str(mmproj_path),
+            "server_path": str(server_path),
+            "ctx_size": ctx_size,
+        }
+
+    def _local_ai_gemma_probe(self, spec) -> dict:
+        from app.mediamanager.ai_captioning.gemma_gguf import GEMMA_GGUF_BACKEND_ID, gemma_profile_by_id
+
+        python_path = self._local_ai_runtime_python_path(spec)
+        requested_device = str(self.settings.value("ai_caption/device", "gpu", type=str) or "gpu").strip().lower() or "gpu"
+        profile = gemma_profile_by_id(str(self.settings.value("ai_caption/gemma_profile_id", "", type=str) or ""))
+        backend = str(self.settings.value("ai_caption/gemma_backend", "", type=str) or "").strip().lower()
+        server_path = Path(str(self.settings.value("ai_caption/gemma_llama_server", "", type=str) or "").strip())
+        model_path = Path(str(self.settings.value("ai_caption/gemma_model_path", "", type=str) or "").strip())
+        mmproj_path = Path(str(self.settings.value("ai_caption/gemma_mmproj_path", "", type=str) or "").strip())
+        ctx_size = int(self.settings.value("ai_caption/gemma_ctx_size", 2048, type=int) or 2048)
+        vram = self._local_ai_detect_nvidia_vram()
+        selected_device = "cpu"
+        reason = ""
+        if backend != GEMMA_GGUF_BACKEND_ID:
+            reason = "Gemma is configured to use the legacy Transformers runtime."
+        elif requested_device != "gpu":
+            reason = "GPU was not requested."
+        elif not server_path.is_file():
+            reason = "llama.cpp CUDA runtime is missing."
+        elif not model_path.is_file() or not mmproj_path.is_file():
+            reason = "Gemma GGUF model files are missing."
+        elif not bool(vram.get("available")):
+            reason = str(vram.get("reason") or "NVIDIA GPU was not detected.")
+        else:
+            selected_device = "gpu"
+        return {
+            "backend": "gguf",
+            "ok": backend == GEMMA_GGUF_BACKEND_ID and python_path.is_file(),
+            "requested_device": requested_device,
+            "selected_device": selected_device,
+            "python_executable": str(python_path),
+            "profile_id": profile.id if profile else str(self.settings.value("ai_caption/gemma_profile_id", "", type=str) or ""),
+            "profile_label": profile.label if profile else str(self.settings.value("ai_caption/gemma_profile_label", "", type=str) or ""),
+            "quantization": profile.quantization if profile else "",
+            "effective_params_label": profile.effective_params_label if profile else "",
+            "approx_model_gb": float(profile.approx_model_gb) if profile else 0.0,
+            "approx_total_gb": float(profile.approx_total_gb) if profile else 0.0,
+            "ctx_size": ctx_size,
+            "llama_server": str(server_path),
+            "model_path": str(model_path),
+            "mmproj_path": str(mmproj_path),
+            "detected_total_vram_gb": float(vram.get("total_vram_gb") or 0.0),
+            "detected_free_vram_gb": float(vram.get("free_vram_gb") or 0.0),
+            "nvidia_smi": {
+                "available": bool(vram.get("available")),
+                "gpus": (
+                    [
+                        {
+                            "name": str(vram.get("gpu_name") or "").strip(),
+                            "driver_version": str(vram.get("driver_version") or "").strip(),
+                        }
+                    ]
+                    if str(vram.get("gpu_name") or "").strip()
+                    else []
+                ),
+            },
+            "reason": reason,
+        }
+
+    def _local_ai_runtime_backend(self, spec) -> str:
+        if str(getattr(spec, "settings_key", "") or "") == "wd_swinv2":
+            return "onnx"
+        if str(getattr(spec, "settings_key", "") or "") == "gemma4":
+            from app.mediamanager.ai_captioning.gemma_gguf import GEMMA_GGUF_BACKEND_ID
+
+            backend = str(self.settings.value("ai_caption/gemma_backend", "", type=str) or "").strip().lower()
+            if backend == GEMMA_GGUF_BACKEND_ID:
+                return "gguf"
+        return "torch"
 
     def _local_ai_runtime_probe_command(self, spec, python_path: str | Path, requested_device: str, gpu_index: int) -> tuple[list[str], Path, dict[str, str]]:
         launcher, worker_cwd, worker_pythonpath = self._local_ai_worker_launcher(
@@ -7829,6 +8106,12 @@ class Bridge(QObject):
         cached = self._local_ai_runtime_status_cache.get(cache_key)
         if not force and cached and (now - cached[0]) < LOCAL_AI_STATUS_CACHE_TTL_SECONDS:
             return dict(cached[1])
+
+        backend = self._local_ai_runtime_backend(spec)
+        if backend == "gguf":
+            payload = self._local_ai_gemma_probe(spec)
+            self._local_ai_runtime_status_cache[cache_key] = (now, dict(payload))
+            return dict(payload)
 
         python_path = self._local_ai_runtime_python_path(spec)
         if not python_path.is_file():
@@ -7902,6 +8185,23 @@ class Bridge(QObject):
             if probe.get("reason") and status_label == "CPU":
                 parts.append(str(probe.get("reason")))
             return " | ".join(parts)
+        if backend == "gguf":
+            parts = [
+                f"Runtime: {status_label}",
+                "llama.cpp GGUF",
+            ]
+            profile_label = str(probe.get("profile_label") or "").strip()
+            quantization = str(probe.get("quantization") or "").strip()
+            if profile_label:
+                parts.append(profile_label)
+            if quantization:
+                parts.append(quantization)
+            total_vram = float(probe.get("detected_total_vram_gb") or 0.0)
+            if total_vram > 0:
+                parts.append(f"VRAM {total_vram:.1f} GB")
+            if probe.get("reason") and status_label == "CPU":
+                parts.append(str(probe.get("reason")))
+            return " | ".join(parts)
         reason = str(probe.get("reason") or "").strip()
         return f"Runtime: {'unavailable' if not probe.get('ok') else status_label}{f' | {reason}' if reason else ''}"
 
@@ -7931,6 +8231,29 @@ class Bridge(QObject):
             providers = [str(name).strip() for name in list(probe.get("available_providers") or []) if str(name).strip()]
             if providers:
                 lines.append(f"<b>Providers:</b> {html.escape(', '.join(providers[:4]))}")
+        elif backend == "gguf":
+            profile_label = str(probe.get("profile_label") or "").strip()
+            if profile_label:
+                lines.append(f"<b>Profile:</b> {html.escape(profile_label)}")
+            quantization = str(probe.get("quantization") or "").strip()
+            if quantization:
+                lines.append(f"<b>Quantization:</b> {html.escape(quantization)}")
+            effective_params = str(probe.get("effective_params_label") or "").strip()
+            if effective_params:
+                lines.append(f"<b>Model:</b> {html.escape(effective_params)}")
+            approx_total_gb = float(probe.get("approx_total_gb") or 0.0)
+            if approx_total_gb > 0:
+                lines.append(f"<b>Approx Size:</b> {html.escape(f'{approx_total_gb:.2f} GB incl. mmproj')}")
+            ctx_size = int(probe.get("ctx_size") or 0)
+            if ctx_size > 0:
+                lines.append(f"<b>Context:</b> {html.escape(str(ctx_size))} tokens")
+            total_vram = float(probe.get("detected_total_vram_gb") or 0.0)
+            free_vram = float(probe.get("detected_free_vram_gb") or 0.0)
+            if total_vram > 0:
+                if free_vram > 0:
+                    lines.append(f"<b>VRAM:</b> {html.escape(f'{total_vram:.2f} GB total, {free_vram:.2f} GB free at install/probe time')}")
+                else:
+                    lines.append(f"<b>VRAM:</b> {html.escape(f'{total_vram:.2f} GB total')}")
         nvidia_smi = dict(probe.get("nvidia_smi") or {})
         smi_gpus = [dict(item or {}) for item in list(nvidia_smi.get("gpus") or [])]
         if smi_gpus:
@@ -7954,6 +8277,84 @@ class Bridge(QObject):
         selected_device = str(probe.get("selected_device") or "").strip().lower()
         active_provider = str(probe.get("active_provider") or "").strip()
         return selected_device.startswith("cuda") or selected_device == "gpu" or active_provider in {"CUDAExecutionProvider", "DmlExecutionProvider"}
+
+    def _local_ai_preload_model(self, spec, python_path: Path, settings_payload: dict, message: str, payload: dict) -> None:
+        launcher, worker_cwd, worker_pythonpath = self._local_ai_worker_launcher(python_path, spec.worker_module)
+        command = [
+            *launcher,
+            "--operation",
+            "preload",
+            "--source",
+            str(Path(__file__).resolve()),
+            "--settings-json",
+            json.dumps(settings_payload, ensure_ascii=False),
+        ]
+        child_env = os.environ.copy()
+        if worker_pythonpath:
+            child_env["PYTHONPATH"] = worker_pythonpath + (os.pathsep + child_env["PYTHONPATH"] if child_env.get("PYTHONPATH") else "")
+        process = subprocess.Popen(
+            command,
+            cwd=str(worker_cwd),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=child_env,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
+        )
+        assert process.stdout is not None
+        last_emit = 0.0
+        last_line = message
+        for line in process.stdout:
+            clean = " ".join(str(line or "").split()).strip()
+            if clean:
+                last_line = clean[-240:]
+            if time.monotonic() - last_emit >= 1.0:
+                last_emit = time.monotonic()
+                payload.update({"state": "installing", "running": True, "message": last_line})
+                self.localAiModelInstallStatus.emit(spec.settings_key, dict(payload))
+        returncode = process.wait()
+        if returncode != 0:
+            raise RuntimeError(f"{message} failed ({self._local_ai_exit_code_text(returncode)}). {last_line}")
+
+    def _install_gemma_gguf_model(self, spec, payload: dict, emit_install_status) -> None:
+        python_path = self._local_ai_runtime_python_path(spec)
+        runtime_dir = Path(python_path).parent.parent
+        runtime_dir.parent.mkdir(parents=True, exist_ok=True)
+        bootstrap_python = self._ensure_local_ai_python_bootstrap(emit_install_status)
+        if not bootstrap_python:
+            raise RuntimeError(
+                "MediaLens could not prepare the Python bootstrap needed to create the Gemma runtime. "
+                "Check your internet connection, then try again."
+            )
+        if not python_path.is_file():
+            message = f"Creating {spec.install_label} runtime..."
+            payload.update({"state": "installing", "running": True, "message": message})
+            self.localAiModelInstallStatus.emit(spec.settings_key, dict(payload))
+            returncode, last_line = self._local_ai_run_command_stream(
+                [bootstrap_python, "-m", "venv", str(runtime_dir)],
+                self._local_ai_worker_source_root(),
+                message,
+                emit_install_status,
+            )
+            if returncode != 0:
+                raise RuntimeError(f"{message} failed ({self._local_ai_exit_code_text(returncode)}). {last_line}")
+        self.settings.setValue("ai_caption/runtime_python/gemma4", str(python_path))
+        self.settings.setValue("ai_caption/gemma_python", str(python_path))
+        profile, vram_info = self._choose_gemma_gguf_profile()
+        emit_install_status(
+            f"Selected {profile.label} for {float(vram_info.get('total_vram_gb') or 0.0):.1f} GB VRAM "
+            f"({float(vram_info.get('free_vram_gb') or 0.0):.1f} GB free)."
+        )
+        self._ensure_gemma_llama_cpp_runtime(runtime_dir, emit_install_status)
+        models_dir = Path(str(self.settings.value("ai_caption/models_dir", self._local_ai_models_dir_default(), type=str) or self._local_ai_models_dir_default()))
+        self._ensure_gemma_gguf_profile_downloaded(models_dir, profile, emit_install_status)
+        configured = self._configure_gemma_gguf_settings(profile, runtime_dir, models_dir, vram_info)
+        message = f"Validating {configured['profile_label']} runtime..."
+        payload.update({"state": "installing", "running": True, "message": message})
+        self.localAiModelInstallStatus.emit(spec.settings_key, dict(payload))
+        self._local_ai_preload_model(spec, python_path, self._local_ai_default_settings_payload_for_spec(spec), message, payload)
 
     def _local_ai_gpu_repair_commands(self, spec, python_path: Path) -> list[tuple[list[str], str]]:
         if os.name != "nt":
@@ -8054,6 +8455,17 @@ class Bridge(QObject):
                 self.localAiModelInstallStatus.emit(spec.settings_key, dict(payload))
 
             try:
+                if spec.settings_key == "gemma4" and os.name == "nt":
+                    self._install_gemma_gguf_model(spec, payload, emit_install_status)
+                    self._local_ai_runtime_status_cache.pop(spec.settings_key, None)
+                    probe = self._local_ai_probe_runtime(spec, force=True)
+                    payload = self._local_ai_status_payload_for_spec(spec)
+                    final_message = f"{spec.install_label} is installed."
+                    if self._local_ai_probe_requests_gpu(self._local_ai_caption_settings()) and not self._local_ai_probe_is_gpu_ready(probe):
+                        final_message = f"{final_message} GPU was requested but this runtime is still using CPU."
+                    payload.update({"state": "installed", "installed": True, "running": False, "message": final_message})
+                    self.localAiModelInstallStatus.emit(spec.settings_key, payload)
+                    return
                 requirements_path = self._local_ai_requirements_path(spec)
                 if not requirements_path.is_file():
                     raise RuntimeError(f"Install instructions for {spec.install_label} were not found.")
@@ -8093,49 +8505,15 @@ class Bridge(QObject):
                     self.localAiModelInstallStatus.emit(spec.settings_key, dict(payload))
                 else:
                     message = f"Downloading {spec.install_label} model files..."
-                    launcher, worker_cwd, worker_pythonpath = self._local_ai_worker_launcher(python_path, spec.worker_module)
-                    command = [
-                        *launcher,
-                        "--operation",
-                        "preload",
-                        "--source",
-                        str(Path(__file__).resolve()),
-                        "--settings-json",
-                        json.dumps(self._local_ai_default_settings_payload_for_spec(spec), ensure_ascii=False),
-                    ]
                     payload.update({"state": "installing", "running": True, "message": message})
                     self.localAiModelInstallStatus.emit(spec.settings_key, dict(payload))
-                    child_env = os.environ.copy()
-                    if worker_pythonpath:
-                        child_env["PYTHONPATH"] = worker_pythonpath + (os.pathsep + child_env["PYTHONPATH"] if child_env.get("PYTHONPATH") else "")
-                    process = subprocess.Popen(
-                        command,
-                        cwd=str(worker_cwd),
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        encoding="utf-8",
-                        errors="replace",
-                        env=child_env,
-                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
-                    )
-                    assert process.stdout is not None
-                    last_emit = 0.0
-                    last_line = message
-                    for line in process.stdout:
-                        clean = " ".join(str(line or "").split()).strip()
-                        if clean:
-                            last_line = clean[-240:]
-                        if time.monotonic() - last_emit >= 1.0:
-                            last_emit = time.monotonic()
-                            payload.update({"state": "installing", "running": True, "message": last_line})
-                            self.localAiModelInstallStatus.emit(spec.settings_key, dict(payload))
-                    returncode = process.wait()
-                    if returncode != 0:
+                    try:
+                        self._local_ai_preload_model(spec, python_path, self._local_ai_default_settings_payload_for_spec(spec), message, payload)
+                    except Exception as exc:
                         if self._local_ai_model_files_installed(models_dir, spec.id):
-                            self._log(f"Local AI model preload failed for {spec.install_label}, but required model files are present ({self._local_ai_exit_code_text(returncode)}): {last_line}")
+                            self._log(f"Local AI model preload failed for {spec.install_label}, but required model files are present: {exc}")
                         else:
-                            raise RuntimeError(f"{message} failed ({self._local_ai_exit_code_text(returncode)}). {last_line}")
+                            raise
                 self._local_ai_runtime_status_cache.pop(spec.settings_key, None)
                 probe = self._local_ai_probe_runtime(spec, force=True)
                 payload = self._local_ai_status_payload_for_spec(spec)
@@ -8174,9 +8552,26 @@ class Bridge(QObject):
                 targets.append(models_dir / "openai" / "clip-vit-large-patch14-336")
             if spec.id == "google/gemma-4-E2B-it":
                 targets.append(models_dir / "gemma4_runtime")
+                targets.append(models_dir / "gemma_gguf")
             for target in targets:
                 if target.exists():
                     shutil.rmtree(target)
+            if spec.settings_key == "gemma4":
+                for key in (
+                    "ai_caption/runtime_python/gemma4",
+                    "ai_caption/gemma_backend",
+                    "ai_caption/gemma_profile_id",
+                    "ai_caption/gemma_profile_label",
+                    "ai_caption/gemma_model_path",
+                    "ai_caption/gemma_mmproj_path",
+                    "ai_caption/gemma_llama_server",
+                    "ai_caption/gemma_ctx_size",
+                    "ai_caption/gemma_gpu_layers",
+                    "ai_caption/gemma_detected_total_vram_gb",
+                    "ai_caption/gemma_detected_free_vram_gb",
+                    "ai_caption/gemma_python",
+                ):
+                    self.settings.remove(key)
             self._local_ai_runtime_status_cache.pop(spec.settings_key, None)
             self.localAiModelInstallStatus.emit(spec.settings_key, self._local_ai_status_payload_for_spec(spec))
             return True
@@ -8304,7 +8699,7 @@ class Bridge(QObject):
         self._emit_local_ai_signal(self.localAiCaptioningStatus, str(message or "").strip())
 
     def _local_ai_settings_payload(self, ai_settings) -> dict:
-        return {
+        payload = {
             "models_dir": str(ai_settings.models_dir),
             "tag_model_id": str(ai_settings.tag_model_id),
             "caption_model_id": str(ai_settings.caption_model_id),
@@ -8332,6 +8727,22 @@ class Bridge(QObject):
             "repetition_penalty": float(ai_settings.repetition_penalty),
             "no_repeat_ngram_size": int(ai_settings.no_repeat_ngram_size),
         }
+        for key, default in (
+            ("gemma_backend", ""),
+            ("gemma_profile_id", ""),
+            ("gemma_profile_label", ""),
+            ("gemma_model_path", ""),
+            ("gemma_mmproj_path", ""),
+            ("gemma_llama_server", ""),
+            ("gemma_ctx_size", 2048),
+            ("gemma_gpu_layers", 999),
+        ):
+            settings_key = f"ai_caption/{key}"
+            if isinstance(default, int):
+                payload[key] = int(self.settings.value(settings_key, default, type=int) or default)
+            else:
+                payload[key] = str(self.settings.value(settings_key, default, type=str) or default)
+        return payload
 
     def _local_ai_default_settings_payload_for_spec(self, spec) -> dict:
         payload = self._local_ai_settings_payload(self._local_ai_caption_settings())
@@ -9978,6 +10389,52 @@ class NativeSeparator(QWidget):
         painter.drawLine(0, y, self.width(), y)
 
 
+class StatusTextEdit(QPlainTextEdit):
+    def __init__(self, text: str = "", parent=None):
+        super().__init__(parent)
+        self.on_nonempty_text = None
+        self.setPlainText(str(text or ""))
+        self.setVisible(bool(str(text or "").strip()))
+        self._copy_shortcut = QShortcut(QKeySequence.StandardKey.Copy, self)
+        self._copy_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._copy_shortcut.activated.connect(self.copy)
+        self.copyAvailable.connect(self._focus_when_selection_available)
+
+    def setText(self, text: str) -> None:
+        clean = str(text or "")
+        self.setPlainText(clean)
+        cursor = self.textCursor()
+        cursor.clearSelection()
+        cursor.setPosition(0)
+        self.setTextCursor(cursor)
+        has_text = bool(clean.strip())
+        self.setVisible(has_text)
+        if has_text and callable(self.on_nonempty_text):
+            QTimer.singleShot(0, self.on_nonempty_text)
+
+    def text(self) -> str:
+        return self.toPlainText()
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        self.setFocus(Qt.FocusReason.MouseFocusReason)
+        super().mousePressEvent(event)
+
+    def _focus_when_selection_available(self, available: bool) -> None:
+        if available:
+            self.setFocus(Qt.FocusReason.MouseFocusReason)
+
+
+class ProgressStatusLabel(QLabel):
+    def __init__(self, text: str = "", parent=None):
+        super().__init__(str(text or ""), parent)
+        self.setWordWrap(True)
+        self.setVisible(bool(str(text or "").strip()))
+
+    def setText(self, text: str) -> None:
+        super().setText(str(text or ""))
+        self.setVisible(bool(str(text or "").strip()))
+
+
 class GalleryView(QWebEngineView):
     """Gallery view that accepts drag and drop from external file explorers."""
     def __init__(self, parent=None):
@@ -10604,10 +11061,30 @@ class MainWindow(QMainWindow):
     def _is_input_focused(self) -> bool:
         """Check if focus is in a text input where shortcuts should be ignored."""
         f = QApplication.focusWidget()
-        return isinstance(f, (QLineEdit, QTextEdit, QPlainTextEdit))
+        while f is not None:
+            if isinstance(f, (QLineEdit, QTextEdit, QPlainTextEdit)):
+                return True
+            parent_widget = getattr(f, "parentWidget", None)
+            f = parent_widget() if callable(parent_widget) else None
+        return False
+
+    def _focused_text_input(self):
+        f = QApplication.focusWidget()
+        while f is not None:
+            if isinstance(f, (QLineEdit, QTextEdit, QPlainTextEdit)):
+                return f
+            parent_widget = getattr(f, "parentWidget", None)
+            f = parent_widget() if callable(parent_widget) else None
+        return None
 
     def _on_copy_shortcut(self) -> None:
-        if self._is_input_focused(): return
+        focused_input = self._focused_text_input()
+        if focused_input is not None:
+            try:
+                focused_input.copy()
+            except Exception:
+                pass
+            return
         paths = self._get_focused_paths()
         if paths: self.bridge.copy_to_clipboard(paths)
 
@@ -11508,13 +11985,18 @@ class MainWindow(QMainWindow):
         self.btn_generate_description.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.btn_generate_description.clicked.connect(self._run_local_ai_description)
         generate_description_btn_layout.addWidget(self.btn_generate_description)
-        self.generate_description_progress_lbl = QLabel("")
+        self.generate_description_progress_lbl = ProgressStatusLabel("")
         self.generate_description_progress_lbl.setObjectName("localAiProgressLabel")
-        self.generate_description_progress_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.generate_description_progress_lbl.setWordWrap(True)
+        self._configure_progress_status_label(self.generate_description_progress_lbl)
         self.generate_description_progress_lbl.setVisible(False)
         self.generate_description_progress_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.generate_description_progress_lbl.setMinimumWidth(0)
+        self.generate_description_error_edit = QPlainTextEdit()
+        self.generate_description_error_edit.setObjectName("localAiErrorText")
+        self._configure_local_ai_error_widget(self.generate_description_error_edit)
+        self.generate_description_error_edit.setVisible(False)
+        self.generate_description_error_edit.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.generate_description_error_edit.setMinimumWidth(0)
 
         self.lbl_tags_cap = QLabel("Tags (comma separated):")
         self.meta_tags = QTextEdit()
@@ -11539,13 +12021,18 @@ class MainWindow(QMainWindow):
         self.btn_generate_tags.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.btn_generate_tags.clicked.connect(self._run_local_ai_tags)
         generate_tags_btn_layout.addWidget(self.btn_generate_tags)
-        self.generate_tags_progress_lbl = QLabel("")
+        self.generate_tags_progress_lbl = ProgressStatusLabel("")
         self.generate_tags_progress_lbl.setObjectName("localAiProgressLabel")
-        self.generate_tags_progress_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.generate_tags_progress_lbl.setWordWrap(True)
+        self._configure_progress_status_label(self.generate_tags_progress_lbl)
         self.generate_tags_progress_lbl.setVisible(False)
         self.generate_tags_progress_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.generate_tags_progress_lbl.setMinimumWidth(0)
+        self.generate_tags_error_edit = QPlainTextEdit()
+        self.generate_tags_error_edit.setObjectName("localAiErrorText")
+        self._configure_local_ai_error_widget(self.generate_tags_error_edit)
+        self.generate_tags_error_edit.setVisible(False)
+        self.generate_tags_error_edit.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.generate_tags_error_edit.setMinimumWidth(0)
 
         self.tag_list_open_btn_row = QWidget()
         self.tag_list_open_btn_row.setObjectName("tagListOpenButtonRow")
@@ -11647,6 +12134,7 @@ class MainWindow(QMainWindow):
                 continue
             widget.setIndent(0)
             widget.setMargin(0)
+            self._make_detail_label_copyable(widget)
             if attr_name.startswith("lbl_"):
                 widget.setProperty("detailCaption", True)
 
@@ -11682,12 +12170,10 @@ class MainWindow(QMainWindow):
         action_layout.addWidget(self.btn_save_to_exif)
         right_layout.addLayout(action_layout)
 
-        self.meta_status_lbl = QLabel("")
+        self.meta_status_lbl = StatusTextEdit("")
         self.meta_status_lbl.setObjectName("metaStatusLabel")
-        self.meta_status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.meta_status_lbl.setWordWrap(True)
         self.meta_status_lbl.setMinimumWidth(0)
-        self.meta_status_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self._configure_status_text_widget(self.meta_status_lbl)
         right_layout.addWidget(self.meta_status_lbl)
 
         self.bulk_editor_panel = QWidget(self.right_workspace_stack)
@@ -11767,10 +12253,9 @@ class MainWindow(QMainWindow):
         self.bulk_uncommon_tags_text.setMaximumHeight(96)
         self.bulk_right_layout.addWidget(self.bulk_uncommon_tags_text)
 
-        self.bulk_status_lbl = QLabel("")
+        self.bulk_status_lbl = StatusTextEdit("")
         self.bulk_status_lbl.setObjectName("bulkTagEditorStatusLabel")
-        self.bulk_status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.bulk_status_lbl.setWordWrap(True)
+        self._configure_status_text_widget(self.bulk_status_lbl)
         self.bulk_right_layout.addWidget(self.bulk_status_lbl)
 
         self.bulk_right_layout.addStretch(1)
@@ -13276,7 +13761,9 @@ class MainWindow(QMainWindow):
             wrapper.updateGeometry()
         for label in [
             getattr(self, "generate_description_progress_lbl", None),
+            getattr(self, "generate_description_error_edit", None),
             getattr(self, "generate_tags_progress_lbl", None),
+            getattr(self, "generate_tags_error_edit", None),
             getattr(self, "meta_status_lbl", None),
             getattr(self, "bulk_status_lbl", None),
         ]:
@@ -13434,10 +13921,24 @@ class MainWindow(QMainWindow):
         else:
             editor.setText(str(text or ""))
 
-    def _active_status_label(self) -> QLabel:
+    def _active_status_label(self):
         if self._is_bulk_editor_active() and hasattr(self, "bulk_status_lbl"):
             return self.bulk_status_lbl
         return self.meta_status_lbl
+
+    def _scroll_bottom_status_into_view(self) -> None:
+        if not hasattr(self, "scroll_area") or not hasattr(self, "meta_status_lbl"):
+            return
+        if self._is_bulk_editor_active():
+            return
+        try:
+            self.scroll_area.ensureWidgetVisible(self.meta_status_lbl, 0, 16)
+        except Exception:
+            try:
+                bar = self.scroll_area.verticalScrollBar()
+                bar.setValue(bar.maximum())
+            except Exception:
+                pass
 
     def _current_file_paths(self, paths: list[str] | None = None) -> list[str]:
         raw_paths = list(paths if paths is not None else getattr(self, "_current_paths", []) or [])
@@ -15784,6 +16285,9 @@ class MainWindow(QMainWindow):
         self.generate_description_progress_lbl.setVisible(
             not is_bulk and show_description and bool(self.generate_description_progress_lbl.text().strip())
         )
+        self.generate_description_error_edit.setVisible(
+            not is_bulk and show_description and bool(self.generate_description_error_edit.toPlainText().strip())
+        )
         self.lbl_notes_cap.setVisible(not is_bulk and show_notes)
         self.meta_notes.setVisible(not is_bulk and show_notes)
         
@@ -15792,6 +16296,7 @@ class MainWindow(QMainWindow):
         self.meta_tags.setVisible(tags_visible)
         self.generate_tags_btn_row.setVisible(tags_visible)
         self.generate_tags_progress_lbl.setVisible(tags_visible and bool(self.generate_tags_progress_lbl.text().strip()))
+        self.generate_tags_error_edit.setVisible(tags_visible and bool(self.generate_tags_error_edit.toPlainText().strip()))
         self.tag_list_open_btn_row.setVisible(tags_visible)
         self.btn_clear_bulk_tags.setVisible(is_bulk)
         
@@ -16193,21 +16698,37 @@ class MainWindow(QMainWindow):
             return getattr(self, "generate_description_progress_lbl", None)
         return getattr(self, "generate_tags_progress_lbl", None)
 
+    def _local_ai_error_widget(self, operation: str):
+        if operation == "descriptions":
+            return getattr(self, "generate_description_error_edit", None)
+        return getattr(self, "generate_tags_error_edit", None)
+
     def _set_local_ai_progress_text(self, text: str, operation: str | None = None) -> None:
         operation = str(operation or getattr(self, "_local_ai_operation", "tags") or "tags")
-        label = getattr(self, "generate_description_progress_lbl", None) if operation == "descriptions" else getattr(self, "generate_tags_progress_lbl", None)
-        if label is None:
+        progress_label = getattr(self, "generate_description_progress_lbl", None) if operation == "descriptions" else getattr(self, "generate_tags_progress_lbl", None)
+        error_widget = self._local_ai_error_widget(operation)
+        if progress_label is None or error_widget is None:
             return
         clean_text = str(text or "").strip()
-        label.setText(clean_text)
+        is_error = clean_text.startswith("Error:")
         if clean_text:
             if operation == "descriptions":
                 visible = self.generate_description_btn_row.isVisible()
             else:
                 visible = self.generate_tags_btn_row.isVisible()
-            label.setVisible(bool(visible))
+            progress_label.setText("" if is_error else clean_text)
+            progress_label.setVisible(bool(visible and not is_error))
+            error_widget.setPlainText(clean_text if is_error else "")
+            error_widget.setVisible(bool(visible and is_error))
+            if hasattr(self, "meta_status_lbl"):
+                self.meta_status_lbl.setVisible(False)
         else:
-            label.setVisible(False)
+            progress_label.setText("")
+            progress_label.setVisible(False)
+            error_widget.setPlainText("")
+            error_widget.setVisible(False)
+            if hasattr(self, "meta_status_lbl"):
+                self.meta_status_lbl.setVisible(bool(self.meta_status_lbl.text().strip()))
         try:
             self._sync_sidebar_panel_widths()
         except Exception:
@@ -16223,7 +16744,7 @@ class MainWindow(QMainWindow):
     def _run_local_ai_tags(self) -> None:
         paths = self._local_ai_target_paths()
         if not paths:
-            self.meta_status_lbl.setText("Select one or more media files first.")
+            self._set_local_ai_progress_text("Select one or more media files first.", "tags")
             return
         if not self._ensure_local_ai_model_ready("tagger"):
             return
@@ -16235,13 +16756,12 @@ class MainWindow(QMainWindow):
             self._set_local_ai_progress_text(self._local_ai_progress_message(0, len(paths)), "tags")
             started = self.bridge.run_local_ai_tags(paths)
             if not started:
-                self._set_local_ai_progress_text("", "tags")
-                self.meta_status_lbl.setText("Local AI tags are already running or no valid files were selected.")
+                self._set_local_ai_progress_text("Local AI tags are already running or no valid files were selected.", "tags")
 
     def _run_local_ai_description(self) -> None:
         paths = self._local_ai_target_paths()
         if not paths:
-            self.meta_status_lbl.setText("Select one or more media files first.")
+            self._set_local_ai_progress_text("Select one or more media files first.", "descriptions")
             return
         if not self._ensure_local_ai_model_ready("captioner"):
             return
@@ -16253,8 +16773,7 @@ class MainWindow(QMainWindow):
             self._set_local_ai_progress_text(self._local_ai_progress_message(0, len(paths)), "descriptions")
             started = self.bridge.run_local_ai_descriptions(paths)
             if not started:
-                self._set_local_ai_progress_text("", "descriptions")
-                self.meta_status_lbl.setText("Local AI descriptions are already running or no valid files were selected.")
+                self._set_local_ai_progress_text("Local AI descriptions are already running or no valid files were selected.", "descriptions")
 
     def _set_local_ai_buttons_enabled(self, enabled: bool) -> None:
         for btn in (
@@ -16270,33 +16789,19 @@ class MainWindow(QMainWindow):
         self._set_local_ai_buttons_enabled(False)
         self._local_ai_total = int(total or 0)
         self._local_ai_completed = 0
-        label = "descriptions" if getattr(self, "_local_ai_operation", "tags") == "descriptions" else "tags"
-        message = f"Running local AI {label} for {int(total or 0)} file(s)..."
-        self.meta_status_lbl.setText(message)
         self._set_local_ai_progress_text(self._local_ai_progress_message(0, int(total or 0)))
-        if hasattr(self, "bulk_status_lbl"):
-            self.bulk_status_lbl.setText(message)
 
     @Slot(str, int, int)
     def _on_local_ai_captioning_progress(self, path: str, current: int, total: int) -> None:
-        name = Path(str(path or "")).name
-        label = "Descriptions" if getattr(self, "_local_ai_operation", "tags") == "descriptions" else "Tags"
-        message = f"Local AI {label} {int(current or 0)}/{int(total or 0)}: {name}"
-        self.meta_status_lbl.setText(message)
         completed_before_current = max(0, int(current or 0) - 1)
         self._set_local_ai_progress_text(self._local_ai_progress_message(completed_before_current, int(total or 0)))
-        if hasattr(self, "bulk_status_lbl"):
-            self.bulk_status_lbl.setText(message)
 
     @Slot(str)
     def _on_local_ai_captioning_status(self, message: str) -> None:
         clean = str(message or "").strip()
         if not clean:
             return
-        self.meta_status_lbl.setText(clean)
         self._set_local_ai_progress_text(clean)
-        if hasattr(self, "bulk_status_lbl"):
-            self.bulk_status_lbl.setText(clean)
 
     @staticmethod
     def _format_local_ai_error(error: str) -> str:
@@ -16312,10 +16817,7 @@ class MainWindow(QMainWindow):
         current_path = str(getattr(self, "_current_path", "") or "")
         if error:
             clean_error = self._format_local_ai_error(error)
-            self.meta_status_lbl.setText(f"Local AI Error: {clean_error}")
             self._set_local_ai_progress_text(f"Error: {clean_error}")
-            if hasattr(self, "bulk_status_lbl"):
-                self.bulk_status_lbl.setText(f"Local AI Error: {clean_error}")
             return
         total = int(getattr(self, "_local_ai_total", 0) or 0)
         completed = min(total, int(getattr(self, "_local_ai_completed", 0) or 0) + 1) if total else 0
@@ -16335,19 +16837,11 @@ class MainWindow(QMainWindow):
         self._set_local_ai_buttons_enabled(True)
         if error:
             clean_error = self._format_local_ai_error(error)
-            self.meta_status_lbl.setText(f"Local AI Error: {clean_error}")
             self._set_local_ai_progress_text(f"Error: {clean_error}")
-            if hasattr(self, "bulk_status_lbl"):
-                self.bulk_status_lbl.setText(f"Local AI Error: {clean_error}")
             return
-        label = "descriptions" if getattr(self, "_local_ai_operation", "tags") == "descriptions" else "tags"
-        message = f"Local AI {label} complete for {int(completed or 0)} file(s)"
-        self.meta_status_lbl.setText(message)
         total = int(getattr(self, "_local_ai_total", completed) or completed or 0)
         self._local_ai_completed = int(completed or 0)
         self._set_local_ai_progress_text(f"Complete: 100% ({int(completed or 0)}/{total})")
-        if hasattr(self, "bulk_status_lbl"):
-            self.bulk_status_lbl.setText(message)
         if getattr(self, "_current_paths", None):
             self._show_metadata_for_path(self._current_paths)
 
@@ -16812,12 +17306,14 @@ class MainWindow(QMainWindow):
                 self.meta_desc,
                 self.generate_description_btn_row,
                 self.generate_description_progress_lbl,
+                self.generate_description_error_edit,
             ],
             "tags": [
                 self.lbl_tags_cap,
                 self.meta_tags,
                 self.generate_tags_btn_row,
                 self.generate_tags_progress_lbl,
+                self.generate_tags_error_edit,
                 self.tag_list_open_btn_row,
             ],
             "notes": [self.lbl_notes_cap, self.meta_notes],
@@ -17017,11 +17513,15 @@ class MainWindow(QMainWindow):
         self.generate_description_progress_lbl.setVisible(
             description_visible and bool(self.generate_description_progress_lbl.text().strip())
         )
+        self.generate_description_error_edit.setVisible(
+            description_visible and bool(self.generate_description_error_edit.toPlainText().strip())
+        )
         tags_visible = "tags" in active_fields and self._is_metadata_enabled_for_kind(kind, "tags", True)
         self.meta_tags.setVisible(tags_visible)
         self.lbl_tags_cap.setVisible(tags_visible)
         self.generate_tags_btn_row.setVisible(tags_visible)
         self.generate_tags_progress_lbl.setVisible(tags_visible and bool(self.generate_tags_progress_lbl.text().strip()))
+        self.generate_tags_error_edit.setVisible(tags_visible and bool(self.generate_tags_error_edit.toPlainText().strip()))
         self.tag_list_open_btn_row.setVisible(tags_visible)
         self.meta_notes.setVisible("notes" in active_fields and self._is_metadata_enabled_for_kind(kind, "notes", True))
         self.lbl_notes_cap.setVisible("notes" in active_fields and self._is_metadata_enabled_for_kind(kind, "notes", True))
@@ -18038,6 +18538,15 @@ class MainWindow(QMainWindow):
                 padding: 4px;
                 color: {text};
             }}
+            QPlainTextEdit#metaStatusLabel {{
+                background: transparent;
+                border: none;
+                padding: 0px;
+                margin: 0px;
+                color: {text_muted};
+                font-weight: 500;
+                selection-background-color: {Theme.get_accent_soft(accent)};
+            }}
             QLabel#localAiProgressLabel {{
                 color: {text_muted};
                 background: transparent;
@@ -18045,6 +18554,15 @@ class MainWindow(QMainWindow):
                 padding: 2px 0px 6px 0px;
                 font-size: 11px;
                 font-weight: 500;
+            }}
+            QPlainTextEdit#localAiErrorText {{
+                color: {text_muted};
+                background: transparent;
+                border: none;
+                padding: 2px 0px 6px 0px;
+                font-size: 11px;
+                font-weight: 500;
+                selection-background-color: {Theme.get_accent_soft(accent)};
             }}
             QPushButton#btnClosePreview {{
                 background-color: {Theme.get_control_bg(accent)};
@@ -18135,9 +18653,18 @@ class MainWindow(QMainWindow):
                     color: {text};
                     font-weight: 700;
                 }}
-                QLabel#bulkTagEditorSelectionLabel, QLabel#bulkTagEditorStatusLabel {{
+                QLabel#bulkTagEditorSelectionLabel {{
                     color: {text_muted};
                     font-weight: 500;
+                }}
+                QPlainTextEdit#metaStatusLabel, QPlainTextEdit#bulkTagEditorStatusLabel {{
+                    background: transparent;
+                    border: none;
+                    color: {text_muted};
+                    font-weight: 500;
+                    padding: 0px;
+                    margin: 0px;
+                    selection-background-color: {Theme.get_accent_soft(accent)};
                 }}
                 QLineEdit#bulkTagEditorTagsEdit, QPlainTextEdit#bulkTagEditorCommonTagsText, QPlainTextEdit#bulkTagEditorUncommonTagsText {{
                     background-color: {Theme.get_input_bg(accent)};
@@ -18683,6 +19210,61 @@ class MainWindow(QMainWindow):
             self.web.page().runJavaScript("window.hideCtx && window.hideCtx();")
         except Exception:
             pass
+
+    @staticmethod
+    def _make_detail_label_copyable(widget: QLabel) -> None:
+        widget.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        widget.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        widget.setCursor(Qt.CursorShape.IBeamCursor)
+        widget.setContextMenuPolicy(Qt.ContextMenuPolicy.DefaultContextMenu)
+
+    @staticmethod
+    def _configure_progress_status_label(widget: QLabel) -> None:
+        widget.setWordWrap(True)
+        widget.setIndent(0)
+        widget.setMargin(0)
+        widget.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        widget.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+    @staticmethod
+    def _configure_local_ai_error_widget(widget: QPlainTextEdit) -> None:
+        widget.setReadOnly(True)
+        widget.setUndoRedoEnabled(False)
+        widget.setFrameShape(QFrame.Shape.NoFrame)
+        widget.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        widget.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        widget.setContextMenuPolicy(Qt.ContextMenuPolicy.DefaultContextMenu)
+        widget.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        widget.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard
+        )
+        widget.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        widget.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+        widget.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        widget.setMaximumHeight(88)
+        widget.setMinimumHeight(24)
+        widget.setCursor(Qt.CursorShape.IBeamCursor)
+        widget.viewport().setCursor(Qt.CursorShape.IBeamCursor)
+
+    @staticmethod
+    def _configure_status_text_widget(widget: QPlainTextEdit) -> None:
+        widget.setReadOnly(True)
+        widget.setUndoRedoEnabled(False)
+        widget.setFrameShape(QFrame.Shape.NoFrame)
+        widget.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        widget.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        widget.setContextMenuPolicy(Qt.ContextMenuPolicy.DefaultContextMenu)
+        widget.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        widget.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard
+        )
+        widget.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        widget.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+        widget.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        widget.setMaximumHeight(72)
+        widget.setMinimumHeight(24)
+        widget.setCursor(Qt.CursorShape.IBeamCursor)
+        widget.viewport().setCursor(Qt.CursorShape.IBeamCursor)
 
     def _deselect_web_items(self) -> None:
         """Tell the web gallery to deselect any currently selected media items."""

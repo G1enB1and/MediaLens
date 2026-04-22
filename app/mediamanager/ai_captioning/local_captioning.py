@@ -53,6 +53,14 @@ class LocalAiSettings:
     models_dir: Path
     tag_model_id: str = TAG_MODEL_ID
     caption_model_id: str = CAPTION_MODEL_ID
+    gemma_backend: str = ""
+    gemma_profile_id: str = ""
+    gemma_profile_label: str = ""
+    gemma_model_path: str = ""
+    gemma_mmproj_path: str = ""
+    gemma_llama_server: str = ""
+    gemma_ctx_size: int = 2048
+    gemma_gpu_layers: int = 999
     tag_min_probability: float = 0.35
     tag_max_tags: int = 75
     tags_to_exclude: str = ""
