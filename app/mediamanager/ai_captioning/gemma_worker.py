@@ -189,8 +189,40 @@ def _gguf_runtime_launch_context(settings: dict[str, Any]) -> tuple[dict[str, st
     runtime_dir = server_path.parent if server_path.is_file() else None
     if runtime_dir is not None:
         runtime_dir_str = str(runtime_dir)
-        existing_path = str(env.get("PATH") or "")
-        env["PATH"] = runtime_dir_str + (os.pathsep + existing_path if existing_path else "")
+        existing_entries = [entry.strip() for entry in str(env.get("PATH") or "").split(os.pathsep) if entry.strip()]
+        blocked_markers = {
+            "_internal",
+            ".venv",
+            "anaconda",
+            "miniconda",
+            "pyside",
+            "python",
+            "medialens",
+        }
+        safe_entries: list[str] = []
+        seen: set[str] = {runtime_dir_str.casefold()}
+        for entry in existing_entries:
+            lower = entry.casefold()
+            if any(marker in lower for marker in blocked_markers):
+                continue
+            if lower in seen:
+                continue
+            if "nvidia" in lower or "windows" in lower or "system32" in lower:
+                safe_entries.append(entry)
+                seen.add(lower)
+        env["PATH"] = os.pathsep.join([runtime_dir_str, *safe_entries])
+        for key in (
+            "PYTHONPATH",
+            "PYTHONHOME",
+            "PYTHONEXECUTABLE",
+            "PYTHONUTF8",
+            "CONDA_PREFIX",
+            "CONDA_DEFAULT_ENV",
+            "CONDA_PROMPT_MODIFIER",
+            "QT_PLUGIN_PATH",
+            "QML2_IMPORT_PATH",
+        ):
+            env.pop(key, None)
         return env, runtime_dir_str
     return env, None
 
@@ -332,11 +364,7 @@ def _gguf_cli_completion(source_path: str, prompt: str, settings: dict[str, Any]
         "-t",
         str(threads),
         "--jinja",
-        "--reasoning",
-        "off",
         "--no-warmup",
-        "--reasoning-budget",
-        "0",
         "--temp",
         str(float(settings.get("temperature") or 1.0)),
         "--top-k",
