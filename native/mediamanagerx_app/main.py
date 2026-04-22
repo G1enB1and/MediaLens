@@ -42,6 +42,11 @@ LOCAL_AI_PYTHON_VERSION = "3.12.10"
 LOCAL_AI_PYTHON_PACKAGE_NAME = f"python.{LOCAL_AI_PYTHON_VERSION}.nupkg"
 LOCAL_AI_PYTHON_PACKAGE_URL = f"https://api.nuget.org/v3-flatcontainer/python/{LOCAL_AI_PYTHON_VERSION}/{LOCAL_AI_PYTHON_PACKAGE_NAME}"
 LOCAL_AI_PYTHON_PACKAGE_SHA512 = "u9pNz2iKlCEbYtUJaKkbOPMF0LjR7NkCafdKhvigpPzrt8oWKgdTpHaR6z3wyWQAm9PYGUxv0Zr66NX9AeHMDw=="
+LOCAL_AI_TORCH_INDEX_URL_CU124 = "https://download.pytorch.org/whl/cu124"
+LOCAL_AI_TORCH_VERSION_CU124 = "2.6.0+cu124"
+LOCAL_AI_TORCHVISION_VERSION_CU124 = "0.21.0+cu124"
+LOCAL_AI_ORT_GPU_VERSION = "1.20.1"
+LOCAL_AI_STATUS_CACHE_TTL_SECONDS = 20.0
 
 
 def _append_env_flag(name: str, flag: str) -> None:
@@ -4124,6 +4129,7 @@ class Bridge(QObject):
         self._local_ai_processes: set[subprocess.Popen] = set()
         self._local_ai_shutting_down = False
         self._local_ai_model_installs: set[str] = set()
+        self._local_ai_runtime_status_cache: dict[str, tuple[float, dict]] = {}
         
         appdata = _appdata_runtime_dir()
         _migrate_legacy_debugging_logs(appdata)
@@ -7564,6 +7570,9 @@ class Bridge(QObject):
         else:
             state = "not_installed"
             message = "Not installed. Install this model before using it."
+        runtime_probe = self._local_ai_probe_runtime(spec) if installed else {}
+        runtime_summary = self._local_ai_runtime_summary(runtime_probe)
+        runtime_details_html = self._local_ai_runtime_details_html(runtime_probe)
         return {
             "id": spec.id,
             "kind": spec.kind,
@@ -7582,6 +7591,9 @@ class Bridge(QObject):
             "location": str(Path(python_path).parent.parent),
             "requirements_file": str(requirements_path),
             "python_bootstrap": str(self._local_ai_python_bootstrap_exe()),
+            "runtime_probe": runtime_probe,
+            "runtime_summary": runtime_summary,
+            "runtime_details_html": runtime_details_html,
         }
 
     def _local_ai_model_files_installed(self, models_dir: Path, model_id: str) -> bool:
@@ -7748,6 +7760,267 @@ class Bridge(QObject):
                 continue
         return ""
 
+    @staticmethod
+    def _local_ai_runtime_backend(spec) -> str:
+        return "onnx" if str(getattr(spec, "settings_key", "") or "") == "wd_swinv2" else "torch"
+
+    def _local_ai_runtime_probe_command(self, spec, python_path: str | Path, requested_device: str, gpu_index: int) -> tuple[list[str], Path, dict[str, str]]:
+        launcher, worker_cwd, worker_pythonpath = self._local_ai_worker_launcher(
+            python_path,
+            "app.mediamanager.ai_captioning.runtime_probe",
+        )
+        command = [
+            *launcher,
+            "--backend",
+            self._local_ai_runtime_backend(spec),
+            "--requested-device",
+            str(requested_device or "gpu"),
+            "--gpu-index",
+            str(max(0, int(gpu_index or 0))),
+        ]
+        child_env = os.environ.copy()
+        if worker_pythonpath:
+            child_env["PYTHONPATH"] = worker_pythonpath + (os.pathsep + child_env["PYTHONPATH"] if child_env.get("PYTHONPATH") else "")
+        return command, worker_cwd, child_env
+
+    def _local_ai_run_command_stream(self, command: list[str], cwd: Path, message: str, emit_status, env: dict[str, str] | None = None) -> tuple[int, str]:
+        payload_message = str(message or "").strip()
+        process = subprocess.Popen(
+            command,
+            cwd=str(cwd),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
+        )
+        assert process.stdout is not None
+        last_emit = 0.0
+        last_line = payload_message
+        for line in process.stdout:
+            clean = " ".join(str(line or "").split()).strip()
+            if clean:
+                last_line = clean[-240:]
+            if time.monotonic() - last_emit >= 1.0:
+                last_emit = time.monotonic()
+                emit_status(last_line)
+        return process.wait(), last_line
+
+    def _local_ai_run_command_capture(self, command: list[str], cwd: Path, env: dict[str, str] | None = None, timeout: int = 25) -> tuple[int, str, str]:
+        completed = subprocess.run(
+            command,
+            cwd=str(cwd),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            timeout=timeout,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
+        )
+        return completed.returncode, str(completed.stdout or ""), str(completed.stderr or "")
+
+    def _local_ai_probe_runtime(self, spec, force: bool = False) -> dict:
+        cache_key = str(getattr(spec, "settings_key", "") or "")
+        now = time.monotonic()
+        cached = self._local_ai_runtime_status_cache.get(cache_key)
+        if not force and cached and (now - cached[0]) < LOCAL_AI_STATUS_CACHE_TTL_SECONDS:
+            return dict(cached[1])
+
+        python_path = self._local_ai_runtime_python_path(spec)
+        if not python_path.is_file():
+            payload = {"ok": False, "reason": "Runtime Python was not found.", "selected_device": "cpu"}
+            self._local_ai_runtime_status_cache[cache_key] = (now, payload)
+            return dict(payload)
+
+        ai_settings = self._local_ai_caption_settings()
+        requested_device = str(ai_settings.device or "gpu")
+        gpu_index = int(ai_settings.gpu_index or 0)
+        command, worker_cwd, child_env = self._local_ai_runtime_probe_command(spec, python_path, requested_device, gpu_index)
+        try:
+            returncode, stdout, stderr = self._local_ai_run_command_capture(command, worker_cwd, env=child_env, timeout=30)
+        except Exception as exc:
+            payload = {"ok": False, "reason": f"Runtime probe failed: {exc}", "selected_device": "cpu"}
+            self._local_ai_runtime_status_cache[cache_key] = (now, payload)
+            return dict(payload)
+
+        combined = "\n".join(part for part in (stdout, stderr) if str(part or "").strip())
+        payload = None
+        for line in reversed([line.strip() for line in combined.splitlines() if line.strip()]):
+            try:
+                payload = json.loads(line)
+                break
+            except Exception:
+                continue
+        if not isinstance(payload, dict):
+            payload = {
+                "ok": False,
+                "reason": f"Runtime probe exited without JSON ({self._local_ai_exit_code_text(returncode)}).",
+                "selected_device": "cpu",
+            }
+        if returncode != 0 and not payload.get("reason"):
+            payload["reason"] = f"Runtime probe failed ({self._local_ai_exit_code_text(returncode)})."
+        self._local_ai_runtime_status_cache[cache_key] = (now, dict(payload))
+        return dict(payload)
+
+    @staticmethod
+    def _local_ai_runtime_summary(probe: dict) -> str:
+        if not probe:
+            return "Runtime: unavailable"
+        backend = str(probe.get("backend") or "").strip().lower()
+        selected_device = str(probe.get("selected_device") or "cpu").strip().lower() or "cpu"
+        status_label = "GPU" if selected_device.startswith("cuda") or selected_device == "gpu" else "CPU"
+        if backend == "torch":
+            gpu_names = [str(name).strip() for name in list(probe.get("gpu_names") or []) if str(name).strip()]
+            parts = [
+                f"Runtime: {status_label}",
+                f"Torch {probe.get('torch_version') or '?'}",
+            ]
+            if probe.get("torch_cuda_version"):
+                parts.append(f"CUDA {probe.get('torch_cuda_version')}")
+            if selected_device.startswith("cuda") and gpu_names:
+                selected_index = int(probe.get("selected_gpu_index") or 0)
+                if 0 <= selected_index < len(gpu_names):
+                    parts.append(gpu_names[selected_index])
+                else:
+                    parts.append(gpu_names[0])
+            elif gpu_names:
+                parts.append(f"Visible GPUs: {len(gpu_names)}")
+            if probe.get("reason") and selected_device == "cpu":
+                parts.append(str(probe.get("reason")))
+            return " | ".join(parts)
+        if backend == "onnx":
+            active_provider = str(probe.get("active_provider") or "CPUExecutionProvider")
+            parts = [
+                f"Runtime: {status_label}",
+                f"ONNX Runtime {probe.get('onnxruntime_version') or '?'}",
+                active_provider,
+            ]
+            if probe.get("reason") and status_label == "CPU":
+                parts.append(str(probe.get("reason")))
+            return " | ".join(parts)
+        reason = str(probe.get("reason") or "").strip()
+        return f"Runtime: {'unavailable' if not probe.get('ok') else status_label}{f' | {reason}' if reason else ''}"
+
+    @staticmethod
+    def _local_ai_runtime_details_html(probe: dict) -> str:
+        if not probe:
+            return ""
+        lines: list[str] = []
+        backend = str(probe.get("backend") or "").strip().lower()
+        selected_device = str(probe.get("selected_device") or "cpu").strip() or "cpu"
+        requested_device = str(probe.get("requested_device") or "").strip()
+        if requested_device:
+            lines.append(f"<b>Device:</b> requested {html.escape(requested_device.upper())}, using {html.escape(selected_device.upper())}")
+        if probe.get("python_version"):
+            lines.append(f"<b>Python:</b> {html.escape(str(probe.get('python_version')))}")
+        if backend == "torch":
+            if probe.get("torch_version"):
+                lines.append(f"<b>Torch:</b> {html.escape(str(probe.get('torch_version')))}")
+            if probe.get("torch_cuda_version"):
+                lines.append(f"<b>CUDA:</b> {html.escape(str(probe.get('torch_cuda_version')))}")
+            gpu_names = [str(name).strip() for name in list(probe.get("gpu_names") or []) if str(name).strip()]
+            if gpu_names:
+                lines.append(f"<b>GPUs:</b> {html.escape(', '.join(gpu_names[:3]))}")
+        elif backend == "onnx":
+            if probe.get("onnxruntime_version"):
+                lines.append(f"<b>ONNX Runtime:</b> {html.escape(str(probe.get('onnxruntime_version')))}")
+            providers = [str(name).strip() for name in list(probe.get("available_providers") or []) if str(name).strip()]
+            if providers:
+                lines.append(f"<b>Providers:</b> {html.escape(', '.join(providers[:4]))}")
+        nvidia_smi = dict(probe.get("nvidia_smi") or {})
+        smi_gpus = [dict(item or {}) for item in list(nvidia_smi.get("gpus") or [])]
+        if smi_gpus:
+            first_gpu = smi_gpus[0]
+            gpu_name = str(first_gpu.get("name") or "").strip()
+            driver_version = str(first_gpu.get("driver_version") or "").strip()
+            driver_text = f"{gpu_name} (driver {driver_version})" if gpu_name and driver_version else gpu_name or driver_version
+            if driver_text:
+                lines.append(f"<b>NVIDIA:</b> {html.escape(driver_text)}")
+        reason = str(probe.get("reason") or "").strip()
+        if reason:
+            lines.append(f"<b>Note:</b> {html.escape(reason)}")
+        return "<br>".join(line for line in lines if line)
+
+    @staticmethod
+    def _local_ai_probe_requests_gpu(ai_settings) -> bool:
+        return str(getattr(ai_settings, "device", "") or "").strip().lower() == "gpu"
+
+    @staticmethod
+    def _local_ai_probe_is_gpu_ready(probe: dict) -> bool:
+        selected_device = str(probe.get("selected_device") or "").strip().lower()
+        active_provider = str(probe.get("active_provider") or "").strip()
+        return selected_device.startswith("cuda") or selected_device == "gpu" or active_provider in {"CUDAExecutionProvider", "DmlExecutionProvider"}
+
+    def _local_ai_gpu_repair_commands(self, spec, python_path: Path) -> list[tuple[list[str], str]]:
+        if os.name != "nt":
+            return []
+        backend = self._local_ai_runtime_backend(spec)
+        if backend == "torch":
+            return [
+                (
+                    [
+                        str(python_path),
+                        "-m",
+                        "pip",
+                        "install",
+                        "--upgrade",
+                        "--force-reinstall",
+                        "--no-cache-dir",
+                        "--index-url",
+                        LOCAL_AI_TORCH_INDEX_URL_CU124,
+                        f"torch=={LOCAL_AI_TORCH_VERSION_CU124}",
+                        f"torchvision=={LOCAL_AI_TORCHVISION_VERSION_CU124}",
+                    ],
+                    "Repairing CUDA Torch packages...",
+                ),
+            ]
+        if backend == "onnx":
+            return [
+                (
+                    [
+                        str(python_path),
+                        "-m",
+                        "pip",
+                        "install",
+                        "--upgrade",
+                        "--force-reinstall",
+                        "--no-cache-dir",
+                        f"onnxruntime-gpu=={LOCAL_AI_ORT_GPU_VERSION}",
+                    ],
+                    "Repairing ONNX Runtime GPU package...",
+                ),
+            ]
+        return []
+
+    def _ensure_local_ai_gpu_runtime(self, spec, python_path: Path, emit_install_status) -> dict:
+        ai_settings = self._local_ai_caption_settings()
+        probe = self._local_ai_probe_runtime(spec, force=True)
+        if not self._local_ai_probe_requests_gpu(ai_settings):
+            return probe
+        if self._local_ai_probe_is_gpu_ready(probe):
+            return probe
+        for command, message in self._local_ai_gpu_repair_commands(spec, python_path):
+            emit_install_status(message)
+            returncode, last_line = self._local_ai_run_command_stream(
+                command,
+                self._local_ai_worker_source_root(),
+                message,
+                emit_install_status,
+            )
+            if returncode != 0:
+                self._log(
+                    f"Local AI GPU repair failed for {spec.install_label} ({self._local_ai_exit_code_text(returncode)}): {last_line}"
+                )
+                continue
+            probe = self._local_ai_probe_runtime(spec, force=True)
+            if self._local_ai_probe_is_gpu_ready(probe):
+                return probe
+        return probe
+
     @Slot(str, str, result="QVariantMap")
     def get_local_ai_model_status(self, model_id: str, kind: str) -> dict:
         try:
@@ -7775,6 +8048,7 @@ class Bridge(QObject):
 
         def work() -> None:
             payload = self._local_ai_status_payload_for_spec(spec)
+
             def emit_install_status(message: str) -> None:
                 payload.update({"state": "installing", "running": True, "message": str(message or "").strip()})
                 self.localAiModelInstallStatus.emit(spec.settings_key, dict(payload))
@@ -7794,36 +8068,25 @@ class Bridge(QObject):
                     )
                 commands = [
                     ([bootstrap_python, "-m", "venv", str(runtime_dir)], f"Creating {spec.install_label} runtime..."),
-                    ([str(python_path), "-m", "pip", "install", "--upgrade", "pip"], "Updating package installer..."),
+                    ([str(python_path), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"], "Updating package installer..."),
                     ([str(python_path), "-m", "pip", "install", "-r", str(requirements_path)], f"Installing {spec.install_label} support..."),
                 ]
                 for command, message in commands:
                     payload.update({"state": "installing", "running": True, "message": message})
                     self.localAiModelInstallStatus.emit(spec.settings_key, dict(payload))
-                    process = subprocess.Popen(
+                    returncode, last_line = self._local_ai_run_command_stream(
                         command,
-                        cwd=str(self._local_ai_worker_source_root()),
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        encoding="utf-8",
-                        errors="replace",
-                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
+                        self._local_ai_worker_source_root(),
+                        message,
+                        emit_install_status,
                     )
-                    assert process.stdout is not None
-                    last_emit = 0.0
-                    last_line = message
-                    for line in process.stdout:
-                        clean = " ".join(str(line or "").split()).strip()
-                        if clean:
-                            last_line = clean[-240:]
-                        if time.monotonic() - last_emit >= 1.0:
-                            last_emit = time.monotonic()
-                            payload.update({"state": "installing", "running": True, "message": last_line})
-                            self.localAiModelInstallStatus.emit(spec.settings_key, dict(payload))
-                    returncode = process.wait()
                     if returncode != 0:
                         raise RuntimeError(f"{message} failed ({self._local_ai_exit_code_text(returncode)}). {last_line}")
+                probe = self._ensure_local_ai_gpu_runtime(spec, python_path, emit_install_status)
+                if self._local_ai_probe_requests_gpu(self._local_ai_caption_settings()) and not self._local_ai_probe_is_gpu_ready(probe):
+                    emit_install_status(
+                        self._local_ai_runtime_summary(probe)
+                    )
                 models_dir = Path(str(self.settings.value("ai_caption/models_dir", self._local_ai_models_dir_default(), type=str) or self._local_ai_models_dir_default()))
                 if self._local_ai_model_files_installed(models_dir, spec.id):
                     payload.update({"state": "installing", "running": True, "message": f"{spec.install_label} model files are already present."})
@@ -7873,8 +8136,13 @@ class Bridge(QObject):
                             self._log(f"Local AI model preload failed for {spec.install_label}, but required model files are present ({self._local_ai_exit_code_text(returncode)}): {last_line}")
                         else:
                             raise RuntimeError(f"{message} failed ({self._local_ai_exit_code_text(returncode)}). {last_line}")
+                self._local_ai_runtime_status_cache.pop(spec.settings_key, None)
+                probe = self._local_ai_probe_runtime(spec, force=True)
                 payload = self._local_ai_status_payload_for_spec(spec)
-                payload.update({"state": "installed", "installed": True, "running": False, "message": f"{spec.install_label} is installed."})
+                final_message = f"{spec.install_label} is installed."
+                if self._local_ai_probe_requests_gpu(self._local_ai_caption_settings()) and not self._local_ai_probe_is_gpu_ready(probe):
+                    final_message = f"{final_message} GPU was requested but this runtime is still using CPU."
+                payload.update({"state": "installed", "installed": True, "running": False, "message": final_message})
                 self.localAiModelInstallStatus.emit(spec.settings_key, payload)
             except Exception as exc:
                 payload.update({"state": "error", "installed": False, "running": False, "message": str(exc) or "Model installation failed."})
@@ -7909,6 +8177,7 @@ class Bridge(QObject):
             for target in targets:
                 if target.exists():
                     shutil.rmtree(target)
+            self._local_ai_runtime_status_cache.pop(spec.settings_key, None)
             self.localAiModelInstallStatus.emit(spec.settings_key, self._local_ai_status_payload_for_spec(spec))
             return True
         except Exception as exc:

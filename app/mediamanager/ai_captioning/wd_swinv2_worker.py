@@ -31,14 +31,17 @@ def _run_cli() -> int:
         if args.operation == "preload":
             settings = _settings_from_json(args.settings_json)
             with contextlib.redirect_stdout(sys.stderr):
-                WdSwinV2Tagger(settings)
+                tagger = WdSwinV2Tagger(settings)
+                print(tagger.runtime_summary, file=sys.stderr, flush=True)
             print(json.dumps({"ok": True}, ensure_ascii=False), flush=True)
             return 0
         if args.operation != "tags":
             raise RuntimeError("WD SwinV2 Tagger v3 can generate tags only.")
         settings = _settings_from_json(args.settings_json)
         with contextlib.redirect_stdout(sys.stderr):
-            tags = WdSwinV2Tagger(settings).generate(Path(args.source), settings)
+            tagger = WdSwinV2Tagger(settings)
+            print(tagger.runtime_summary, file=sys.stderr, flush=True)
+            tags = tagger.generate(Path(args.source), settings)
         print(json.dumps({"ok": True, "tags": tags}, ensure_ascii=False), flush=True)
         return 0
     except Exception as exc:

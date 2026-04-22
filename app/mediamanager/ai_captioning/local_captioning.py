@@ -174,10 +174,108 @@ def _open_local_ai_image(source_path: Path, mode: str = "RGB") -> PilImage.Image
             raise RuntimeError(f"Could not open image for local AI ({source_path.name}): {message}") from second_exc
 
 
+def inspect_torch_cuda_runtime(torch, requested_device: str, gpu_index: int) -> dict[str, object]:
+    requested = str(requested_device or "gpu").strip().lower() or "gpu"
+    requested_gpu_index = max(0, int(gpu_index or 0))
+    info: dict[str, object] = {
+        "requested_device": requested,
+        "requested_gpu_index": requested_gpu_index,
+        "selected_device": "cpu",
+        "cuda_available": False,
+        "device_count": 0,
+        "torch_cuda_version": str(getattr(getattr(torch, "version", None), "cuda", "") or ""),
+        "reason": "",
+    }
+    cuda = getattr(torch, "cuda", None)
+    if cuda is None:
+        info["reason"] = "torch.cuda is unavailable in this runtime"
+        return info
+    try:
+        info["cuda_available"] = bool(cuda.is_available())
+    except Exception as exc:
+        info["reason"] = f"torch.cuda.is_available() failed: {exc}"
+        return info
+    if not info["cuda_available"]:
+        info["reason"] = "torch.cuda.is_available() returned False"
+        return info
+    try:
+        info["device_count"] = max(0, int(cuda.device_count()))
+    except Exception as exc:
+        info["reason"] = f"torch.cuda.device_count() failed: {exc}"
+        return info
+    if int(info["device_count"]) <= 0:
+        info["reason"] = "CUDA reported no visible devices"
+        return info
+    selected_gpu_index = requested_gpu_index
+    if selected_gpu_index >= int(info["device_count"]):
+        selected_gpu_index = 0
+        info["reason"] = f"requested gpu_index={requested_gpu_index} is out of range; using cuda:0"
+    info["selected_gpu_index"] = selected_gpu_index
+    try:
+        info["selected_gpu_name"] = str(cuda.get_device_name(selected_gpu_index))
+    except Exception:
+        info["selected_gpu_name"] = ""
+    if requested == "gpu":
+        info["selected_device"] = f"cuda:{selected_gpu_index}"
+    return info
+
+
+def format_torch_runtime_summary(label: str, info: dict[str, object]) -> str:
+    parts = [
+        f"{label}: requested={info.get('requested_device', 'gpu')}",
+        f"selected={info.get('selected_device', 'cpu')}",
+        f"cuda_available={bool(info.get('cuda_available'))}",
+    ]
+    if "requested_gpu_index" in info:
+        parts.append(f"requested_gpu_index={info.get('requested_gpu_index')}")
+    if "selected_gpu_index" in info:
+        parts.append(f"selected_gpu_index={info.get('selected_gpu_index')}")
+    if info.get("selected_gpu_name"):
+        parts.append(f"gpu_name={info.get('selected_gpu_name')}")
+    if info.get("torch_cuda_version"):
+        parts.append(f"torch_cuda={info.get('torch_cuda_version')}")
+    if "device_count" in info:
+        parts.append(f"device_count={info.get('device_count')}")
+    reason = str(info.get("reason") or "").strip()
+    if reason:
+        parts.append(f"reason={reason}")
+    return ", ".join(parts)
+
+
+def choose_onnx_execution_providers(settings: LocalAiSettings, ort_module) -> tuple[list[str], str]:
+    requested = str(settings.device or "gpu").strip().lower() or "gpu"
+    try:
+        available = list(ort_module.get_available_providers())
+    except Exception as exc:
+        available = []
+        summary = (
+            f"WD SwinV2 runtime: requested={requested}, selected=cpu, "
+            f"providers=['CPUExecutionProvider'], reason=provider discovery failed: {exc}"
+        )
+        return ["CPUExecutionProvider"], summary
+    providers = ["CPUExecutionProvider"]
+    selected = "cpu"
+    if requested == "gpu":
+        if "CUDAExecutionProvider" in available:
+            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            selected = "cuda"
+        elif "DmlExecutionProvider" in available:
+            providers = ["DmlExecutionProvider", "CPUExecutionProvider"]
+            selected = "directml"
+    summary = (
+        f"WD SwinV2 runtime: requested={requested}, selected={selected}, "
+        f"available_providers={available}, providers={providers}"
+    )
+    if requested == "gpu" and selected == "cpu":
+        summary = f"{summary}, reason=no GPU execution provider is available in this runtime"
+    return providers, summary
+
+
 class WdSwinV2Tagger:
     def __init__(self, settings: LocalAiSettings) -> None:
         try:
             import numpy as np
+            import onnxruntime as ort
             from onnxruntime import InferenceSession
         except Exception as exc:
             raise DependencyMissingError("onnxruntime and numpy are required for WD tag generation.") from exc
@@ -190,7 +288,12 @@ class WdSwinV2Tagger:
         if not tags_path.is_file():
             tags_path = Path(_hf_download(settings.models_dir, settings.tag_model_id, "selected_tags.csv"))
 
-        self.session = InferenceSession(str(model_path))
+        providers, runtime_summary = choose_onnx_execution_providers(settings, ort)
+        self.session = InferenceSession(str(model_path), providers=providers)
+        active_providers = list(self.session.get_providers()) if hasattr(self.session, "get_providers") else []
+        self.runtime_summary = runtime_summary
+        if active_providers:
+            self.runtime_summary = f"{self.runtime_summary}, active_providers={active_providers}"
         self.tags: list[str] = []
         self.rating_indices: set[int] = set()
         with open(tags_path, "r", encoding="utf-8", newline="") as tags_file:
@@ -338,8 +441,9 @@ class XComposer2Captioner:
 
     def _device(self, settings: LocalAiSettings):
         torch = self.torch
-        if str(settings.device or "").lower() == "gpu" and torch.cuda.is_available():
-            return torch.device(f"cuda:{max(0, int(settings.gpu_index))}")
+        runtime = inspect_torch_cuda_runtime(torch, str(settings.device or "gpu"), int(settings.gpu_index or 0))
+        if str(runtime.get("selected_device") or "").startswith("cuda:"):
+            return torch.device(str(runtime["selected_device"]))
         return torch.device("cpu")
 
     def _patch_clip_vision_forward(self) -> None:

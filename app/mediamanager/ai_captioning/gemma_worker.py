@@ -14,10 +14,20 @@ from PIL import Image as PilImage
 from PIL.ImageOps import exif_transpose
 
 try:
-    from app.mediamanager.ai_captioning.local_captioning import DEFAULT_CAPTION_PROMPT, build_description_prompt
+    from app.mediamanager.ai_captioning.local_captioning import (
+        DEFAULT_CAPTION_PROMPT,
+        build_description_prompt,
+        format_torch_runtime_summary,
+        inspect_torch_cuda_runtime,
+    )
     from app.mediamanager.ai_captioning.model_registry import GEMMA4_MODEL_ID
 except ModuleNotFoundError:
-    from local_captioning import DEFAULT_CAPTION_PROMPT, build_description_prompt
+    from local_captioning import (
+        DEFAULT_CAPTION_PROMPT,
+        build_description_prompt,
+        format_torch_runtime_summary,
+        inspect_torch_cuda_runtime,
+    )
     from model_registry import GEMMA4_MODEL_ID
 
 
@@ -85,14 +95,23 @@ def _load_model(settings: dict[str, Any]):
 
     device = str(settings.get("device") or "gpu").lower()
     gpu_index = max(0, int(settings.get("gpu_index") or 0))
+    runtime = inspect_torch_cuda_runtime(torch, device, gpu_index)
+    print(format_torch_runtime_summary("Gemma 4 runtime", runtime), file=sys.stderr, flush=True)
     load_args: dict[str, Any] = {"dtype": "auto"}
-    if device == "gpu" and torch.cuda.is_available():
-        load_args["device_map"] = {"": gpu_index}
+    selected_device = str(runtime.get("selected_device") or "cpu")
+    if selected_device.startswith("cuda:"):
+        load_args["device_map"] = {"": selected_device}
     model = model_class.from_pretrained(model_id, **load_args)
     if "device_map" not in load_args:
         model.to(torch.device("cpu"))
+    actual_device = getattr(model, "device", None)
+    print(
+        f"Gemma 4 model device: requested={device}, selected={selected_device}, actual={actual_device if actual_device is not None else selected_device}",
+        file=sys.stderr,
+        flush=True,
+    )
     model.eval()
-    return torch, processor, model
+    return torch, processor, model, torch.device(selected_device)
 
 
 def _clean_response(text: object) -> str:
@@ -110,7 +129,7 @@ def _clean_response(text: object) -> str:
 
 
 def _generate_text(source_path: str, prompt: str, settings: dict[str, Any], max_new_tokens: int) -> str:
-    torch, processor, model = _load_model(settings)
+    torch, processor, model, target_device = _load_model(settings)
     image = _open_image(source_path)
     messages = [
         {
@@ -128,7 +147,6 @@ def _generate_text(source_path: str, prompt: str, settings: dict[str, Any], max_
         return_tensors="pt",
         add_generation_prompt=True,
     )
-    target_device = getattr(model, "device", None)
     if target_device is not None:
         inputs = {key: value.to(target_device) if hasattr(value, "to") else value for key, value in inputs.items()}
     input_len = inputs["input_ids"].shape[-1]

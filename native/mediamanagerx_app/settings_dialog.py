@@ -4,6 +4,7 @@ import ctypes
 import html
 import json
 import sys
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -2116,12 +2117,14 @@ class AISettingsPage(SettingsPage):
         self.tag_model_description_label = QLabel("")
         self.tag_model_description_label.setWordWrap(True)
         self.tag_model_description_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.tag_model_description_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.tag_model_description_label.setMinimumHeight(22)
         self.tag_model_description_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.tag_model_status_label = QLabel("")
         self.tag_model_status_label.setObjectName("aiSettingsModelStatus")
         self.tag_model_status_label.setTextFormat(Qt.TextFormat.RichText)
         self.tag_model_status_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.tag_model_status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.tag_model_install_btn = QPushButton("Install Model")
         self.tag_model_install_btn.clicked.connect(lambda: self._install_selected_ai_model("tagger"))
         tag_model_status_row = QWidget()
@@ -2176,12 +2179,14 @@ class AISettingsPage(SettingsPage):
         self.caption_model_description_label = QLabel("")
         self.caption_model_description_label.setWordWrap(True)
         self.caption_model_description_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.caption_model_description_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.caption_model_description_label.setMinimumHeight(22)
         self.caption_model_description_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.caption_model_status_label = QLabel("")
         self.caption_model_status_label.setObjectName("aiSettingsModelStatus")
         self.caption_model_status_label.setTextFormat(Qt.TextFormat.RichText)
         self.caption_model_status_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.caption_model_status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.caption_model_install_btn = QPushButton("Install Model")
         self.caption_model_install_btn.clicked.connect(lambda: self._install_selected_ai_model("captioner"))
         caption_model_status_row = QWidget()
@@ -2268,6 +2273,8 @@ class AISettingsPage(SettingsPage):
         state = str(status.get("state") or "").strip()
         description = str(status.get("description") or "").strip()
         message = str(status.get("message") or "").strip()
+        runtime_summary = str(status.get("runtime_summary") or "").strip()
+        runtime_details_html = str(status.get("runtime_details_html") or "").strip()
         Theme = _theme_api()
         is_light = Theme.get_is_light()
         ok_color = "#238636" if is_light else "#7ee787"
@@ -2283,6 +2290,15 @@ class AISettingsPage(SettingsPage):
             status_text = f'<span style="color:{bad_color};">✕</span> {clean_error}'
         else:
             status_text = html.escape(message or "Status unavailable")
+        detail_lines: list[str] = []
+        if runtime_summary:
+            detail_lines.append(html.escape(runtime_summary))
+        if runtime_details_html:
+            detail_lines.append(runtime_details_html)
+        elif message and state in {"installed", "installing"}:
+            detail_lines.append(html.escape(message))
+        if detail_lines:
+            status_text = f"{status_text}<br><span style=\"font-size:11px;\">{'<br>'.join(detail_lines)}</span>"
         description_label.setText(description or "No description available.")
         status_label.setText(status_text)
         status_label.setProperty("installState", state or "unknown")
@@ -2402,6 +2418,8 @@ class AISettingsPage(SettingsPage):
 
 
 class LocalAiSetupDialog(QDialog):
+    statusResolved = Signal(str, "QVariantMap", int)
+
     def __init__(self, main_window: QWidget, focus_kind: str = "") -> None:
         super().__init__(main_window)
         self.main_window = main_window
@@ -2412,6 +2430,7 @@ class LocalAiSetupDialog(QDialog):
         self.resize(760, 540)
         self.setModal(False)
         self._rows: dict[str, dict[str, object]] = {}
+        self._refresh_generation = 0
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 16)
@@ -2460,6 +2479,7 @@ class LocalAiSetupDialog(QDialog):
             self.bridge.localAiModelInstallStatus.connect(self._on_install_status)
         if hasattr(self.bridge, "accentColorChanged"):
             self.bridge.accentColorChanged.connect(lambda _value: self._apply_theme())
+        self.statusResolved.connect(self._on_status_resolved)
 
         self._build_rows()
         self.refresh_statuses()
@@ -2526,11 +2546,14 @@ class LocalAiSetupDialog(QDialog):
                 detail.setObjectName("localAiModelDetails")
                 detail.setTextFormat(Qt.TextFormat.RichText)
                 detail.setWordWrap(True)
+                detail.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
                 detail.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
                 metadata_layout.addWidget(detail)
             message_label = QLabel("")
             message_label.setObjectName("localAiModelInstallMessage")
+            message_label.setTextFormat(Qt.TextFormat.RichText)
             message_label.setWordWrap(True)
+            message_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             message_label.setVisible(False)
             metadata_layout.addWidget(message_label)
             details_layout.addWidget(metadata)
@@ -2585,10 +2608,21 @@ class LocalAiSetupDialog(QDialog):
         self.rows_layout.addStretch(1)
 
     def refresh_statuses(self) -> None:
+        self._refresh_generation += 1
+        generation = self._refresh_generation
         for status_key, row in self._rows.items():
             spec = row["spec"]
-            status = self._status_for_spec(spec)
-            self._apply_status(status_key, status)
+            self._apply_status(status_key, {"state": "installing", "message": "Checking runtime status..."})
+            threading.Thread(
+                target=self._resolve_status_async,
+                args=(status_key, spec, generation),
+                daemon=True,
+                name=f"local-ai-status-{status_key}",
+            ).start()
+
+    def _resolve_status_async(self, status_key: str, spec, generation: int) -> None:
+        status = self._status_for_spec(spec)
+        self.statusResolved.emit(str(status_key or ""), dict(status or {}), int(generation))
 
     def _status_for_spec(self, spec) -> dict:
         if not hasattr(self.bridge, "get_local_ai_model_status"):
@@ -2609,6 +2643,8 @@ class LocalAiSetupDialog(QDialog):
         frame = row["frame"]
         state = str(status.get("state") or "").strip()
         message = str(status.get("message") or "").strip()
+        runtime_summary = str(status.get("runtime_summary") or "").strip()
+        runtime_details_html = str(status.get("runtime_details_html") or "").strip()
         Theme = _theme_api()
         is_light = Theme.get_is_light()
         ok_color = "#238636" if is_light else "#7ee787"
@@ -2635,8 +2671,15 @@ class LocalAiSetupDialog(QDialog):
         button.setText("Installing..." if state == "installing" else "Install")
         uninstall_button.setVisible(state == "installed")
         uninstall_button.setEnabled(state == "installed")
-        if state in {"installing", "error"} and message:
-            message_label.setText(message)
+        details: list[str] = []
+        if runtime_summary:
+            details.append(f"<b>Status:</b> {html.escape(runtime_summary)}")
+        if runtime_details_html:
+            details.append(runtime_details_html)
+        if message and (state in {"installing", "error"} or not details):
+            details.append(html.escape(message))
+        if details:
+            message_label.setText("<br>".join(details))
             message_label.setProperty("installState", state)
             message_label.setVisible(True)
             message_label.style().unpolish(message_label)
@@ -2668,6 +2711,11 @@ class LocalAiSetupDialog(QDialog):
         self.refresh_statuses()
 
     def _on_install_status(self, status_key: str, payload: dict) -> None:
+        self._apply_status(str(status_key or ""), dict(payload or {}))
+
+    def _on_status_resolved(self, status_key: str, payload: dict, generation: int) -> None:
+        if int(generation) != int(self._refresh_generation):
+            return
         self._apply_status(str(status_key or ""), dict(payload or {}))
 
     def _apply_theme(self) -> None:
