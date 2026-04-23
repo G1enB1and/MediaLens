@@ -18452,15 +18452,20 @@ class MainWindow(QMainWindow):
         self._save_splitter_state()
         self._sync_sidebar_panel_widths()
         self._update_preview_display()
-        # Re-apply card selection via JS so resize doesn't visually deselect the last item
-        if hasattr(self, "_current_path") and self._current_path:
-            escaped = self._current_path.replace("\\", "\\\\").replace('"', '\\"')
+        # Re-apply the full gallery selection via JS so resize doesn't visually collapse it to one card.
+        selected_paths = [str(p or "") for p in list(getattr(self, "_current_paths", []) or []) if str(p or "").strip()]
+        if selected_paths:
+            selected_paths_js = json.dumps(selected_paths)
             self.web.page().runJavaScript(
-                f'(function(){{'  
-                f'  var c = document.querySelector(\'.card[data-path="{escaped}"]\');'  
-                f'  if (c) {{ document.querySelectorAll(\'.card.selected\').forEach(function(x){{x.classList.remove(\'selected\')}});'  
-                f'    c.classList.add(\'selected\'); }}'
-                f'}})();'
+                f"""
+                (function(){{
+                  var selected = new Set({selected_paths_js});
+                  document.querySelectorAll('.card').forEach(function(card){{
+                    var path = card.getAttribute('data-path') || '';
+                    card.classList.toggle('selected', selected.has(path));
+                  }});
+                }})();
+                """
             )
         self._schedule_gallery_container_relayout(120)
 
