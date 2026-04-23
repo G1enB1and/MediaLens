@@ -1,6 +1,38 @@
 # Change Log
 
-## v1.1.31 (Current)
+## v1.1.32 (Current)
+
+### Summary
+
+This release makes Local AI much more reliable in real-world use, especially in installed builds. MediaLens now handles more image formats correctly for Gemma, keeps model selection and status more consistent, and fixes several frustrating Local AI setup and runtime edge cases.
+
+### Highlights
+
+- Gemma 4 is more dependable in the installed app, with several fixes for model selection, runtime launch behavior, and fallback handling.
+- Local AI now handles AVIF, HEIC, HEIF, TIFF, WebP, animated images, and video sources more safely by converting them to preview images before sending them to Gemma.
+- The Local AI setup and status experience is clearer, with improved model syncing, copyable status text, and simpler advanced versus recommended flows.
+
+### Added
+
+- Added stronger Gemma launch diagnostics in worker logs to make installed-build failures easier to trace.
+- Added broader retry and fallback handling for Gemma GGUF launches, including a true CPU-offload fallback path when GPU startup fails.
+- Added more complete Gemma sub-model syncing between settings UI, status views, and active runtime payloads.
+
+### Changed
+
+- Changed Local AI source handling so Gemma uses generated preview images for AVIF, HEIC, HEIF, TIFF, WebP, animated images, and videos instead of sending unsupported originals to llama.cpp.
+- Changed Gemma GGUF launch behavior in installed builds to better isolate subprocess state inherited from the packaged app.
+- Changed Gemma profile selection so the selected downloaded sub-model consistently becomes the active runtime model instead of only updating UI state.
+- Changed Local AI troubleshooting surfaces so important status and error text remains easier to copy and verify.
+- Changed several Local AI model-management flows to behave more predictably when switching between downloaded Gemma variants.
+
+### Removed
+
+- Removed a parser-sensitive tag filter expression that could fail on stricter Python parsing paths.
+
+---
+
+## v1.1.31
 
 ### Summary
 
