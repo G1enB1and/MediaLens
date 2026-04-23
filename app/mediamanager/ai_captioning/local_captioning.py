@@ -56,6 +56,7 @@ class LocalAiSettings:
     gemma_backend: str = ""
     gemma_profile_id: str = ""
     gemma_profile_label: str = ""
+    gemma_profile_quantization: str = ""
     gemma_model_path: str = ""
     gemma_mmproj_path: str = ""
     gemma_llama_server: str = ""

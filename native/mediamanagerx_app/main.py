@@ -7543,6 +7543,53 @@ class Bridge(QObject):
             return [str(python_path), str(worker_script)], self._local_ai_runtime_root(), ""
         return [str(python_path), "-m", str(worker_module)], source_root, str(source_root)
 
+    def _local_ai_subprocess_env(self, worker_pythonpath: str = "") -> dict[str, str]:
+        child_env = os.environ.copy()
+        if bool(getattr(sys, "frozen", False)):
+            for key in list(child_env.keys()):
+                upper = str(key).upper()
+                if upper.startswith("_PYI") or upper.startswith("PYINSTALLER_"):
+                    child_env.pop(key, None)
+            for key in (
+                "PYTHONHOME",
+                "PYTHONEXECUTABLE",
+                "PYTHONUTF8",
+                "QT_PLUGIN_PATH",
+                "QML2_IMPORT_PATH",
+                "QT_OPENGL",
+                "QTWEBENGINE_CHROMIUM_FLAGS",
+            ):
+                child_env.pop(key, None)
+            blocked_roots: list[str] = []
+            try:
+                blocked_roots.append(str(Path(sys.executable).resolve().parent).casefold())
+                blocked_roots.append(str((Path(sys.executable).resolve().parent / "_internal")).casefold())
+            except Exception:
+                pass
+            try:
+                meipass = str(getattr(sys, "_MEIPASS", "") or "").strip()
+                if meipass:
+                    blocked_roots.append(str(Path(meipass).resolve()).casefold())
+            except Exception:
+                pass
+            path_entries = [entry.strip() for entry in str(child_env.get("PATH") or "").split(os.pathsep) if entry.strip()]
+            filtered_entries: list[str] = []
+            seen_entries: set[str] = set()
+            for entry in path_entries:
+                lower = entry.casefold()
+                if any(lower.startswith(root) for root in blocked_roots if root):
+                    continue
+                if lower in seen_entries:
+                    continue
+                filtered_entries.append(entry)
+                seen_entries.add(lower)
+            child_env["PATH"] = os.pathsep.join(filtered_entries)
+        if worker_pythonpath:
+            child_env["PYTHONPATH"] = worker_pythonpath + (os.pathsep + child_env["PYTHONPATH"] if child_env.get("PYTHONPATH") else "")
+        else:
+            child_env.pop("PYTHONPATH", None)
+        return child_env
+
     def _local_ai_runtime_python_path(self, spec) -> Path:
         from app.mediamanager.ai_captioning.model_registry import default_python_for_runtime
 
@@ -8181,9 +8228,7 @@ class Bridge(QObject):
             "--gpu-index",
             str(max(0, int(gpu_index or 0))),
         ]
-        child_env = os.environ.copy()
-        if worker_pythonpath:
-            child_env["PYTHONPATH"] = worker_pythonpath + (os.pathsep + child_env["PYTHONPATH"] if child_env.get("PYTHONPATH") else "")
+        child_env = self._local_ai_subprocess_env(worker_pythonpath)
         return command, worker_cwd, child_env
 
     def _local_ai_run_command_stream(self, command: list[str], cwd: Path, message: str, emit_status, env: dict[str, str] | None = None) -> tuple[int, str]:
@@ -8420,9 +8465,7 @@ class Bridge(QObject):
             "--settings-json",
             json.dumps(settings_payload, ensure_ascii=False),
         ]
-        child_env = os.environ.copy()
-        if worker_pythonpath:
-            child_env["PYTHONPATH"] = worker_pythonpath + (os.pathsep + child_env["PYTHONPATH"] if child_env.get("PYTHONPATH") else "")
+        child_env = self._local_ai_subprocess_env(worker_pythonpath)
         process = subprocess.Popen(
             command,
             cwd=str(worker_cwd),
@@ -9086,9 +9129,7 @@ class Bridge(QObject):
         ]
         if tags is not None:
             command.extend(["--tags-json", json.dumps(tags, ensure_ascii=False)])
-        child_env = os.environ.copy()
-        if worker_pythonpath:
-            child_env["PYTHONPATH"] = worker_pythonpath + (os.pathsep + child_env["PYTHONPATH"] if child_env.get("PYTHONPATH") else "")
+        child_env = self._local_ai_subprocess_env(worker_pythonpath)
         popen_kwargs = dict(
             cwd=str(worker_cwd),
             stdout=subprocess.PIPE,
