@@ -176,6 +176,49 @@ def _bf16_like_gemma_profile(settings: dict[str, Any]) -> bool:
     return _gemma_profile_quantization(settings) in {"BF16", "F16"}
 
 
+def _is_gpu_device_requested(settings: dict[str, Any]) -> bool:
+    return str(settings.get("device") or "gpu").strip().lower() != "cpu"
+
+
+def _gguf_access_violation_codes() -> tuple[int, ...]:
+    return (3221225477, -1073741819)
+
+
+def _is_gguf_launch_access_violation(exc: Exception) -> bool:
+    text = str(exc or "")
+    return any(
+        f"code {code}" in text or f"exit code {code}" in text
+        for code in _gguf_access_violation_codes()
+    )
+
+
+def _gguf_retry_settings_ladder(settings: dict[str, Any]) -> list[dict[str, Any]]:
+    backend = str(settings.get("gemma_backend") or "").strip().lower()
+    if not (backend == GEMMA_GGUF_BACKEND_ID and _is_gpu_device_requested(settings)):
+        return []
+    current_ctx = max(512, int(settings.get("gemma_ctx_size", 2048)))
+    current_layers = max(0, int(settings.get("gemma_gpu_layers", 999)))
+    candidates: list[tuple[int, int]] = []
+    if _bf16_like_gemma_profile(settings):
+        candidates.extend([(1024, 8), (768, 4), (512, 1), (512, 0)])
+    else:
+        candidates.extend([(1024, 24), (768, 8), (512, 1), (512, 0)])
+    retries: list[dict[str, Any]] = []
+    seen: set[tuple[int, int]] = {(current_ctx, current_layers)}
+    for retry_ctx, retry_layers in candidates:
+        next_ctx = min(current_ctx, retry_ctx)
+        next_layers = min(current_layers, retry_layers)
+        key = (next_ctx, next_layers)
+        if key in seen:
+            continue
+        seen.add(key)
+        updated = dict(settings)
+        updated["gemma_ctx_size"] = next_ctx
+        updated["gemma_gpu_layers"] = next_layers
+        retries.append(updated)
+    return retries
+
+
 def _gguf_cli_path(settings: dict[str, Any]) -> Path:
     server_path = Path(str(settings.get("gemma_llama_server") or "").strip())
     if server_path.is_file():
@@ -183,7 +226,35 @@ def _gguf_cli_path(settings: dict[str, Any]) -> Path:
     return Path()
 
 
+def _gguf_launch_summary(settings: dict[str, Any]) -> str:
+    model_path = Path(str(settings.get("gemma_model_path") or "").strip())
+    mmproj_path = Path(str(settings.get("gemma_mmproj_path") or "").strip())
+    return (
+        f"profile={str(settings.get('gemma_profile_id') or '').strip() or 'unknown'} "
+        f"quant={_gemma_profile_quantization(settings) or 'unknown'} "
+        f"model={model_path.name or '<missing>'} "
+        f"mmproj={mmproj_path.name or '<missing>'} "
+        f"ctx={max(512, int(settings.get('gemma_ctx_size', 2048)))} "
+        f"ngl={int(settings.get('gemma_gpu_layers', 999))}"
+    )
+
+
+def _reset_inherited_windows_dll_directory() -> None:
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        kernel32.SetDllDirectoryW.argtypes = [ctypes.c_wchar_p]
+        kernel32.SetDllDirectoryW.restype = ctypes.c_int
+        kernel32.SetDllDirectoryW(None)
+    except Exception:
+        pass
+
+
 def _gguf_runtime_launch_context(settings: dict[str, Any]) -> tuple[dict[str, str], str | None]:
+    _reset_inherited_windows_dll_directory()
     env = os.environ.copy()
     server_path = Path(str(settings.get("gemma_llama_server") or "").strip())
     runtime_dir = server_path.parent if server_path.is_file() else None
@@ -275,9 +346,9 @@ def _start_gguf_server(settings: dict[str, Any]):
     if not model_path.is_file() or not mmproj_path.is_file():
         raise RuntimeError("Gemma GGUF model files are missing.")
     port = _find_free_port()
-    ctx_size = max(512, int(settings.get("gemma_ctx_size") or 2048))
-    gpu_layers = int(settings.get("gemma_gpu_layers") or 999)
-    threads = max(1, int(settings.get("gemma_threads") or 8))
+    ctx_size = max(512, int(settings.get("gemma_ctx_size", 2048)))
+    gpu_layers = int(settings.get("gemma_gpu_layers", 999))
+    threads = max(1, int(settings.get("gemma_threads", 8)))
     command = [
         str(server_path),
         "-m",
@@ -303,16 +374,17 @@ def _start_gguf_server(settings: dict[str, Any]):
         "0",
     ]
     env, runtime_cwd = _gguf_runtime_launch_context(settings)
-    process = __import__("subprocess").Popen(
+    process = subprocess.Popen(
         command,
-        stdout=__import__("subprocess").PIPE,
-        stderr=__import__("subprocess").STDOUT,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
         encoding="utf-8",
         errors="replace",
         cwd=runtime_cwd,
         env=env,
-        creationflags=getattr(__import__("subprocess"), "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
     _wait_for_server_ready(process, port)
     return process, port
@@ -342,9 +414,9 @@ def _gguf_cli_completion(source_path: str, prompt: str, settings: dict[str, Any]
     mmproj_path = Path(str(settings.get("gemma_mmproj_path") or "").strip())
     if not model_path.is_file() or not mmproj_path.is_file():
         raise RuntimeError("Gemma GGUF model files are missing.")
-    ctx_size = max(512, int(settings.get("gemma_ctx_size") or 2048))
-    gpu_layers = int(settings.get("gemma_gpu_layers") or 999)
-    threads = max(1, int(settings.get("gemma_threads") or 8))
+    ctx_size = max(512, int(settings.get("gemma_ctx_size", 2048)))
+    gpu_layers = int(settings.get("gemma_gpu_layers", 999))
+    threads = max(1, int(settings.get("gemma_threads", 8)))
     command = [
         str(cli_path),
         "-m",
@@ -375,6 +447,7 @@ def _gguf_cli_completion(source_path: str, prompt: str, settings: dict[str, Any]
     env, runtime_cwd = _gguf_runtime_launch_context(settings)
     completed = subprocess.run(
         command,
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -397,7 +470,35 @@ def _gguf_cli_completion(source_path: str, prompt: str, settings: dict[str, Any]
 
 
 def _gguf_chat_completion(source_path: str, prompt: str, settings: dict[str, Any], max_new_tokens: int) -> str:
+    retry_settings_list = _gguf_retry_settings_ladder(settings)
+    try:
+        return _gguf_chat_completion_once(source_path, prompt, settings, max_new_tokens)
+    except Exception as exc:
+        if not retry_settings_list or not _is_gguf_launch_access_violation(exc):
+            raise
+        last_exc: Exception = exc
+        for index, retry_settings in enumerate(retry_settings_list, start=1):
+            print(
+                "Gemma GGUF retrying with reduced GPU offload "
+                f"({index}/{len(retry_settings_list)}) "
+                f"(quant={_gemma_profile_quantization(settings) or 'unknown'} "
+                f"ctx={int(retry_settings.get('gemma_ctx_size') or 0)} "
+                f"ngl={int(retry_settings.get('gemma_gpu_layers') or 0)}): {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+            try:
+                return _gguf_chat_completion_once(source_path, prompt, retry_settings, max_new_tokens)
+            except Exception as retry_exc:
+                last_exc = retry_exc
+                if not _is_gguf_launch_access_violation(retry_exc):
+                    raise
+        raise last_exc
+
+
+def _gguf_chat_completion_once(source_path: str, prompt: str, settings: dict[str, Any], max_new_tokens: int) -> str:
     process = None
+    print(f"Gemma GGUF launch: {_gguf_launch_summary(settings)} source={Path(source_path).name}", file=sys.stderr, flush=True)
     try:
         process, port = _start_gguf_server(settings)
         payload = {

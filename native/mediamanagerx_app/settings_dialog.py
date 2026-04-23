@@ -2335,6 +2335,8 @@ class AISettingsPage(SettingsPage):
         if not profile_id:
             return
         self.settings.setValue("ai_caption/gemma_selected_profile_id", profile_id)
+        if hasattr(self.bridge, "_sync_selected_gemma_profile_settings"):
+            self.bridge._sync_selected_gemma_profile_settings(sync_qsettings=False)
         self.settings.sync()
         self._refresh_ai_model_statuses()
 
@@ -2851,6 +2853,8 @@ class LocalAiSetupDialog(QDialog):
     def _use_recommended_models(self) -> None:
         recommended = self._recommended_gemma_profile()
         self.bridge.settings.setValue("ai_caption/gemma_selected_profile_id", recommended.id)
+        if hasattr(self.bridge, "_sync_selected_gemma_profile_settings"):
+            self.bridge._sync_selected_gemma_profile_settings(sync_qsettings=False)
         self.bridge.settings.sync()
         self._set_simple_status(f"Starting {recommended.label}...", active=True)
         if hasattr(self.bridge, "install_local_ai_model"):
@@ -2991,9 +2995,34 @@ class LocalAiSetupDialog(QDialog):
             delete_btn.setEnabled(is_downloaded)
 
     def _on_gemma_profile_changed(self, row: dict[str, object]) -> None:
+        from app.mediamanager.ai_captioning.gemma_gguf import (
+            gemma_profile_by_id,
+            gemma_profile_is_installed,
+            gemma_profile_mmproj_path,
+            gemma_profile_model_path,
+        )
+
         combo = row["gemma_profile_combo"]
         profile_id = str(combo.currentData() or "").strip()
         self.bridge.settings.setValue("ai_caption/gemma_selected_profile_id", profile_id)
+        if hasattr(self.bridge, "_sync_selected_gemma_profile_settings"):
+            self.bridge._sync_selected_gemma_profile_settings(sync_qsettings=False)
+        profile = gemma_profile_by_id(profile_id)
+        models_dir = Path(
+            str(
+                self.bridge.settings.value(
+                    "ai_caption/models_dir",
+                    getattr(self.bridge, "_local_ai_models_dir_default", lambda: "")(),
+                    type=str,
+                )
+                or getattr(self.bridge, "_local_ai_models_dir_default", lambda: "")()
+            )
+        )
+        if profile is not None and gemma_profile_is_installed(models_dir, profile):
+            self.bridge.settings.setValue("ai_caption/gemma_profile_id", profile.id)
+            self.bridge.settings.setValue("ai_caption/gemma_profile_label", profile.label)
+            self.bridge.settings.setValue("ai_caption/gemma_model_path", str(gemma_profile_model_path(models_dir, profile)))
+            self.bridge.settings.setValue("ai_caption/gemma_mmproj_path", str(gemma_profile_mmproj_path(models_dir, profile)))
         self._sync_gemma_profile_controls(row)
         self.refresh_statuses()
 

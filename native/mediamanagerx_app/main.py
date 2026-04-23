@@ -7470,7 +7470,13 @@ class Bridge(QObject):
         threading.Thread(target=work, daemon=True, name="manual-ocr").start()
 
     def _local_ai_source_path(self, media_path: Path) -> Path:
-        if media_path.suffix.lower() not in VIDEO_EXTS:
+        suffix = media_path.suffix.lower()
+        needs_poster = (
+            suffix in VIDEO_EXTS
+            or suffix in {".avif", ".heic", ".heif", ".tif", ".tiff", ".webp"}
+            or self._is_animated(media_path)
+        )
+        if not needs_poster:
             return media_path
         poster = self._video_poster_path(media_path)
         if poster.exists():
@@ -7478,7 +7484,7 @@ class Bridge(QObject):
         poster = self._ensure_video_poster(media_path)
         if poster and poster.exists():
             return poster
-        raise RuntimeError("No video preview image is available for local AI captioning.")
+        raise RuntimeError("No preview image is available for local AI captioning.")
 
     def _local_ai_models_dir_default(self) -> str:
         if bool(getattr(sys, "frozen", False)):
@@ -7544,46 +7550,84 @@ class Bridge(QObject):
         return [str(python_path), "-m", str(worker_module)], source_root, str(source_root)
 
     def _local_ai_subprocess_env(self, worker_pythonpath: str = "") -> dict[str, str]:
-        child_env = os.environ.copy()
+        parent_env = os.environ.copy()
+        child_env = parent_env.copy()
         if bool(getattr(sys, "frozen", False)):
-            for key in list(child_env.keys()):
-                upper = str(key).upper()
-                if upper.startswith("_PYI") or upper.startswith("PYINSTALLER_"):
-                    child_env.pop(key, None)
+            safe_env: dict[str, str] = {}
             for key in (
-                "PYTHONHOME",
-                "PYTHONEXECUTABLE",
-                "PYTHONUTF8",
-                "QT_PLUGIN_PATH",
-                "QML2_IMPORT_PATH",
-                "QT_OPENGL",
-                "QTWEBENGINE_CHROMIUM_FLAGS",
+                "APPDATA",
+                "COMSPEC",
+                "HOMEDRIVE",
+                "HOMEPATH",
+                "LOCALAPPDATA",
+                "NUMBER_OF_PROCESSORS",
+                "OS",
+                "PATHEXT",
+                "PROCESSOR_ARCHITECTURE",
+                "PROCESSOR_IDENTIFIER",
+                "PROCESSOR_LEVEL",
+                "PROCESSOR_REVISION",
+                "PROGRAMDATA",
+                "SYSTEMDRIVE",
+                "SYSTEMROOT",
+                "TEMP",
+                "TMP",
+                "USERDOMAIN",
+                "USERNAME",
+                "USERPROFILE",
+                "WINDIR",
             ):
-                child_env.pop(key, None)
+                value = str(parent_env.get(key, "") or "").strip()
+                if value:
+                    safe_env[key] = value
+            for key, value in parent_env.items():
+                upper = str(key).upper()
+                if upper.startswith(("CUDA_", "NVIDIA_", "NV_")):
+                    safe_env[str(key)] = str(value)
             blocked_roots: list[str] = []
             try:
-                blocked_roots.append(str(Path(sys.executable).resolve().parent).casefold())
-                blocked_roots.append(str((Path(sys.executable).resolve().parent / "_internal")).casefold())
+                app_root = Path(sys.executable).resolve().parent
+                blocked_roots.append(str(app_root).replace("\\", "/").casefold())
+                blocked_roots.append(str((app_root / "_internal")).replace("\\", "/").casefold())
             except Exception:
                 pass
             try:
                 meipass = str(getattr(sys, "_MEIPASS", "") or "").strip()
                 if meipass:
-                    blocked_roots.append(str(Path(meipass).resolve()).casefold())
+                    blocked_roots.append(str(Path(meipass).resolve()).replace("\\", "/").casefold())
             except Exception:
                 pass
-            path_entries = [entry.strip() for entry in str(child_env.get("PATH") or "").split(os.pathsep) if entry.strip()]
+            allowed_path_prefixes = (
+                "c:/windows",
+                "c:\\windows",
+            )
+            allowed_path_markers = (
+                "nvidia",
+                "cuda",
+                "cudnn",
+                "powershell",
+                "system32",
+                "wbem",
+            )
+            path_entries = [entry.strip() for entry in str(parent_env.get("PATH") or "").split(os.pathsep) if entry.strip()]
             filtered_entries: list[str] = []
             seen_entries: set[str] = set()
             for entry in path_entries:
-                lower = entry.casefold()
-                if any(lower.startswith(root) for root in blocked_roots if root):
+                normalized = entry.replace("\\", "/").casefold()
+                if any(normalized.startswith(root) for root in blocked_roots if root):
                     continue
-                if lower in seen_entries:
+                if normalized in seen_entries:
                     continue
-                filtered_entries.append(entry)
-                seen_entries.add(lower)
-            child_env["PATH"] = os.pathsep.join(filtered_entries)
+                if normalized.startswith(allowed_path_prefixes) or any(marker in normalized for marker in allowed_path_markers):
+                    filtered_entries.append(entry)
+                    seen_entries.add(normalized)
+            safe_env["PATH"] = os.pathsep.join(filtered_entries)
+            child_env = safe_env
+            self._log(
+                "Local AI subprocess env prepared: "
+                f"mode=frozen-clean path_entries={len(filtered_entries)} "
+                f"pythonpath={'yes' if bool(worker_pythonpath) else 'no'}"
+            )
         if worker_pythonpath:
             child_env["PYTHONPATH"] = worker_pythonpath + (os.pathsep + child_env["PYTHONPATH"] if child_env.get("PYTHONPATH") else "")
         else:
@@ -7629,6 +7673,7 @@ class Bridge(QObject):
         gemma_downloaded_profiles: list[str] = []
         selected_profile_id = ""
         if spec.settings_key == "gemma4":
+            self._sync_selected_gemma_profile_settings(sync_qsettings=False)
             gemma_downloaded_profiles = self._local_ai_gemma_downloaded_profile_ids(models_dir)
             selected_profile_id = str(self.settings.value("ai_caption/gemma_selected_profile_id", "", type=str) or "").strip()
         return {
@@ -8127,6 +8172,51 @@ class Bridge(QObject):
             "mmproj_path": str(mmproj_path),
             "server_path": str(server_path),
             "ctx_size": ctx_size,
+        }
+
+    def _sync_selected_gemma_profile_settings(self, *, sync_qsettings: bool = True) -> dict[str, str] | None:
+        from app.mediamanager.ai_captioning.gemma_gguf import (
+            GEMMA_GGUF_BACKEND_ID,
+            gemma_profile_by_id,
+            gemma_profile_is_installed,
+            gemma_profile_mmproj_path,
+            gemma_profile_model_path,
+        )
+
+        selected_profile_id = str(self.settings.value("ai_caption/gemma_selected_profile_id", "", type=str) or "").strip()
+        if not selected_profile_id:
+            return None
+        profile = gemma_profile_by_id(selected_profile_id)
+        if profile is None:
+            return None
+        models_dir = Path(
+            str(
+                self.settings.value(
+                    "ai_caption/models_dir",
+                    self._local_ai_models_dir_default(),
+                    type=str,
+                )
+                or self._local_ai_models_dir_default()
+            )
+        )
+        if not gemma_profile_is_installed(models_dir, profile):
+            return None
+        model_path = gemma_profile_model_path(models_dir, profile)
+        mmproj_path = gemma_profile_mmproj_path(models_dir, profile)
+        self.settings.setValue("ai_caption/gemma_backend", GEMMA_GGUF_BACKEND_ID)
+        self.settings.setValue("ai_caption/gemma_profile_id", profile.id)
+        self.settings.setValue("ai_caption/gemma_profile_label", profile.label)
+        self.settings.setValue("ai_caption/gemma_profile_quantization", profile.quantization)
+        self.settings.setValue("ai_caption/gemma_model_path", str(model_path))
+        self.settings.setValue("ai_caption/gemma_mmproj_path", str(mmproj_path))
+        if sync_qsettings:
+            self.settings.sync()
+        return {
+            "profile_id": profile.id,
+            "profile_label": profile.label,
+            "profile_quantization": profile.quantization,
+            "model_path": str(model_path),
+            "mmproj_path": str(mmproj_path),
         }
 
     def _local_ai_gemma_probe(self, spec) -> dict:
@@ -9026,6 +9116,7 @@ class Bridge(QObject):
             gemma_profile_model_path,
         )
 
+        self._sync_selected_gemma_profile_settings(sync_qsettings=False)
         payload = {
             "models_dir": str(ai_settings.models_dir),
             "tag_model_id": str(ai_settings.tag_model_id),
@@ -9118,6 +9209,7 @@ class Bridge(QObject):
         operation_label = "description" if operation == "description" else "tags"
         python_exe, worker_module = self._local_ai_worker_command(operation, ai_settings)
         launcher, worker_cwd, worker_pythonpath = self._local_ai_worker_launcher(python_exe, worker_module)
+        settings_payload = self._local_ai_settings_payload(ai_settings)
         command = [
             *launcher,
             "--operation",
@@ -9125,10 +9217,21 @@ class Bridge(QObject):
             "--source",
             str(source_path),
             "--settings-json",
-            json.dumps(self._local_ai_settings_payload(ai_settings), ensure_ascii=False),
+            json.dumps(settings_payload, ensure_ascii=False),
         ]
         if tags is not None:
             command.extend(["--tags-json", json.dumps(tags, ensure_ascii=False)])
+        if str(settings_payload.get("gemma_backend") or "").strip().lower() == "llama_cpp_gguf":
+            self._log(
+                "Local AI Gemma launch: "
+                f"profile={str(settings_payload.get('gemma_profile_id') or '').strip()} "
+                f"quant={str(settings_payload.get('gemma_profile_quantization') or '').strip()} "
+                f"model={Path(str(settings_payload.get('gemma_model_path') or '')).name} "
+                f"mmproj={Path(str(settings_payload.get('gemma_mmproj_path') or '')).name} "
+                f"ctx={int(settings_payload.get('gemma_ctx_size') or 0)} "
+                f"ngl={int(settings_payload.get('gemma_gpu_layers') or 0)} "
+                f"source={source_path.name}"
+            )
         child_env = self._local_ai_subprocess_env(worker_pythonpath)
         popen_kwargs = dict(
             cwd=str(worker_cwd),
@@ -14782,7 +14885,8 @@ class MainWindow(QMainWindow):
             self._refresh_tag_list_panel()
 
     def _filter_gallery_by_tag(self, tag_name: str) -> None:
-        query = f'tag:"{str(tag_name or "").replace(chr(34), r"\\\"")}"'
+        escaped_tag_name = str(tag_name or "").replace('"', '\\"')
+        query = f'tag:"{escaped_tag_name}"'
         self._active_tag_scope_name = str(tag_name or "").strip()
         try:
             self.web.page().runJavaScript(
