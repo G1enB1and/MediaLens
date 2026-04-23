@@ -2225,6 +2225,9 @@ let gLockedCard = null;
 let gSelectedPaths = new Set();
 let gLastSelectionIdx = -1;
 let gIsCtxMenuClick = false; // Guard for context menu clicks
+let gPendingMetadataSyncHandle = 0;
+let gPendingMetadataSyncTimeout = 0;
+let gMetadataSyncRevision = 0;
 
 function shouldSelectFoldersOnSelectAll() {
   return !gIncludeNestedFiles;
@@ -2324,10 +2327,26 @@ function triggerRename() {
 window.triggerRename = triggerRename;
 
 function syncMetadataToBridge() {
-  if (gBridge && gBridge.show_metadata) {
-    const paths = Array.from(gSelectedPaths);
-    gBridge.show_metadata(paths);
+  if (gPendingMetadataSyncHandle) {
+    cancelAnimationFrame(gPendingMetadataSyncHandle);
+    gPendingMetadataSyncHandle = 0;
   }
+  if (gPendingMetadataSyncTimeout) {
+    clearTimeout(gPendingMetadataSyncTimeout);
+    gPendingMetadataSyncTimeout = 0;
+  }
+  const revision = ++gMetadataSyncRevision;
+  gPendingMetadataSyncHandle = requestAnimationFrame(() => {
+    gPendingMetadataSyncHandle = 0;
+    gPendingMetadataSyncTimeout = window.setTimeout(() => {
+      gPendingMetadataSyncTimeout = 0;
+      if (revision !== gMetadataSyncRevision) return;
+      if (gBridge && gBridge.show_metadata) {
+        const paths = Array.from(gSelectedPaths);
+        gBridge.show_metadata(paths);
+      }
+    }, 0);
+  });
 }
 
 function reconcileSelectionWithVisibleItems(items) {

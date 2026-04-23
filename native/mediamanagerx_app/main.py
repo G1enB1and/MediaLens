@@ -2091,13 +2091,24 @@ class TagListTagRow(QWidget):
         return self._tag_name
 
     def update_entry(self, entry: dict) -> None:
-        self._scope_use_count = int(entry.get("scope_use_count") or 0)
-        self._global_use_count = int(entry.get("global_use_count") or 0)
-        self._selection_state = str(entry.get("selection_state") or ("selected" if entry.get("in_selected_tags") else "none"))
-        self._filter_active = bool(entry.get("filter_active"))
+        next_scope_use_count = int(entry.get("scope_use_count") or 0)
+        next_global_use_count = int(entry.get("global_use_count") or 0)
+        next_selection_state = str(entry.get("selection_state") or ("selected" if entry.get("in_selected_tags") else "none"))
+        next_filter_active = bool(entry.get("filter_active"))
+        changed = (
+            next_scope_use_count != self._scope_use_count
+            or next_global_use_count != self._global_use_count
+            or next_selection_state != self._selection_state
+            or next_filter_active != self._filter_active
+        )
+        self._scope_use_count = next_scope_use_count
+        self._global_use_count = next_global_use_count
+        self._selection_state = next_selection_state
+        self._filter_active = next_filter_active
         self.scope_btn.setText(str(self._scope_use_count))
         self.scope_btn.setToolTip(f"The tag {self._tag_name} was found in {self._scope_use_count} files within the current scope")
         self.name_lbl.setToolTip(f"Click to filter gallery using Tag: {self._tag_name}")
+        return changed
 
     def _on_remove_from_selection_clicked(self) -> None:
         if not self._can_remove_from_selection:
@@ -11096,7 +11107,7 @@ class MainWindow(QMainWindow):
         self.bridge.videoPreprocessingStatus.connect(self._on_video_preprocessing_status)
         self.debugLogUploadFinished.connect(self._on_debug_log_upload_finished)
         self.bridge.uiFlagChanged.connect(self._apply_ui_flag)
-        self.bridge.metadataRequested.connect(self._show_metadata_for_path)
+        self.bridge.metadataRequested.connect(self._schedule_show_metadata_for_path)
         self.videoSidebarMetadataReady.connect(self._on_video_sidebar_metadata_ready)
         self.videoSidebarPosterReady.connect(self._on_video_sidebar_poster_ready)
         self.bridge.loadFolderRequested.connect(self._on_load_folder_requested)
@@ -11128,6 +11139,17 @@ class MainWindow(QMainWindow):
         self._tree_sync_timer = QTimer(self)
         self._tree_sync_timer.setSingleShot(True)
         self._tree_sync_timer.timeout.connect(self._apply_pending_tree_sync)
+        self._pending_metadata_paths: list[str] = []
+        self._metadata_request_revision = 0
+        self._metadata_applied_revision = 0
+        self._metadata_request_timer = QTimer(self)
+        self._metadata_request_timer.setSingleShot(True)
+        self._metadata_request_timer.timeout.connect(self._apply_pending_metadata_request)
+        self._pending_tag_list_refresh_mode = "rows"
+        self._tag_list_refresh_revision = 0
+        self._tag_list_refresh_timer = QTimer(self)
+        self._tag_list_refresh_timer.setSingleShot(True)
+        self._tag_list_refresh_timer.timeout.connect(self._apply_pending_tag_list_refresh)
 
         # Native Tooltip
         self.native_tooltip = NativeDragTooltip()
@@ -13134,7 +13156,7 @@ class MainWindow(QMainWindow):
     def _can_show_tag_list_panel(self) -> bool:
         return bool(hasattr(self, "right_panel_host") and self.right_panel_host.isVisible())
 
-    def _sync_tag_list_panel_visibility(self) -> None:
+    def _sync_tag_list_panel_visibility(self, refresh_contents: bool = True) -> None:
         if not hasattr(self, "tag_list_panel"):
             return
         should_show = self._is_tag_list_panel_requested_visible() and self._can_show_tag_list_panel()
@@ -13156,7 +13178,11 @@ class MainWindow(QMainWindow):
         self.tag_list_panel.setVisible(should_show)
         if should_show:
             self._restore_right_splitter_sizes()
-            self._refresh_tag_list_panel()
+            if refresh_contents:
+                if was_visible:
+                    self._refresh_tag_list_rows_state()
+                else:
+                    self._refresh_tag_list_panel()
         elif hasattr(self, "right_splitter"):
             details_width = max(240, int(self.bridge.settings.value("ui/tag_list_last_details_width", self._DEFAULT_RIGHT_PANEL_WIDTH, type=int) or self._DEFAULT_RIGHT_PANEL_WIDTH))
             self.right_splitter.setSizes([0, details_width])
@@ -14498,6 +14524,10 @@ class MainWindow(QMainWindow):
     def _selected_tag_names_from_editor(self) -> set[str]:
         return {tag.casefold() for tag in self._normalize_tag_list(self._tag_editor_text())}
 
+    def _invalidate_tag_list_scope_counts_cache(self) -> None:
+        self._tag_list_scope_counts_cache_key = None
+        self._tag_list_scope_counts_cache_value = None
+
     def _effective_gallery_scope_search(self, include_tag_scope: bool = True) -> str:
         base_query = str(getattr(self.bridge, "_current_gallery_search", "") or "").strip()
         if not include_tag_scope:
@@ -14508,6 +14538,15 @@ class MainWindow(QMainWindow):
         return f"{base_query} {tag_scope_query}".strip() if base_query else tag_scope_query
 
     def _current_scope_tag_counts(self) -> dict[str, int]:
+        cache_key = (
+            tuple(str(path or "").casefold() for path in list(getattr(self.bridge, "_selected_folders", []) or [])),
+            str(getattr(self.bridge, "_current_gallery_filter", "all") or "all"),
+            self._effective_gallery_scope_search(include_tag_scope=False),
+        )
+        if getattr(self, "_tag_list_scope_counts_cache_key", None) == cache_key:
+            cached = getattr(self, "_tag_list_scope_counts_cache_value", None)
+            if isinstance(cached, dict):
+                return dict(cached)
         counts: Counter[str] = Counter()
         try:
             entries = self.bridge._get_gallery_entries(
@@ -14529,7 +14568,10 @@ class MainWindow(QMainWindow):
                     continue
                 seen.add(key)
                 counts[key] += 1
-        return dict(counts)
+        resolved = dict(counts)
+        self._tag_list_scope_counts_cache_key = cache_key
+        self._tag_list_scope_counts_cache_value = dict(resolved)
+        return resolved
 
     def _reload_tag_lists(self, preferred_id: int | None = None) -> None:
         from app.mediamanager.db.tag_lists_repo import list_tag_lists
@@ -14750,41 +14792,85 @@ class MainWindow(QMainWindow):
             return
         if not str(getattr(self.bridge, "_current_gallery_tag_scope_search", "") or "").strip():
             self._active_tag_scope_name = ""
+        self._invalidate_tag_list_scope_counts_cache()
         self._refresh_tag_list_panel()
 
     def _refresh_tag_list_rows_state(self) -> None:
         if not hasattr(self, "tag_list_panel") or not self.tag_list_panel.isVisible():
             return
-        self._refresh_tag_list_panel()
-
-    def _apply_tag_list_theme(self) -> None:
-        if not hasattr(self, "tag_list_rows"):
+        if not hasattr(self, "tag_list_rows") or self.tag_list_rows.count() <= 0:
+            self._refresh_tag_list_panel()
             return
+
+        selected_tags = self._selected_tag_names_from_editor()
+        common_tags, uncommon_tags = self._bulk_tag_selection_states() if self._is_bulk_editor_active() else (set(), set())
+        active_filter_key = str(getattr(self, "_active_tag_scope_name", "") or "").casefold()
+        changed_rows: list[TagListTagRow] = []
+        updated_rows = 0
+        theme_kwargs = self._tag_list_theme_kwargs()
+        if theme_kwargs is None:
+            self._refresh_tag_list_panel()
+            return
+
+        for index in range(self.tag_list_rows.count()):
+            item = self.tag_list_rows.item(index)
+            row = self.tag_list_rows.itemWidget(item)
+            if not isinstance(row, TagListTagRow):
+                continue
+            key = str(row.tag_name or "").casefold()
+            if self._is_bulk_editor_active():
+                if key in common_tags:
+                    selection_state = "common"
+                elif key in uncommon_tags:
+                    selection_state = "uncommon"
+                else:
+                    selection_state = "none"
+            else:
+                selection_state = "selected" if key in selected_tags else "none"
+            changed = row.update_entry({
+                "scope_use_count": row._scope_use_count,
+                "global_use_count": row._global_use_count,
+                "selection_state": selection_state,
+                "filter_active": bool(active_filter_key and key == active_filter_key),
+            })
+            if changed:
+                changed_rows.append(row)
+            updated_rows += 1
+
+        if updated_rows != self.tag_list_rows.count():
+            self._refresh_tag_list_panel()
+            return
+        for row in changed_rows:
+            row.apply_theme(**theme_kwargs)
+
+    def _tag_list_theme_kwargs(self) -> dict | None:
+        if not hasattr(self, "tag_list_rows"):
+            return None
         accent = QColor(getattr(self, "_current_accent", Theme.ACCENT_DEFAULT))
         text = Theme.get_text_color()
         text_muted = Theme.get_text_muted()
-        accent_text = Theme.mix(text, accent, 0.78)
-        accent_text_muted = Theme.mix(text_muted, accent, 0.48)
-        btn_bg = Theme.get_input_bg(accent)
-        btn_hover = Theme.get_btn_save_hover(accent)
-        btn_border = Theme.get_input_border(accent)
-        btn_border_hover = Theme.mix(Theme.get_border(accent), accent, 0.28)
+        return {
+            "accent_color": accent.name(),
+            "accent_text": Theme.mix(text, accent, 0.78),
+            "accent_text_muted": Theme.mix(text_muted, accent, 0.48),
+            "text": text,
+            "text_muted": text_muted,
+            "btn_bg": Theme.get_input_bg(accent),
+            "btn_hover": Theme.get_btn_save_hover(accent),
+            "btn_border": Theme.get_input_border(accent),
+            "btn_border_hover": Theme.mix(Theme.get_border(accent), accent, 0.28),
+            "is_light": Theme.get_is_light(),
+        }
+
+    def _apply_tag_list_theme(self) -> None:
+        theme_kwargs = self._tag_list_theme_kwargs()
+        if theme_kwargs is None:
+            return
         for index in range(self.tag_list_rows.count()):
             item = self.tag_list_rows.item(index)
             row = self.tag_list_rows.itemWidget(item)
             if isinstance(row, TagListTagRow):
-                row.apply_theme(
-                    accent_color=accent.name(),
-                    accent_text=accent_text,
-                    accent_text_muted=accent_text_muted,
-                    text=text,
-                    text_muted=text_muted,
-                    btn_bg=btn_bg,
-                    btn_hover=btn_hover,
-                    btn_border=btn_border,
-                    btn_border_hover=btn_border_hover,
-                    is_light=Theme.get_is_light(),
-                )
+                row.apply_theme(**theme_kwargs)
 
     def _on_tag_list_changed(self, _index: int) -> None:
         self._refresh_tag_list_panel()
@@ -14820,12 +14906,13 @@ class MainWindow(QMainWindow):
             for path in paths:
                 try:
                     self.bridge.attach_media_tags(path, [tag_name])
+                    self._invalidate_tag_list_scope_counts_cache()
                 except Exception:
                     pass
             self.bulk_status_lbl.setText(f"✓ Added '{tag_name}' to {len(paths)} selected files")
             QTimer.singleShot(3000, lambda: self.bulk_status_lbl.setText(""))
             self._refresh_bulk_tag_editor_summary()
-            self._refresh_tag_list_scope_counts()
+            self._refresh_tag_list_rows_state()
             return
         path = str(getattr(self, "_current_path", "") or "").strip()
         if not path:
@@ -14835,11 +14922,12 @@ class MainWindow(QMainWindow):
         self._set_tag_editor_text(", ".join(next_tags), editor)
         try:
             self.bridge.set_media_tags(path, next_tags)
+            self._invalidate_tag_list_scope_counts_cache()
         except Exception:
             pass
         self.meta_status_lbl.setText(f"✓ Added '{tag_name}'")
         QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
-        self._refresh_tag_list_scope_counts()
+        self._refresh_tag_list_rows_state()
 
     def _remove_tag_from_current_editor(self, tag_name: str) -> None:
         if self._is_bulk_editor_active():
@@ -14854,12 +14942,13 @@ class MainWindow(QMainWindow):
                     existing = list_media_tags(self.bridge.conn, int(media.get("id") or 0)) if media else []
                     next_tags = [tag for tag in list(existing or []) if str(tag or "").strip() and str(tag).casefold() != remove_key]
                     self.bridge.set_media_tags(path, next_tags)
+                    self._invalidate_tag_list_scope_counts_cache()
                 except Exception:
                     pass
             self.bulk_status_lbl.setText(f"✓ Removed '{tag_name}' from {len(paths)} selected files")
             QTimer.singleShot(3000, lambda: self.bulk_status_lbl.setText(""))
             self._refresh_bulk_tag_editor_summary()
-        self._refresh_tag_list_scope_counts()
+        self._refresh_tag_list_rows_state()
         return
         remove_key = str(tag_name or "").casefold()
         editor = self._active_tag_editor()
@@ -14869,11 +14958,12 @@ class MainWindow(QMainWindow):
         if path:
             try:
                 self.bridge.set_media_tags(path, next_tags)
+                self._invalidate_tag_list_scope_counts_cache()
             except Exception:
                 pass
         self.meta_status_lbl.setText(f"âœ“ Removed '{tag_name}'")
         QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
-        self._refresh_tag_list_scope_counts()
+        self._refresh_tag_list_rows_state()
 
     def _remove_tag_from_active_list(self, tag_id: int, _tag_name: str) -> None:
         from app.mediamanager.db.tag_lists_repo import remove_tag_from_list
@@ -15400,6 +15490,7 @@ class MainWindow(QMainWindow):
                 self.bridge.update_media_detected_text(path, detected_text)
                 self.bridge.update_media_dates(path, exif_date_taken, metadata_date)
                 self.bridge.set_media_tags(path, tags)
+                self._invalidate_tag_list_scope_counts_cache()
                 self._current_ai_meta = {
                     "is_ai_detected": is_ai_detected,
                     "is_ai_confidence": is_ai_confidence,
@@ -15420,6 +15511,7 @@ class MainWindow(QMainWindow):
                 try:
                     existing = self.bridge.get_media_metadata(p).get("tags", [])
                     self.bridge.set_media_tags(p, self._merge_tag_lists(existing, tags))
+                    self._invalidate_tag_list_scope_counts_cache()
                 except Exception:
                     pass
 
@@ -16448,17 +16540,59 @@ class MainWindow(QMainWindow):
         # (Editing tags triggers a soft save).
         self._save_native_metadata()
 
-    def _show_metadata_for_path(self, paths: list[str]) -> None:
+    def _schedule_show_metadata_for_path(self, paths: list[str]) -> None:
+        self._pending_metadata_paths = [str(path or "") for path in list(paths or [])]
+        self._metadata_request_revision += 1
+        self._metadata_request_timer.start(0)
+
+    def _apply_pending_metadata_request(self) -> None:
+        revision = int(getattr(self, "_metadata_request_revision", 0))
+        paths = list(getattr(self, "_pending_metadata_paths", []) or [])
+        self._show_metadata_for_path(paths, request_revision=revision)
+
+    def _schedule_tag_list_refresh(self, mode: str = "rows", *, request_revision: int | None = None) -> None:
+        if not hasattr(self, "tag_list_panel") or not self.tag_list_panel.isVisible():
+            return
+        next_mode = "full" if str(mode or "rows") == "full" else "rows"
+        current_mode = str(getattr(self, "_pending_tag_list_refresh_mode", "rows") or "rows")
+        if current_mode != "full":
+            self._pending_tag_list_refresh_mode = next_mode
+        self._tag_list_refresh_revision = int(
+            request_revision
+            if request_revision is not None
+            else getattr(self, "_metadata_request_revision", 0)
+        )
+        self._tag_list_refresh_timer.start(0)
+
+    def _apply_pending_tag_list_refresh(self) -> None:
+        request_revision = int(getattr(self, "_tag_list_refresh_revision", 0))
+        if request_revision < int(getattr(self, "_metadata_request_revision", 0)):
+            return
+        mode = str(getattr(self, "_pending_tag_list_refresh_mode", "rows") or "rows")
+        self._pending_tag_list_refresh_mode = "rows"
+        if mode == "full":
+            self._refresh_tag_list_panel()
+        else:
+            self._refresh_tag_list_rows_state()
+
+    def _show_metadata_for_path(self, paths: list[str], request_revision: int | None = None) -> None:
+        active_revision = int(request_revision if request_revision is not None else getattr(self, "_metadata_request_revision", 0))
+        if active_revision < int(getattr(self, "_metadata_request_revision", 0)):
+            return
         # Ignore empty lists (e.g. from background clicks that deselect cards).
         raw_paths = [str(path or "").strip() for path in list(paths or []) if str(path or "").strip()]
         if not raw_paths:
             self._clear_metadata_panel()
+            self._metadata_applied_revision = active_revision
+            self._schedule_tag_list_refresh("rows", request_revision=active_revision)
             return
         file_paths = self._current_file_paths(raw_paths)
         self._current_paths = raw_paths
         if not file_paths:
             self._current_path = None
             self._clear_metadata_panel()
+            self._metadata_applied_revision = active_revision
+            self._schedule_tag_list_refresh("rows", request_revision=active_revision)
             return
 
         is_bulk = len(file_paths) > 1
@@ -16472,7 +16606,9 @@ class MainWindow(QMainWindow):
             self.bulk_meta_tags.setText("")
             self.bulk_meta_tags.blockSignals(False)
             self.bulk_status_lbl.setText("")
-            self._sync_tag_list_panel_visibility()
+            self._sync_tag_list_panel_visibility(refresh_contents=False)
+            self._metadata_applied_revision = active_revision
+            self._schedule_tag_list_refresh("rows", request_revision=active_revision)
             return
 
         self._set_active_right_workspace("details")
@@ -16984,7 +17120,9 @@ class MainWindow(QMainWindow):
         self.meta_detected_text_edit.blockSignals(False)
         self.meta_text_detected_toggle.blockSignals(False)
         self.meta_ai_generated_toggle.blockSignals(False)
-        self._sync_tag_list_panel_visibility()
+        self._metadata_applied_revision = active_revision
+        self._sync_tag_list_panel_visibility(refresh_contents=False)
+        self._schedule_tag_list_refresh("rows", request_revision=active_revision)
 
     def _clear_embedded_labels(self):
         self.meta_camera_lbl.setText("Camera: ")
