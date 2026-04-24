@@ -1,5 +1,6 @@
 import sqlite3
 import unittest
+import uuid
 from pathlib import Path
 
 from app.mediamanager.db.migrations import init_db
@@ -10,10 +11,15 @@ class TestSelectionState(unittest.TestCase):
     def setUp(self) -> None:
         tmp_dir = Path('.tmp-tests')
         tmp_dir.mkdir(exist_ok=True)
-        self.db_path = tmp_dir / 'selection-state.db'
-        if self.db_path.exists():
-            self.db_path.unlink()
+        self.db_path = tmp_dir / f'selection-state-{uuid.uuid4()}.db'
         init_db(str(self.db_path))
+
+    def tearDown(self) -> None:
+        try:
+            if self.db_path.exists():
+                self.db_path.unlink()
+        except Exception:
+            pass
 
     def test_replace_selection_normalizes_and_dedupes(self) -> None:
         with sqlite3.connect(self.db_path) as conn:

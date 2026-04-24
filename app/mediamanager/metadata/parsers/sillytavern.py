@@ -54,7 +54,8 @@ def parse_sillytavern(raw: RawMetadataEnvelope) -> ParsedMetadataResult | None:
     normalized = {
         "source_format": "sillytavern_card",
         "character_name": card.get("name", ""),
-        "description": _display_description(card),
+        "description": str(card.get("description") or "").strip(),
+        "display_description": _display_description(card),
         "character_cards": [card] if card else [],
         "unknown_fields": card,
     }

@@ -132,6 +132,24 @@ def _extract_card_description(text: Any) -> str:
     return cleaned or raw
 
 
+def _canonical_storage_description(canonical: Any) -> str:
+    if getattr(canonical, "character_cards", None):
+        for card in canonical.character_cards:
+            if not isinstance(card, dict):
+                continue
+            short_description = str(card.get("short_description") or "").strip()
+            if short_description:
+                return short_description
+            extracted = _extract_card_description(card.get("description"))
+            if extracted:
+                return extracted
+            for key in ("scenario", "personality"):
+                value = str(card.get(key) or "").strip()
+                if value:
+                    return value
+    return str(getattr(canonical, "description", "") or "").strip()
+
+
 def replace_media_ai_metadata(
     conn: sqlite3.Connection,
     media_id: int,
@@ -197,7 +215,7 @@ def replace_media_ai_metadata(
             float(canonical.tool_name_confidence),
             canonical.ai_prompt or None,
             canonical.ai_negative_prompt or None,
-            canonical.description or None,
+            _canonical_storage_description(canonical) or None,
             canonical.model_name or None,
             canonical.model_hash or None,
             canonical.checkpoint_name or None,
@@ -227,6 +245,8 @@ def replace_media_ai_metadata(
     conn.execute("DELETE FROM media_character_cards WHERE media_id = ?", (media_id,))
 
     for result in inspection.parsed:
+        if result.family == "generic_embedded" and canonical.metadata_families_detected:
+            continue
         for raw_blob in result.raw_blobs:
             path_descriptor = raw_blob.get("path") or (result.extracted_paths[0] if result.extracted_paths else result.family)
             raw_kind = "raw_text"

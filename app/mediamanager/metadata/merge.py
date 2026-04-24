@@ -16,7 +16,11 @@ def merge_results(detections: list[DetectionHit], parsed_results: list[ParsedMet
 
     for result in parsed_results:
         source_format = result.normalized.get("source_format")
-        if source_format and source_format not in canonical.source_formats:
+        if (
+            source_format
+            and source_format != "generic_embedded"
+            and source_format not in canonical.source_formats
+        ):
             canonical.source_formats.append(str(source_format))
         if result.family != "generic_embedded":
             for path in result.extracted_paths:
@@ -83,6 +87,9 @@ def merge_results(detections: list[DetectionHit], parsed_results: list[ParsedMet
                     canonical.character_cards.append(card)
             canonical.description = canonical.description or result.normalized.get("description", "")
         elif result.family == "generic_embedded":
+            source_format = result.normalized.get("source_format")
+            if source_format and not canonical.source_formats:
+                canonical.source_formats.append(str(source_format))
             canonical.description = canonical.description or result.normalized.get("description", "")
 
     return canonical

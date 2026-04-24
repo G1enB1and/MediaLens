@@ -1,5 +1,6 @@
 import sqlite3
 import unittest
+import uuid
 from pathlib import Path
 
 from app.mediamanager.db.migrations import init_db
@@ -10,9 +11,7 @@ class TestMetadataRepo(unittest.TestCase):
     def setUp(self) -> None:
         tmp_dir = Path('.tmp-tests')
         tmp_dir.mkdir(exist_ok=True)
-        self.db_path = tmp_dir / 'metadata.db'
-        if self.db_path.exists():
-            self.db_path.unlink()
+        self.db_path = tmp_dir / f'metadata-{uuid.uuid4()}.db'
         init_db(str(self.db_path))
 
         with sqlite3.connect(self.db_path) as conn:
@@ -25,6 +24,13 @@ class TestMetadataRepo(unittest.TestCase):
                 ('c:/media/cats/a.jpg', 'image'),
             )
             conn.commit()
+
+    def tearDown(self) -> None:
+        try:
+            if self.db_path.exists():
+                self.db_path.unlink()
+        except Exception:
+            pass
 
     def test_upsert_and_read_metadata(self) -> None:
         with sqlite3.connect(self.db_path) as conn:
