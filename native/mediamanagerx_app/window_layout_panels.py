@@ -521,7 +521,7 @@ class WindowLayoutPanelsMixin:
         self.details_header_lbl.setObjectName("detailsHeaderLabel")
         right_layout.addWidget(self.details_header_lbl)
 
-        self.meta_empty_state_lbl = QLabel("Select a file to show details")
+        self.meta_empty_state_lbl = QLabel("Select file(s) to view details.")
         self.meta_empty_state_lbl.setObjectName("metaEmptyStateLabel")
         self.meta_empty_state_lbl.setWordWrap(True)
         self.meta_empty_state_lbl.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)

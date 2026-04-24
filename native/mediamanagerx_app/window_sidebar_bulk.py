@@ -311,6 +311,12 @@ class WindowSidebarBulkMixin:
             self.btn_merge_hidden_meta,
             self.btn_save_to_exif,
             self.meta_status_lbl,
+            self.lbl_group_general,
+            self.lbl_group_camera,
+            self.lbl_group_ai,
+            self.meta_sep1,
+            self.meta_sep2,
+            self.meta_sep3,
         ]
         seen: set[int] = set()
         for group_widgets in getattr(self, "_meta_groups", {}).values():
@@ -325,6 +331,7 @@ class WindowSidebarBulkMixin:
     def _set_metadata_empty_state(self, visible: bool) -> None:
         if not hasattr(self, "meta_empty_state_lbl"):
             return
+        self.meta_empty_state_lbl.setText("Select file(s) to view details.")
         self.meta_empty_state_lbl.setVisible(visible)
         if hasattr(self, "meta_empty_select_all_btn"):
             self.meta_empty_select_all_btn.setVisible(visible)

@@ -3022,14 +3022,56 @@ class WindowPreviewMetadataMixin:
                 sep_index += 1
 
     def _clear_metadata_panel(self):
-        """Reset all labels and hide/show them based on current settings."""
+        """Reset all metadata fields and show the no-selection empty state."""
         self._set_active_right_workspace("details")
         self._current_path = None
         self._current_paths = []
         kind = getattr(self, "_current_metadata_kind", "image")
         self._setup_metadata_layout(kind)
         self._refresh_preview_for_path(None)
-        
+
+        signal_widgets = [
+            self.meta_filename_edit,
+            self.meta_desc,
+            self.meta_tags,
+            self.meta_notes,
+            self.meta_exif_date_taken_edit,
+            self.meta_metadata_date_edit,
+            self.meta_detected_text_edit,
+            self.meta_text_detected_toggle,
+            self.meta_ai_generated_toggle,
+            self.meta_embedded_tags_edit,
+            self.meta_embedded_comments_edit,
+            self.meta_embedded_metadata_edit,
+            self.meta_ai_status_edit,
+            self.meta_ai_source_edit,
+            self.meta_ai_families_edit,
+            self.meta_ai_detection_reasons_edit,
+            self.meta_ai_loras_edit,
+            self.meta_ai_model_edit,
+            self.meta_ai_checkpoint_edit,
+            self.meta_ai_sampler_edit,
+            self.meta_ai_scheduler_edit,
+            self.meta_ai_cfg_edit,
+            self.meta_ai_steps_edit,
+            self.meta_ai_seed_edit,
+            self.meta_ai_upscaler_edit,
+            self.meta_ai_denoise_edit,
+            self.meta_ai_prompt_edit,
+            self.meta_ai_negative_prompt_edit,
+            self.meta_ai_params_edit,
+            self.meta_ai_workflows_edit,
+            self.meta_ai_provenance_edit,
+            self.meta_ai_character_cards_edit,
+            self.meta_ai_raw_paths_edit,
+        ]
+        previous_signal_state: list[tuple[QObject, bool]] = []
+        for widget in signal_widgets:
+            try:
+                previous_signal_state.append((widget, widget.blockSignals(True)))
+            except Exception:
+                pass
+
         self.meta_filename_edit.setText("")
         self.meta_path_lbl.setText("Folder: ")
         self.meta_size_lbl.setText("File Size: ")
@@ -3043,126 +3085,33 @@ class WindowPreviewMetadataMixin:
         self.meta_fps_lbl.setText("FPS: ")
         self.meta_codec_lbl.setText("Codec: ")
         self.meta_audio_lbl.setText("Audio: ")
+        self.meta_desc.setPlainText("")
+        self.meta_tags.setPlainText("")
+        self.meta_notes.setPlainText("")
+        self.generate_description_progress_lbl.setText("")
+        self.generate_description_error_edit.setPlainText("")
+        self.generate_tags_progress_lbl.setText("")
+        self.generate_tags_error_edit.setPlainText("")
         self._clear_embedded_labels()
-        
-        # UI visibility logic
-        visible_groups = [group for group in self._metadata_group_order(kind) if self._is_metadata_group_enabled(kind, group, True)]
-        self.lbl_group_general.setVisible(False)
-        self.lbl_group_camera.setVisible(False)
-        self.lbl_group_ai.setVisible(False)
-        active_fields = {
-            field
-            for group in visible_groups
-            for field in self._metadata_group_fields(kind).get(group, [])
-        }
-        self.meta_res_lbl.setVisible("res" in active_fields and self._is_metadata_enabled_for_kind(kind, "res", True))
-        self.meta_size_lbl.setVisible("size" in active_fields and self._is_metadata_enabled_for_kind(kind, "size", True))
-        self.lbl_exif_date_taken_cap.setVisible("exifdatetaken" in active_fields and self._is_metadata_enabled_for_kind(kind, "exifdatetaken", False))
-        self.meta_exif_date_taken_edit.setVisible("exifdatetaken" in active_fields and self._is_metadata_enabled_for_kind(kind, "exifdatetaken", False))
-        self.lbl_metadata_date_cap.setVisible("metadatadate" in active_fields and self._is_metadata_enabled_for_kind(kind, "metadatadate", False))
-        self.meta_metadata_date_edit.setVisible("metadatadate" in active_fields and self._is_metadata_enabled_for_kind(kind, "metadatadate", False))
-        self.lbl_original_file_date_cap.setVisible("originalfiledate" in active_fields and self._is_metadata_enabled_for_kind(kind, "originalfiledate", False))
-        self.meta_original_file_date_lbl.setVisible("originalfiledate" in active_fields and self._is_metadata_enabled_for_kind(kind, "originalfiledate", False))
-        self.lbl_file_created_date_cap.setVisible("filecreateddate" in active_fields and self._is_metadata_enabled_for_kind(kind, "filecreateddate", False))
-        self.meta_file_created_date_lbl.setVisible("filecreateddate" in active_fields and self._is_metadata_enabled_for_kind(kind, "filecreateddate", False))
-        self.lbl_file_modified_date_cap.setVisible("filemodifieddate" in active_fields and self._is_metadata_enabled_for_kind(kind, "filemodifieddate", False))
-        self.meta_file_modified_date_lbl.setVisible("filemodifieddate" in active_fields and self._is_metadata_enabled_for_kind(kind, "filemodifieddate", False))
-        self.lbl_text_detected_cap.setVisible("textdetected" in active_fields and self._is_metadata_enabled_for_kind(kind, "textdetected", True))
-        self.meta_text_detected_row.setVisible("textdetected" in active_fields and self._is_metadata_enabled_for_kind(kind, "textdetected", True))
-        self.lbl_text_detected_note.setVisible("textdetected" in active_fields and self._is_metadata_enabled_for_kind(kind, "textdetected", True))
-        self.lbl_detected_text_cap.setVisible("textdetected" in active_fields and self._is_metadata_enabled_for_kind(kind, "textdetected", True))
-        self.meta_detected_text_edit.setVisible("textdetected" in active_fields and self._is_metadata_enabled_for_kind(kind, "textdetected", True))
-        self.btn_use_ocr.setVisible("textdetected" in active_fields and self._is_metadata_enabled_for_kind(kind, "textdetected", True))
-        self.meta_duration_lbl.setVisible("duration" in active_fields and self._is_metadata_enabled_for_kind(kind, "duration", True))
-        self.meta_fps_lbl.setVisible("fps" in active_fields and self._is_metadata_enabled_for_kind(kind, "fps", True))
-        self.meta_codec_lbl.setVisible("codec" in active_fields and self._is_metadata_enabled_for_kind(kind, "codec", True))
-        self.meta_audio_lbl.setVisible("audio" in active_fields and self._is_metadata_enabled_for_kind(kind, "audio", True))
-        self.meta_camera_lbl.setVisible("camera" in active_fields and self._is_metadata_enabled_for_kind(kind, "camera", False))
-        self.meta_location_lbl.setVisible("location" in active_fields and self._is_metadata_enabled_for_kind(kind, "location", False))
-        self.meta_iso_lbl.setVisible("iso" in active_fields and self._is_metadata_enabled_for_kind(kind, "iso", False))
-        self.meta_shutter_lbl.setVisible("shutter" in active_fields and self._is_metadata_enabled_for_kind(kind, "shutter", False))
-        self.meta_aperture_lbl.setVisible("aperture" in active_fields and self._is_metadata_enabled_for_kind(kind, "aperture", False))
-        self.meta_software_lbl.setVisible("software" in active_fields and self._is_metadata_enabled_for_kind(kind, "software", False))
-        self.meta_lens_lbl.setVisible("lens" in active_fields and self._is_metadata_enabled_for_kind(kind, "lens", False))
-        self.meta_dpi_lbl.setVisible("dpi" in active_fields and self._is_metadata_enabled_for_kind(kind, "dpi", False))
-        self.meta_embedded_tags_edit.setVisible("embeddedtags" in active_fields and self._is_metadata_enabled_for_kind(kind, "embeddedtags", True))
-        self.lbl_embedded_tags_cap.setVisible("embeddedtags" in active_fields and self._is_metadata_enabled_for_kind(kind, "embeddedtags", True))
-        self.meta_embedded_comments_edit.setVisible("embeddedcomments" in active_fields and self._is_metadata_enabled_for_kind(kind, "embeddedcomments", True))
-        self.lbl_embedded_comments_cap.setVisible("embeddedcomments" in active_fields and self._is_metadata_enabled_for_kind(kind, "embeddedcomments", True))
-        self.meta_embedded_metadata_edit.setVisible("embeddedmetadata" in active_fields and self._is_metadata_enabled_for_kind(kind, "embeddedmetadata", True))
-        self.lbl_embedded_metadata_cap.setVisible("embeddedmetadata" in active_fields and self._is_metadata_enabled_for_kind(kind, "embeddedmetadata", True))
-        self.meta_ai_status_edit.setVisible("aistatus" in active_fields and self._is_metadata_enabled_for_kind(kind, "aistatus", True))
-        self.lbl_ai_status_cap.setVisible("aistatus" in active_fields and self._is_metadata_enabled_for_kind(kind, "aistatus", True))
-        self.meta_ai_generated_row.setVisible("aigenerated" in active_fields and self._is_metadata_enabled_for_kind(kind, "aigenerated", True))
-        self.lbl_ai_generated_cap.setVisible("aigenerated" in active_fields and self._is_metadata_enabled_for_kind(kind, "aigenerated", True))
-        self.lbl_ai_generated_note.setVisible("aigenerated" in active_fields and self._is_metadata_enabled_for_kind(kind, "aigenerated", True))
-        self.meta_ai_source_edit.setVisible("aisource" in active_fields and self._is_metadata_enabled_for_kind(kind, "aisource", True))
-        self.lbl_ai_source_cap.setVisible("aisource" in active_fields and self._is_metadata_enabled_for_kind(kind, "aisource", True))
-        self.meta_ai_families_edit.setVisible("aifamilies" in active_fields and self._is_metadata_enabled_for_kind(kind, "aifamilies", True))
-        self.lbl_ai_families_cap.setVisible("aifamilies" in active_fields and self._is_metadata_enabled_for_kind(kind, "aifamilies", True))
-        self.meta_ai_detection_reasons_edit.setVisible("aidetectionreasons" in active_fields and self._is_metadata_enabled_for_kind(kind, "aidetectionreasons", False))
-        self.lbl_ai_detection_reasons_cap.setVisible("aidetectionreasons" in active_fields and self._is_metadata_enabled_for_kind(kind, "aidetectionreasons", False))
-        self.meta_ai_loras_edit.setVisible("ailoras" in active_fields and self._is_metadata_enabled_for_kind(kind, "ailoras", True))
-        self.lbl_ai_loras_cap.setVisible("ailoras" in active_fields and self._is_metadata_enabled_for_kind(kind, "ailoras", True))
-        self.meta_ai_model_edit.setVisible("aimodel" in active_fields and self._is_metadata_enabled_for_kind(kind, "aimodel", True))
-        self.lbl_ai_model_cap.setVisible("aimodel" in active_fields and self._is_metadata_enabled_for_kind(kind, "aimodel", True))
-        self.meta_ai_checkpoint_edit.setVisible("aicheckpoint" in active_fields and self._is_metadata_enabled_for_kind(kind, "aicheckpoint", False))
-        self.lbl_ai_checkpoint_cap.setVisible("aicheckpoint" in active_fields and self._is_metadata_enabled_for_kind(kind, "aicheckpoint", False))
-        self.meta_ai_sampler_edit.setVisible("aisampler" in active_fields and self._is_metadata_enabled_for_kind(kind, "aisampler", True))
-        self.lbl_ai_sampler_cap.setVisible("aisampler" in active_fields and self._is_metadata_enabled_for_kind(kind, "aisampler", True))
-        self.meta_ai_scheduler_edit.setVisible("aischeduler" in active_fields and self._is_metadata_enabled_for_kind(kind, "aischeduler", True))
-        self.lbl_ai_scheduler_cap.setVisible("aischeduler" in active_fields and self._is_metadata_enabled_for_kind(kind, "aischeduler", True))
-        self.meta_ai_cfg_edit.setVisible("aicfg" in active_fields and self._is_metadata_enabled_for_kind(kind, "aicfg", True))
-        self.lbl_ai_cfg_cap.setVisible("aicfg" in active_fields and self._is_metadata_enabled_for_kind(kind, "aicfg", True))
-        self.meta_ai_steps_edit.setVisible("aisteps" in active_fields and self._is_metadata_enabled_for_kind(kind, "aisteps", True))
-        self.lbl_ai_steps_cap.setVisible("aisteps" in active_fields and self._is_metadata_enabled_for_kind(kind, "aisteps", True))
-        self.meta_ai_seed_edit.setVisible("aiseed" in active_fields and self._is_metadata_enabled_for_kind(kind, "aiseed", True))
-        self.lbl_ai_seed_cap.setVisible("aiseed" in active_fields and self._is_metadata_enabled_for_kind(kind, "aiseed", True))
-        self.meta_ai_upscaler_edit.setVisible("aiupscaler" in active_fields and self._is_metadata_enabled_for_kind(kind, "aiupscaler", False))
-        self.lbl_ai_upscaler_cap.setVisible("aiupscaler" in active_fields and self._is_metadata_enabled_for_kind(kind, "aiupscaler", False))
-        self.meta_ai_denoise_edit.setVisible("aidenoise" in active_fields and self._is_metadata_enabled_for_kind(kind, "aidenoise", False))
-        self.lbl_ai_denoise_cap.setVisible("aidenoise" in active_fields and self._is_metadata_enabled_for_kind(kind, "aidenoise", False))
-        self.meta_ai_prompt_edit.setVisible("aiprompt" in active_fields and self._is_metadata_enabled_for_kind(kind, "aiprompt", True))
-        self.lbl_ai_prompt_cap.setVisible("aiprompt" in active_fields and self._is_metadata_enabled_for_kind(kind, "aiprompt", True))
-        self.meta_ai_negative_prompt_edit.setVisible("ainegprompt" in active_fields and self._is_metadata_enabled_for_kind(kind, "ainegprompt", True))
-        self.lbl_ai_negative_prompt_cap.setVisible("ainegprompt" in active_fields and self._is_metadata_enabled_for_kind(kind, "ainegprompt", True))
-        self.meta_ai_params_edit.setVisible("aiparams" in active_fields and self._is_metadata_enabled_for_kind(kind, "aiparams", True))
-        self.lbl_ai_params_cap.setVisible("aiparams" in active_fields and self._is_metadata_enabled_for_kind(kind, "aiparams", True))
-        self.meta_ai_workflows_edit.setVisible("aiworkflows" in active_fields and self._is_metadata_enabled_for_kind(kind, "aiworkflows", False))
-        self.lbl_ai_workflows_cap.setVisible("aiworkflows" in active_fields and self._is_metadata_enabled_for_kind(kind, "aiworkflows", False))
-        self.meta_ai_provenance_edit.setVisible("aiprovenance" in active_fields and self._is_metadata_enabled_for_kind(kind, "aiprovenance", False))
-        self.lbl_ai_provenance_cap.setVisible("aiprovenance" in active_fields and self._is_metadata_enabled_for_kind(kind, "aiprovenance", False))
-        self.meta_ai_character_cards_edit.setVisible("aicharcards" in active_fields and self._is_metadata_enabled_for_kind(kind, "aicharcards", False))
-        self.lbl_ai_character_cards_cap.setVisible("aicharcards" in active_fields and self._is_metadata_enabled_for_kind(kind, "aicharcards", False))
-        self.meta_ai_raw_paths_edit.setVisible("airawpaths" in active_fields and self._is_metadata_enabled_for_kind(kind, "airawpaths", False))
-        self.lbl_ai_raw_paths_cap.setVisible("airawpaths" in active_fields and self._is_metadata_enabled_for_kind(kind, "airawpaths", False))
-        self.meta_filename_edit.setVisible(True)
-        self.meta_path_lbl.setVisible(True)
-        
-        self.meta_sep1.setVisible(len(visible_groups) > 1)
-        self.meta_sep2.setVisible(len(visible_groups) > 2)
-        self.meta_sep3.setVisible(False)
-        
-        
-        description_visible = "description" in active_fields and self._is_metadata_enabled_for_kind(kind, "description", True)
-        self.meta_desc.setVisible(description_visible)
-        self.lbl_desc_cap.setVisible(description_visible)
-        self.generate_description_btn_row.setVisible(description_visible)
-        self.generate_description_progress_lbl.setVisible(
-            description_visible and bool(self.generate_description_progress_lbl.text().strip())
-        )
-        self.generate_description_error_edit.setVisible(
-            description_visible and bool(self.generate_description_error_edit.toPlainText().strip())
-        )
-        tags_visible = "tags" in active_fields and self._is_metadata_enabled_for_kind(kind, "tags", True)
-        self.meta_tags.setVisible(tags_visible)
-        self.lbl_tags_cap.setVisible(tags_visible)
-        self.generate_tags_btn_row.setVisible(tags_visible)
-        self.generate_tags_progress_lbl.setVisible(tags_visible and bool(self.generate_tags_progress_lbl.text().strip()))
-        self.generate_tags_error_edit.setVisible(tags_visible and bool(self.generate_tags_error_edit.toPlainText().strip()))
-        self.tag_list_open_btn_row.setVisible(tags_visible)
-        self.meta_notes.setVisible("notes" in active_fields and self._is_metadata_enabled_for_kind(kind, "notes", True))
-        self.lbl_notes_cap.setVisible("notes" in active_fields and self._is_metadata_enabled_for_kind(kind, "notes", True))
+
+        self._current_ai_meta = {}
+        self._current_user_confirmed_text_detected = None
+        self._current_auto_text_detected = None
+        self._ai_generated_override_dirty = False
+        self._text_detected_override_dirty = False
+        self._current_video_width = 0
+        self._current_video_height = 0
+        self._current_video_duration_ms = 0
+        self._update_override_note_labels(auto_text_detected=None, auto_ai_detected=None)
+
+        for widget, was_blocked in previous_signal_state:
+            try:
+                widget.blockSignals(was_blocked)
+            except Exception:
+                pass
+
+        self._set_metadata_empty_state(True)
+        self._sync_tag_list_panel_visibility(refresh_contents=False)
 
 
 __all__ = [name for name in globals() if not (name.startswith("__") and name.endswith("__"))]
