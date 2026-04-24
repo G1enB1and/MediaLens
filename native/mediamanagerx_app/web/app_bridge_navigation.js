@@ -216,7 +216,7 @@ function fetchMediaList(folders, limit, offset, sortBy, filterType, searchQuery)
     return new Promise((resolve) => {
       const requestId = `list-${Date.now()}-${++gGalleryRequestSeq}`;
       gPendingMediaListRequests.set(requestId, resolve);
-      gBridge.list_media_async(
+    gBridge.list_media_async(
         requestId,
         folders || [],
         Number(limit || 0),

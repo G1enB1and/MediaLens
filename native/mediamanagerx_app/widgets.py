@@ -863,7 +863,7 @@ class BulkSelectedFileRow(QWidget):
         self.tags_edit.setPlainText(str(tags_text or ""))
         self.tags_edit.setFixedHeight(self._content_height)
         self.tags_edit.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self.tags_edit.editingFinished.connect(lambda: self.tagsEdited.emit(self._path, self.tags_edit.toPlainText()))
+        self.tags_edit.editingFinished.connect(self._emit_tags_edited)
 
         self.tags_edit_host = QWidget()
         self.tags_edit_host.setObjectName("bulkSelectedFileTagsHost")
@@ -878,6 +878,12 @@ class BulkSelectedFileRow(QWidget):
 
         layout.addLayout(content_row, 1)
         self._queue_sync_editor_width()
+
+    def _emit_tags_edited(self) -> None:
+        try:
+            self.tagsEdited.emit(self._path, self.tags_edit.toPlainText())
+        except RuntimeError:
+            pass
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

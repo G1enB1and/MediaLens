@@ -300,6 +300,10 @@ function normalizedVideoLoopCutoffSeconds() {
   return Math.max(1, Math.round(parsed));
 }
 
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
 function shouldLoopVideoForDurationSeconds(durationSeconds) {
   const mode = gVideoLoopMode === 'all' || gVideoLoopMode === 'none' || gVideoLoopMode === 'short'
     ? gVideoLoopMode

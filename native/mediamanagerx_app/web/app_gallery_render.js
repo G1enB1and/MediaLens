@@ -1607,6 +1607,7 @@ function wireCtxMenu() {
 function renderMediaList(items, scrollToTop = true) {
   if (gIsRenderingGallery) return;
   gIsRenderingGallery = true;
+  items = asArray(items);
 
   const finalizeRender = () => {
     requestAnimationFrame(() => {

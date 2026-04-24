@@ -342,7 +342,7 @@ function refreshFromBridge(bridge, resetPage = false) {
   };
   bridge.get_selected_folders(function (folders) {
     if (refreshToken !== gRefreshGeneration) return;
-    gSelectedFolders = folders || [];
+    gSelectedFolders = asArray(folders);
     bridge.get_active_collection(function (activeCollection) {
       if (refreshToken !== gRefreshGeneration) return;
       gActiveCollection = activeCollection && activeCollection.id ? activeCollection : null;
@@ -423,7 +423,7 @@ function refreshFromBridge(bridge, resetPage = false) {
             });
           });
           if (bridge.start_scan_paths) {
-            bridge.start_scan_paths((items || []).filter(item => !item.is_folder).map(item => item.path).filter(Boolean));
+            bridge.start_scan_paths(asArray(items).filter(item => !item.is_folder).map(item => item.path).filter(Boolean));
           }
         });
         return;
@@ -440,7 +440,7 @@ function refreshFromBridge(bridge, resetPage = false) {
         // Hide the "Starting..." or "Loading..." overlay once we have the first batch of results.
         setGlobalLoading(false);
         if (bridge.start_scan_paths) {
-          bridge.start_scan_paths((items || []).filter(item => !item.is_folder).map(item => item.path).filter(Boolean));
+          bridge.start_scan_paths(asArray(items).filter(item => !item.is_folder).map(item => item.path).filter(Boolean));
         }
         fetchMediaCount(gSelectedFolders, gFilter, gSearchQuery || '').then(function (count) {
           if (refreshToken !== gRefreshGeneration) return;
@@ -877,13 +877,14 @@ function getMetadataGroupOrder(settings, mode) {
   let order = [];
   try { order = raw ? JSON.parse(raw) : []; } catch (e) { order = []; }
   if (!Array.isArray(order)) order = [];
-  cfg.groupOrder.forEach(key => { if (!order.includes(key)) order.push(key); });
-  return order.filter(key => cfg.groups[key]);
+  asArray(cfg.groupOrder).forEach(key => { if (!order.includes(key)) order.push(key); });
+  return order.filter(key => cfg.groups && cfg.groups[key]);
 }
 
 function getMetadataFieldOrder(settings, mode, groupKey) {
   const cfg = metadataConfigFor(mode);
-  const defaults = cfg.groups[groupKey].fields.map(([key]) => key);
+  const groupCfg = cfg.groups && cfg.groups[groupKey] ? cfg.groups[groupKey] : { fields: [] };
+  const defaults = asArray(groupCfg.fields).map(([key]) => key);
   const raw = settings && settings[metadataFieldOrderKey(mode, groupKey)];
   let order = [];
   try { order = raw ? JSON.parse(raw) : []; } catch (e) { order = []; }
@@ -921,7 +922,7 @@ function renderMetadataSettings(settings) {
     const body = document.createElement('div');
     body.className = 'metadata-group-body';
     body.dataset.groupKey = groupKey;
-    const fieldMap = Object.fromEntries(groupCfg.fields.map(field => [field[0], field]));
+    const fieldMap = Object.fromEntries(asArray(groupCfg.fields).map(field => [field[0], field]));
     getMetadataFieldOrder(settings, gActiveMetadataMode, groupKey).forEach(fieldKey => {
       const fieldCfg = fieldMap[fieldKey];
       if (!fieldCfg) return;
