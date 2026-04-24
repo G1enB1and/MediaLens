@@ -1,0 +1,1390 @@
+from __future__ import annotations
+
+from native.mediamanagerx_app.common import *
+from native.mediamanagerx_app.image_utils import *
+from native.mediamanagerx_app.runtime_paths import *
+from native.mediamanagerx_app.theme_dialogs import *
+from native.mediamanagerx_app.widgets import *
+from native.mediamanagerx_app.compare import *
+from native.mediamanagerx_app.metadata_payload import *
+from native.mediamanagerx_app.bridge import *
+from native.mediamanagerx_app.gallery import *
+
+class WindowSidebarBulkMixin:
+    def _apply_ui_flag(self, key: str, value: bool) -> None:
+        try:
+            schedule_gallery_relayout = key in {
+                "ui.show_top_panel",
+                "ui.show_left_panel",
+                "ui.show_right_panel",
+                "ui.show_bottom_panel",
+            }
+            if key == "gallery.view_mode":
+                self._sync_gallery_view_actions()
+            elif key == "ui.show_top_panel":
+                if hasattr(self, "act_toggle_top_panel"):
+                    self.act_toggle_top_panel.setChecked(bool(value))
+                self._sync_menu_bar_controls()
+            elif key == "ui.show_left_panel":
+                if not bool(value):
+                    self._save_main_panel_widths()
+                self.left_panel.setVisible(bool(value))
+                QTimer.singleShot(0, self._restore_main_splitter_sizes)
+                if bool(value):
+                    current_path = self.bridge._selected_folders[0] if self.bridge._selected_folders else ""
+                    if current_path:
+                        self._queue_tree_sync(current_path)
+                self._sync_menu_bar_controls()
+            elif key == "ui.show_right_panel":
+                if not bool(value):
+                    self._save_main_panel_widths()
+                self.right_panel_host.setVisible(bool(value))
+                QTimer.singleShot(0, self._restore_main_splitter_sizes)
+                if bool(value):
+                    if self._is_tag_list_panel_requested_visible():
+                        QTimer.singleShot(0, self._sync_tag_list_panel_visibility)
+                    else:
+                        QTimer.singleShot(0, self._restore_right_splitter_sizes)
+                if hasattr(self, "act_toggle_right_panel"):
+                    self.act_toggle_right_panel.setChecked(bool(value))
+                self._sync_menu_bar_controls()
+            elif key == "ui.show_bottom_panel":
+                if not bool(value):
+                    self._save_bottom_panel_height()
+                self.bottom_panel.setVisible(bool(value))
+                QTimer.singleShot(0, self._restore_center_splitter_sizes)
+                if hasattr(self, "act_toggle_bottom_panel"):
+                    self.act_toggle_bottom_panel.setChecked(bool(value))
+                self._sync_menu_bar_controls()
+            elif key == "ui.preview_above_details":
+                if hasattr(self, "preview_header_row"):
+                    visible = bool(value)
+                    
+                    # Stop video playback asynchronously before hiding the UI to prevent Qt FFmpeg deadlock
+                    overlay = getattr(self, "sidebar_video_overlay", None)
+                    if not visible and overlay is not None:
+                        overlay.close_overlay(notify_web=False)
+
+                    # "Preview" title row stays visible; toggle image/sep and corresponding buttons
+                    self.preview_header_row.setVisible(True)
+                    self.preview_image_lbl.setVisible(visible)
+                    self.preview_sep.setVisible(visible)
+                    if hasattr(self, "btn_play_preview"):
+                        self.btn_play_preview.setVisible(False)
+                    if hasattr(self, "btn_close_preview"):
+                        self.btn_close_preview.setVisible(visible)
+                    if hasattr(self, "btn_show_preview_inline"):
+                        self.btn_show_preview_inline.setVisible(not visible)
+
+                    # Reload the correct media (image or video) when toggled back on
+                    if visible:
+                        QTimer.singleShot(0, lambda: self._refresh_preview_for_path(getattr(self, "_current_path", None)))
+                if hasattr(self, "act_preview_above_details"):
+                    self.act_preview_above_details.setChecked(bool(value))
+                if hasattr(self, "right_layout"):
+                    self.right_layout.activate()
+                    self._sync_sidebar_panel_widths()
+                self._sync_tag_list_panel_visibility()
+                self._sync_sidebar_video_preview_controls()
+            elif key == "player.autoplay_preview_animated_gifs":
+                if getattr(self, "_preview_movie", None) is not None:
+                    if bool(value):
+                        self._update_preview_display()
+                    else:
+                        try:
+                            self._preview_movie.stop()
+                            self._preview_movie.jumpToFrame(0)
+                        except Exception:
+                            pass
+                        self._render_preview_movie_frame()
+                        self._sync_sidebar_video_preview_controls()
+            elif key == "ui.theme_mode":
+                self._update_native_styles(self._current_accent)
+                self._update_splitter_style(self._current_accent)
+                self._apply_compare_panel_theme(self._current_accent)
+                if hasattr(self, "compare_panel"):
+                    self.compare_panel.update()
+                    self.compare_panel.repaint()
+                if hasattr(self, "native_tooltip"):
+                    self.native_tooltip.update_style(QColor(self._current_accent), Theme.get_is_light())
+                self._update_app_style(QColor(self._current_accent))
+                QTimer.singleShot(0, lambda: self._apply_compare_panel_theme(self._current_accent))
+            elif key == "metadata.display.order" or key.startswith("metadata.layout."):
+                self._setup_metadata_layout()
+                if hasattr(self, "_current_paths") and self._current_paths:
+                    self._show_metadata_for_path(self._current_paths)
+                else:
+                    self._clear_metadata_panel()
+            elif key.startswith("metadata.display."):
+                # Refresh current metadata display to apply visibility
+                if hasattr(self, "_current_paths") and self._current_paths:
+                    self._show_metadata_for_path(self._current_paths)
+                else:
+                    self._clear_metadata_panel()
+            elif key == "gallery.show_hidden":
+                if hasattr(self, "proxy_model"):
+                    self.proxy_model.invalidateFilter()
+                if hasattr(self, "pinned_folders_list"):
+                    self._reload_pinned_folders()
+                if hasattr(self, "collections_list"):
+                    self._reload_collections()
+                if hasattr(self, "tag_list_select"):
+                    self._reload_tag_lists()
+            if key == "ui.show_left_panel" and hasattr(self, "act_toggle_left_panel"):
+                self.act_toggle_left_panel.setChecked(bool(value))
+            if schedule_gallery_relayout:
+                QTimer.singleShot(0, lambda: self._schedule_gallery_container_relayout(120))
+        except Exception:
+            pass
+
+    def _update_preview_visibility(self) -> None:
+        visible = self.bridge._preview_above_details_enabled()
+        self.preview_header_row.setVisible(True)
+        self.preview_image_lbl.setVisible(visible)
+        self.preview_sep.setVisible(visible)
+        if hasattr(self, "btn_play_preview"):
+            self.btn_play_preview.setVisible(False)
+        if hasattr(self, "btn_close_preview"):
+            self.btn_close_preview.setVisible(visible)
+        if hasattr(self, "btn_show_preview_inline"):
+            self.btn_show_preview_inline.setVisible(not visible)
+        if hasattr(self, "act_preview_above_details"):
+            self.act_preview_above_details.setChecked(visible)
+        self._sync_sidebar_video_preview_controls()
+
+    def _wrap_button_text(self, button: QPushButton, base_text: str, max_width: int) -> None:
+        metrics = QFontMetrics(button.font())
+        inner_width = max(40, max_width - 22)
+        words = base_text.split()
+        if not words:
+            if button.text() != base_text:
+                button.setText(base_text)
+            return
+
+        lines: list[str] = []
+        current = words[0]
+        for word in words[1:]:
+            candidate = f"{current} {word}"
+            if metrics.horizontalAdvance(candidate) <= inner_width:
+                current = candidate
+            else:
+                lines.append(current)
+                current = word
+        lines.append(current)
+        wrapped = "\n".join(lines)
+        if button.text() != wrapped:
+            button.setText(wrapped)
+
+    def _right_panel_content_width(self) -> int:
+        if not hasattr(self, "scroll_area"):
+            return 180
+        if self._is_bulk_editor_active() and hasattr(self, "bulk_scroll_area") and hasattr(self, "bulk_right_layout"):
+            if self._current_bulk_editor_mode() == "captions" and hasattr(self, "bulk_caption_scroll_area") and hasattr(self, "bulk_caption_right_layout"):
+                scroll_area = self.bulk_caption_scroll_area
+                layout = self.bulk_caption_right_layout
+            else:
+                scroll_area = self.bulk_scroll_area
+                layout = self.bulk_right_layout
+        else:
+            scroll_area = self.scroll_area
+            layout = self.right_layout if hasattr(self, "right_layout") else None
+        margins = layout.contentsMargins() if layout is not None else None
+        left = margins.left() if margins else 12
+        right = margins.right() if margins else 12
+        viewport_w = scroll_area.viewport().width()
+        return max(90, viewport_w - left - right)
+
+    def _queue_sidebar_panel_width_sync(self) -> None:
+        if bool(getattr(self, "_sidebar_width_sync_pending", False)):
+            return
+        self._sidebar_width_sync_pending = True
+        QTimer.singleShot(0, self._sync_sidebar_panel_widths)
+
+    def _sync_sidebar_panel_widths(self) -> None:
+        self._sidebar_width_sync_pending = False
+        if not hasattr(self, "scroll_area"):
+            return
+        available_w = self._right_panel_content_width()
+        self._update_sidebar_action_buttons(available_w)
+        self._update_sidebar_input_widths(available_w)
+        if hasattr(self, "right_layout"):
+            self.right_layout.activate()
+        if hasattr(self, "bulk_right_layout"):
+            self.bulk_right_layout.activate()
+        if hasattr(self, "bulk_caption_right_layout"):
+            self.bulk_caption_right_layout.activate()
+
+    def _update_sidebar_action_buttons(self, available_w: int | None = None) -> None:
+        if not hasattr(self, "scroll_area"):
+            return
+        if available_w is None:
+            available_w = self._right_panel_content_width()
+        buttons = [
+            getattr(self, "meta_empty_select_all_btn", None),
+            getattr(self, "btn_open_tag_list", None),
+            getattr(self, "btn_clear_bulk_tags", None),
+            getattr(self, "btn_save_meta", None),
+            getattr(self, "btn_use_ocr", None),
+            getattr(self, "btn_generate_tags", None),
+            getattr(self, "btn_generate_description", None),
+            getattr(self, "btn_import_exif", None),
+            getattr(self, "btn_merge_hidden_meta", None),
+            getattr(self, "btn_save_to_exif", None),
+            getattr(self, "bulk_btn_select_all_gallery", None),
+            getattr(self, "bulk_btn_open_tag_list", None),
+            getattr(self, "bulk_btn_clear_tags", None),
+            getattr(self, "bulk_btn_run_local_ai", None),
+            getattr(self, "bulk_btn_save_meta", None),
+            getattr(self, "bulk_btn_save_to_exif", None),
+        ]
+        for button in buttons:
+            if button is None:
+                continue
+            base_text = str(button.property("baseText") or button.text()).replace("\n", " ").strip()
+            button.setProperty("baseText", base_text)
+            button.setMinimumWidth(0)
+            button.setMaximumWidth(16777215)
+            button.setFixedWidth(available_w)
+            self._wrap_button_text(button, base_text, available_w)
+            button.updateGeometry()
+
+    def _update_sidebar_input_widths(self, available_w: int | None = None) -> None:
+        if not hasattr(self, "scroll_container"):
+            return
+        if available_w is None:
+            available_w = self._right_panel_content_width()
+        if hasattr(self, "preview_image_lbl"):
+            self.preview_image_lbl.setFixedWidth(available_w)
+        for wrapper in [
+            getattr(self, "generate_description_btn_row", None),
+            getattr(self, "generate_tags_btn_row", None),
+            getattr(self, "tag_list_open_btn_row", None),
+        ]:
+            if wrapper is None:
+                continue
+            wrapper.setMinimumWidth(0)
+            wrapper.setMaximumWidth(16777215)
+            wrapper.setFixedWidth(available_w)
+            wrapper.setSizePolicy(QSizePolicy.Policy.Ignored, wrapper.sizePolicy().verticalPolicy())
+            wrapper.updateGeometry()
+        for label in [
+            getattr(self, "generate_description_progress_lbl", None),
+            getattr(self, "generate_description_error_edit", None),
+            getattr(self, "generate_tags_progress_lbl", None),
+            getattr(self, "generate_tags_error_edit", None),
+            getattr(self, "meta_status_lbl", None),
+            getattr(self, "bulk_status_lbl", None),
+            getattr(self, "bulk_caption_status_lbl", None),
+        ]:
+            if label is None:
+                continue
+            label.setMinimumWidth(0)
+            label.setMaximumWidth(16777215)
+            label.setFixedWidth(available_w)
+            label.setSizePolicy(QSizePolicy.Policy.Ignored, label.sizePolicy().verticalPolicy())
+            label.updateGeometry()
+        if self._is_bulk_editor_active():
+            active_container = self.bulk_caption_scroll_container if self._current_bulk_editor_mode() == "captions" and hasattr(self, "bulk_caption_scroll_container") else self.bulk_scroll_container
+        else:
+            active_container = self.scroll_container
+        for widget in active_container.findChildren(QWidget):
+            if not isinstance(widget, (QLineEdit, QTextEdit, QPlainTextEdit)):
+                continue
+            widget.setMinimumWidth(0)
+            widget.setMaximumWidth(16777215)
+            widget.setFixedWidth(available_w)
+            widget.setSizePolicy(QSizePolicy.Policy.Ignored, widget.sizePolicy().verticalPolicy())
+            widget.updateGeometry()
+
+    def _metadata_content_widgets(self) -> list[QWidget]:
+        widgets: list[QWidget] = [
+            self.preview_header_row,
+            self.preview_image_lbl,
+            self.preview_sep,
+            self.details_header_lbl,
+            self.lbl_fn_cap,
+            self.meta_filename_edit,
+            self.meta_path_lbl,
+            self.btn_clear_bulk_tags,
+            self.btn_save_meta,
+            self.btn_import_exif,
+            self.btn_merge_hidden_meta,
+            self.btn_save_to_exif,
+            self.meta_status_lbl,
+        ]
+        seen: set[int] = set()
+        for group_widgets in getattr(self, "_meta_groups", {}).values():
+            for widget in group_widgets:
+                ident = id(widget)
+                if ident in seen:
+                    continue
+                seen.add(ident)
+                widgets.append(widget)
+        return widgets
+
+    def _set_metadata_empty_state(self, visible: bool) -> None:
+        if not hasattr(self, "meta_empty_state_lbl"):
+            return
+        self.meta_empty_state_lbl.setVisible(visible)
+        if hasattr(self, "meta_empty_select_all_btn"):
+            self.meta_empty_select_all_btn.setVisible(visible)
+        if visible:
+            self._clear_preview_media()
+            self.preview_image_lbl.setText("")
+            for widget in self._metadata_content_widgets():
+                widget.setVisible(False)
+
+    def _current_bulk_editor_mode(self) -> str:
+        mode = str(getattr(self, "_bulk_editor_mode", "tags") or "tags").strip().lower()
+        return "captions" if mode == "captions" else "tags"
+
+    def _set_active_bulk_editor_mode(self, mode: str) -> None:
+        next_mode = "captions" if str(mode or "").strip().lower() == "captions" else "tags"
+        self._bulk_editor_mode = next_mode
+        if hasattr(self, "bulk_mode_tags_btn"):
+            self.bulk_mode_tags_btn.blockSignals(True)
+            self.bulk_mode_tags_btn.setChecked(next_mode == "tags")
+            self.bulk_mode_tags_btn.blockSignals(False)
+        if hasattr(self, "bulk_mode_captions_btn"):
+            self.bulk_mode_captions_btn.blockSignals(True)
+            self.bulk_mode_captions_btn.setChecked(next_mode == "captions")
+            self.bulk_mode_captions_btn.blockSignals(False)
+        if hasattr(self, "bulk_pages_stack"):
+            target = getattr(self, "bulk_captions_page", None) if next_mode == "captions" else getattr(self, "bulk_tags_page", None)
+            if target is not None:
+                self.bulk_pages_stack.setCurrentWidget(target)
+        if self._is_bulk_editor_active():
+            selection_count = len(self._current_file_paths())
+            if next_mode == "captions":
+                self._configure_bulk_caption_editor(selection_count)
+            else:
+                self._configure_bulk_tag_editor(selection_count)
+
+    def _configure_bulk_tag_editor(self, selection_count: int) -> None:
+        self._set_active_right_workspace("bulk")
+        self._set_active_bulk_editor_mode("tags") if self._current_bulk_editor_mode() != "tags" else None
+        self.bulk_selection_lbl.setText(f"<span style=\"font-weight:700;\">{selection_count}</span> files selected")
+        self.bulk_meta_tags.setPlaceholderText("tag1, tag2, tag3")
+        self.bulk_btn_select_all_gallery.setProperty("baseText", "Select All Files in Gallery")
+        self.bulk_btn_run_local_ai.setProperty("baseText", f"Generate Tags for All ({selection_count} Files)")
+        self.bulk_btn_save_meta.setProperty("baseText", f"Save Tags to DB for {selection_count} Items")
+        self.bulk_btn_clear_tags.setProperty("baseText", f"Clear Tags from DB for {selection_count} Items")
+        self.bulk_btn_save_to_exif.setProperty("baseText", f"Embed Tags in {selection_count} Files")
+        self.bulk_btn_save_to_exif.setToolTip("Write only the entered tags into each selected file's embedded metadata")
+        self._refresh_bulk_tag_editor_summary()
+        self._sync_sidebar_panel_widths()
+
+    def _configure_bulk_caption_editor(self, selection_count: int) -> None:
+        self._set_active_right_workspace("bulk")
+        self._set_active_bulk_editor_mode("captions") if self._current_bulk_editor_mode() != "captions" else None
+        self.bulk_caption_selection_lbl.setText(f"<span style=\"font-weight:700;\">{selection_count}</span> files selected")
+        self.bulk_caption_btn_select_all_gallery.setProperty("baseText", "Select All Files in Gallery")
+        self.bulk_caption_btn_run_local_ai.setProperty("baseText", f"Generate Descriptions for All ({selection_count} Files)")
+        self.bulk_caption_btn_save_meta.setProperty("baseText", f"Save Descriptions to DB for {selection_count} Items")
+        self.bulk_caption_btn_clear.setProperty("baseText", f"Clear Descriptions from DB for {selection_count} Items")
+        self._refresh_bulk_caption_editor_summary()
+        self._sync_sidebar_panel_widths()
+
+    def _select_all_visible_gallery_items(self, _checked: bool = False) -> None:
+        try:
+            self.web.page().runJavaScript(
+                "try{ if(window.__mmx_selectAllVisible){ window.__mmx_selectAllVisible(); } else if(window.selectAll){ window.selectAll(); } }catch(e){}"
+            )
+        except Exception:
+            pass
+
+    def _jump_review_group(self, direction: int) -> None:
+        step = -1 if int(direction or 0) < 0 else 1
+        try:
+            self.web.page().runJavaScript(
+                f"try{{ window.__mmx_jumpReviewGroup && window.__mmx_jumpReviewGroup({step}); }}catch(e){{}}"
+            )
+        except Exception:
+            pass
+
+    def _open_bulk_tag_editor_from_menu(self, _checked: bool = False) -> None:
+        try:
+            if not bool(self.bridge.settings.value("ui/show_right_panel", True, type=bool)):
+                self.bridge.settings.setValue("ui/show_right_panel", True)
+                self.bridge.uiFlagChanged.emit("ui.show_right_panel", True)
+        except Exception:
+            pass
+        self._set_tag_list_panel_requested_visible(True)
+        self._set_active_bulk_editor_mode("tags")
+        scope_paths = self._current_gallery_scope_paths()
+        if len(scope_paths) > 1:
+            self._show_metadata_for_path(scope_paths)
+        QTimer.singleShot(0, self._select_all_visible_gallery_items)
+
+    def _open_bulk_caption_editor_from_menu(self, _checked: bool = False) -> None:
+        try:
+            if not bool(self.bridge.settings.value("ui/show_right_panel", True, type=bool)):
+                self.bridge.settings.setValue("ui/show_right_panel", True)
+                self.bridge.uiFlagChanged.emit("ui.show_right_panel", True)
+        except Exception:
+            pass
+        self._set_active_bulk_editor_mode("captions")
+        scope_paths = self._current_gallery_scope_paths()
+        if len(scope_paths) > 1:
+            self._show_metadata_for_path(scope_paths)
+        QTimer.singleShot(0, self._select_all_visible_gallery_items)
+
+    def _save_bulk_descriptions_to_db(self) -> None:
+        paths = self._current_file_paths()
+        if not paths:
+            return
+        updated = 0
+        for i in range(self.bulk_caption_selected_files_list.count()):
+            item = self.bulk_caption_selected_files_list.item(i)
+            row = self.bulk_caption_selected_files_list.itemWidget(item)
+            if not isinstance(row, BulkSelectedFileRow):
+                continue
+            clean_path = str(getattr(row, "_path", "") or "").strip()
+            if not clean_path:
+                continue
+            try:
+                existing = dict(self.bridge.get_media_metadata(clean_path) or {})
+                self.bridge.update_media_metadata(
+                    clean_path,
+                    str(existing.get("title") or ""),
+                    row.tags_edit.toPlainText(),
+                    str(existing.get("notes") or ""),
+                    str(existing.get("embedded_tags") or ""),
+                    str(existing.get("embedded_comments") or ""),
+                    str(existing.get("ai_prompt") or ""),
+                    str(existing.get("ai_negative_prompt") or ""),
+                    str(existing.get("ai_params") or ""),
+                )
+                updated += 1
+            except Exception:
+                pass
+        self._refresh_bulk_caption_editor_summary()
+        self.bulk_caption_status_lbl.setText(f"âœ“ Descriptions saved for {updated} items")
+        QTimer.singleShot(3000, lambda: self.bulk_caption_status_lbl.setText(""))
+
+    def _clear_bulk_descriptions(self) -> None:
+        paths = self._current_file_paths()
+        if not paths:
+            return
+        for path in paths:
+            try:
+                existing = dict(self.bridge.get_media_metadata(path) or {})
+                self.bridge.update_media_metadata(
+                    path,
+                    str(existing.get("title") or ""),
+                    "",
+                    str(existing.get("notes") or ""),
+                    str(existing.get("embedded_tags") or ""),
+                    str(existing.get("embedded_comments") or ""),
+                    str(existing.get("ai_prompt") or ""),
+                    str(existing.get("ai_negative_prompt") or ""),
+                    str(existing.get("ai_params") or ""),
+                )
+            except Exception:
+                pass
+        self._refresh_bulk_caption_editor_summary()
+        self.bulk_caption_status_lbl.setText(f"âœ“ Descriptions cleared for {len(paths)} items")
+        QTimer.singleShot(3000, lambda: self.bulk_caption_status_lbl.setText(""))
+
+    @staticmethod
+    def _normalize_tag_list(text: str) -> list[str]:
+        parts = re.split(r"[;,]", str(text or ""))
+        return [part.strip() for part in parts if part.strip()]
+
+    @staticmethod
+    def _merge_tag_lists(existing: list[str] | None, new_tags: list[str] | None) -> list[str]:
+        merged: list[str] = []
+        seen: set[str] = set()
+        for tag in list(existing or []) + list(new_tags or []):
+            normalized = str(tag or "").strip()
+            if not normalized:
+                continue
+            key = normalized.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(normalized)
+        return merged
+
+    def _active_tag_list_id(self) -> int:
+        if not hasattr(self, "tag_list_select"):
+            return 0
+        return int(self.tag_list_select.currentData() or 0)
+
+    def _is_bulk_editor_active(self) -> bool:
+        return bool(hasattr(self, "right_workspace_stack") and self.right_workspace_stack.currentWidget() is getattr(self, "bulk_editor_panel", None))
+
+    def _set_active_right_workspace(self, workspace: str) -> None:
+        if not hasattr(self, "right_workspace_stack"):
+            return
+        if workspace == "bulk" and hasattr(self, "bulk_editor_panel"):
+            self.right_workspace_stack.setCurrentWidget(self.bulk_editor_panel)
+        elif hasattr(self, "details_workspace"):
+            self.right_workspace_stack.setCurrentWidget(self.details_workspace)
+        self._sync_sidebar_panel_widths()
+        if hasattr(self, "tag_list_panel") and self.tag_list_panel.isVisible():
+            self._refresh_tag_list_rows_state()
+
+    def _active_tag_editor(self):
+        if self._is_bulk_editor_active() and hasattr(self, "bulk_meta_tags"):
+            return self.bulk_meta_tags
+        return self.meta_tags
+
+    def _tag_editor_text(self, editor=None) -> str:
+        editor = editor or self._active_tag_editor()
+        if isinstance(editor, QTextEdit):
+            return editor.toPlainText()
+        return editor.text()
+
+    def _set_tag_editor_text(self, text: str, editor=None) -> None:
+        editor = editor or self._active_tag_editor()
+        if isinstance(editor, QTextEdit):
+            editor.setPlainText(str(text or ""))
+        else:
+            editor.setText(str(text or ""))
+
+    def _active_status_label(self):
+        if self._is_bulk_editor_active():
+            if self._current_bulk_editor_mode() == "captions" and hasattr(self, "bulk_caption_status_lbl"):
+                return self.bulk_caption_status_lbl
+            if hasattr(self, "bulk_status_lbl"):
+                return self.bulk_status_lbl
+        return self.meta_status_lbl
+
+    def _scroll_bottom_status_into_view(self) -> None:
+        if not hasattr(self, "scroll_area") or not hasattr(self, "meta_status_lbl"):
+            return
+        if self._is_bulk_editor_active():
+            return
+        try:
+            self.scroll_area.ensureWidgetVisible(self.meta_status_lbl, 0, 16)
+        except Exception:
+            try:
+                bar = self.scroll_area.verticalScrollBar()
+                bar.setValue(bar.maximum())
+            except Exception:
+                pass
+
+    def _current_file_paths(self, paths: list[str] | None = None) -> list[str]:
+        raw_paths = list(paths if paths is not None else getattr(self, "_current_paths", []) or [])
+        file_paths: list[str] = []
+        seen: set[str] = set()
+        for raw_path in raw_paths:
+            path = str(raw_path or "").strip()
+            if not path:
+                continue
+            key = path.casefold()
+            if key in seen:
+                continue
+            try:
+                if not Path(path).is_file():
+                    continue
+            except Exception:
+                continue
+            seen.add(key)
+            file_paths.append(path)
+        return file_paths
+
+    def _selected_paths_tag_summary(self) -> tuple[list[str], list[str]]:
+        from app.mediamanager.utils.pathing import normalize_windows_path
+
+        paths = self._current_file_paths()
+        if not paths:
+            return [], []
+        unique_paths: list[str] = []
+        seen_paths: set[str] = set()
+        for path in paths:
+            normalized_path = normalize_windows_path(path)
+            key = normalized_path.casefold()
+            if key in seen_paths:
+                continue
+            seen_paths.add(key)
+            unique_paths.append(normalized_path)
+        placeholders = ",".join("?" for _ in unique_paths)
+        ordered_names: dict[str, str] = {}
+        counts: Counter[str] = Counter()
+        try:
+            rows = self.bridge.conn.execute(
+                f"""
+                SELECT t.name, COUNT(DISTINCT mi.id) AS usage_count
+                FROM media_items mi
+                JOIN media_tags mt ON mt.media_id = mi.id
+                JOIN tags t ON t.id = mt.tag_id
+                WHERE mi.path IN ({placeholders})
+                GROUP BY t.id, t.name
+                ORDER BY t.name COLLATE NOCASE
+                """,
+                unique_paths,
+            ).fetchall()
+        except Exception:
+            rows = []
+        for row in rows:
+            tag = str((row[0] if len(row) > 0 else "") or "").strip()
+            if not tag:
+                continue
+            key = tag.casefold()
+            ordered_names.setdefault(key, tag)
+            counts[key] = int(row[1] or 0)
+        total = max(1, len(unique_paths))
+        common = [ordered_names[key] for key, count in counts.items() if count == total]
+        uncommon = [ordered_names[key] for key, count in counts.items() if 0 < count < total]
+        return sorted(common, key=str.casefold), sorted(uncommon, key=str.casefold)
+
+    def _current_gallery_scope_paths(self) -> list[str]:
+        try:
+            entries = self.bridge._get_gallery_entries(
+                list(getattr(self.bridge, "_selected_folders", []) or []),
+                "none",
+                getattr(self.bridge, "_current_gallery_filter", "all"),
+                self._effective_gallery_scope_search(include_tag_scope=False),
+            )
+        except Exception:
+            entries = []
+        paths: list[str] = []
+        seen: set[str] = set()
+        for entry in entries or []:
+            if entry.get("is_folder"):
+                continue
+            path = str(entry.get("path") or "").strip()
+            if not path:
+                continue
+            key = path.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            paths.append(path)
+        return paths
+
+    def _bulk_tag_selection_states(self) -> tuple[set[str], set[str]]:
+        common, uncommon = self._selected_paths_tag_summary()
+        return {tag.casefold() for tag in common}, {tag.casefold() for tag in uncommon}
+
+    def _bulk_selected_file_thumbnail(self, path: str, content_height: int | None = None) -> QPixmap | None:
+        clean = str(path or "").strip()
+        if not clean:
+            return None
+        try:
+            p = Path(clean)
+            try:
+                preview_path = self.bridge._local_ai_source_path(p)
+            except Exception:
+                preview_path = p
+            image = _read_image_with_svg_support(preview_path)
+            if image is None or image.isNull():
+                return None
+            target_size = max(72, int(content_height or BulkSelectedFileRow._TAG_CONTENT_HEIGHT))
+            return QPixmap.fromImage(image).scaled(
+                target_size,
+                target_size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        except Exception:
+            return None
+
+    def _toggle_bulk_tag_section(self, toggle: QToolButton, widget: QWidget, checked: bool) -> None:
+        if toggle is not None:
+            label = toggle.text()
+            if " " in label:
+                _, suffix = label.split(" ", 1)
+            else:
+                suffix = label
+            toggle.setText(("â–¾ " if checked else "â–¸ ") + suffix)
+        if widget is not None:
+            widget.setVisible(bool(checked))
+
+    def _save_bulk_selected_file_tags(self, path: str, text: str) -> None:
+        clean_path = str(path or "").strip()
+        if not clean_path:
+            return
+        try:
+            self.bridge.set_media_tags(clean_path, self._normalize_tag_list(text))
+        except Exception:
+            pass
+        self._refresh_bulk_tag_editor_summary()
+        if self._is_bulk_editor_active():
+            self.bulk_status_lbl.setText(f"âœ“ Saved tags for {Path(clean_path).name}")
+            QTimer.singleShot(2500, lambda: self.bulk_status_lbl.setText(""))
+
+    def _save_bulk_selected_file_description(self, path: str, text: str) -> None:
+        clean_path = str(path or "").strip()
+        if not clean_path:
+            return
+        try:
+            existing = dict(self.bridge.get_media_metadata(clean_path) or {})
+            self.bridge.update_media_metadata(
+                clean_path,
+                str(existing.get("title") or ""),
+                str(text or ""),
+                str(existing.get("notes") or ""),
+                str(existing.get("embedded_tags") or ""),
+                str(existing.get("embedded_comments") or ""),
+                str(existing.get("ai_prompt") or ""),
+                str(existing.get("ai_negative_prompt") or ""),
+                str(existing.get("ai_params") or ""),
+            )
+        except Exception:
+            pass
+        self._refresh_bulk_caption_editor_summary()
+        if self._is_bulk_editor_active():
+            self.bulk_caption_status_lbl.setText(f"âœ“ Saved description for {Path(clean_path).name}")
+            QTimer.singleShot(2500, lambda: self.bulk_caption_status_lbl.setText(""))
+
+    @staticmethod
+    def _bulk_selected_file_tags_text(tags: list[str]) -> str:
+        clean = [str(tag or "").strip() for tag in list(tags or []) if str(tag or "").strip()]
+        return ", ".join(clean)
+
+    def _refresh_bulk_selected_files_list(
+        self,
+        list_widget: QListWidget,
+        *,
+        content_height: int,
+        value_getter,
+        edit_handler,
+        placeholder_text: str,
+    ) -> None:
+        if list_widget is None:
+            return
+        from app.mediamanager.db.media_repo import get_media_by_path
+        from app.mediamanager.db.tags_repo import list_media_tags
+
+        list_widget.clear()
+        paths = self._current_file_paths()
+        for path in paths:
+            try:
+                media = get_media_by_path(self.bridge.conn, path)
+                tags = list_media_tags(self.bridge.conn, int(media.get("id") or 0)) if media else []
+                metadata = dict(self.bridge.get_media_metadata(path) or {})
+            except Exception:
+                tags = []
+                metadata = {}
+            item = QListWidgetItem()
+            row = BulkSelectedFileRow(
+                path,
+                self._bulk_selected_file_thumbnail(path, content_height),
+                Path(path).name,
+                str(value_getter(tags, metadata) or ""),
+                content_height=content_height,
+                placeholder_text=placeholder_text,
+            )
+            item.setSizeHint(QSize(0, row.item_height()))
+            row.tagsEdited.connect(edit_handler)
+            list_widget.addItem(item)
+            list_widget.setItemWidget(item, row)
+        list_widget.doItemsLayout()
+
+    def _refresh_bulk_tag_selected_files_list(self) -> None:
+        self._refresh_bulk_selected_files_list(
+            getattr(self, "bulk_selected_files_list", None),
+            content_height=BulkSelectedFileRow._TAG_CONTENT_HEIGHT,
+            value_getter=lambda tags, metadata: self._bulk_selected_file_tags_text(tags),
+            edit_handler=self._save_bulk_selected_file_tags,
+            placeholder_text="Tags for this file",
+        )
+        self._queue_bulk_selected_files_layout_sync()
+
+    def _refresh_bulk_caption_selected_files_list(self) -> None:
+        self._refresh_bulk_selected_files_list(
+            getattr(self, "bulk_caption_selected_files_list", None),
+            content_height=BulkSelectedFileRow._CAPTION_CONTENT_HEIGHT,
+            value_getter=lambda tags, metadata: str(metadata.get("description") or ""),
+            edit_handler=self._save_bulk_selected_file_description,
+            placeholder_text="Description for this file",
+        )
+        self._queue_bulk_caption_selected_files_layout_sync()
+
+    def _queue_bulk_selected_files_layout_sync(self) -> None:
+        if not hasattr(self, "bulk_selected_files_list"):
+            return
+        QTimer.singleShot(0, self._sync_bulk_selected_files_layout)
+
+    def _sync_bulk_selected_files_layout(self) -> None:
+        if not hasattr(self, "bulk_selected_files_list"):
+            return
+        list_widget = self.bulk_selected_files_list
+        viewport = list_widget.viewport()
+        if viewport is None:
+            return
+        viewport_width = max(0, viewport.width())
+        if viewport_width <= 0 or list_widget.count() <= 0:
+            return
+        first_row = list_widget.itemWidget(list_widget.item(0))
+        if not isinstance(first_row, BulkSelectedFileRow):
+            return
+        root_margins = first_row._root_layout.contentsMargins()
+        row_margins = first_row._content_row.contentsMargins()
+        thumb_width = first_row.thumb_lbl.width()
+        spacing = first_row._content_row.spacing()
+        host_width = max(
+            BulkSelectedFileRow._MIN_EDITOR_WIDTH,
+            viewport_width
+            - root_margins.left()
+            - root_margins.right()
+            - row_margins.left()
+            - row_margins.right()
+            - thumb_width
+            - spacing
+            - BulkSelectedFileRow._RIGHT_GUTTER,
+        )
+        list_widget.doItemsLayout()
+        for i in range(list_widget.count()):
+            row = list_widget.itemWidget(list_widget.item(i))
+            if isinstance(row, BulkSelectedFileRow):
+                row.set_shared_editor_widths(host_width)
+                row.updateGeometry()
+                row.update()
+        viewport.update()
+
+    def _queue_bulk_caption_selected_files_layout_sync(self) -> None:
+        if not hasattr(self, "bulk_caption_selected_files_list"):
+            return
+        QTimer.singleShot(0, self._sync_bulk_caption_selected_files_layout)
+
+    def _sync_bulk_caption_selected_files_layout(self) -> None:
+        if not hasattr(self, "bulk_caption_selected_files_list"):
+            return
+        list_widget = self.bulk_caption_selected_files_list
+        viewport = list_widget.viewport()
+        if viewport is None:
+            return
+        viewport_width = max(0, viewport.width())
+        if viewport_width <= 0 or list_widget.count() <= 0:
+            return
+        first_row = list_widget.itemWidget(list_widget.item(0))
+        if not isinstance(first_row, BulkSelectedFileRow):
+            return
+        root_margins = first_row._root_layout.contentsMargins()
+        row_margins = first_row._content_row.contentsMargins()
+        thumb_width = first_row.thumb_lbl.width()
+        spacing = first_row._content_row.spacing()
+        host_width = max(
+            BulkSelectedFileRow._MIN_EDITOR_WIDTH,
+            viewport_width
+            - root_margins.left()
+            - root_margins.right()
+            - row_margins.left()
+            - row_margins.right()
+            - thumb_width
+            - spacing
+            - BulkSelectedFileRow._RIGHT_GUTTER,
+        )
+        list_widget.doItemsLayout()
+        for i in range(list_widget.count()):
+            row = list_widget.itemWidget(list_widget.item(i))
+            if isinstance(row, BulkSelectedFileRow):
+                row.set_shared_editor_widths(host_width)
+                row.updateGeometry()
+                row.update()
+        viewport.update()
+
+    def _refresh_bulk_tag_editor_summary(self) -> None:
+        if not hasattr(self, "bulk_common_tags_text"):
+            return
+        common, uncommon = self._selected_paths_tag_summary()
+        self.bulk_common_tags_text.setPlainText(", ".join(common))
+        self.bulk_uncommon_tags_text.setPlainText(", ".join(uncommon))
+        self._refresh_bulk_tag_selected_files_list()
+
+    def _refresh_bulk_caption_editor_summary(self) -> None:
+        if not hasattr(self, "bulk_caption_selected_files_list"):
+            return
+        self._refresh_bulk_caption_selected_files_list()
+
+    def _configure_tag_list_combo(self, combo: QComboBox) -> None:
+        is_tag_list_selector = combo.objectName() == "tagListSelect"
+        view = TagListComboPopupView(self.bridge, combo, combo) if is_tag_list_selector else QListView(combo)
+        view.setObjectName(f"{combo.objectName()}Popup")
+        view.setFrameShape(QFrame.Shape.NoFrame)
+        view.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        view.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        view.setUniformItemSizes(False)
+        view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        view.setMouseTracking(True)
+        if is_tag_list_selector and isinstance(view, TagListComboPopupView):
+            view.deleteRequested.connect(self._delete_tag_list)
+            view.renameRequested.connect(self._rename_tag_list_by_id)
+            view.hiddenToggled.connect(self._set_tag_list_hidden)
+        combo.setView(view)
+        combo.setItemDelegate(TagListComboDelegate(self.bridge, combo, view, show_actions=is_tag_list_selector))
+
+    def _selected_tag_names_from_editor(self) -> set[str]:
+        return {tag.casefold() for tag in self._normalize_tag_list(self._tag_editor_text())}
+
+    def _invalidate_tag_list_scope_counts_cache(self) -> None:
+        self._tag_list_scope_counts_cache_key = None
+        self._tag_list_scope_counts_cache_value = None
+
+    def _effective_gallery_scope_search(self, include_tag_scope: bool = True) -> str:
+        base_query = str(getattr(self.bridge, "_current_gallery_search", "") or "").strip()
+        if not include_tag_scope:
+            return base_query
+        tag_scope_query = str(getattr(self.bridge, "_current_gallery_tag_scope_search", "") or "").strip()
+        if not tag_scope_query:
+            return base_query
+        return f"{base_query} {tag_scope_query}".strip() if base_query else tag_scope_query
+
+    def _current_scope_tag_counts(self) -> dict[str, int]:
+        cache_key = (
+            tuple(str(path or "").casefold() for path in list(getattr(self.bridge, "_selected_folders", []) or [])),
+            str(getattr(self.bridge, "_current_gallery_filter", "all") or "all"),
+            self._effective_gallery_scope_search(include_tag_scope=False),
+        )
+        if getattr(self, "_tag_list_scope_counts_cache_key", None) == cache_key:
+            cached = getattr(self, "_tag_list_scope_counts_cache_value", None)
+            if isinstance(cached, dict):
+                return dict(cached)
+        counts: Counter[str] = Counter()
+        try:
+            entries = self.bridge._get_gallery_entries(
+                list(getattr(self.bridge, "_selected_folders", []) or []),
+                "none",
+                getattr(self.bridge, "_current_gallery_filter", "all"),
+                self._effective_gallery_scope_search(include_tag_scope=False),
+            )
+        except Exception:
+            entries = []
+        for entry in entries or []:
+            if entry.get("is_folder"):
+                continue
+            tags = self._normalize_tag_list(entry.get("tags") or "")
+            seen: set[str] = set()
+            for tag in tags:
+                key = tag.casefold()
+                if key in seen:
+                    continue
+                seen.add(key)
+                counts[key] += 1
+        resolved = dict(counts)
+        self._tag_list_scope_counts_cache_key = cache_key
+        self._tag_list_scope_counts_cache_value = dict(resolved)
+        return resolved
+
+    def _reload_tag_lists(self, preferred_id: int | None = None) -> None:
+        from app.mediamanager.db.tag_lists_repo import list_tag_lists
+
+        current_id = preferred_id if preferred_id is not None else self._active_tag_list_id()
+        rows = list_tag_lists(self.bridge.conn, include_hidden=self.bridge._show_hidden_enabled())
+        self.tag_list_select.blockSignals(True)
+        self.tag_list_select.clear()
+        for row in rows:
+            self.tag_list_select.addItem(str(row.get("name") or ""), int(row.get("id") or 0))
+            index = self.tag_list_select.count() - 1
+            self.tag_list_select.setItemData(index, bool(row.get("is_hidden")), Qt.ItemDataRole.UserRole + 1)
+        self.tag_list_select.blockSignals(False)
+        self.tag_list_select.setVisible(bool(rows))
+
+        index = -1
+        for i, row in enumerate(rows):
+            if int(row.get("id") or 0) == int(current_id or 0):
+                index = i
+                break
+        if index < 0 and rows:
+            index = 0
+        if index >= 0:
+            self.tag_list_select.setCurrentIndex(index)
+        self._refresh_tag_list_panel()
+
+    def _create_tag_list(self) -> None:
+        from app.mediamanager.db.tag_lists_repo import create_tag_list
+
+        name, ok = _run_themed_text_input_dialog(self, "Create Tag List", "List name:")
+        if not ok or not str(name or "").strip():
+            return
+        created = create_tag_list(self.bridge.conn, name)
+        if not created:
+            QMessageBox.warning(self, "Create Tag List", "Unable to create that tag list.")
+            return
+        self._reload_tag_lists(int(created.get("id") or 0))
+        self._open_tag_list_panel()
+
+    def _rename_tag_list_by_id(self, tag_list_id: int) -> None:
+        from app.mediamanager.db.tag_lists_repo import get_tag_list, rename_tag_list
+
+        if tag_list_id <= 0:
+            return
+        current = get_tag_list(self.bridge.conn, tag_list_id) or {}
+        name, ok = _run_themed_text_input_dialog(self, "Rename Tag List", "List name:", text=str(current.get("name") or ""))
+        if not ok or not str(name or "").strip():
+            return
+        if not rename_tag_list(self.bridge.conn, tag_list_id, name):
+            QMessageBox.warning(self, "Rename Tag List", "That tag list name is already in use.")
+            return
+        self._reload_tag_lists(tag_list_id)
+
+    def _rename_active_tag_list(self) -> None:
+        self._rename_tag_list_by_id(self._active_tag_list_id())
+
+    def _set_tag_list_hidden(self, tag_list_id: int, hidden: bool) -> None:
+        from app.mediamanager.db.tag_lists_repo import set_tag_list_hidden
+
+        resolved_id = int(tag_list_id or 0)
+        if resolved_id <= 0:
+            return
+        if set_tag_list_hidden(self.bridge.conn, resolved_id, bool(hidden)):
+            self._reload_tag_lists(None if hidden and not self.bridge._show_hidden_enabled() else resolved_id)
+
+    def _delete_tag_list(self, tag_list_id: int | None = None) -> None:
+        from app.mediamanager.db.tag_lists_repo import delete_tag_list, get_tag_list
+
+        resolved_id = int(tag_list_id or self._active_tag_list_id() or 0)
+        if resolved_id <= 0:
+            return
+        current = get_tag_list(self.bridge.conn, resolved_id) or {}
+        current_name = str(current.get("name") or "")
+        reply = _run_themed_question_dialog(
+            self,
+            "Delete Tag List",
+            f"Delete tag list '{current_name}'?",
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        if not delete_tag_list(self.bridge.conn, resolved_id):
+            QMessageBox.warning(self, "Delete Tag List", "Unable to delete that tag list.")
+            return
+        self._reload_tag_lists()
+
+    def _add_tag_to_active_list(self) -> None:
+        from app.mediamanager.db.tag_lists_repo import add_tag_to_list
+
+        tag_list_id = self._active_tag_list_id()
+        if tag_list_id <= 0:
+            return
+        tag_name, ok = _run_themed_text_input_dialog(self, "Add New Tag", "Tag:")
+        if not ok or not str(tag_name or "").strip():
+            return
+        add_tag_to_list(self.bridge.conn, tag_list_id, tag_name)
+        self._refresh_tag_list_panel()
+
+    def _import_tags_from_current_file_into_active_list(self) -> None:
+        from app.mediamanager.db.tag_lists_repo import add_tag_to_list
+
+        tag_list_id = self._active_tag_list_id()
+        if tag_list_id <= 0:
+            return
+        tags: list[str] = []
+        for path in self._current_file_paths():
+            try:
+                payload = self.bridge.get_media_metadata(path)
+                tags = self._merge_tag_lists(tags, list(payload.get("tags") or []))
+            except Exception:
+                pass
+        if not tags:
+            tags = self._normalize_tag_list(self._tag_editor_text())
+        if not tags:
+            self.meta_status_lbl.setText("No tags available to import")
+            QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
+            return
+        for tag in tags:
+            add_tag_to_list(self.bridge.conn, tag_list_id, tag)
+        self._refresh_tag_list_panel()
+
+    def _sort_tag_list_entries(self, entries: list[dict], sort_mode: str) -> list[dict]:
+        mode = str(sort_mode or "none")
+        if mode == "az":
+            return sorted(entries, key=lambda row: str(row.get("name") or "").casefold())
+        if mode == "za":
+            return sorted(entries, key=lambda row: str(row.get("name") or "").casefold(), reverse=True)
+        if mode == "most_used":
+            return sorted(entries, key=lambda row: (-int(row.get("global_use_count") or 0), str(row.get("name") or "").casefold()))
+        if mode == "least_used":
+            return sorted(entries, key=lambda row: (int(row.get("global_use_count") or 0), str(row.get("name") or "").casefold()))
+        return sorted(entries, key=lambda row: (int(row.get("sort_order") or 0), str(row.get("name") or "").casefold()))
+
+    def _refresh_tag_list_panel(self) -> None:
+        from app.mediamanager.db.tag_lists_repo import get_tag_list, list_tag_list_entries
+
+        if not hasattr(self, "tag_list_rows"):
+            return
+        tag_list_id = self._active_tag_list_id()
+        tag_list = get_tag_list(self.bridge.conn, tag_list_id) if tag_list_id > 0 else None
+
+        self.tag_list_rows.clear()
+        has_list = bool(tag_list)
+        self.active_tag_list_name_lbl.setVisible(has_list)
+        self.tag_list_sort_lbl.setVisible(has_list)
+        self.tag_list_sort_select.setVisible(has_list)
+        self.btn_add_tag_list_tag.setVisible(has_list)
+        self.btn_import_tag_list_tags.setVisible(has_list)
+        self.btn_clear_tag_scope_filter.setVisible(has_list)
+        self.tag_list_rows.setVisible(has_list)
+        self.tag_list_panel_layout.setStretchFactor(self.tag_list_rows, 1 if has_list else 0)
+        self.tag_list_rows.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding if has_list else QSizePolicy.Policy.Fixed,
+        )
+        if hasattr(self, "tag_list_bottom_spacer"):
+            self.tag_list_bottom_spacer.changeSize(
+                0,
+                0,
+                QSizePolicy.Policy.Minimum,
+                QSizePolicy.Policy.Fixed if has_list else QSizePolicy.Policy.Expanding,
+            )
+            self.tag_list_panel_layout.invalidate()
+
+        if not has_list:
+            self.active_tag_list_name_lbl.setText("")
+            self.tag_list_empty_lbl.setText("Create or select a tag list.")
+            self.tag_list_empty_lbl.setVisible(False)
+            self.tag_list_empty_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            return
+
+        self.active_tag_list_name_lbl.setText(str(tag_list.get("name") or ""))
+        sort_mode = str(tag_list.get("sort_mode") or "none")
+        sort_index = max(0, self.tag_list_sort_select.findData(sort_mode))
+        self.tag_list_sort_select.blockSignals(True)
+        self.tag_list_sort_select.setCurrentIndex(sort_index)
+        self.tag_list_sort_select.blockSignals(False)
+
+        scope_counts = self._current_scope_tag_counts()
+        selected_tags = self._selected_tag_names_from_editor()
+        common_tags, uncommon_tags = self._bulk_tag_selection_states() if self._is_bulk_editor_active() else (set(), set())
+        active_filter_key = str(getattr(self, "_active_tag_scope_name", "") or "").casefold()
+        entries = list_tag_list_entries(self.bridge.conn, tag_list_id)
+        for entry in entries:
+            key = str(entry.get("name") or "").casefold()
+            entry["scope_use_count"] = int(scope_counts.get(key, 0))
+            entry["filter_active"] = bool(active_filter_key and key == active_filter_key)
+            if self._is_bulk_editor_active():
+                if key in common_tags:
+                    entry["selection_state"] = "common"
+                elif key in uncommon_tags:
+                    entry["selection_state"] = "uncommon"
+                else:
+                    entry["selection_state"] = "none"
+            else:
+                entry["selection_state"] = "selected" if key in selected_tags else "none"
+        entries = self._sort_tag_list_entries(entries, sort_mode)
+        self.tag_list_rows.set_user_sort_enabled(sort_mode == "none")
+
+        for entry in entries:
+            item = QListWidgetItem()
+            item.setData(Qt.ItemDataRole.UserRole, int(entry.get("tag_id") or 0))
+            item.setSizeHint(QSize(0, 36))
+            self.tag_list_rows.addItem(item)
+            row = TagListTagRow(self.tag_list_rows, item, entry)
+            row.addToSelectionRequested.connect(self._add_tag_to_current_editor)
+            row.removeFromSelectionRequested.connect(self._remove_tag_from_current_editor)
+            row.removeFromListRequested.connect(self._remove_tag_from_active_list)
+            row.filterRequested.connect(self._filter_gallery_by_tag)
+            self.tag_list_rows.setItemWidget(item, row)
+
+        self.tag_list_empty_lbl.setText("No tags in this list yet." if not entries else "")
+        self.tag_list_empty_lbl.setVisible(not entries)
+        self.tag_list_empty_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._apply_tag_list_theme()
+
+    def _refresh_tag_list_scope_counts(self) -> None:
+        if not hasattr(self, "tag_list_panel") or not self.tag_list_panel.isVisible():
+            return
+        if not str(getattr(self.bridge, "_current_gallery_tag_scope_search", "") or "").strip():
+            self._active_tag_scope_name = ""
+        self._invalidate_tag_list_scope_counts_cache()
+        self._refresh_tag_list_panel()
+
+    def _refresh_tag_list_rows_state(self) -> None:
+        if not hasattr(self, "tag_list_panel") or not self.tag_list_panel.isVisible():
+            return
+        if not hasattr(self, "tag_list_rows") or self.tag_list_rows.count() <= 0:
+            self._refresh_tag_list_panel()
+            return
+
+        selected_tags = self._selected_tag_names_from_editor()
+        common_tags, uncommon_tags = self._bulk_tag_selection_states() if self._is_bulk_editor_active() else (set(), set())
+        active_filter_key = str(getattr(self, "_active_tag_scope_name", "") or "").casefold()
+        changed_rows: list[TagListTagRow] = []
+        updated_rows = 0
+        theme_kwargs = self._tag_list_theme_kwargs()
+        if theme_kwargs is None:
+            self._refresh_tag_list_panel()
+            return
+
+        for index in range(self.tag_list_rows.count()):
+            item = self.tag_list_rows.item(index)
+            row = self.tag_list_rows.itemWidget(item)
+            if not isinstance(row, TagListTagRow):
+                continue
+            key = str(row.tag_name or "").casefold()
+            if self._is_bulk_editor_active():
+                if key in common_tags:
+                    selection_state = "common"
+                elif key in uncommon_tags:
+                    selection_state = "uncommon"
+                else:
+                    selection_state = "none"
+            else:
+                selection_state = "selected" if key in selected_tags else "none"
+            changed = row.update_entry({
+                "scope_use_count": row._scope_use_count,
+                "global_use_count": row._global_use_count,
+                "selection_state": selection_state,
+                "filter_active": bool(active_filter_key and key == active_filter_key),
+            })
+            if changed:
+                changed_rows.append(row)
+            updated_rows += 1
+
+        if updated_rows != self.tag_list_rows.count():
+            self._refresh_tag_list_panel()
+            return
+        for row in changed_rows:
+            row.apply_theme(**theme_kwargs)
+
+    def _tag_list_theme_kwargs(self) -> dict | None:
+        if not hasattr(self, "tag_list_rows"):
+            return None
+        accent = QColor(getattr(self, "_current_accent", Theme.ACCENT_DEFAULT))
+        text = Theme.get_text_color()
+        text_muted = Theme.get_text_muted()
+        return {
+            "accent_color": accent.name(),
+            "accent_text": Theme.mix(text, accent, 0.78),
+            "accent_text_muted": Theme.mix(text_muted, accent, 0.48),
+            "text": text,
+            "text_muted": text_muted,
+            "btn_bg": Theme.get_input_bg(accent),
+            "btn_hover": Theme.get_btn_save_hover(accent),
+            "btn_border": Theme.get_input_border(accent),
+            "btn_border_hover": Theme.mix(Theme.get_border(accent), accent, 0.28),
+            "is_light": Theme.get_is_light(),
+        }
+
+    def _apply_tag_list_theme(self) -> None:
+        theme_kwargs = self._tag_list_theme_kwargs()
+        if theme_kwargs is None:
+            return
+        for index in range(self.tag_list_rows.count()):
+            item = self.tag_list_rows.item(index)
+            row = self.tag_list_rows.itemWidget(item)
+            if isinstance(row, TagListTagRow):
+                row.apply_theme(**theme_kwargs)
+
+    def _on_tag_list_changed(self, _index: int) -> None:
+        self._refresh_tag_list_panel()
+
+    def _on_tag_list_sort_changed(self, _index: int) -> None:
+        from app.mediamanager.db.tag_lists_repo import set_tag_list_sort_mode
+
+        tag_list_id = self._active_tag_list_id()
+        if tag_list_id <= 0:
+            return
+        sort_mode = str(self.tag_list_sort_select.currentData() or "none")
+        set_tag_list_sort_mode(self.bridge.conn, tag_list_id, sort_mode)
+        self._refresh_tag_list_panel()
+
+    def _persist_active_tag_list_order(self) -> None:
+        from app.mediamanager.db.tag_lists_repo import reorder_tag_list_entries
+
+        tag_list_id = self._active_tag_list_id()
+        if tag_list_id <= 0:
+            return
+        if str(self.tag_list_sort_select.currentData() or "none") != "none":
+            return
+        ordered_ids: list[int] = []
+        for index in range(self.tag_list_rows.count()):
+            item = self.tag_list_rows.item(index)
+            ordered_ids.append(int(item.data(Qt.ItemDataRole.UserRole) or 0))
+        reorder_tag_list_entries(self.bridge.conn, tag_list_id, ordered_ids)
+        self._save_tag_list_panel_width()
+
+    def _add_tag_to_current_editor(self, tag_name: str) -> None:
+        if self._is_bulk_editor_active():
+            paths = self._current_file_paths()
+            for path in paths:
+                try:
+                    self.bridge.attach_media_tags(path, [tag_name])
+                    self._invalidate_tag_list_scope_counts_cache()
+                except Exception:
+                    pass
+            self.bulk_status_lbl.setText(f"âœ“ Added '{tag_name}' to {len(paths)} selected files")
+            QTimer.singleShot(3000, lambda: self.bulk_status_lbl.setText(""))
+            self._refresh_bulk_tag_editor_summary()
+            self._refresh_tag_list_rows_state()
+            return
+        path = str(getattr(self, "_current_path", "") or "").strip()
+        if not path:
+            return
+        editor = self._active_tag_editor()
+        next_tags = self._merge_tag_lists(self._normalize_tag_list(self._tag_editor_text(editor)), [tag_name])
+        self._set_tag_editor_text(", ".join(next_tags), editor)
+        try:
+            self.bridge.set_media_tags(path, next_tags)
+            self._invalidate_tag_list_scope_counts_cache()
+        except Exception:
+            pass
+        self.meta_status_lbl.setText(f"âœ“ Added '{tag_name}'")
+        QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
+        self._refresh_tag_list_rows_state()
+
+    def _remove_tag_from_current_editor(self, tag_name: str) -> None:
+        if self._is_bulk_editor_active():
+            from app.mediamanager.db.media_repo import get_media_by_path
+            from app.mediamanager.db.tags_repo import list_media_tags
+
+            remove_key = str(tag_name or "").casefold()
+            paths = self._current_file_paths()
+            for path in paths:
+                try:
+                    media = get_media_by_path(self.bridge.conn, path)
+                    existing = list_media_tags(self.bridge.conn, int(media.get("id") or 0)) if media else []
+                    next_tags = [tag for tag in list(existing or []) if str(tag or "").strip() and str(tag).casefold() != remove_key]
+                    self.bridge.set_media_tags(path, next_tags)
+                    self._invalidate_tag_list_scope_counts_cache()
+                except Exception:
+                    pass
+            self.bulk_status_lbl.setText(f"âœ“ Removed '{tag_name}' from {len(paths)} selected files")
+            QTimer.singleShot(3000, lambda: self.bulk_status_lbl.setText(""))
+            self._refresh_bulk_tag_editor_summary()
+        self._refresh_tag_list_rows_state()
+        return
+        remove_key = str(tag_name or "").casefold()
+        editor = self._active_tag_editor()
+        next_tags = [tag for tag in self._normalize_tag_list(self._tag_editor_text(editor)) if tag.casefold() != remove_key]
+        self._set_tag_editor_text(", ".join(next_tags), editor)
+        path = str(getattr(self, "_current_path", "") or "").strip()
+        if path:
+            try:
+                self.bridge.set_media_tags(path, next_tags)
+                self._invalidate_tag_list_scope_counts_cache()
+            except Exception:
+                pass
+        self.meta_status_lbl.setText(f"Ã¢Å“â€œ Removed '{tag_name}'")
+        QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
+        self._refresh_tag_list_rows_state()
+
+    def _remove_tag_from_active_list(self, tag_id: int, _tag_name: str) -> None:
+        from app.mediamanager.db.tag_lists_repo import remove_tag_from_list
+
+        tag_list_id = self._active_tag_list_id()
+        if tag_list_id <= 0:
+            return
+        if remove_tag_from_list(self.bridge.conn, tag_list_id, tag_id):
+            self._refresh_tag_list_panel()
+
+    def _filter_gallery_by_tag(self, tag_name: str) -> None:
+        escaped_tag_name = str(tag_name or "").replace('"', '\\"')
+        query = f'tag:"{escaped_tag_name}"'
+        self._active_tag_scope_name = str(tag_name or "").strip()
+        try:
+            self.web.page().runJavaScript(
+                f"try{{ if(window.__mmx_applyTagScopeAndSelectAll){{ window.__mmx_applyTagScopeAndSelectAll({json.dumps(query)}); }}else if(window.__mmx_applyTagScope){{ window.__mmx_applyTagScope({json.dumps(query)}); if(window.selectAll) window.selectAll(); }} }}catch(e){{}}"
+            )
+        except Exception:
+            pass
+        self._refresh_tag_list_rows_state()
+
+    def _clear_tag_scope_filter(self) -> None:
+        self._active_tag_scope_name = ""
+        try:
+            self.web.page().runJavaScript(
+                "try{ window.__mmx_clearTagScope && window.__mmx_clearTagScope(); }catch(e){}"
+            )
+        except Exception:
+            pass
+        self._refresh_tag_list_rows_state()
+
+
+
+
+__all__ = [name for name in globals() if not (name.startswith("__") and name.endswith("__"))]
