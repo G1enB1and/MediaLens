@@ -1610,6 +1610,8 @@ class WindowPreviewMetadataMixin:
         raw_paths = [str(path or "").strip() for path in list(paths or []) if str(path or "").strip()]
         if not raw_paths:
             self._clear_metadata_panel()
+            if hasattr(self, "_set_bulk_select_all_pending"):
+                self._set_bulk_select_all_pending(False, "")
             self._metadata_applied_revision = active_revision
             self._schedule_tag_list_refresh("rows", request_revision=active_revision)
             return
@@ -1618,6 +1620,8 @@ class WindowPreviewMetadataMixin:
         if not file_paths:
             self._current_path = None
             self._clear_metadata_panel()
+            if hasattr(self, "_set_bulk_select_all_pending"):
+                self._set_bulk_select_all_pending(False, "")
             self._metadata_applied_revision = active_revision
             self._schedule_tag_list_refresh("rows", request_revision=active_revision)
             return
@@ -1638,6 +1642,8 @@ class WindowPreviewMetadataMixin:
             self.bulk_status_lbl.setText("")
             if hasattr(self, "bulk_caption_status_lbl"):
                 self.bulk_caption_status_lbl.setText("")
+            if hasattr(self, "_set_bulk_select_all_pending"):
+                self._set_bulk_select_all_pending(False, "")
             self._sync_tag_list_panel_visibility(refresh_contents=False)
             self._metadata_applied_revision = active_revision
             self._schedule_tag_list_refresh("rows", request_revision=active_revision)

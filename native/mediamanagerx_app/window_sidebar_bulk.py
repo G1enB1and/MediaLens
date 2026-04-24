@@ -392,13 +392,30 @@ class WindowSidebarBulkMixin:
         self._refresh_bulk_caption_editor_summary()
         self._sync_sidebar_panel_widths()
 
+    def _set_bulk_select_all_pending(self, pending: bool, message: str = "") -> None:
+        widgets = [
+            getattr(self, "bulk_btn_select_all_gallery", None),
+            getattr(self, "bulk_caption_btn_select_all_gallery", None),
+        ]
+        for widget in widgets:
+            if widget is not None:
+                widget.setEnabled(not bool(pending))
+        label = getattr(self, "bulk_caption_status_lbl", None) if self._current_bulk_editor_mode() == "captions" else getattr(self, "bulk_status_lbl", None)
+        if label is not None:
+            label.setText(str(message or ""))
+        try:
+            QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
+        except Exception:
+            pass
+
     def _select_all_visible_gallery_items(self, _checked: bool = False) -> None:
+        self._set_bulk_select_all_pending(True, "Selecting files...")
         try:
             self.web.page().runJavaScript(
                 "try{ if(window.__mmx_selectAllVisible){ window.__mmx_selectAllVisible(); } else if(window.selectAll){ window.selectAll(); } }catch(e){}"
             )
         except Exception:
-            pass
+            self._set_bulk_select_all_pending(False, "")
 
     def _jump_review_group(self, direction: int) -> None:
         step = -1 if int(direction or 0) < 0 else 1
@@ -418,9 +435,8 @@ class WindowSidebarBulkMixin:
             pass
         self._set_tag_list_panel_requested_visible(True)
         self._set_active_bulk_editor_mode("tags")
-        scope_paths = self._current_gallery_scope_paths()
-        if len(scope_paths) > 1:
-            self._show_metadata_for_path(scope_paths)
+        self._set_active_right_workspace("bulk")
+        self._set_bulk_select_all_pending(True, "Selecting files...")
         QTimer.singleShot(0, self._select_all_visible_gallery_items)
 
     def _open_bulk_caption_editor_from_menu(self, _checked: bool = False) -> None:
@@ -431,9 +447,8 @@ class WindowSidebarBulkMixin:
         except Exception:
             pass
         self._set_active_bulk_editor_mode("captions")
-        scope_paths = self._current_gallery_scope_paths()
-        if len(scope_paths) > 1:
-            self._show_metadata_for_path(scope_paths)
+        self._set_active_right_workspace("bulk")
+        self._set_bulk_select_all_pending(True, "Selecting files...")
         QTimer.singleShot(0, self._select_all_visible_gallery_items)
 
     def _save_bulk_descriptions_to_db(self) -> None:
@@ -750,6 +765,93 @@ class WindowSidebarBulkMixin:
         clean = [str(tag or "").strip() for tag in list(tags or []) if str(tag or "").strip()]
         return ", ".join(clean)
 
+    def _bulk_selected_file_payloads(self, paths: list[str]) -> dict[str, tuple[list[str], dict]]:
+        from app.mediamanager.utils.pathing import normalize_windows_path
+
+        normalized_by_key: dict[str, str] = {}
+        key_by_normalized: dict[str, str] = {}
+        for path in paths:
+            normalized = normalize_windows_path(path)
+            key = normalized.lower()
+            normalized_by_key[key] = normalized
+            key_by_normalized[key] = key
+        result: dict[str, tuple[list[str], dict]] = {
+            key: ([], {}) for key in normalized_by_key
+        }
+        tag_keys: dict[str, set[str]] = {key: set() for key in normalized_by_key}
+        if not normalized_by_key:
+            return result
+
+        def chunks(values: list[str], size: int = 700):
+            for start in range(0, len(values), size):
+                yield values[start:start + size]
+
+        normalized_paths = list(key_by_normalized.keys())
+        try:
+            for batch in chunks(normalized_paths):
+                placeholders = ",".join("?" for _ in batch)
+                rows = self.bridge.conn.execute(
+                    f"""
+                    SELECT mi.path, t.name
+                    FROM media_items mi
+                    JOIN media_tags mt ON mt.media_id = mi.id
+                    JOIN tags t ON t.id = mt.tag_id
+                    WHERE LOWER(mi.path) IN ({placeholders})
+                    ORDER BY mi.path COLLATE NOCASE, t.name COLLATE NOCASE
+                    """,
+                    batch,
+                ).fetchall()
+                for media_path, tag_name in rows:
+                    key = str(media_path or "").lower()
+                    if key not in result:
+                        continue
+                    tags, metadata = result[key]
+                    clean_tag = str(tag_name or "").strip()
+                    tag_key = clean_tag.casefold()
+                    if clean_tag and tag_key not in tag_keys.setdefault(key, set()):
+                        tags.append(clean_tag)
+                        tag_keys[key].add(tag_key)
+                    result[key] = (tags, metadata)
+        except Exception:
+            pass
+
+        try:
+            for batch in chunks(normalized_paths):
+                placeholders = ",".join("?" for _ in batch)
+                rows = self.bridge.conn.execute(
+                    f"""
+                    SELECT mi.path, mm.title, mm.description, mm.notes, mm.embedded_tags,
+                           mm.embedded_comments, mm.ai_prompt, mm.ai_negative_prompt, mm.ai_params,
+                           mm.embedded_metadata_summary
+                    FROM media_items mi
+                    LEFT JOIN media_metadata mm ON mm.media_id = mi.id
+                    WHERE LOWER(mi.path) IN ({placeholders})
+                    """,
+                    batch,
+                ).fetchall()
+                for row in rows:
+                    key = str(row[0] or "").lower()
+                    if key not in result:
+                        continue
+                    tags, _metadata = result[key]
+                    result[key] = (
+                        tags,
+                        {
+                            "title": row[1] or "",
+                            "description": row[2] or "",
+                            "notes": row[3] or "",
+                            "embedded_tags": row[4] or "",
+                            "embedded_comments": row[5] or "",
+                            "ai_prompt": row[6] or "",
+                            "ai_negative_prompt": row[7] or "",
+                            "ai_params": row[8] or "",
+                            "embedded_metadata_summary": row[9] or "",
+                        },
+                    )
+        except Exception:
+            pass
+        return result
+
     def _refresh_bulk_selected_files_list(
         self,
         list_widget: QListWidget,
@@ -761,20 +863,16 @@ class WindowSidebarBulkMixin:
     ) -> None:
         if list_widget is None:
             return
-        from app.mediamanager.db.media_repo import get_media_by_path
-        from app.mediamanager.db.tags_repo import list_media_tags
-
         self._detach_bulk_selected_file_rows(list_widget)
         list_widget.clear()
         paths = self._current_file_paths()
+        payloads = self._bulk_selected_file_payloads(paths)
+        try:
+            from app.mediamanager.utils.pathing import normalize_windows_path
+        except Exception:
+            normalize_windows_path = lambda value: str(value or "")
         for path in paths:
-            try:
-                media = get_media_by_path(self.bridge.conn, path)
-                tags = list_media_tags(self.bridge.conn, int(media.get("id") or 0)) if media else []
-                metadata = dict(self.bridge.get_media_metadata(path) or {})
-            except Exception:
-                tags = []
-                metadata = {}
+            tags, metadata = payloads.get(str(normalize_windows_path(path)).lower(), ([], {}))
             item = QListWidgetItem()
             row = BulkSelectedFileRow(
                 path,

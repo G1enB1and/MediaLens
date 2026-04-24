@@ -190,6 +190,7 @@ from PySide6.QtCore import (
     QPoint,
     QMimeData,
     QEvent,
+    QEventLoop,
     QTimer,
     QMetaObject,
     QRect,
