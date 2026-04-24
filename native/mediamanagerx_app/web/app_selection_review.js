@@ -855,6 +855,27 @@ function hasSelectedMediaCards() {
   return Array.from(document.querySelectorAll('.card.selected')).some(card => card.getAttribute('data-is-folder') !== 'true');
 }
 
+function syncSelectedCardClasses() {
+  document.querySelectorAll('.card').forEach((card) => {
+    const path = card.getAttribute('data-path') || '';
+    card.classList.toggle('selected', !!path && gSelectedPaths.has(path));
+  });
+}
+
+function updateLockedCardAfterSelection(preferredCard = null) {
+  if (preferredCard) {
+    const preferredPath = preferredCard.getAttribute('data-path') || '';
+    if (preferredPath && gSelectedPaths.has(preferredPath)) {
+      gLockedCard = preferredCard;
+      return;
+    }
+  }
+  const firstSelectedPath = Array.from(gSelectedPaths)[0] || '';
+  gLockedCard = firstSelectedPath
+    ? document.querySelector(`.card[data-path="${CSS.escape(firstSelectedPath)}"]`)
+    : null;
+}
+
 function updateCtxViewState() {
   document.querySelectorAll('.ctx-view-item').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.viewMode === gGalleryViewMode);
@@ -863,17 +884,18 @@ function updateCtxViewState() {
 
 function handleCardSelection(card, item, idx, e) {
   e.stopPropagation();
-  const path = item.path || '';
+  const path = card.getAttribute('data-path') || item.path || '';
+  if (!path) return;
 
   if (e.ctrlKey || e.metaKey) {
-    if (card.classList.contains('selected')) {
-      card.classList.remove('selected');
+    if (gSelectedPaths.has(path)) {
       gSelectedPaths.delete(path);
     } else {
-      card.classList.add('selected');
       gSelectedPaths.add(path);
     }
-    gLastSelectionIdx = idx;
+    syncSelectedCardClasses();
+    updateLockedCardAfterSelection(card);
+    gLastSelectionIdx = gSelectedPaths.has(path) ? idx : -1;
   } else if (e.shiftKey && gLastSelectionIdx !== -1) {
     const start = Math.min(gLastSelectionIdx, idx);
     const end = Math.max(gLastSelectionIdx, idx);
@@ -889,9 +911,9 @@ function handleCardSelection(card, item, idx, e) {
     card.classList.add('selected');
     gSelectedPaths.add(path);
     gLastSelectionIdx = idx;
+    gLockedCard = card;
   }
 
-  gLockedCard = card;
   syncMetadataToBridge();
 }
 
