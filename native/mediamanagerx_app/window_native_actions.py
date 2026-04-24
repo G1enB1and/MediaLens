@@ -553,6 +553,18 @@ class WindowNativeActionsMixin:
         icon_path = Path(__file__).with_name("web") / "MediaLens-Logo.ico"
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
+
+        if hasattr(self, "bottom_panel_prev_group_btn"):
+            self.bottom_panel_prev_group_btn.setIcon(self._native_arrow_icon("left"))
+        if hasattr(self, "bottom_panel_next_group_btn"):
+            self.bottom_panel_next_group_btn.setIcon(self._native_arrow_icon("right"))
+        for toggle in (
+            getattr(self, "bulk_common_tags_toggle", None),
+            getattr(self, "bulk_uncommon_tags_toggle", None),
+        ):
+            if toggle is not None:
+                label = str(toggle.property("sectionLabel") or toggle.text() or "")
+                self._set_bulk_tag_section_toggle(toggle, label, toggle.isChecked())
         
         # Loading Screen
         load_fg = "rgba(0,0,0,200)" if is_light else "rgba(255,255,255,200)"

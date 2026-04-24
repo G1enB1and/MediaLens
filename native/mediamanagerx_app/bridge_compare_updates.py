@@ -176,7 +176,7 @@ class BridgeCompareUpdatesMixin:
                     if "Preferred Folder" not in reasons:
                         reasons.append("Preferred Folder")
                     entry["duplicate_category_reasons"] = reasons
-                    entry["duplicate_best_reason"] = " â€¢ ".join(reasons)
+                    entry["duplicate_best_reason"] = f" {chr(8226)} ".join(reasons)
         ranked_by_path = {str(entry.get("path") or ""): entry for entry in ranked}
         active_paths = {str(entry.get("path") or "") for entry in slot_entries.values() if entry}
         active_entries = [entry for entry in slot_entries.values() if entry]

@@ -684,12 +684,8 @@ class WindowSidebarBulkMixin:
 
     def _toggle_bulk_tag_section(self, toggle: QToolButton, widget: QWidget, checked: bool) -> None:
         if toggle is not None:
-            label = toggle.text()
-            if " " in label:
-                _, suffix = label.split(" ", 1)
-            else:
-                suffix = label
-            toggle.setText(("â–¾ " if checked else "â–¸ ") + suffix)
+            label = str(toggle.property("sectionLabel") or toggle.text() or "")
+            self._set_bulk_tag_section_toggle(toggle, label, bool(checked))
         if widget is not None:
             widget.setVisible(bool(checked))
 

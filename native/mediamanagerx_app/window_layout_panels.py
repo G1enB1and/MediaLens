@@ -18,6 +18,18 @@ class WindowLayoutPanelsMixin:
         sep.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         return sep
 
+    def _native_arrow_icon(self, direction: str) -> QIcon:
+        mode = "light" if Theme.get_is_light() else "dark"
+        icon_path = Path(__file__).with_name("web") / "scrollbar_arrows" / f"{mode}_{direction}.svg"
+        return QIcon(str(icon_path))
+
+    def _set_bulk_tag_section_toggle(self, toggle: QToolButton, label: str, expanded: bool) -> None:
+        toggle.setText(label)
+        toggle.setProperty("sectionLabel", label)
+        toggle.setIcon(self._native_arrow_icon("down" if expanded else "right"))
+        toggle.setIconSize(QSize(12, 12))
+        toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+
     def _build_layout(self) -> None:
         try:
             accent_val = str(self.bridge.settings.value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT)
@@ -1119,9 +1131,9 @@ class WindowLayoutPanelsMixin:
 
         self.bulk_common_tags_toggle = QToolButton()
         self.bulk_common_tags_toggle.setObjectName("bulkTagEditorSectionToggle")
-        self.bulk_common_tags_toggle.setText("â–¸ Common Tags")
         self.bulk_common_tags_toggle.setCheckable(True)
         self.bulk_common_tags_toggle.setChecked(False)
+        self._set_bulk_tag_section_toggle(self.bulk_common_tags_toggle, "Common Tags", False)
         self.bulk_common_tags_toggle.clicked.connect(
             lambda checked: self._toggle_bulk_tag_section(self.bulk_common_tags_toggle, self.bulk_common_tags_text, checked)
         )
@@ -1137,9 +1149,9 @@ class WindowLayoutPanelsMixin:
 
         self.bulk_uncommon_tags_toggle = QToolButton()
         self.bulk_uncommon_tags_toggle.setObjectName("bulkTagEditorSectionToggle")
-        self.bulk_uncommon_tags_toggle.setText("â–¸ Uncommon Tags")
         self.bulk_uncommon_tags_toggle.setCheckable(True)
         self.bulk_uncommon_tags_toggle.setChecked(False)
+        self._set_bulk_tag_section_toggle(self.bulk_uncommon_tags_toggle, "Uncommon Tags", False)
         self.bulk_uncommon_tags_toggle.clicked.connect(
             lambda checked: self._toggle_bulk_tag_section(self.bulk_uncommon_tags_toggle, self.bulk_uncommon_tags_text, checked)
         )
@@ -1362,11 +1374,13 @@ class WindowLayoutPanelsMixin:
         bottom_panel_header_layout.setContentsMargins(0, 0, 0, 0)
         bottom_panel_header_layout.setSpacing(8)
 
-        self.bottom_panel_prev_group_btn = QPushButton("â†Previous Group")
+        self.bottom_panel_prev_group_btn = QPushButton("Previous Group")
         self.bottom_panel_prev_group_btn.setObjectName("bottomPanelGroupNavButton")
         self.bottom_panel_prev_group_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.bottom_panel_prev_group_btn.setToolTip("Jump to Previous Group")
         self.bottom_panel_prev_group_btn.setFixedHeight(22)
+        self.bottom_panel_prev_group_btn.setIcon(self._native_arrow_icon("left"))
+        self.bottom_panel_prev_group_btn.setIconSize(QSize(12, 12))
         self.bottom_panel_prev_group_btn.clicked.connect(lambda: self._jump_review_group(-1))
         bottom_panel_header_layout.addWidget(self.bottom_panel_prev_group_btn, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         bottom_panel_header_layout.addStretch(1)
@@ -1377,11 +1391,14 @@ class WindowLayoutPanelsMixin:
         bottom_panel_header_layout.addWidget(self.bottom_panel_header, 0, Qt.AlignmentFlag.AlignCenter)
         bottom_panel_header_layout.addStretch(1)
 
-        self.bottom_panel_next_group_btn = QPushButton("Next Groupâ†’")
+        self.bottom_panel_next_group_btn = QPushButton("Next Group")
         self.bottom_panel_next_group_btn.setObjectName("bottomPanelGroupNavButton")
         self.bottom_panel_next_group_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.bottom_panel_next_group_btn.setToolTip("Jump to Next Group")
         self.bottom_panel_next_group_btn.setFixedHeight(22)
+        self.bottom_panel_next_group_btn.setIcon(self._native_arrow_icon("right"))
+        self.bottom_panel_next_group_btn.setIconSize(QSize(12, 12))
+        self.bottom_panel_next_group_btn.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.bottom_panel_next_group_btn.clicked.connect(lambda: self._jump_review_group(1))
         bottom_panel_header_layout.addWidget(self.bottom_panel_next_group_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 

@@ -436,6 +436,26 @@ class CompareSlotCard(QFrame):
         self.meta_label.setContentsMargins(0, 0, 0, 0)
         self.meta_label.setMinimumHeight(0)
         thumb_layout.addWidget(self.meta_label)
+
+        self.meta_detail_row = QWidget()
+        self.meta_detail_row.setObjectName("compareSlotMetaDetailRow")
+        meta_detail_layout = QHBoxLayout(self.meta_detail_row)
+        meta_detail_layout.setContentsMargins(0, 0, 0, 0)
+        meta_detail_layout.setSpacing(6)
+        self.meta_size_label = QLabel("")
+        self.meta_size_label.setObjectName("compareSlotMeta")
+        self.meta_time_label = QLabel("")
+        self.meta_time_label.setObjectName("compareSlotMeta")
+        self.meta_dot_label = QLabel("")
+        self.meta_dot_label.setObjectName("compareSlotMetaDot")
+        self.meta_dot_label.setFixedSize(6, 14)
+        self.meta_dot_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        meta_detail_layout.addWidget(self.meta_size_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        meta_detail_layout.addWidget(self.meta_dot_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        meta_detail_layout.addWidget(self.meta_time_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        meta_detail_layout.addStretch(1)
+        self.meta_detail_row.setVisible(False)
+        thumb_layout.addWidget(self.meta_detail_row)
         layout.addWidget(self.thumb_frame, 1)
 
         self.reasons_label = QLabel("")
@@ -566,6 +586,15 @@ class CompareSlotCard(QFrame):
         self.meta_label.setStyleSheet(
             f"color: {text_muted}; margin: 0px; padding: 0px; border: none; background: transparent;"
         )
+        self.meta_detail_row.setStyleSheet("margin: 0px; padding: 0px; border: none; background: transparent;")
+        self.meta_size_label.setStyleSheet(
+            f"color: {text_muted}; margin: 0px; padding: 0px; border: none; background: transparent;"
+        )
+        self.meta_time_label.setStyleSheet(
+            f"color: {text_muted}; margin: 0px; padding: 0px; border: none; background: transparent;"
+        )
+        dot_svg = Path(__file__).with_name("web") / "icons" / "dot-separator.svg"
+        self.meta_dot_label.setPixmap(QIcon(str(dot_svg)).pixmap(QSize(4, 4)))
         self.reasons_label.setStyleSheet(f"color: {accent_hex}; font-weight: 700;")
         self.best_label.setStyleSheet(f"color: {accent_hex}; font-weight: 700;")
         self._thumb_border_color = border
@@ -624,6 +653,10 @@ class CompareSlotCard(QFrame):
         for widget in (
             self.name_label,
             self.meta_label,
+            self.meta_detail_row,
+            self.meta_size_label,
+            self.meta_dot_label,
+            self.meta_time_label,
             self.reasons_label,
             self.best_label,
             self.clear_btn,
@@ -707,6 +740,11 @@ class CompareSlotCard(QFrame):
             self.thumb_label.setPixmap(QPixmap())
             self.thumb_label.setText("Left" if self.slot_name == "left" else "Right")
             self.meta_label.setText("Browse or drag an image from the gallery")
+            self.meta_label.setVisible(True)
+            self.meta_size_label.setText("")
+            self.meta_time_label.setText("")
+            self.meta_dot_label.setVisible(False)
+            self.meta_detail_row.setVisible(False)
             self.reasons_label.setText("")
             self.best_label.setText("")
             self.keep_toggle.blockSignals(True)
@@ -727,25 +765,17 @@ class CompareSlotCard(QFrame):
         self._thumb_source_pixmap = self._load_thumb(path)
         self.thumb_label.setText("")
         self._update_thumb_pixmap()
-        self.meta_label.setText(
-            "\n".join(
-                [
-                    part for part in [
-                        str(self._entry.get("resolution_text") or ""),
-                        " â€¢ ".join(
-                            [
-                                part for part in [
-                                    str(self._entry.get("file_size_text") or ""),
-                                    str(self._entry.get("modified_time_text") or ""),
-                                ]
-                                if part
-                            ]
-                        ),
-                    ]
-                    if part
-                ]
-            )
-        )
+        resolution_text = str(self._entry.get("resolution_text") or "")
+        file_size_text = str(self._entry.get("file_size_text") or "")
+        modified_time_text = str(self._entry.get("modified_time_text") or "")
+        self.meta_label.setText(resolution_text)
+        self.meta_label.setVisible(bool(resolution_text))
+        self.meta_size_label.setText(file_size_text)
+        self.meta_time_label.setText(modified_time_text)
+        self.meta_size_label.setVisible(bool(file_size_text))
+        self.meta_time_label.setVisible(bool(modified_time_text))
+        self.meta_dot_label.setVisible(bool(file_size_text and modified_time_text))
+        self.meta_detail_row.setVisible(bool(file_size_text or modified_time_text))
         reasons = list(self._entry.get("duplicate_category_reasons") or [])[:5]
         self.reasons_label.setText("\n".join(reasons))
         compare_best_in_pair = bool(self._entry.get("compare_best_in_pair"))

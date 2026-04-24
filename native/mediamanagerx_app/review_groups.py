@@ -258,7 +258,7 @@ def sort_duplicate_group(
         if unique_best_modified and int(entry.get("preferred_date") or 0) == best_modified:
             reasons.append("Newest edit")
         entry["duplicate_category_reasons"] = reasons
-        entry["duplicate_best_reason"] = " • ".join(reasons)
+        entry["duplicate_best_reason"] = f" {chr(8226)} ".join(reasons)
         entry["duplicate_is_overall_best"] = index == 0
     return ranked
 
@@ -636,7 +636,7 @@ def rank_duplicate_group(
         entry["duplicate_keep_suggestion"] = original_idx == best_idx
         entry["duplicate_group_position"] = position
         entry["duplicate_category_reasons"] = reasons
-        entry["duplicate_best_reason"] = " • ".join(reasons)
+        entry["duplicate_best_reason"] = f" {chr(8226)} ".join(reasons)
         entry["duplicate_is_overall_best"] = original_idx == best_idx
         next_idx = order[position + 1] if position + 1 < len(order) else None
         entry["duplicate_rank_tied_with_next"] = bool(
@@ -842,7 +842,7 @@ def build_similar_entries(
             if unique_lowest_area and area == min_area:
                 reasons.append("Downscaled copy")
             entry["duplicate_category_reasons"] = list(dict.fromkeys(reasons))
-            entry["duplicate_best_reason"] = " • ".join(entry["duplicate_category_reasons"])
+            entry["duplicate_best_reason"] = f" {chr(8226)} ".join(entry["duplicate_category_reasons"])
             entry["review_group_mode"] = "similar" if include_exact else "similar_only"
             entry["similar_group_distance_threshold"] = threshold
             entry["similar_group_key"] = f"similar-{group_index}"

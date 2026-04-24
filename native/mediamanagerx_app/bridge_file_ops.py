@@ -437,14 +437,6 @@ class BridgeFileOpsMixin:
         try: return QUrl.fromLocalFile(str(path)).toString()
         except Exception: return ""
 
-    @Slot(int, bool, str)
-    def update_drag_tooltip(self, count: int, is_copy: bool, target_folder: str) -> None:
-        self.updateTooltipRequested.emit(count, is_copy, target_folder)
-
-    @Slot()
-    def hide_drag_tooltip(self) -> None:
-        self.hideTooltipRequested.emit()
-
     @Slot(str, str)
     def _invoke_conflict_dialog(self, dst_str: str, src_str: str):
         """Helper to show dialog on main thread."""
