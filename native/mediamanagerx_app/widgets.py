@@ -858,8 +858,11 @@ class BulkSelectedFileRow(QWidget):
         )
         if thumbnail is not None and not thumbnail.isNull():
             self.thumb_lbl.setPixmap(thumbnail)
+            self._thumbnail_loaded = True
         else:
             self.thumb_lbl.setText("â€¢")
+        if not hasattr(self, "_thumbnail_loaded"):
+            self._thumbnail_loaded = False
         content_row.addWidget(self.thumb_lbl, 0, Qt.AlignmentFlag.AlignTop)
 
         self.tags_edit = self._TagsEdit()
@@ -892,6 +895,25 @@ class BulkSelectedFileRow(QWidget):
     def _emit_tags_edited(self) -> None:
         try:
             self.tagsEdited.emit(self._path, self.tags_edit.toPlainText())
+        except RuntimeError:
+            pass
+
+    def set_thumbnail(self, thumbnail: QPixmap | None, thumbnail_bg_hint: str = "") -> None:
+        try:
+            thumb_hint = str(thumbnail_bg_hint or "").strip().lower()
+            if thumb_hint == "light":
+                thumb_bg = "#ffffff" if Theme.get_is_light() else "#f7f8fa"
+            elif thumb_hint == "dark":
+                thumb_bg = "#101114"
+            else:
+                thumb_bg = "transparent"
+            self.thumb_lbl.setStyleSheet(
+                f"QLabel#bulkSelectedFileThumb {{ background-color: {thumb_bg}; border-radius: 6px; }}"
+            )
+            if thumbnail is not None and not thumbnail.isNull():
+                self.thumb_lbl.setText("")
+                self.thumb_lbl.setPixmap(thumbnail)
+            self._thumbnail_loaded = True
         except RuntimeError:
             pass
 
@@ -963,6 +985,10 @@ class BulkSelectedFilesListWidget(QListWidget):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        self.layoutSyncRequested.emit()
+
+    def scrollContentsBy(self, dx: int, dy: int) -> None:
+        super().scrollContentsBy(dx, dy)
         self.layoutSyncRequested.emit()
 
     def viewportEvent(self, event) -> bool:

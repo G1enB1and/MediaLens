@@ -876,18 +876,18 @@ class WindowSidebarBulkMixin:
             item = QListWidgetItem()
             row = BulkSelectedFileRow(
                 path,
-                self._bulk_selected_file_thumbnail(path, content_height),
+                None,
                 Path(path).name,
                 str(value_getter(tags, metadata) or ""),
                 content_height=content_height,
                 placeholder_text=placeholder_text,
-                thumbnail_bg_hint=self._bulk_selected_file_thumbnail_bg_hint(path),
             )
             item.setSizeHint(QSize(0, row.item_height()))
             row.tagsEdited.connect(edit_handler)
             list_widget.addItem(item)
             list_widget.setItemWidget(item, row)
         list_widget.doItemsLayout()
+        QTimer.singleShot(0, lambda: self._load_visible_bulk_selected_file_thumbnails(list_widget, content_height))
 
     @staticmethod
     def _is_valid_bulk_selected_file_row(row) -> bool:
@@ -940,6 +940,46 @@ class WindowSidebarBulkMixin:
             return
         QTimer.singleShot(0, self._sync_bulk_selected_files_layout)
 
+    def _load_visible_bulk_selected_file_thumbnails(
+        self,
+        list_widget: QListWidget,
+        content_height: int,
+        *,
+        max_per_pass: int = 8,
+    ) -> None:
+        if list_widget is None or list_widget.count() <= 0:
+            return
+        viewport = list_widget.viewport()
+        if viewport is None:
+            return
+        visible_rect = viewport.rect().adjusted(0, -int(content_height) * 2, 0, int(content_height) * 2)
+        loaded = 0
+        pending_more = False
+        for i in range(list_widget.count()):
+            item = list_widget.item(i)
+            if item is None:
+                continue
+            if not list_widget.visualItemRect(item).intersects(visible_rect):
+                continue
+            row = list_widget.itemWidget(item)
+            if not self._is_valid_bulk_selected_file_row(row):
+                continue
+            if bool(getattr(row, "_thumbnail_loaded", False)):
+                continue
+            if loaded >= int(max_per_pass):
+                pending_more = True
+                break
+            path = str(getattr(row, "_path", "") or "").strip()
+            thumbnail = self._bulk_selected_file_thumbnail(path, content_height)
+            bg_hint = self._bulk_selected_file_thumbnail_bg_hint(path)
+            try:
+                row.set_thumbnail(thumbnail, bg_hint)
+            except RuntimeError:
+                pass
+            loaded += 1
+        if pending_more:
+            QTimer.singleShot(16, lambda: self._load_visible_bulk_selected_file_thumbnails(list_widget, content_height, max_per_pass=max_per_pass))
+
     def _sync_bulk_selected_files_layout(self) -> None:
         if not hasattr(self, "bulk_selected_files_list"):
             return
@@ -982,6 +1022,13 @@ class WindowSidebarBulkMixin:
                 except RuntimeError:
                     pass
         viewport.update()
+        QTimer.singleShot(
+            0,
+            lambda: self._load_visible_bulk_selected_file_thumbnails(
+                list_widget,
+                BulkSelectedFileRow._TAG_CONTENT_HEIGHT,
+            ),
+        )
 
     def _queue_bulk_caption_selected_files_layout_sync(self) -> None:
         if not hasattr(self, "bulk_caption_selected_files_list"):
@@ -1030,6 +1077,13 @@ class WindowSidebarBulkMixin:
                 except RuntimeError:
                     pass
         viewport.update()
+        QTimer.singleShot(
+            0,
+            lambda: self._load_visible_bulk_selected_file_thumbnails(
+                list_widget,
+                BulkSelectedFileRow._CAPTION_CONTENT_HEIGHT,
+            ),
+        )
 
     def _refresh_bulk_tag_editor_summary(self) -> None:
         if not hasattr(self, "bulk_common_tags_text"):
