@@ -1,6 +1,37 @@
 # Change Log
 
-## v1.1.32 (Current)
+## v1.1.33 (Current)
+
+### Summary
+
+This release makes MediaLens much faster and more practical when working with groups of files. Bulk editing is now more capable, selection stays stable while resizing the panel, and the new caption workflow makes it easier to manage descriptions separately from tags.
+
+### Highlights
+
+- Added a dedicated Bulk Captioning Editor alongside the upgraded Bulk Tag Editor.
+- Bulk editing now shows selected files with thumbnails and per-file editable tag or caption fields.
+- Multi-file gallery selections now stay visually selected while resizing the editor panel.
+
+### Added
+
+- Added a separate Bulk Captioning Editor with its own page, controls, per-file description fields, and View menu entry.
+- Added a mode switch at the top of the Bulk Editor so you can quickly move between bulk tag editing and bulk caption editing.
+- Added compact selected-file cards to bulk editing, including thumbnails and editable per-file fields for the active mode.
+
+### Changed
+
+- Changed the Bulk Tag Editor layout to better support large selections, including a more useful selected-files view and updated bulk generation controls.
+- Changed bulk caption generation to use the existing MediaLens description pipeline while presenting it as captions in the bulk workflow.
+- Changed bulk editor behavior during resize so selected files in the gallery keep their multi-selection state instead of collapsing visually to one file.
+- Changed gallery selection updates with the tag list open to reduce unnecessary tag-list work and improve responsiveness when moving between files.
+
+### Removed
+
+- Removed Common and Uncommon sections, add-to-all input, and tag-list access from the caption workflow where they did not fit description editing.
+
+---
+
+## v1.1.32
 
 ### Summary
 

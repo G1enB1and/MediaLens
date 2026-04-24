@@ -1,18 +1,18 @@
-## MediaLens v1.1.32
+## MediaLens v1.1.33
 
 ### Summary
 
-This release makes Local AI more dependable in everyday use, especially in the installed app. MediaLens now handles more image formats correctly for Gemma, keeps model selection more consistent, and smooths out several frustrating Local AI setup and runtime problems.
+This release makes bulk editing much more practical for real library work. MediaLens now gives you a separate bulk caption workflow, richer per-file editing in bulk mode, and more stable multi-selection behavior while resizing the panel.
 
 ### Highlights
 
-- Gemma 4 is more reliable in the installed build, with fixes for model selection, runtime launch behavior, and fallback handling.
-- AVIF, HEIC, HEIF, TIFF, WebP, animated images, and video sources now go through preview-image conversion before being sent to Gemma.
-- Local AI status and setup behavior is more consistent, making it easier to switch models and understand what MediaLens is actually using.
+- Added a dedicated Bulk Captioning Editor alongside the improved Bulk Tag Editor.
+- Bulk editing now shows selected files with thumbnails and editable per-file tags or captions.
+- Multi-file selections now stay visually selected in the gallery while resizing the editor panel.
 
 ### Notes
 
-- This release includes multiple Local AI reliability fixes focused on installed-build Gemma behavior and difficult image-format edge cases.
+- This release focuses on bulk workflow improvements, panel behavior, and selection stability rather than Local AI model changes.
 
 Full Changelog:
 https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md
