@@ -13,7 +13,7 @@ class BridgeLocalAiMixin:
         suffix = media_path.suffix.lower()
         needs_poster = (
             suffix in VIDEO_EXTS
-            or suffix in {".avif", ".heic", ".heif", ".tif", ".tiff", ".webp"}
+            or suffix in {".avif", ".heic", ".heif", ".tif", ".tiff", ".webp", ".svg"}
             or self._is_animated(media_path)
         )
         if not needs_poster:

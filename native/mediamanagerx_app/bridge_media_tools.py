@@ -22,6 +22,36 @@ class BridgeMediaToolsMixin:
     def _video_poster_path(self, video_path: Path) -> Path:
         return self._thumb_dir / f"{self._thumb_key(video_path)}.jpg"
 
+    def _ensure_svg_poster(self, svg_path: Path) -> Path | None:
+        out = self._video_poster_path(svg_path)
+        if out.exists():
+            return out
+        try:
+            image = _render_svg_image(svg_path)
+            if image is None or image.isNull():
+                self._log(f"SVG poster generation failed for {svg_path}: invalid SVG image")
+                return None
+            if image.width() > 1024 or image.height() > 1024:
+                image = image.scaled(
+                    1024,
+                    1024,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            poster = QImage(image.size(), QImage.Format.Format_RGB32)
+            poster.fill(QColor("#ffffff"))
+            painter = QPainter(poster)
+            painter.drawImage(0, 0, image)
+            painter.end()
+            out.parent.mkdir(parents=True, exist_ok=True)
+            if not poster.save(str(out), "JPG", 92):
+                self._log(f"SVG poster generation failed for {svg_path}: could not save poster")
+                return None
+            return out if out.exists() else None
+        except Exception as e:
+            self._log(f"SVG poster generation error for {svg_path}: {type(e).__name__}: {e}")
+            return None
+
     def _video_needs_ascii_runtime_path(self, video_path: Path) -> bool:
         try:
             raw = str(video_path)
@@ -135,6 +165,8 @@ class BridgeMediaToolsMixin:
         out = self._video_poster_path(video_path)
         if out.exists():
             return out
+        if video_path.suffix.lower() == ".svg":
+            return self._ensure_svg_poster(video_path)
         ffmpeg = self._ffmpeg_bin()
         if not ffmpeg:
             self._log(f"Video poster unavailable; ffmpeg not found for {video_path}")
