@@ -1,19 +1,20 @@
-## MediaLens v1.1.34
+## MediaLens v1.1.35
 
 ### Summary
 
-This update makes MediaLens more dependable when working with SVGs, bulk selections, and the details panel. SVG previews are cleaner, Local AI can tag SVGs through generated preview images, and empty details states no longer leave stale metadata behind.
+This release makes duplicate and similar-image review smoother and faster. The comparison panel now opens into the right review context, adds practical image-by-image navigation, and bulk editors feel more responsive with large selections.
 
 ### Highlights
 
-- SVGs now preview more sharply and can be tagged with Local AI through generated preview images.
-- The details panel now fully resets when nothing is selected, avoiding stale tags, descriptions, or AI metadata.
-- Ctrl-click deselection now works correctly when removing one file from a selected group.
+- Move through duplicate and similar groups directly from the comparison panel with new previous and next image controls.
+- Reopen the comparison panel and continue from the review group you were working on.
+- Bulk tag and caption editors render large selections faster by loading thumbnails only as needed.
 
-### Notes
+### Improvements
 
-- This release also includes internal refactors that split large bridge, window, settings, and web files into smaller modules without changing intended behavior.
-- Several native UI symbols were moved to SVG assets to avoid character encoding problems.
+- Comparison labels now use live file sizes, so equal-size files are no longer shown as largest or smallest winners.
+- Navigation buttons now have clearer disabled states, helpful tooltips, and styling that better matches the rest of MediaLens.
+- The bottom comparison panel no longer reopens itself after you close it during duplicate or similar review.
 
 Full Changelog:
 https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md

@@ -1,6 +1,39 @@
 # Change Log
 
-## v1.1.34 (Current)
+## v1.1.35 (Current)
+
+### Summary
+
+This release makes duplicate and similar-image review smoother and faster. The comparison panel now opens directly into the right review context, adds practical image-by-image navigation, and bulk editors feel more responsive with large selections.
+
+### Highlights
+
+- The comparison panel now preloads review groups and lets you move through images and groups without leaving the panel.
+- Bulk tag and caption editors open large selections faster by loading thumbnails lazily.
+- Comparison labels now use live file sizes, so equal-size files are no longer shown as largest or smallest winners.
+
+### Added
+
+- Added Previous Image and Next Image controls for both comparison slots when reviewing duplicate or similar groups.
+- Added startup and reopen handling so the comparison panel can preload the current duplicate or similar group when the bottom panel is already open.
+- Added disabled tooltips for comparison navigation buttons so unavailable previous or next actions explain why they cannot run.
+
+### Changed
+
+- Changed comparison group navigation to remember the active review group while the bottom panel is closed and resume there when reopened.
+- Changed duplicate and similar review comparison setup so opening the bottom panel seeds the active group without forcing the panel to reopen after it is closed.
+- Changed comparison navigation button styling, disabled states, cursors, and SVG close icons to better match the rest of MediaLens.
+- Changed comparison file-size ranking to use the live file size on disk instead of stale cached scan data.
+- Changed bulk tag and bulk caption editors to lazy-load thumbnails so selected-file rows render faster.
+- Changed bulk Select All handling to reduce duplicate metadata refresh work and batch selected-file database reads.
+
+### Removed
+
+- Removed stale auto-seeding paths that could force the bottom comparison panel open again after users closed it.
+
+---
+
+## v1.1.34
 
 ### Summary
 
