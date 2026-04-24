@@ -2,14 +2,25 @@ from __future__ import annotations
 
 from native.mediamanagerx_app.common import *
 
-def _render_svg_image(path: str | Path) -> QImage | None:
+def _render_svg_image(path: str | Path, target_size: QSize | None = None) -> QImage | None:
     clean = str(path or "").strip()
     if not clean:
         return None
     renderer = QSvgRenderer(clean)
     if not renderer.isValid():
         return None
-    size = renderer.defaultSize()
+    default_size = renderer.defaultSize()
+    if target_size is not None and target_size.isValid() and target_size.width() > 0 and target_size.height() > 0:
+        if default_size.isValid() and default_size.width() > 0 and default_size.height() > 0:
+            scale = min(
+                target_size.width() / max(1, default_size.width()),
+                target_size.height() / max(1, default_size.height()),
+            )
+            size = QSize(max(1, int(default_size.width() * scale)), max(1, int(default_size.height() * scale)))
+        else:
+            size = QSize(target_size)
+    else:
+        size = default_size
     if not size.isValid() or size.width() <= 0 or size.height() <= 0:
         size = QSize(512, 512)
     max_dim = max(size.width(), size.height())

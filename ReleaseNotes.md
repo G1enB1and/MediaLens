@@ -1,18 +1,19 @@
-## MediaLens v1.1.33
+## MediaLens v1.1.34
 
 ### Summary
 
-This release makes bulk editing much more practical for real library work. MediaLens now gives you a separate bulk caption workflow, richer per-file editing in bulk mode, and more stable multi-selection behavior while resizing the panel.
+This update makes MediaLens more dependable when working with SVGs, bulk selections, and the details panel. SVG previews are cleaner, Local AI can tag SVGs through generated preview images, and empty details states no longer leave stale metadata behind.
 
 ### Highlights
 
-- Added a dedicated Bulk Captioning Editor alongside the improved Bulk Tag Editor.
-- Bulk editing now shows selected files with thumbnails and editable per-file tags or captions.
-- Multi-file selections now stay visually selected in the gallery while resizing the editor panel.
+- SVGs now preview more sharply and can be tagged with Local AI through generated preview images.
+- The details panel now fully resets when nothing is selected, avoiding stale tags, descriptions, or AI metadata.
+- Ctrl-click deselection now works correctly when removing one file from a selected group.
 
 ### Notes
 
-- This release focuses on bulk workflow improvements, panel behavior, and selection stability rather than Local AI model changes.
+- This release also includes internal refactors that split large bridge, window, settings, and web files into smaller modules without changing intended behavior.
+- Several native UI symbols were moved to SVG assets to avoid character encoding problems.
 
 Full Changelog:
 https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md

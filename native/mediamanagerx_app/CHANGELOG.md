@@ -1,6 +1,39 @@
 # Change Log
 
-## v1.1.33 (Current)
+## v1.1.34 (Current)
+
+### Summary
+
+This release makes MediaLens more dependable when working with SVGs, bulk selections, and the details panel. SVG files now behave better across previews and Local AI, while selection and empty-state behavior is cleaner and more predictable.
+
+### Highlights
+
+- SVG files now preview more cleanly and can be used with Local AI tagging through automatically generated preview images.
+- The details panel now clears stale tags, descriptions, and AI fields when nothing is selected.
+- Multi-select behavior is more dependable, including Ctrl-click deselection from an existing selected group.
+
+### Added
+
+- Added SVG poster generation for Local AI so SVG files are analyzed through a raster preview while tags and descriptions still save to the original SVG record.
+
+### Changed
+
+- Changed SVG rendering in the details panel so previews stay sharper when the right sidebar is resized.
+- Changed SVG thumbnails in the bulk tag and caption editors to use high-contrast backgrounds.
+- Changed Ctrl-click gallery selection so clicking an already selected item removes it from the current selection and updates the details panel with the reduced selection.
+- Changed the details-panel empty state so stale tags, descriptions, embedded metadata, and AI fields are cleared and replaced with `Select file(s) to view details.`
+- Changed bulk selected-file rows to guard against deleted Qt objects during teardown and layout updates.
+- Changed corrupted text glyphs in native controls to use SVG icons or source-safe separators instead of fragile encoded characters.
+- Changed `main.py`, `bridge.py`, `web/app.js`, `settings.py`, and the native window code into smaller task-focused modules while preserving the existing app behavior.
+- Changed JavaScript bridge helpers to tolerate missing or non-array values in more gallery and settings flows.
+
+### Removed
+
+- Removed duplicate Qt bridge tooltip slots that caused ambiguous overload warnings in the terminal.
+
+---
+
+## v1.1.33
 
 ### Summary
 

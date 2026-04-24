@@ -24,6 +24,7 @@ class WindowPreviewMetadataMixin:
             self._preview_movie.deleteLater()
             self._preview_movie = None
         self._preview_source_pixmap = None
+        self._preview_svg_path = ""
         self._preview_aspect_ratio = 1.0
         self.preview_image_lbl.setPixmap(QPixmap())
         self._sync_sidebar_video_preview_controls()
@@ -206,12 +207,20 @@ class WindowPreviewMetadataMixin:
 
         if self._preview_source_pixmap is not None and not self._preview_source_pixmap.isNull():
             self.preview_image_lbl.setText("")
-            scaled = self._preview_source_pixmap.scaled(
-                available_w,
-                target_h,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
+            svg_path = str(getattr(self, "_preview_svg_path", "") or "")
+            scaled = QPixmap()
+            if svg_path:
+                svg_size = QSize(available_w, target_h)
+                rendered = _render_svg_image(svg_path, svg_size)
+                if rendered is not None and not rendered.isNull():
+                    scaled = QPixmap.fromImage(rendered)
+            if scaled.isNull():
+                scaled = self._preview_source_pixmap.scaled(
+                    available_w,
+                    target_h,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
             self.preview_image_lbl.setFixedHeight(max(96, scaled.height()))
             self.preview_image_lbl.setPixmap(scaled)
             overlay = getattr(self, "sidebar_video_overlay", None)
@@ -227,9 +236,10 @@ class WindowPreviewMetadataMixin:
             overlay.setGeometry(self.preview_image_lbl.rect())
         self._sync_sidebar_video_preview_controls()
 
-    def _set_preview_pixmap(self, pixmap: QPixmap | None, placeholder: str = "No preview", bg_hint: str = "") -> None:
+    def _set_preview_pixmap(self, pixmap: QPixmap | None, placeholder: str = "No preview", bg_hint: str = "", svg_path: str = "") -> None:
         self._clear_preview_media()
         self._preview_bg_hint = str(bg_hint or "")
+        self._preview_svg_path = str(svg_path or "")
         self._preview_source_pixmap = pixmap if pixmap and not pixmap.isNull() else None
         if self._preview_source_pixmap is not None:
             self._preview_aspect_ratio = max(
@@ -241,6 +251,7 @@ class WindowPreviewMetadataMixin:
     def _set_preview_movie(self, path: Path, aspect_ratio: float) -> None:
         self._clear_preview_media()
         self._preview_bg_hint = ""
+        self._preview_svg_path = ""
         movie = QMovie(str(path))
         if not movie.isValid():
             self._set_preview_pixmap(None)
@@ -379,11 +390,12 @@ class WindowPreviewMetadataMixin:
         if suffix == ".gif" and self.bridge._autoplay_preview_animated_gifs_enabled():
             self._set_preview_movie(p, aspect_ratio)
             return
+        svg_path = str(preview_path) if Path(preview_path).suffix.lower() == ".svg" else ""
         img = _read_image_with_svg_support(preview_path)
         if img is None or img.isNull():
             self._set_preview_pixmap(None)
             return
-        self._set_preview_pixmap(QPixmap.fromImage(img), bg_hint=_thumbnail_bg_hint(preview_path))
+        self._set_preview_pixmap(QPixmap.fromImage(img), bg_hint=_thumbnail_bg_hint(preview_path), svg_path=svg_path)
         if suffix in VIDEO_EXTS:
             overlay = getattr(self, "sidebar_video_overlay", None)
             if overlay is not None:

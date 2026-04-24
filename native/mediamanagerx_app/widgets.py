@@ -813,6 +813,7 @@ class BulkSelectedFileRow(QWidget):
         *,
         content_height: int | None = None,
         placeholder_text: str = "Tags for this file",
+        thumbnail_bg_hint: str = "",
     ) -> None:
         super().__init__(parent)
         self._path = str(path or "")
@@ -845,7 +846,16 @@ class BulkSelectedFileRow(QWidget):
         self.thumb_lbl.setObjectName("bulkSelectedFileThumb")
         self.thumb_lbl.setFixedSize(self._content_height, self._content_height)
         self.thumb_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.thumb_lbl.setStyleSheet("QLabel#bulkSelectedFileThumb { border-radius: 6px; }")
+        thumb_hint = str(thumbnail_bg_hint or "").strip().lower()
+        if thumb_hint == "light":
+            thumb_bg = "#ffffff" if Theme.get_is_light() else "#f7f8fa"
+        elif thumb_hint == "dark":
+            thumb_bg = "#101114"
+        else:
+            thumb_bg = "transparent"
+        self.thumb_lbl.setStyleSheet(
+            f"QLabel#bulkSelectedFileThumb {{ background-color: {thumb_bg}; border-radius: 6px; }}"
+        )
         if thumbnail is not None and not thumbnail.isNull():
             self.thumb_lbl.setPixmap(thumbnail)
         else:

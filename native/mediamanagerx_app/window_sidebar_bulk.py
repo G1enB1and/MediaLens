@@ -672,14 +672,20 @@ class WindowSidebarBulkMixin:
             return None
         try:
             p = Path(clean)
-            try:
-                preview_path = self.bridge._local_ai_source_path(p)
-            except Exception:
+            if p.suffix.lower() == ".svg":
                 preview_path = p
-            image = _read_image_with_svg_support(preview_path)
+            else:
+                try:
+                    preview_path = self.bridge._local_ai_source_path(p)
+                except Exception:
+                    preview_path = p
+            target_size = max(72, int(content_height or BulkSelectedFileRow._TAG_CONTENT_HEIGHT))
+            if Path(preview_path).suffix.lower() == ".svg":
+                image = _render_svg_image(preview_path, QSize(target_size, target_size))
+            else:
+                image = _read_image_with_svg_support(preview_path)
             if image is None or image.isNull():
                 return None
-            target_size = max(72, int(content_height or BulkSelectedFileRow._TAG_CONTENT_HEIGHT))
             return QPixmap.fromImage(image).scaled(
                 target_size,
                 target_size,
@@ -688,6 +694,12 @@ class WindowSidebarBulkMixin:
             )
         except Exception:
             return None
+
+    def _bulk_selected_file_thumbnail_bg_hint(self, path: str) -> str:
+        try:
+            return _thumbnail_bg_hint(path)
+        except Exception:
+            return ""
 
     def _toggle_bulk_tag_section(self, toggle: QToolButton, widget: QWidget, checked: bool) -> None:
         if toggle is not None:
@@ -771,6 +783,7 @@ class WindowSidebarBulkMixin:
                 str(value_getter(tags, metadata) or ""),
                 content_height=content_height,
                 placeholder_text=placeholder_text,
+                thumbnail_bg_hint=self._bulk_selected_file_thumbnail_bg_hint(path),
             )
             item.setSizeHint(QSize(0, row.item_height()))
             row.tagsEdited.connect(edit_handler)
