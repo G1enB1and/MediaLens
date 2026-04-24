@@ -397,7 +397,7 @@ class CompareSlotCard(QFrame):
         self.name_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         header_layout.addWidget(self.name_label, 1)
 
-        self.clear_btn = QPushButton("X")
+        self.clear_btn = QPushButton("")
         self.clear_btn.setObjectName("compareSlotClearButton")
         self.clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.clear_btn.setFixedSize(22, 22)
@@ -529,6 +529,7 @@ class CompareSlotCard(QFrame):
 
     def apply_theme_styles(self, text: str, text_muted: str, accent_hex: str, accent_raw: str, thumb_bg: str, border: str) -> None:
         accent_color = QColor(accent_raw)
+        pure_accent = accent_color.name()
         is_light = Theme.get_is_light()
         btn_base = Theme.get_input_bg(accent_color)
         btn_hover = Theme.get_btn_save_hover(accent_color)
@@ -546,6 +547,8 @@ class CompareSlotCard(QFrame):
         trash_svg = (Path(__file__).with_name("web") / "icons" / trash_svg_name).as_posix()
         trash_red_svg = (Path(__file__).with_name("web") / "icons" / "trashcan-red.svg").as_posix()
         trash_disabled_svg = (Path(__file__).with_name("web") / "icons" / "trashcan-gray.svg").as_posix()
+        close_svg_name = "close-dark.svg" if is_light else "close.svg"
+        close_svg = (Path(__file__).with_name("web") / "icons" / close_svg_name).as_posix()
 
         name_font = QFont(self.name_label.font())
         name_font.setBold(True)
@@ -565,21 +568,20 @@ class CompareSlotCard(QFrame):
             f"""
             QPushButton#compareSlotClearButton {{
                 background-color: {close_btn_bg};
-                color: {close_btn_text};
                 border: 1px solid {btn_border};
                 border-radius: 4px;
-                font-weight: 700;
                 padding: 0px;
+                image: url('{close_svg}');
             }}
             QPushButton#compareSlotClearButton:hover {{
                 background-color: {close_btn_hover_bg};
-                color: {close_btn_hover_text};
-                border-color: {accent_raw};
+                border-color: {pure_accent};
+                image: url('{close_svg}');
             }}
             QPushButton#compareSlotClearButton:disabled {{
                 background-color: {close_btn_disabled_bg};
-                color: {close_btn_disabled_text};
                 border-color: {btn_border};
+                image: url('{close_svg}');
             }}
             """
         )

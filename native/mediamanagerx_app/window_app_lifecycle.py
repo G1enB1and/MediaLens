@@ -252,6 +252,8 @@ class WindowAppLifecycleMixin:
         close_btn_hover_bg = Theme.get_btn_save_hover(accent)
         close_btn_text = text if is_light else "#f2f2f2"
         close_btn_hover_text = text if is_light else "#ffffff"
+        close_icon_name = "close-dark.svg" if is_light else "close.svg"
+        close_icon_path = (Path(__file__).with_name("web") / "icons" / close_icon_name).as_posix()
 
         header_font = QFont(self.bottom_panel_header.font())
         header_font.setBold(True)
@@ -267,14 +269,18 @@ class WindowAppLifecycleMixin:
                 border: 1px solid {btn_border};
                 border-radius: 4px;
                 padding: 0px;
+                image: url('{close_icon_path}');
             }}
             QPushButton#bottomPanelCloseButton:hover {{
                 background-color: {close_btn_hover_bg};
                 color: {close_btn_hover_text};
                 border-color: {accent_color};
+                image: url('{close_icon_path}');
             }}
             """
         )
+        self.bottom_panel_close_btn.setText("")
+        self.bottom_panel_close_btn.setIcon(QIcon())
 
         self.compare_panel.apply_theme_styles(text, text_muted, compare_accent, accent_color, thumb_bg, thumb_border)
         try:
@@ -333,14 +339,22 @@ class WindowAppLifecycleMixin:
     def _toggle_panel_setting(self, qkey: str) -> None:
         try:
             cur = bool(self.bridge.settings.value(qkey, True, type=bool))
-            new = not cur
+            self._set_panel_setting(qkey, not cur)
+        except Exception:
+            pass
+
+    def _set_panel_setting(self, qkey: str, value: bool) -> None:
+        try:
+            new = bool(value)
             if not new:
                 if qkey == "ui/show_bottom_panel":
                     self._save_bottom_panel_height()
                 else:
                     self._save_main_panel_widths()
+            signal_key = qkey.replace("/", ".")
             self.bridge.settings.setValue(qkey, new)
-            self.bridge.uiFlagChanged.emit(qkey.replace("/", "."), new)
+            self._apply_ui_flag(signal_key, new)
+            self.bridge.uiFlagChanged.emit(signal_key, new)
             if qkey == "ui/show_bottom_panel":
                 self.bridge.compareStateChanged.emit(self.bridge.get_compare_state())
         except Exception:

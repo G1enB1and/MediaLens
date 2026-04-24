@@ -49,10 +49,14 @@ class WindowSidebarBulkMixin:
                     self.act_toggle_right_panel.setChecked(bool(value))
                 self._sync_menu_bar_controls()
             elif key == "ui.show_bottom_panel":
+                was_visible = bool(self.bottom_panel.isVisible())
                 if not bool(value):
                     self._save_bottom_panel_height()
                 self.bottom_panel.setVisible(bool(value))
                 QTimer.singleShot(0, self._restore_center_splitter_sizes)
+                if bool(value) and not was_visible:
+                    QTimer.singleShot(0, self._seed_compare_from_first_review_group)
+                    QTimer.singleShot(50, self._refresh_compare_nav_buttons)
                 if hasattr(self, "act_toggle_bottom_panel"):
                     self.act_toggle_bottom_panel.setChecked(bool(value))
                 self._sync_menu_bar_controls()
@@ -423,8 +427,116 @@ class WindowSidebarBulkMixin:
             self.web.page().runJavaScript(
                 f"try{{ window.__mmx_jumpReviewGroup && window.__mmx_jumpReviewGroup({step}); }}catch(e){{}}"
             )
+            QTimer.singleShot(50, self._refresh_compare_nav_buttons)
+            QTimer.singleShot(200, self._refresh_compare_nav_buttons)
         except Exception:
             pass
+
+    def _jump_review_image(self, slot_name: str, direction: int) -> None:
+        slot = "right" if str(slot_name or "").strip().lower() == "right" else "left"
+        step = -1 if int(direction or 0) < 0 else 1
+        try:
+            self.web.page().runJavaScript(
+                f"try{{ window.__mmx_jumpReviewImage && window.__mmx_jumpReviewImage('{slot}', {step}); }}catch(e){{}}"
+            )
+            QTimer.singleShot(50, self._refresh_compare_nav_buttons)
+            QTimer.singleShot(200, self._refresh_compare_nav_buttons)
+        except Exception:
+            pass
+
+    def _seed_compare_from_first_review_group(self) -> None:
+        try:
+            if not bool(self.bridge.settings.value("ui/show_bottom_panel", True, type=bool)):
+                return
+            self.web.page().runJavaScript(
+                "try{ window.__mmx_seedCompareFromCurrentReviewGroup ? window.__mmx_seedCompareFromCurrentReviewGroup() : (window.__mmx_seedCompareFromFirstReviewGroup && window.__mmx_seedCompareFromFirstReviewGroup()); }catch(e){}"
+            )
+        except Exception:
+            pass
+
+    def _schedule_startup_compare_seed(self) -> None:
+        try:
+            if getattr(self, "_startup_compare_seed_scheduled", False):
+                return
+            self._startup_compare_seed_scheduled = True
+            if not bool(self.bridge.settings.value("ui/show_bottom_panel", True, type=bool)):
+                return
+            for delay_ms in (300, 900, 1800, 3200):
+                QTimer.singleShot(delay_ms, self._seed_compare_from_first_review_group_if_empty)
+        except Exception:
+            pass
+
+    def _seed_compare_from_first_review_group_if_empty(self) -> None:
+        try:
+            if not bool(self.bridge.settings.value("ui/show_bottom_panel", True, type=bool)):
+                return
+            state = self.bridge.get_compare_state()
+            left_path = str((state.get("left") or {}).get("path") or "")
+            right_path = str((state.get("right") or {}).get("path") or "")
+            if left_path or right_path:
+                return
+            self._seed_compare_from_first_review_group()
+            QTimer.singleShot(120, self._refresh_compare_nav_buttons)
+        except Exception:
+            pass
+
+    def _refresh_compare_nav_buttons(self) -> None:
+        if not hasattr(self, "web"):
+            return
+
+        def _apply(state) -> None:
+            if isinstance(state, str):
+                try:
+                    parsed = json.loads(state)
+                except Exception:
+                    parsed = {}
+                self._apply_compare_nav_state(parsed if isinstance(parsed, dict) else {})
+                return
+            self._apply_compare_nav_state(state if isinstance(state, dict) else {})
+
+        try:
+            self.web.page().runJavaScript(
+                "(() => { try { return JSON.stringify(window.__mmx_getReviewCompareNavState ? window.__mmx_getReviewCompareNavState() : {}); } catch (e) { return '{}'; } })()",
+                _apply,
+            )
+        except Exception:
+            self._apply_compare_nav_state({})
+
+    def _apply_compare_nav_state(self, state: dict) -> None:
+        if not state:
+            for attr in ("bottom_panel_prev_group_btn", "bottom_panel_next_group_btn"):
+                button = getattr(self, attr, None)
+                if button is not None:
+                    button.setEnabled(True)
+                    button.setCursor(Qt.CursorShape.PointingHandCursor)
+            for attr, tip in (
+                ("bottom_panel_left_prev_image_btn", "The left slot is already at the first available image in this group."),
+                ("bottom_panel_left_next_image_btn", "You're on the last image in the group for the left slot."),
+                ("bottom_panel_right_prev_image_btn", "The right slot is already at the first available image in this group."),
+                ("bottom_panel_right_next_image_btn", "You're on the last image in the group for the right slot."),
+            ):
+                button = getattr(self, attr, None)
+                if button is not None:
+                    button.setEnabled(False)
+                    button.setCursor(Qt.CursorShape.ForbiddenCursor)
+                    button.setToolTip(tip)
+            return
+        pairs = (
+            ("bottom_panel_prev_group_btn", "previousGroup", "Jump to Previous Group", "You're on the first group."),
+            ("bottom_panel_next_group_btn", "nextGroup", "Jump to Next Group", "You're on the last group."),
+            ("bottom_panel_left_prev_image_btn", "leftPrevious", "Load the previous image into the left comparison slot", "The left slot is already at the first available image in this group."),
+            ("bottom_panel_left_next_image_btn", "leftNext", "Load the next image into the left comparison slot", "You're on the last image in the group for the left slot."),
+            ("bottom_panel_right_prev_image_btn", "rightPrevious", "Load the previous image into the right comparison slot", "The right slot is already at the first available image in this group."),
+            ("bottom_panel_right_next_image_btn", "rightNext", "Load the next image into the right comparison slot", "You're on the last image in the group for the right slot."),
+        )
+        for attr, key, enabled_tip, disabled_tip in pairs:
+            button = getattr(self, attr, None)
+            if button is None:
+                continue
+            enabled = bool(state.get(key))
+            button.setEnabled(enabled)
+            button.setCursor(Qt.CursorShape.PointingHandCursor if enabled else Qt.CursorShape.ForbiddenCursor)
+            button.setToolTip(enabled_tip if enabled else disabled_tip)
 
     def _open_bulk_tag_editor_from_menu(self, _checked: bool = False) -> None:
         try:

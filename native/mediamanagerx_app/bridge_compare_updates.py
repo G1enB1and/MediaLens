@@ -57,9 +57,7 @@ class BridgeCompareUpdatesMixin:
                     height = max(height, size.height())
             except Exception:
                 pass
-        file_size = int(media.get("file_size") or 0)
-        if file_size <= 0 and stat is not None:
-            file_size = int(stat.st_size)
+        file_size = int(stat.st_size) if stat is not None else int(media.get("file_size") or 0)
         modified_time = self._iso_to_ns(media.get("modified_time"))
         file_created_time = self._iso_to_ns(media.get("file_created_time"))
         original_file_date = self._iso_to_ns(media.get("original_file_date"))

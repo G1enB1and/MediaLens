@@ -292,7 +292,8 @@ class WindowMenuShortcutMixin:
         button.setIconSize(QSize(18, 18))
 
     def _sync_close_button_icons(self) -> None:
-        icon_path = (Path(__file__).with_name("web") / "icons" / "close.svg").as_posix()
+        icon_name = "close-dark.svg" if Theme.get_is_light() else "close.svg"
+        icon_path = (Path(__file__).with_name("web") / "icons" / icon_name).as_posix()
         icon = QIcon(icon_path)
         for button in (
             getattr(self, "tag_list_close_btn", None),

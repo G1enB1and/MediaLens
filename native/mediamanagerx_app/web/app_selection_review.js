@@ -1203,6 +1203,20 @@ function focusReviewGroup(groupKey) {
   return true;
 }
 
+function seedCompareFromFirstReviewGroup() {
+  const groups = getReviewGroupsForNavigation();
+  if (!groups.length) return false;
+  return focusReviewGroup(groups[0].key);
+}
+
+function seedCompareFromCurrentReviewGroup() {
+  const groups = getReviewGroupsForNavigation();
+  if (!groups.length) return false;
+  const currentKey = getCurrentReviewGroupKeyForNavigation();
+  const group = groups.find(entry => String(entry.key || '') === currentKey) || groups[0];
+  return focusReviewGroup(group.key);
+}
+
 function jumpReviewGroup(direction) {
   const groups = getReviewGroupsForNavigation();
   if (!groups.length) return false;
@@ -1217,8 +1231,104 @@ function jumpReviewGroup(direction) {
   return focusReviewGroup(groups[targetIndex].key);
 }
 
+function getReviewCompareNavContext() {
+  const groups = getReviewGroupsForNavigation();
+  const currentKey = getCurrentReviewGroupKeyForNavigation();
+  const currentIndex = groups.findIndex(group => String(group.key || '') === currentKey);
+  const group = currentIndex >= 0 ? groups[currentIndex] : null;
+  const items = group && Array.isArray(group.items) ? group.items : [];
+  const leftPath = compareSlotPath('left');
+  const rightPath = compareSlotPath('right');
+  const normalizedLeft = normalizeMediaPath(leftPath);
+  const normalizedRight = normalizeMediaPath(rightPath);
+  const indexForPath = (path) => {
+    const normalized = normalizeMediaPath(path);
+    if (!normalized) return -1;
+    return items.findIndex(item => normalizeMediaPath(item && item.path) === normalized);
+  };
+  return {
+    groups,
+    currentIndex,
+    group,
+    items,
+    leftPath,
+    rightPath,
+    normalizedLeft,
+    normalizedRight,
+    leftIndex: indexForPath(leftPath),
+    rightIndex: indexForPath(rightPath),
+  };
+}
+
+function findReviewImageStepPath(items, currentIndex, otherIndex, direction) {
+  if (!Array.isArray(items) || currentIndex < 0) return '';
+  const step = Number(direction) < 0 ? -1 : 1;
+  for (let index = currentIndex + step; index >= 0 && index < items.length; index += step) {
+    if (index === otherIndex) continue;
+    const path = String(items[index] && items[index].path || '');
+    if (path) return path;
+  }
+  return '';
+}
+
+function getReviewCompareNavState() {
+  const ctx = getReviewCompareNavContext();
+  const leftPreviousPath = findReviewImageStepPath(ctx.items, ctx.leftIndex, ctx.rightIndex, -1);
+  const leftNextPath = findReviewImageStepPath(ctx.items, ctx.leftIndex, ctx.rightIndex, 1);
+  const rightPreviousPath = findReviewImageStepPath(ctx.items, ctx.rightIndex, ctx.leftIndex, -1);
+  const rightNextPath = findReviewImageStepPath(ctx.items, ctx.rightIndex, ctx.leftIndex, 1);
+  return {
+    previousGroup: ctx.currentIndex > 0,
+    nextGroup: ctx.currentIndex >= 0 && ctx.currentIndex < ctx.groups.length - 1,
+    leftPrevious: !!leftPreviousPath,
+    leftNext: !!leftNextPath,
+    rightPrevious: !!rightPreviousPath,
+    rightNext: !!rightNextPath,
+    leftPreviousPath,
+    leftNextPath,
+    rightPreviousPath,
+    rightNextPath,
+  };
+}
+
+function jumpReviewImage(slotName, direction) {
+  if (!gBridge || !gBridge.set_compare_path) return false;
+  const slot = String(slotName || '').trim().toLowerCase() === 'right' ? 'right' : 'left';
+  const step = Number(direction) < 0 ? -1 : 1;
+  const ctx = getReviewCompareNavContext();
+  const currentIndex = slot === 'right' ? ctx.rightIndex : ctx.leftIndex;
+  const otherIndex = slot === 'right' ? ctx.leftIndex : ctx.rightIndex;
+  const nextPath = findReviewImageStepPath(ctx.items, currentIndex, otherIndex, step);
+  if (!nextPath) return false;
+  gBridge.set_compare_path(slot, nextPath);
+  const key = String(ctx.group && ctx.group.key || '').trim();
+  if (key) {
+    const keepPaths = getDuplicateKeepPaths(key).slice().sort();
+    const deletePaths = getDuplicateDeletePaths(key).slice().sort();
+    const bestPath = getDuplicateBestPath(key);
+    window.setTimeout(() => syncCompareStateFromReviewGroup(key, keepPaths, deletePaths, bestPath), 0);
+  }
+  return true;
+}
+
+window.__mmx_seedCompareFromFirstReviewGroup = function () {
+  return seedCompareFromFirstReviewGroup();
+};
+
+window.__mmx_seedCompareFromCurrentReviewGroup = function () {
+  return seedCompareFromCurrentReviewGroup();
+};
+
 window.__mmx_jumpReviewGroup = function (direction) {
   return jumpReviewGroup(direction);
+};
+
+window.__mmx_jumpReviewImage = function (slotName, direction) {
+  return jumpReviewImage(slotName, direction);
+};
+
+window.__mmx_getReviewCompareNavState = function () {
+  return getReviewCompareNavState();
 };
 
 function captureCurrentGroupScrollAnchor(excludedPaths = null) {

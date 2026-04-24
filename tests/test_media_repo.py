@@ -499,6 +499,58 @@ class TestMediaRepo(unittest.TestCase):
         self.assertEqual(ranked[1]["path"], "c:/media/misc/file-c.png")
         self.assertEqual(ranked[2]["path"], "c:/media/tests/nested/deeper/file-a.png")
 
+    def test_compare_entry_uses_live_file_size_over_stale_database_size(self) -> None:
+        file_path = self.tmp_dir / "compare-stale-size.jpg"
+        file_path.write_bytes(b"same-size-current")
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("PRAGMA journal_mode=MEMORY;")
+            add_media_item(conn, str(file_path), "image")
+            conn.execute(
+                "UPDATE media_items SET file_size_bytes = ? WHERE path = ?",
+                (999_999, str(file_path).replace("\\", "/").lower()),
+            )
+            conn.commit()
+            bridge = _build_test_bridge(conn)
+
+            entry = bridge._build_compare_entry(str(file_path))
+
+        self.assertEqual(entry["file_size"], file_path.stat().st_size)
+        self.assertEqual(entry["file_size_text"], f"{file_path.stat().st_size} B")
+
+    def test_compare_payload_does_not_mark_equal_live_sizes_as_size_winners(self) -> None:
+        left_path = self.tmp_dir / "compare-equal-left.jpg"
+        right_path = self.tmp_dir / "compare-equal-right.jpg"
+        left_path.write_bytes(b"equal-live-size")
+        right_path.write_bytes(b"equal-live-size")
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("PRAGMA journal_mode=MEMORY;")
+            add_media_item(conn, str(left_path), "image")
+            add_media_item(conn, str(right_path), "image")
+            conn.execute(
+                "UPDATE media_items SET file_size_bytes = ? WHERE path = ?",
+                (100, str(left_path).replace("\\", "/").lower()),
+            )
+            conn.execute(
+                "UPDATE media_items SET file_size_bytes = ? WHERE path = ?",
+                (200, str(right_path).replace("\\", "/").lower()),
+            )
+            conn.commit()
+            bridge = _build_test_bridge(conn)
+            bridge._compare_paths = {"left": str(left_path), "right": str(right_path)}
+            bridge._compare_keep_paths = set()
+            bridge._compare_delete_paths = set()
+            bridge._compare_best_path = ""
+            bridge._compare_selection_revision = 0
+
+            payload = bridge._build_compare_payload()
+
+        reasons = (
+            list(payload["left"].get("duplicate_category_reasons") or [])
+            + list(payload["right"].get("duplicate_category_reasons") or [])
+        )
+        self.assertNotIn("Largest file size", reasons)
+        self.assertNotIn("Smallest file size", reasons)
+
 
 if __name__ == '__main__':
     unittest.main()

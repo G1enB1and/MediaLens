@@ -78,6 +78,7 @@ class MainWindow(WindowAppLifecycleMixin, WindowNativeActionsMixin, WindowPrevie
         self.bridge.videoPreprocessingStatus.connect(self._on_video_preprocessing_status)
         self.debugLogUploadFinished.connect(self._on_debug_log_upload_finished)
         self.bridge.uiFlagChanged.connect(self._apply_ui_flag)
+        self.bridge.compareStateChanged.connect(lambda _state: QTimer.singleShot(0, self._refresh_compare_nav_buttons))
         self.bridge.metadataRequested.connect(self._schedule_show_metadata_for_path)
         self.videoSidebarMetadataReady.connect(self._on_video_sidebar_metadata_ready)
         self.videoSidebarPosterReady.connect(self._on_video_sidebar_poster_ready)

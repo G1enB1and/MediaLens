@@ -558,6 +558,15 @@ class WindowNativeActionsMixin:
             self.bottom_panel_prev_group_btn.setIcon(self._native_arrow_icon("left"))
         if hasattr(self, "bottom_panel_next_group_btn"):
             self.bottom_panel_next_group_btn.setIcon(self._native_arrow_icon("right"))
+        for attr, direction in (
+            ("bottom_panel_left_prev_image_btn", "left"),
+            ("bottom_panel_left_next_image_btn", "right"),
+            ("bottom_panel_right_prev_image_btn", "left"),
+            ("bottom_panel_right_next_image_btn", "right"),
+        ):
+            button = getattr(self, attr, None)
+            if button is not None:
+                button.setIcon(self._native_arrow_icon(direction))
         for toggle in (
             getattr(self, "bulk_common_tags_toggle", None),
             getattr(self, "bulk_uncommon_tags_toggle", None),
@@ -832,6 +841,10 @@ class WindowNativeActionsMixin:
         self.right_panel.setAutoFillBackground(True)
         self.right_panel.setPalette(right_palette)
         if hasattr(self, "bottom_panel"):
+            disabled_nav_bg = "#d7dbe2" if is_light else "#303030"
+            disabled_nav_text = "#7b828c" if is_light else "#b8b8b8"
+            disabled_nav_border = "#b8bec8" if is_light else "#4a4a4a"
+            disabled_nav_hover_border = "#a7afbb" if is_light else "#5c5c5c"
             self.bottom_panel.setStyleSheet(f"""
                 QWidget#bottomPanel {{
                     background-color: {sb_bg_str};
@@ -905,6 +918,19 @@ class WindowNativeActionsMixin:
                     min-height: 22px;
                     max-height: 22px;
                     padding: 0px 12px;
+                }}
+                QPushButton#bottomPanelGroupNavButton:hover {{
+                    border-color: {accent.name()};
+                }}
+                QPushButton#bottomPanelGroupNavButton:disabled {{
+                    background-color: {disabled_nav_bg};
+                    color: {disabled_nav_text};
+                    border-color: {disabled_nav_border};
+                }}
+                QPushButton#bottomPanelGroupNavButton:disabled:hover {{
+                    background-color: {disabled_nav_bg};
+                    color: {disabled_nav_text};
+                    border-color: {disabled_nav_hover_border};
                 }}
                 {scrollbar_style}
             """)
