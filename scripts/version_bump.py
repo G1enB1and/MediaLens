@@ -50,6 +50,10 @@ def main():
     # 2. native/mediamanagerx_app/main.py
     main_py = root / "native" / "mediamanagerx_app" / "main.py"
     update_file(main_py, r'__version__ = "v[\d.]+"', f'__version__ = "v{new_version}"')
+
+    # 2b. native/mediamanagerx_app/common.py
+    common_py = root / "native" / "mediamanagerx_app" / "common.py"
+    update_file(common_py, r'__version__ = "v[\d.]+"', f'__version__ = "v{new_version}"')
     
     # 3. installer.iss
     iss = root / "installer.iss"

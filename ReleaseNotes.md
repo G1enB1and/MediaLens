@@ -1,20 +1,24 @@
-## MediaLens v1.1.35
+## MediaLens v1.1.36
 
 ### Summary
 
-This release makes duplicate and similar-image review smoother and faster. The comparison panel now opens into the right review context, adds practical image-by-image navigation, and bulk editors feel more responsive with large selections.
+This release focuses on startup reliability and a clearer OCR setup experience. MediaLens now avoids a Windows startup path that could crash just after the splash screen, while OCR settings and model status are easier to understand and manage.
 
 ### Highlights
 
-- Move through duplicate and similar groups directly from the comparison panel with new previous and next image controls.
-- Reopen the comparison panel and continue from the review group you were working on.
-- Bulk tag and caption editors render large selections faster by loading thumbnails only as needed.
+- Startup is more reliable on affected Windows installs that previously crashed just after the splash screen.
+- OCR setup is easier to review with clearer Fast OCR, AI OCR, and Paddle runtime status.
+- Review workflows now make it faster to generate OCR text and mark files as having no text.
 
 ### Improvements
 
-- Comparison labels now use live file sizes, so equal-size files are no longer shown as largest or smallest winners.
-- Navigation buttons now have clearer disabled states, helpful tooltips, and styling that better matches the rest of MediaLens.
-- The bottom comparison panel no longer reopens itself after you close it during duplicate or similar review.
+- Settings > AI opens more quickly because model status checks now run only when needed.
+- Paddle OCR status now shows whether GPU is actually active.
+- Review-window OCR generation updates in place without reloading and re-sorting the review list.
+
+### Notes
+
+- Windows builds now keep WebEngine's default page during startup unless diagnostic custom-page logging is explicitly enabled.
 
 Full Changelog:
 https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md

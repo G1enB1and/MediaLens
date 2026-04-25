@@ -1,6 +1,42 @@
 # Change Log
 
-## v1.1.35 (Current)
+## v1.1.36 (Current)
+
+### Summary
+
+This release focuses on startup reliability and a clearer OCR setup experience. MediaLens now avoids a Windows WebEngine startup path that could crash just after the splash screen, while OCR settings and model status are easier to understand and manage.
+
+### Highlights
+
+- Startup is more reliable on affected Windows installs that previously crashed just after the splash screen.
+- OCR setup is easier to review with clearer Fast OCR, AI OCR, and Paddle runtime status.
+- Review workflows now make it faster to generate OCR text and mark files as having no text.
+
+### Added
+
+- Added Paddle OCR to the Local AI Models status dialog with status, progress, install, uninstall, and delete-cache controls.
+- Added OCR scanner scope options for processing either files marked as text detected or all files in scope.
+- Added Fast OCR and AI OCR generate buttons to the OCR review workflow.
+- Added a No Text review action that clears the selected OCR winner and marks the file as no text detected.
+- Added startup diagnostics that log whether MediaLens is using the default or custom WebEngine page.
+
+### Changed
+
+- Changed Windows frozen builds to keep WebEngine's default page during startup, avoiding a native crash path seen on some installed systems.
+- Changed splash startup handling to avoid forcing an immediate Qt event pass before the main window is built.
+- Changed Settings > AI to refresh lazily so opening settings no longer runs expensive status checks for every page up front.
+- Changed OCR settings into clearer Tags, Descriptions, and Text OCR tabs with model status and editable prompts.
+- Changed Paddle OCR status reporting to show whether GPU is actually active instead of only showing the preferred mode.
+- Changed review-window OCR generation to update the OCR cell in place without reloading and re-sorting the review list.
+- Changed file-tree and pinned-folder hidden-state lookups to keep rendering if a database lookup fails instead of allowing a Qt model callback to terminate the app.
+
+### Removed
+
+- Removed OCR Accurate, leaving Fast OCR through Paddle and AI OCR through Gemma 4.
+
+---
+
+## v1.1.35
 
 ### Summary
 
