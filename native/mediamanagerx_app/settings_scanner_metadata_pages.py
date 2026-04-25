@@ -88,8 +88,11 @@ class ScannersSettingsPage(SettingsPage):
             source_buttons.setContentsMargins(0, 0, 0, 0)
             add_source_btn = QPushButton("Add Folder")
             remove_source_btn = QPushButton("Remove")
+            add_above_source_btn = QPushButton("Add All Folders From List Above")
+            add_above_source_btn.setVisible(key == "ocr_text")
             source_buttons.addWidget(add_source_btn)
             source_buttons.addWidget(remove_source_btn)
+            source_buttons.addWidget(add_above_source_btn)
             source_buttons.addStretch(1)
             source_layout.addWidget(source_note)
             source_layout.addWidget(source_list)
@@ -136,6 +139,7 @@ class ScannersSettingsPage(SettingsPage):
                 "source_list": source_list,
                 "add_source": add_source_btn,
                 "remove_source": remove_source_btn,
+                "add_above_source": add_above_source_btn,
                 "run": run_btn,
                 "cancel": cancel_btn,
                 "review": review_btn,
@@ -150,6 +154,7 @@ class ScannersSettingsPage(SettingsPage):
             interval.valueChanged.connect(lambda value, scanner_key=key: self._set_interval(scanner_key, int(value)))
             add_source_btn.clicked.connect(lambda _checked=False, scanner_key=key: self._add_source_folder(scanner_key))
             remove_source_btn.clicked.connect(lambda _checked=False, scanner_key=key: self._remove_selected_source_folders(scanner_key))
+            add_above_source_btn.clicked.connect(lambda _checked=False, scanner_key=key: self._add_folders_from_list_above(scanner_key))
             run_btn.clicked.connect(lambda _checked=False, scanner_key=key: self._run_now(scanner_key))
             cancel_btn.clicked.connect(lambda _checked=False, scanner_key=key: self._cancel(scanner_key))
             review_btn.clicked.connect(self._open_ocr_review)
@@ -241,6 +246,14 @@ class ScannersSettingsPage(SettingsPage):
         self._save_source_folders(scanner_key, folders)
         self._set_source_folders(scanner_key, folders)
 
+    def _add_folders_from_list_above(self, scanner_key: str) -> None:
+        if str(scanner_key or "") != "ocr_text":
+            return
+        folders = self._source_folders(scanner_key)
+        folders.extend(self._source_folders("text_detection"))
+        self._save_source_folders(scanner_key, folders)
+        self._set_source_folders(scanner_key, folders)
+
     def _set_source_folders(self, scanner_key: str, folders: list[str]) -> None:
         widgets = self._widgets.get(scanner_key) or {}
         source_list = widgets.get("source_list")
@@ -286,7 +299,7 @@ class ScannersSettingsPage(SettingsPage):
             widget = widgets.get(child_key)
             if widget is not None:
                 widget.setEnabled(enabled)
-        for child_key in ("source_group", "source_list", "add_source", "remove_source"):
+        for child_key in ("source_group", "source_list", "add_source", "remove_source", "add_above_source"):
             widget = widgets.get(child_key)
             if widget is not None:
                 widget.setEnabled(enabled)
