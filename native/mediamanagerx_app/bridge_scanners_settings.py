@@ -271,12 +271,12 @@ class BridgeScannersSettingsMixin:
     def _scanner_status_payload(self, scanner_key: str) -> dict:
         enabled = self._scanner_enabled(scanner_key)
         status = str(self.settings.value(self._scanner_setting_key(scanner_key, "status"), "Idle", type=str) or "Idle")
-        if not enabled:
-            status = "Disabled"
+        running = bool(scanner_key == "ocr_text" and getattr(self, "_ocr_text_processing_active", False))
         return {
             "key": scanner_key,
             "name": self._scanner_display_name(scanner_key),
             "enabled": enabled,
+            "running": running,
             "interval_hours": self._scanner_interval_hours(scanner_key),
             "last_run_utc": self._scanner_last_run_utc(scanner_key),
             "status": status,
@@ -733,6 +733,10 @@ class BridgeScannersSettingsMixin:
         if not entries:
             self._set_scanner_status("ocr_text", "Idle (no active scope)")
             return False
+        try:
+            self._ocr_text_cancel.clear()
+        except Exception:
+            self._ocr_text_cancel = threading.Event()
 
         def work() -> None:
             self._ocr_text_processing_active = True
@@ -741,18 +745,37 @@ class BridgeScannersSettingsMixin:
             saved = 0
             try:
                 from app.mediamanager.db.media_repo import add_media_item
+                from app.mediamanager.db.ocr_repo import ensure_ocr_tables
 
-                eligible = [
-                    entry for entry in entries
-                    if not entry.get("is_folder")
-                    and self._effective_text_detected(entry)
-                    and (force or not str(entry.get("detected_text") or "").strip())
-                ]
+                ensure_ocr_tables(self.conn)
+
+                def has_fast_ocr(media_id: int) -> bool:
+                    try:
+                        row = self.conn.execute(
+                            "SELECT 1 FROM media_ocr_results WHERE media_id = ? AND source = ? LIMIT 1",
+                            (int(media_id), "paddle_fast"),
+                        ).fetchone()
+                        return bool(row)
+                    except Exception:
+                        return False
+
+                eligible = []
+                for entry in entries:
+                    if entry.get("is_folder") or not self._effective_text_detected(entry):
+                        continue
+                    media_id = int(entry.get("id") or -1)
+                    if media_id >= 0 and has_fast_ocr(media_id):
+                        continue
+                    if media_id < 0 or force or not str(entry.get("detected_text") or "").strip():
+                        eligible.append(entry)
                 total = len(eligible)
                 if total <= 0:
                     self._set_scanner_status("ocr_text", "Idle (no eligible files)", mark_run=True)
                     return
                 for entry in eligible:
+                    if getattr(self, "_ocr_text_cancel", None) is not None and self._ocr_text_cancel.is_set():
+                        self._set_scanner_status("ocr_text", f"Canceled ({processed} / {total}, {saved} saved)", mark_run=True)
+                        return
                     processed += 1
                     self._set_scanner_status("ocr_text", f"Running {processed} / {total}")
                     path = str(entry.get("path") or "").strip()
@@ -786,9 +809,26 @@ class BridgeScannersSettingsMixin:
                 self._set_scanner_status("ocr_text", f"Error: {exc}")
             finally:
                 self._ocr_text_processing_active = False
+                try:
+                    self._ocr_text_cancel.clear()
+                except Exception:
+                    pass
+                try:
+                    self.scannerStatusChanged.emit("ocr_text", self._scanner_status_payload("ocr_text"))
+                except Exception:
+                    pass
 
         threading.Thread(target=work, daemon=True, name="ocr-text-scanner").start()
         return True
+
+    @Slot(str, result=bool)
+    def cancel_scanner(self, scanner_key: str) -> bool:
+        key = str(scanner_key or "").strip()
+        if key == "ocr_text" and self._ocr_text_processing_active:
+            self._ocr_text_cancel.set()
+            self._set_scanner_status("ocr_text", "Canceling...")
+            return True
+        return False
 
     def _backfill_scope_content_hashes(self, entries: list[dict]) -> None:
         from app.mediamanager.utils.hashing import calculate_media_content_hash

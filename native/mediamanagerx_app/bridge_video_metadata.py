@@ -490,6 +490,29 @@ class BridgeVideoMetadataMixin:
             self._log(f"Keep OCR result failed: {exc}")
             return False
 
+    @Slot(int, str, result=bool)
+    def keep_user_ocr_text(self, media_id: int, text: str) -> bool:
+        from app.mediamanager.db.ocr_repo import add_ocr_result
+
+        try:
+            clean_text = str(text or "").strip()
+            add_ocr_result(
+                self.conn,
+                int(media_id),
+                source="user",
+                text=clean_text,
+                confidence=1.0,
+                engine_version="manual_review",
+                preprocess_profile="user_edit",
+                select_as_winner=True,
+                selected_by="user",
+            )
+            self.galleryScopeChanged.emit()
+            return True
+        except Exception as exc:
+            self._log(f"Keep edited OCR text failed: {exc}")
+            return False
+
 
 
 __all__ = [name for name in globals() if not (name.startswith("__") and name.endswith("__"))]

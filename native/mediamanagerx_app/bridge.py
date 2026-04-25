@@ -194,6 +194,7 @@ class Bridge(BridgeMediaListingScanMixin, BridgeTagsMetadataMixin, BridgeLocalAi
         self.settings = app_settings()
         Theme.set_theme_mode(str(self.settings.value("ui/theme_mode", "dark", type=str) or "dark"))
         self._ocr_text_processing_active = False
+        self._ocr_text_cancel = threading.Event()
         self._scanner_schedule_timer = QTimer(self)
         self._scanner_schedule_timer.setInterval(60_000)
         self._scanner_schedule_timer.timeout.connect(self._check_scanner_schedules)

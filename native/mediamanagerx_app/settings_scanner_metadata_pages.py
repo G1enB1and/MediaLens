@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from native.mediamanagerx_app.image_utils import _read_image_with_svg_support, _render_svg_image
 from native.mediamanagerx_app.settings_common import *
 from native.mediamanagerx_app.settings_general_pages import *
 
@@ -39,9 +40,13 @@ class ScannersSettingsPage(SettingsPage):
             action_row = QHBoxLayout()
             action_row.setContentsMargins(0, 0, 0, 0)
             run_btn = QPushButton("Run Now")
+            cancel_btn = QPushButton("Cancel")
+            cancel_btn.setVisible(key == "ocr_text")
+            cancel_btn.setEnabled(False)
             status_label = QLabel("Status: Idle")
             status_label.setWordWrap(True)
             action_row.addWidget(run_btn)
+            action_row.addWidget(cancel_btn)
             action_row.addWidget(status_label, 1)
 
             last_run_label = QLabel("Last run: Never")
@@ -61,6 +66,7 @@ class ScannersSettingsPage(SettingsPage):
                 "enable": enable_toggle,
                 "interval": interval,
                 "run": run_btn,
+                "cancel": cancel_btn,
                 "review": review_btn,
                 "status": status_label,
                 "last_run": last_run_label,
@@ -68,6 +74,7 @@ class ScannersSettingsPage(SettingsPage):
             enable_toggle.toggled.connect(lambda checked, scanner_key=key: self._set_enabled(scanner_key, checked))
             interval.valueChanged.connect(lambda value, scanner_key=key: self._set_interval(scanner_key, int(value)))
             run_btn.clicked.connect(lambda _checked=False, scanner_key=key: self._run_now(scanner_key))
+            cancel_btn.clicked.connect(lambda _checked=False, scanner_key=key: self._cancel(scanner_key))
             review_btn.clicked.connect(self._open_ocr_review)
 
         layout.addStretch(1)
@@ -108,6 +115,17 @@ class ScannersSettingsPage(SettingsPage):
             if isinstance(status, QLabel):
                 status.setText("Status: Error starting scanner")
 
+    def _cancel(self, scanner_key: str) -> None:
+        widgets = self._widgets.get(scanner_key) or {}
+        status = widgets.get("status")
+        try:
+            canceled = bool(self.bridge.cancel_scanner(scanner_key)) if hasattr(self.bridge, "cancel_scanner") else False
+            if not canceled and isinstance(status, QLabel):
+                status.setText("Status: Nothing to cancel")
+        except Exception:
+            if isinstance(status, QLabel):
+                status.setText("Status: Error canceling scanner")
+
     def _sync_enabled_state(self, scanner_key: str) -> None:
         widgets = self._widgets.get(scanner_key) or {}
         enable = widgets.get("enable")
@@ -119,6 +137,9 @@ class ScannersSettingsPage(SettingsPage):
         run_btn = widgets.get("run")
         if run_btn is not None:
             run_btn.setEnabled(True)
+        cancel_btn = widgets.get("cancel")
+        if cancel_btn is not None:
+            cancel_btn.setEnabled(False)
 
     def _open_ocr_review(self) -> None:
         dialog = OcrReviewDialog(self)
@@ -134,6 +155,8 @@ class ScannersSettingsPage(SettingsPage):
         interval = widgets.get("interval")
         status = widgets.get("status")
         last_run = widgets.get("last_run")
+        cancel_btn = widgets.get("cancel")
+        running = bool(payload.get("running"))
         if isinstance(enable, QCheckBox):
             with QSignalBlocker(enable):
                 enable.setChecked(enabled)
@@ -145,6 +168,8 @@ class ScannersSettingsPage(SettingsPage):
         if isinstance(last_run, QLabel):
             last_run.setText(f"Last run: {self._format_last_run(payload.get('last_run_utc'))}")
         self._sync_enabled_state(scanner_key)
+        if cancel_btn is not None:
+            cancel_btn.setEnabled(running)
 
     def _on_scanner_status_changed(self, scanner_key: str, payload: dict) -> None:
         self._apply_status(str(scanner_key or ""), dict(payload or {}))
@@ -243,18 +268,25 @@ class OcrReviewDialog(QDialog):
         preview.setMinimumSize(180, 120)
         preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         preview.setText("Preview")
-        try:
-            pixmap = QPixmap(str(item.get("path") or ""))
-            if not pixmap.isNull():
-                preview.setPixmap(pixmap.scaled(220, 160, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-        except Exception:
-            pass
+        pixmap = self._review_preview_pixmap(str(item.get("path") or ""))
+        if pixmap is not None and not pixmap.isNull():
+            preview.setText("")
+            preview.setPixmap(pixmap)
         grid.addWidget(preview, 0, 0)
 
         results = list(item.get("results") or [])
         latest_by_source: dict[str, dict] = {}
         for result in results:
             latest_by_source.setdefault(str(result.get("source") or ""), dict(result or {}))
+        if "user" not in latest_by_source:
+            winner = dict(item.get("winner") or {})
+            latest_by_source["user"] = {
+                "id": 0,
+                "media_id": int(item.get("media_id") or 0),
+                "source": "user",
+                "text": str(item.get("detected_text") or winner.get("text") or ""),
+                "confidence": 1.0,
+            }
         ordered_sources = ["paddle_fast", "paddle_accurate", "gemma4", "user", "windows_ocr_legacy"]
         col = 1
         for source in ordered_sources:
@@ -265,6 +297,32 @@ class OcrReviewDialog(QDialog):
             col += 1
         panel_layout.addLayout(grid)
         return panel
+
+    def _review_preview_pixmap(self, path: str) -> QPixmap | None:
+        clean_path = str(path or "").strip()
+        if not clean_path:
+            return None
+        source_path = Path(clean_path)
+        try:
+            if hasattr(self.bridge, "_local_ai_source_path"):
+                source_path = self.bridge._local_ai_source_path(source_path)
+        except Exception:
+            source_path = Path(clean_path)
+        try:
+            if source_path.suffix.lower() == ".svg":
+                image = _render_svg_image(source_path, QSize(220, 160))
+            else:
+                image = _read_image_with_svg_support(source_path)
+            if image is None or image.isNull():
+                return None
+            return QPixmap.fromImage(image).scaled(
+                220,
+                160,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        except Exception:
+            return None
 
     def _build_result_cell(self, media_id: int, result: dict) -> QWidget:
         cell = QFrame()
@@ -277,12 +335,16 @@ class OcrReviewDialog(QDialog):
         label = QLabel(f"{self.SOURCE_LABELS.get(source, source or 'OCR')}{confidence_text}")
         label.setObjectName("settingsFieldTitle")
         text = QPlainTextEdit(str(result.get("text") or ""))
-        text.setReadOnly(True)
+        is_user_text = source == "user"
+        text.setReadOnly(not is_user_text)
         text.setMinimumWidth(190)
         text.setMinimumHeight(120)
         keep_btn = QPushButton("Keep")
         result_id = int(result.get("id") or 0)
-        keep_btn.clicked.connect(lambda _checked=False, mid=media_id, rid=result_id: self._keep_result(mid, rid))
+        if is_user_text:
+            keep_btn.clicked.connect(lambda _checked=False, mid=media_id, edit=text: self._keep_user_text(mid, edit.toPlainText()))
+        else:
+            keep_btn.clicked.connect(lambda _checked=False, mid=media_id, rid=result_id: self._keep_result(mid, rid))
         layout.addWidget(label)
         layout.addWidget(text, 1)
         layout.addWidget(keep_btn)
@@ -291,6 +353,13 @@ class OcrReviewDialog(QDialog):
     def _keep_result(self, media_id: int, result_id: int) -> None:
         try:
             if self.bridge.keep_ocr_result(int(media_id), int(result_id)):
+                self._reload()
+        except Exception:
+            pass
+
+    def _keep_user_text(self, media_id: int, text: str) -> None:
+        try:
+            if self.bridge.keep_user_ocr_text(int(media_id), str(text or "")):
                 self._reload()
         except Exception:
             pass

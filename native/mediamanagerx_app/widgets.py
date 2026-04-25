@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import weakref
+
 from native.mediamanagerx_app.common import *
 from native.mediamanagerx_app.image_utils import *
 from native.mediamanagerx_app.runtime_paths import *
@@ -932,7 +934,25 @@ class BulkSelectedFileRow(QWidget):
         return result
 
     def _queue_sync_editor_width(self) -> None:
-        QTimer.singleShot(0, self._sync_editor_width)
+        row_ref = weakref.ref(self)
+
+        def _sync_if_alive() -> None:
+            row = row_ref()
+            if row is None:
+                return
+            try:
+                import shiboken6
+
+                if not shiboken6.isValid(row):
+                    return
+            except Exception:
+                pass
+            try:
+                row._sync_editor_width()
+            except RuntimeError:
+                pass
+
+        QTimer.singleShot(0, _sync_if_alive)
 
     def set_shared_editor_widths(self, host_width: int) -> None:
         self._shared_width_managed = True
@@ -941,36 +961,46 @@ class BulkSelectedFileRow(QWidget):
         self.tags_edit.setFixedWidth(clamped_width)
 
     def _sync_editor_width(self) -> None:
-        if self._shared_width_managed:
-            return
-        if (
-            not hasattr(self, "tags_edit_host")
-            or not hasattr(self, "thumb_lbl")
-            or not hasattr(self, "_root_layout")
-            or not hasattr(self, "_content_row")
-            or not hasattr(self, "_tags_host_layout")
-        ):
-            return
-        total_width = max(0, self.width())
-        if total_width <= 0:
-            return
-        root_margins = self._root_layout.contentsMargins()
-        row_margins = self._content_row.contentsMargins()
-        thumb_width = self.thumb_lbl.width()
-        spacing = self._content_row.spacing()
-        host_width = max(
-            self._MIN_EDITOR_WIDTH,
-            total_width
-            - root_margins.left()
-            - root_margins.right()
-            - row_margins.left()
-            - row_margins.right()
-            - thumb_width
-            - spacing
-            - self._RIGHT_GUTTER,
-        )
-        self.tags_edit_host.setFixedWidth(host_width)
-        self.tags_edit.setFixedWidth(host_width)
+        try:
+            import shiboken6
+
+            if not shiboken6.isValid(self):
+                return
+        except Exception:
+            pass
+        try:
+            if self._shared_width_managed:
+                return
+            if (
+                not hasattr(self, "tags_edit_host")
+                or not hasattr(self, "thumb_lbl")
+                or not hasattr(self, "_root_layout")
+                or not hasattr(self, "_content_row")
+                or not hasattr(self, "_tags_host_layout")
+            ):
+                return
+            total_width = max(0, self.width())
+            if total_width <= 0:
+                return
+            root_margins = self._root_layout.contentsMargins()
+            row_margins = self._content_row.contentsMargins()
+            thumb_width = self.thumb_lbl.width()
+            spacing = self._content_row.spacing()
+            host_width = max(
+                self._MIN_EDITOR_WIDTH,
+                total_width
+                - root_margins.left()
+                - root_margins.right()
+                - row_margins.left()
+                - row_margins.right()
+                - thumb_width
+                - spacing
+                - self._RIGHT_GUTTER,
+            )
+            self.tags_edit_host.setFixedWidth(host_width)
+            self.tags_edit.setFixedWidth(host_width)
+        except RuntimeError:
+            pass
 
     def item_height(self) -> int:
         return int(self._content_height) + 60
