@@ -390,7 +390,14 @@ class WindowNavigationMixin:
             path_str = str(folder_path or "").strip()
             if not path_str:
                 continue
-            is_hidden = self.bridge.repo.is_path_hidden(path_str)
+            try:
+                is_hidden = self.bridge.repo.is_path_hidden(path_str)
+            except Exception as exc:
+                try:
+                    self.bridge._log(f"Pinned folder hidden-state lookup skipped for {path_str}: {exc}")
+                except Exception:
+                    pass
+                is_hidden = False
             if is_hidden and not show_hidden:
                 continue
             item = QListWidgetItem("")

@@ -142,7 +142,8 @@ class Bridge(BridgeMediaListingScanMixin, BridgeTagsMetadataMixin, BridgeLocalAi
                 f"enabled={bool(_WINDOWS_WEBENGINE_RUNTIME.get('enabled'))} "
                 f"reason={_WINDOWS_WEBENGINE_RUNTIME.get('reason') or 'n/a'} "
                 f"QT_OPENGL={_WINDOWS_WEBENGINE_RUNTIME.get('qt_opengl') or '<unset>'} "
-                f"QTWEBENGINE_CHROMIUM_FLAGS={_WINDOWS_WEBENGINE_RUNTIME.get('chromium_flags') or '<unset>'}"
+                f"QTWEBENGINE_CHROMIUM_FLAGS={_WINDOWS_WEBENGINE_RUNTIME.get('chromium_flags') or '<unset>'} "
+                f"use_custom_page={bool(_WINDOWS_WEBENGINE_RUNTIME.get('use_custom_page', True))}"
             )
         
         # Initialize Database

@@ -251,7 +251,8 @@ class WindowLayoutPanelsMixin:
         center_layout.setContentsMargins(0, 0, 0, 0)
 
         self.web = GalleryView(center)
-        self.web.setPage(GalleryWebPage(self.web))
+        if bool(_WINDOWS_WEBENGINE_RUNTIME.get("use_custom_page", True)):
+            self.web.setPage(GalleryWebPage(self.web))
         center_layout.addWidget(self.web)
 
         # Native loading overlay shown while the WebEngine page itself is loading.

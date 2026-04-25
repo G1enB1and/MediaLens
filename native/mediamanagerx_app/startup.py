@@ -186,7 +186,6 @@ def main() -> None:
     splash = _create_startup_splash(app, startup_bg) if show_splash else None
     if splash is not None:
         splash.show()
-        app.processEvents()
 
     win = MainWindow()
     try:

@@ -64,6 +64,7 @@ def _configure_windows_webengine_runtime() -> dict[str, object]:
         "reason": "",
         "qt_opengl": str(os.environ.get("QT_OPENGL", "") or ""),
         "chromium_flags": str(os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "") or ""),
+        "use_custom_page": True,
     }
     if os.name != "nt":
         return runtime
@@ -93,6 +94,16 @@ def _configure_windows_webengine_runtime() -> dict[str, object]:
     runtime["reason"] = "forced-by-env" if safe_mode in {"1", "true", "yes", "on"} else "frozen-default"
     runtime["qt_opengl"] = str(os.environ.get("QT_OPENGL", "") or "")
     runtime["chromium_flags"] = str(os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "") or "")
+
+    custom_page = str(os.environ.get("MEDIALENS_WEBENGINE_CUSTOM_PAGE", "") or "").strip().lower()
+    if custom_page in {"1", "true", "yes", "on"}:
+        runtime["use_custom_page"] = True
+    elif custom_page in {"0", "false", "no", "off"} or frozen_build:
+        # Replacing QWebEngineView's default page during startup has caused
+        # native COM/OLE aborts on some installed Windows systems. The custom
+        # page only adds console diagnostics, so keep the safer default page in
+        # frozen builds unless explicitly requested for troubleshooting.
+        runtime["use_custom_page"] = False
     return runtime
 
 

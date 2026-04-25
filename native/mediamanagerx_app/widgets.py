@@ -1080,8 +1080,14 @@ class RootFilterProxyModel(QSortFilterProxyModel):
         # Hidden logic: if show_hidden is False, skip database-marked hidden paths
         # This check must come before the root path inclusion logic.
         if not self.bridge._show_hidden_enabled():
-            if self.bridge.repo.is_path_hidden(raw_path):
-                return False
+            try:
+                if self.bridge.repo.is_path_hidden(raw_path):
+                    return False
+            except Exception as exc:
+                try:
+                    self.bridge._log(f"Tree hidden-path filter skipped for {raw_path}: {exc}")
+                except Exception:
+                    pass
 
         root = normalize_windows_path(self._root_path).rstrip("/")
         norm_path = normalized_path.rstrip("/")
