@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Slot
+from PySide6.QtSvg import QSvgRenderer
 
 from native.mediamanagerx_app.image_utils import _read_image_with_svg_support, _render_svg_image
 from native.mediamanagerx_app.settings_common import *
@@ -82,11 +83,13 @@ class ScannersSettingsPage(SettingsPage):
             source_group_layout.setContentsMargins(10, 8, 10, 10)
             source_group_layout.setSpacing(6)
             source_header = QToolButton()
-            source_header.setText("v  Folders to Scan")
+            source_header.setText("Folders to Scan")
             source_header.setObjectName("settingsExpandableHeader")
             source_header.setCheckable(True)
             source_header.setChecked(True)
-            source_header.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+            source_header.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+            source_header.setIcon(self._source_folder_section_icon(True))
+            source_header.setIconSize(QSize(10, 10))
             source_header.setCursor(Qt.CursorShape.PointingHandCursor)
             source_header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             source_divider = QFrame()
@@ -213,10 +216,27 @@ class ScannersSettingsPage(SettingsPage):
         self.dialog.set_setting_bool("scanners.ocr_text.all_files", checked)
 
     @staticmethod
+    def _source_folder_section_icon(expanded: bool) -> QIcon:
+        Theme = _theme_api()
+        color = Theme.get_text_muted()
+        points = "4,2 12,8 4,14" if not expanded else "2,4 8,12 14,4"
+        svg = (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
+            f'<polyline points="{points}" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
+            "</svg>"
+        )
+        pixmap = QPixmap(16, 16)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        QSvgRenderer(bytes(svg, "utf-8")).render(painter)
+        painter.end()
+        return QIcon(pixmap)
+
+    @staticmethod
     def _toggle_source_folder_section(header: QToolButton, body: QWidget, divider: QFrame, checked: bool) -> None:
         body.setVisible(bool(checked))
         divider.setVisible(bool(checked))
-        header.setText(("v  " if checked else ">  ") + "Folders to Scan")
+        header.setIcon(ScannersSettingsPage._source_folder_section_icon(bool(checked)))
 
     @staticmethod
     def _clean_source_folders(values: list[object]) -> list[str]:
@@ -325,10 +345,6 @@ class ScannersSettingsPage(SettingsPage):
         enable = widgets.get("enable")
         enabled = bool(enable.isChecked()) if isinstance(enable, QCheckBox) else True
         for child_key in ("interval",):
-            widget = widgets.get(child_key)
-            if widget is not None:
-                widget.setEnabled(enabled)
-        for child_key in ("source_group", "source_list", "add_source", "remove_source", "add_above_source"):
             widget = widgets.get(child_key)
             if widget is not None:
                 widget.setEnabled(enabled)

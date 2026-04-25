@@ -796,8 +796,9 @@ class BulkSelectedFileRow(QWidget):
     generateRequested = Signal(str)
     _TAG_CONTENT_HEIGHT = 92
     _CAPTION_CONTENT_HEIGHT = 132
-    _GENERATE_BUTTON_HEIGHT = 28
+    _GENERATE_BUTTON_HEIGHT = 32
     _GENERATE_BUTTON_GAP = 5
+    _GENERATE_BUTTON_BOTTOM_PADDING = 14
     _RIGHT_GUTTER = 5
     _MIN_EDITOR_WIDTH = 140
 
@@ -931,7 +932,7 @@ class BulkSelectedFileRow(QWidget):
     def _generate_button_extra_height(self) -> int:
         try:
             if self.generate_btn.isVisible():
-                return int(self._GENERATE_BUTTON_HEIGHT + self._GENERATE_BUTTON_GAP + 8)
+                return int(self._GENERATE_BUTTON_HEIGHT + self._GENERATE_BUTTON_GAP + self._GENERATE_BUTTON_BOTTOM_PADDING)
         except RuntimeError:
             pass
         return 0
@@ -1043,7 +1044,7 @@ class BulkSelectedFileRow(QWidget):
             pass
 
     def item_height(self) -> int:
-        return int(self._content_height) + 68 + self._generate_button_extra_height()
+        return int(self._content_height) + 76 + self._generate_button_extra_height()
 
 
 class BulkSelectedFilesListWidget(QListWidget):

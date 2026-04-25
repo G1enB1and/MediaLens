@@ -151,6 +151,7 @@ class SettingsDialog(QDialog):
         hover = Theme.get_btn_save_hover(accent)
         accent_soft = Theme.get_accent_soft(accent)
         accent_str = accent.name()
+        accent_text = Theme.mix(accent.name(), QColor("#000000" if Theme.get_is_light() else "#ffffff"), 0.28 if Theme.get_is_light() else 0.38)
         self._proxy_style.update_colors(accent, control_bg, border, text, Theme.get_is_light())
         selection_text = "#000000" if SettingsProxyStyle._contrast_ratio(accent, QColor("#000000")) >= SettingsProxyStyle._contrast_ratio(accent, QColor("#ffffff")) else "#ffffff"
         category_hover = Theme.mix(sidebar_bg, accent, 0.10 if Theme.get_is_light() else 0.14)
@@ -365,7 +366,7 @@ class SettingsDialog(QDialog):
                 text-align: left;
             }}
             QToolButton#settingsExpandableHeader:hover {{
-                color: {accent_str};
+                color: {accent_text};
             }}
             QFrame#settingsExpandableDivider {{
                 background-color: {Theme.mix(border, accent, 0.26)};
