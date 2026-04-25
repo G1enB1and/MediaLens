@@ -258,8 +258,8 @@ class BridgeScannersSettingsMixin:
             return 24
 
     def _scanner_schedule_mode(self, scanner_key: str) -> str:
-        value = str(self.settings.value(self._scanner_setting_key(scanner_key, "schedule_mode"), "hours", type=str) or "hours").strip().lower()
-        return value if value in {"hours", "daily", "weekly", "monthly"} else "hours"
+        value = str(self.settings.value(self._scanner_setting_key(scanner_key, "schedule_mode"), "weekly", type=str) or "weekly").strip().lower()
+        return value if value in {"hours", "daily", "weekly", "monthly"} else "weekly"
 
     def _scanner_schedule_time(self, scanner_key: str) -> str:
         value = str(self.settings.value(self._scanner_setting_key(scanner_key, "schedule_time"), "02:00", type=str) or "02:00").strip()

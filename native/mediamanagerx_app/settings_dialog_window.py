@@ -158,6 +158,9 @@ class SettingsDialog(QDialog):
         popup_bg = "#ffffff" if Theme.get_is_light() else Theme.mix(control_bg, "#000000", 0.24)
         popup_border = "#cfd5dd" if Theme.get_is_light() else Theme.mix(border, "#000000", 0.20)
         popup_hover = Theme.mix(popup_bg, accent, 0.12 if Theme.get_is_light() else 0.16)
+        combo_arrow_svg = (
+            Path(__file__).with_name("web") / "icons" / ("chevron-down-light.svg" if Theme.get_is_light() else "chevron-down-dark.svg")
+        ).as_posix()
         close_bg = Theme.get_btn_save_bg(accent)
         close_hover = Theme.get_btn_save_hover(accent)
         installed_bg = Theme.mix(control_bg, QColor("#2f8f46"), 0.20 if Theme.get_is_light() else 0.24)
@@ -319,6 +322,22 @@ class SettingsDialog(QDialog):
             QComboBox::drop-down {{
                 border: none;
                 width: 24px;
+            }}
+            QComboBox#scannerScheduleMode {{
+                min-width: 170px;
+                padding-right: 30px;
+            }}
+            QComboBox#scannerScheduleMode::drop-down {{
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 28px;
+                border: none;
+                background: transparent;
+            }}
+            QComboBox#scannerScheduleMode::down-arrow {{
+                image: url("{combo_arrow_svg}");
+                width: 12px;
+                height: 12px;
             }}
             QComboBox QAbstractItemView {{
                 background-color: {popup_bg};

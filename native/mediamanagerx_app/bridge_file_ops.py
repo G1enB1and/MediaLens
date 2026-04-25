@@ -110,7 +110,7 @@ class BridgeFileOpsMixin:
                 except Exception:
                     return False
             elif key in {"scanners.text_detection.schedule_mode", "scanners.ocr_text.schedule_mode"}:
-                value = str(value or "hours").strip().lower()
+                value = str(value or "weekly").strip().lower()
                 if value not in {"hours", "daily", "weekly", "monthly"}:
                     return False
             elif key in {"scanners.text_detection.schedule_time", "scanners.ocr_text.schedule_time"}:

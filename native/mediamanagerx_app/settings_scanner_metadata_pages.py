@@ -135,12 +135,20 @@ class ScannersSettingsPage(SettingsPage):
             schedule_layout.setContentsMargins(0, 0, 0, 0)
             schedule_layout.setSpacing(8)
 
+            schedule_mode_row = QWidget()
+            schedule_mode_layout = QHBoxLayout(schedule_mode_row)
+            schedule_mode_layout.setContentsMargins(0, 0, 0, 0)
+            schedule_mode_layout.addWidget(QLabel("Select Interval"))
             schedule_mode = QComboBox()
+            schedule_mode.setObjectName("scannerScheduleMode")
             schedule_mode.addItem("Every X Hours", "hours")
             schedule_mode.addItem("Daily", "daily")
             schedule_mode.addItem("Weekly", "weekly")
             schedule_mode.addItem("Monthly", "monthly")
-            schedule_layout.addWidget(schedule_mode)
+            schedule_mode.setCurrentIndex(schedule_mode.findData("weekly"))
+            schedule_mode_layout.addWidget(schedule_mode)
+            schedule_mode_layout.addStretch(1)
+            schedule_layout.addWidget(schedule_mode_row)
 
             interval_row = QWidget()
             interval_layout = QHBoxLayout(interval_row)
@@ -490,15 +498,6 @@ class ScannersSettingsPage(SettingsPage):
 
     def _sync_enabled_state(self, scanner_key: str) -> None:
         widgets = self._widgets.get(scanner_key) or {}
-        enable = widgets.get("enable")
-        enabled = bool(enable.isChecked()) if isinstance(enable, QCheckBox) else True
-        for child_key in ("interval", "schedule_mode", "schedule_time", "schedule_month_day"):
-            widget = widgets.get(child_key)
-            if widget is not None:
-                widget.setEnabled(enabled)
-        for toggle in list(widgets.get("schedule_day_toggles") or []):
-            if isinstance(toggle, QCheckBox):
-                toggle.setEnabled(enabled)
         run_btn = widgets.get("run")
         if run_btn is not None:
             run_btn.setEnabled(True)
@@ -550,7 +549,7 @@ class ScannersSettingsPage(SettingsPage):
         if isinstance(interval, QSpinBox):
             with QSignalBlocker(interval):
                 interval.setValue(max(1, interval_value))
-        mode_value = str(payload.get("schedule_mode") or "hours")
+        mode_value = str(payload.get("schedule_mode") or "weekly")
         if isinstance(schedule_mode, QComboBox):
             with QSignalBlocker(schedule_mode):
                 idx = schedule_mode.findData(mode_value)
@@ -596,7 +595,7 @@ class ScannersSettingsPage(SettingsPage):
                 payload = {
                     "enabled": bool(self.settings.value(f"scanners/{scanner_key}/enabled", default_enabled, type=bool)),
                     "interval_hours": int(self.settings.value(f"scanners/{scanner_key}/interval_hours", 24, type=int) or 24),
-                    "schedule_mode": str(self.settings.value(f"scanners/{scanner_key}/schedule_mode", "hours", type=str) or "hours"),
+                    "schedule_mode": str(self.settings.value(f"scanners/{scanner_key}/schedule_mode", "weekly", type=str) or "weekly"),
                     "schedule_time": str(self.settings.value(f"scanners/{scanner_key}/schedule_time", "02:00", type=str) or "02:00"),
                     "schedule_days": self._schedule_days_from_settings(scanner_key),
                     "schedule_month_day": int(self.settings.value(f"scanners/{scanner_key}/schedule_month_day", 1, type=int) or 1),
