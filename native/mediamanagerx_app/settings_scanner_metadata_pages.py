@@ -63,6 +63,25 @@ class ScannersSettingsPage(SettingsPage):
             schedule_row.addWidget(interval)
             schedule_row.addStretch(1)
 
+            source_group = QGroupBox("Scanners Scope")
+            source_layout = QVBoxLayout(source_group)
+            source_layout.setSpacing(6)
+            source_note = _description("Scheduled scanner runs use these folders instead of the current gallery selection.")
+            source_list = QListWidget()
+            source_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+            source_list.setMinimumHeight(74)
+            source_list.setMaximumHeight(120)
+            source_buttons = QHBoxLayout()
+            source_buttons.setContentsMargins(0, 0, 0, 0)
+            add_source_btn = QPushButton("Add Folder")
+            remove_source_btn = QPushButton("Remove")
+            source_buttons.addWidget(add_source_btn)
+            source_buttons.addWidget(remove_source_btn)
+            source_buttons.addStretch(1)
+            source_layout.addWidget(source_note)
+            source_layout.addWidget(source_list)
+            source_layout.addLayout(source_buttons)
+
             action_row = QHBoxLayout()
             action_row.setContentsMargins(0, 0, 0, 0)
             run_btn = QPushButton("Run Now")
@@ -85,6 +104,7 @@ class ScannersSettingsPage(SettingsPage):
             group_layout.addWidget(ocr_source_row)
             group_layout.addWidget(ocr_scope_row)
             group_layout.addLayout(schedule_row)
+            group_layout.addWidget(source_group)
             group_layout.addLayout(action_row)
             group_layout.addWidget(review_btn)
             group_layout.addWidget(last_run_label)
@@ -99,6 +119,10 @@ class ScannersSettingsPage(SettingsPage):
                 "ocr_scope_detected": ocr_scope_detected_radio,
                 "ocr_scope_all": ocr_scope_all_radio,
                 "interval": interval,
+                "source_group": source_group,
+                "source_list": source_list,
+                "add_source": add_source_btn,
+                "remove_source": remove_source_btn,
                 "run": run_btn,
                 "cancel": cancel_btn,
                 "review": review_btn,
@@ -111,6 +135,8 @@ class ScannersSettingsPage(SettingsPage):
             ocr_scope_detected_radio.toggled.connect(lambda checked: checked and self._set_ocr_scope_all_files(False))
             ocr_scope_all_radio.toggled.connect(lambda checked: checked and self._set_ocr_scope_all_files(True))
             interval.valueChanged.connect(lambda value, scanner_key=key: self._set_interval(scanner_key, int(value)))
+            add_source_btn.clicked.connect(lambda _checked=False, scanner_key=key: self._add_source_folder(scanner_key))
+            remove_source_btn.clicked.connect(lambda _checked=False, scanner_key=key: self._remove_selected_source_folders(scanner_key))
             run_btn.clicked.connect(lambda _checked=False, scanner_key=key: self._run_now(scanner_key))
             cancel_btn.clicked.connect(lambda _checked=False, scanner_key=key: self._cancel(scanner_key))
             review_btn.clicked.connect(self._open_ocr_review)
@@ -145,6 +171,75 @@ class ScannersSettingsPage(SettingsPage):
     def _set_ocr_scope_all_files(self, checked: bool) -> None:
         self.dialog.set_setting_bool("scanners.ocr_text.all_files", checked)
 
+    @staticmethod
+    def _clean_source_folders(values: list[object]) -> list[str]:
+        folders: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            folder = str(value or "").strip()
+            if not folder:
+                continue
+            key = str(Path(folder)).casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            folders.append(folder)
+        return folders
+
+    def _source_folders(self, scanner_key: str) -> list[str]:
+        widgets = self._widgets.get(scanner_key) or {}
+        source_list = widgets.get("source_list")
+        if not isinstance(source_list, QListWidget):
+            return []
+        return [str(source_list.item(i).data(Qt.ItemDataRole.UserRole) or source_list.item(i).text()) for i in range(source_list.count())]
+
+    def _source_folders_from_settings(self, scanner_key: str) -> list[str]:
+        try:
+            raw = str(self.settings.value(f"scanners/{scanner_key}/source_folders", "", type=str) or "")
+            parsed = json.loads(raw or "[]")
+        except Exception:
+            parsed = []
+        return self._clean_source_folders(list(parsed or []) if isinstance(parsed, list) else [])
+
+    def _save_source_folders(self, scanner_key: str, folders: list[str]) -> None:
+        self.dialog.set_setting_str(f"scanners.{scanner_key}.source_folders", json.dumps(self._clean_source_folders(list(folders or []))))
+
+    def _add_source_folder(self, scanner_key: str) -> None:
+        current = ""
+        folders = self._source_folders(scanner_key)
+        if folders:
+            current = folders[-1]
+        elif self.bridge and getattr(self.bridge, "_selected_folders", None):
+            current = str(self.bridge._selected_folders[0])
+        selected = QFileDialog.getExistingDirectory(self, "Add Scanner Source Folder", current)
+        if not selected:
+            return
+        folders.append(str(selected))
+        self._save_source_folders(scanner_key, folders)
+        self._set_source_folders(scanner_key, folders)
+
+    def _remove_selected_source_folders(self, scanner_key: str) -> None:
+        widgets = self._widgets.get(scanner_key) or {}
+        source_list = widgets.get("source_list")
+        if not isinstance(source_list, QListWidget):
+            return
+        selected_rows = {source_list.row(item) for item in source_list.selectedItems()}
+        folders = [folder for index, folder in enumerate(self._source_folders(scanner_key)) if index not in selected_rows]
+        self._save_source_folders(scanner_key, folders)
+        self._set_source_folders(scanner_key, folders)
+
+    def _set_source_folders(self, scanner_key: str, folders: list[str]) -> None:
+        widgets = self._widgets.get(scanner_key) or {}
+        source_list = widgets.get("source_list")
+        if not isinstance(source_list, QListWidget):
+            return
+        source_list.clear()
+        for folder in self._clean_source_folders(list(folders or [])):
+            item = QListWidgetItem(folder)
+            item.setToolTip(folder)
+            item.setData(Qt.ItemDataRole.UserRole, folder)
+            source_list.addItem(item)
+
     def _run_now(self, scanner_key: str) -> None:
         widgets = self._widgets.get(scanner_key) or {}
         status = widgets.get("status")
@@ -178,6 +273,10 @@ class ScannersSettingsPage(SettingsPage):
             widget = widgets.get(child_key)
             if widget is not None:
                 widget.setEnabled(enabled)
+        for child_key in ("source_group", "source_list", "add_source", "remove_source"):
+            widget = widgets.get(child_key)
+            if widget is not None:
+                widget.setEnabled(enabled)
         run_btn = widgets.get("run")
         if run_btn is not None:
             run_btn.setEnabled(True)
@@ -205,6 +304,7 @@ class ScannersSettingsPage(SettingsPage):
         ocr_ai = widgets.get("ocr_ai")
         ocr_scope_detected = widgets.get("ocr_scope_detected")
         ocr_scope_all = widgets.get("ocr_scope_all")
+        self._set_source_folders(scanner_key, list(payload.get("source_folders") or []))
         if isinstance(enable, QCheckBox):
             with QSignalBlocker(enable):
                 enable.setChecked(enabled)
@@ -252,6 +352,7 @@ class ScannersSettingsPage(SettingsPage):
                     "run_fast": bool(self.settings.value("scanners/ocr_text/run_fast", True, type=bool)),
                     "run_ai": bool(self.settings.value("scanners/ocr_text/run_ai", False, type=bool)),
                     "all_files": bool(self.settings.value("scanners/ocr_text/all_files", False, type=bool)),
+                    "source_folders": self._source_folders_from_settings(scanner_key),
                 }
             self._apply_status(scanner_key, payload)
 

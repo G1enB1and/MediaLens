@@ -264,6 +264,25 @@ class BridgeScannersSettingsMixin:
     def _ocr_scanner_all_files(self) -> bool:
         return bool(self.settings.value(self._scanner_setting_key("ocr_text", "all_files"), False, type=bool))
 
+    def _scanner_source_folders(self, scanner_key: str) -> list[str]:
+        raw = self.settings.value(self._scanner_setting_key(scanner_key, "source_folders"), "", type=str)
+        try:
+            values = json.loads(str(raw or "[]"))
+        except Exception:
+            values = []
+        folders: list[str] = []
+        seen: set[str] = set()
+        for value in values if isinstance(values, list) else []:
+            folder = str(value or "").strip()
+            if not folder:
+                continue
+            key = os.path.normcase(os.path.normpath(folder))
+            if key in seen:
+                continue
+            seen.add(key)
+            folders.append(folder)
+        return folders
+
     def _scanner_last_run_utc(self, scanner_key: str) -> str:
         return str(self.settings.value(self._scanner_setting_key(scanner_key, "last_run_utc"), "", type=str) or "")
 
@@ -289,6 +308,7 @@ class BridgeScannersSettingsMixin:
             "interval_hours": self._scanner_interval_hours(scanner_key),
             "last_run_utc": self._scanner_last_run_utc(scanner_key),
             "status": status,
+            "source_folders": self._scanner_source_folders(scanner_key),
             "run_fast": self._ocr_scanner_run_fast() if scanner_key == "ocr_text" else False,
             "run_ai": self._ocr_scanner_run_ai() if scanner_key == "ocr_text" else False,
             "all_files": self._ocr_scanner_all_files() if scanner_key == "ocr_text" else False,
@@ -310,9 +330,17 @@ class BridgeScannersSettingsMixin:
 
     def _check_scanner_schedules(self) -> None:
         if self._scanner_due("text_detection"):
-            self._ensure_background_text_processing(force=True)
+            folders = self._scanner_source_folders("text_detection")
+            if folders:
+                self._ensure_background_text_processing(folders=folders, force=True)
+            else:
+                self._set_scanner_status("text_detection", "Idle (no scheduled source folders)", mark_run=True)
         if self._scanner_due("ocr_text"):
-            self._run_ocr_text_scanner(force=True)
+            folders = self._scanner_source_folders("ocr_text")
+            if folders:
+                self._run_ocr_text_scanner(folders=folders, force=True)
+            else:
+                self._set_scanner_status("ocr_text", "Idle (no scheduled source folders)", mark_run=True)
 
     @staticmethod
     def _text_stage_label(stage_key: str) -> str:
@@ -734,14 +762,14 @@ class BridgeScannersSettingsMixin:
                 self.textProcessingFinished.emit()
         return completed
 
-    def _run_ocr_text_scanner(self, *, force: bool = False) -> bool:
+    def _run_ocr_text_scanner(self, folders: list[str] | None = None, *, force: bool = False) -> bool:
         if self._ocr_text_processing_active:
             self._set_scanner_status("ocr_text", "Already running")
             return False
         if not force and not self._scanner_enabled("ocr_text"):
             self._set_scanner_status("ocr_text", "Disabled")
             return False
-        entries = self._collect_text_scope_entries()
+        entries = self._collect_text_scope_entries(folders=folders)
         if not entries:
             self._set_scanner_status("ocr_text", "Idle (no active scope)")
             return False

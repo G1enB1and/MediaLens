@@ -33,6 +33,9 @@ class BridgeFileOpsMixin:
                 "updates.check_on_launch",
                 "scanners.text_detection.enabled",
                 "scanners.ocr_text.enabled",
+                "scanners.ocr_text.run_fast",
+                "scanners.ocr_text.run_ai",
+                "scanners.ocr_text.all_files",
             )
             if key not in allowed and key not in {"duplicate.rules.merge_before_delete", "duplicate.rules.preferred_folders_enabled"} and not key.startswith("metadata.display.") and not key.startswith("duplicate.rules.merge"):
                 return False
@@ -61,7 +64,7 @@ class BridgeFileOpsMixin:
     @Slot(str, str, result=bool)
     def set_setting_str(self, key: str, value: str) -> bool:
         try:
-            if key not in ("gallery.start_folder", "gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "gallery.similarity_threshold", "ui.accent_color", "ui.theme_mode", "ui.advanced_search_saved_queries", "metadata.display.order", "duplicate.settings.active_tab", "player.video_loop_mode", "player.video_loop_cutoff_seconds", "scanners.text_detection.interval_hours", "scanners.ocr_text.interval_hours") and not key.startswith("metadata.layout.") and not key.startswith("duplicate.rules.") and key != "duplicate.priorities.order":
+            if key not in ("gallery.start_folder", "gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "gallery.similarity_threshold", "ui.accent_color", "ui.theme_mode", "ui.advanced_search_saved_queries", "metadata.display.order", "duplicate.settings.active_tab", "player.video_loop_mode", "player.video_loop_cutoff_seconds", "scanners.text_detection.interval_hours", "scanners.ocr_text.interval_hours", "scanners.text_detection.source_folders", "scanners.ocr_text.source_folders") and not key.startswith("metadata.layout.") and not key.startswith("duplicate.rules.") and key != "duplicate.priorities.order":
                 return False
             if key == "gallery.view_mode":
                 allowed = {"masonry", "grid_small", "grid_medium", "grid_large", "grid_xlarge", "list", "content", "details", "duplicates", "similar", "similar_only"}
@@ -92,6 +95,25 @@ class BridgeFileOpsMixin:
                     value = str(max(1, int(str(value or "24").strip())))
                 except Exception:
                     return False
+            elif key in {"scanners.text_detection.source_folders", "scanners.ocr_text.source_folders"}:
+                try:
+                    parsed = json.loads(str(value or "[]"))
+                except Exception:
+                    return False
+                if not isinstance(parsed, list):
+                    return False
+                clean_folders: list[str] = []
+                seen: set[str] = set()
+                for item in parsed:
+                    folder = str(item or "").strip()
+                    if not folder:
+                        continue
+                    folder_key = os.path.normcase(os.path.normpath(folder))
+                    if folder_key in seen:
+                        continue
+                    seen.add(folder_key)
+                    clean_folders.append(folder)
+                value = json.dumps(clean_folders)
             qkey = key.replace(".", "/")
             self.settings.setValue(qkey, str(value or ""))
             if key == "ui.accent_color":

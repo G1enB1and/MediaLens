@@ -474,11 +474,17 @@ class BridgeCompareUpdatesMixin:
     @Slot(str, result=bool)
     def run_scanner_now(self, scanner_key: str) -> bool:
         key = str(scanner_key or "").strip()
+        folders = self._scanner_source_folders(key)
         if key == "text_detection":
-            self._ensure_background_text_processing(allow_concurrent_scan=True, force=True, rescan_existing=True)
+            self._ensure_background_text_processing(
+                folders=folders or None,
+                allow_concurrent_scan=True,
+                force=True,
+                rescan_existing=True,
+            )
             return True
         if key == "ocr_text":
-            return self._run_ocr_text_scanner(force=True)
+            return self._run_ocr_text_scanner(folders=folders or None, force=True)
         return False
 
     @staticmethod
