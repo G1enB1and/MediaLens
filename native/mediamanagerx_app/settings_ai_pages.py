@@ -293,9 +293,6 @@ class AISettingsPage(SettingsPage):
         self.paddle_fast_status_label.setTextFormat(Qt.TextFormat.RichText)
         self.paddle_fast_status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         paddle_form.addRow("Paddle Fast", self.paddle_fast_status_label)
-        self.paddle_install_btn = QPushButton("Install / Repair Paddle OCR Runtime")
-        self.paddle_install_btn.clicked.connect(self._install_paddle_ocr_runtime)
-        paddle_form.addRow("Runtime", self.paddle_install_btn)
         ocr_page_layout.addStretch(1)
 
         models_group = QGroupBox("Models")
@@ -490,33 +487,18 @@ class AISettingsPage(SettingsPage):
         else:
             detail = html.escape(str(status.get("error") or status.get("message") or status.get("python_path") or "Runtime not installed."))
             self.paddle_fast_status_label.setText(f'<span style="color:{bad_color};">Not installed</span><br>{detail}')
-        if hasattr(self, "paddle_install_btn"):
-            self.paddle_install_btn.setEnabled(True)
-
-    def _install_paddle_ocr_runtime(self) -> None:
-        if not hasattr(self.bridge, "install_paddle_ocr_runtime"):
-            return
-        self.paddle_install_btn.setEnabled(False)
-        self.paddle_fast_status_label.setText("Installing Paddle OCR runtime...")
-        started = bool(self.bridge.install_paddle_ocr_runtime())
-        if not started:
-            self.paddle_install_btn.setEnabled(True)
-            self._refresh_paddle_ocr_status()
 
     def _on_paddle_ocr_runtime_install_status(self, payload: dict) -> None:
         payload = dict(payload or {})
         state = str(payload.get("state") or "").strip()
         message = html.escape(str(payload.get("message") or "").strip() or "Installing Paddle OCR runtime...")
         if state == "installed":
-            self.paddle_install_btn.setEnabled(True)
             self._refresh_paddle_ocr_status()
             current = self.paddle_fast_status_label.text()
             self.paddle_fast_status_label.setText(f"{current}<br>{message}")
         elif state == "error":
-            self.paddle_install_btn.setEnabled(True)
             self.paddle_fast_status_label.setText(f'<span style="color:#c62828;">Install failed</span><br>{message}')
         else:
-            self.paddle_install_btn.setEnabled(False)
             self.paddle_fast_status_label.setText(message)
 
     def _install_selected_ai_model(self, kind: str) -> None:
