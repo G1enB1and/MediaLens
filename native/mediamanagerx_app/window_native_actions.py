@@ -1258,6 +1258,7 @@ class WindowNativeActionsMixin:
                 QLabel#bulkSelectedFileName {{
                     color: {text};
                     font-weight: 700;
+                    padding-top: 7px;
                 }}
                 QLabel#bulkSelectedFileThumb {{
                     background-color: {Theme.mix(Theme.get_input_bg(accent), QColor("#ffffff" if is_light else "#000000"), 0.16)};
@@ -1267,7 +1268,7 @@ class WindowNativeActionsMixin:
                 QPlainTextEdit#bulkTagEditorCommonTagsText, QPlainTextEdit#bulkTagEditorUncommonTagsText {{
                     selection-background-color: {Theme.get_accent_soft(accent)};
                 }}
-                QPushButton#bulkBtnSelectAllGallery, QPushButton#bulkBtnClearTags, QPushButton#bulkBtnRunLocalAI, QPushButton#bulkBtnSaveMeta, QPushButton#bulkBtnSaveToExif, QPushButton#bulkBtnOpenTagList {{
+                QPushButton#bulkBtnSelectAllGallery, QPushButton#bulkBtnClearTags, QPushButton#bulkBtnRunLocalAI, QPushButton#bulkBtnSaveMeta, QPushButton#bulkBtnSaveToExif, QPushButton#bulkBtnOpenTagList, QPushButton#bulkSelectedFileGenerateButton {{
                     background-color: {Theme.get_btn_save_bg(accent)};
                     color: {text};
                     border: 1px solid {Theme.get_border(accent)};
@@ -1279,7 +1280,7 @@ class WindowNativeActionsMixin:
                 QPushButton#bulkBtnOpenTagList {{
                     font-weight: 700;
                 }}
-                QPushButton#bulkBtnSelectAllGallery:hover, QPushButton#bulkBtnClearTags:hover, QPushButton#bulkBtnRunLocalAI:hover, QPushButton#bulkBtnSaveMeta:hover, QPushButton#bulkBtnSaveToExif:hover, QPushButton#bulkBtnOpenTagList:hover {{
+                QPushButton#bulkBtnSelectAllGallery:hover, QPushButton#bulkBtnClearTags:hover, QPushButton#bulkBtnRunLocalAI:hover, QPushButton#bulkBtnSaveMeta:hover, QPushButton#bulkBtnSaveToExif:hover, QPushButton#bulkBtnOpenTagList:hover, QPushButton#bulkSelectedFileGenerateButton:hover {{
                     background-color: {Theme.get_btn_save_hover(accent)};
                     color: {"#000" if is_light else "#fff"};
                     border-color: {accent_str};

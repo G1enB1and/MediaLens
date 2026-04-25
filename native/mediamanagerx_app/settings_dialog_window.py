@@ -166,6 +166,7 @@ class SettingsDialog(QDialog):
         installing_bg = Theme.mix(control_bg, accent, 0.22 if Theme.get_is_light() else 0.26)
         error_bg = Theme.mix(control_bg, QColor("#d33f49"), 0.24 if Theme.get_is_light() else 0.28)
         error_fg = "#8a111a" if Theme.get_is_light() else "#ffd0d4"
+        radio_dot = "#000000" if Theme.get_is_light() else "#ffffff"
         
         for btn in self.findChildren(QPushButton):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -358,6 +359,20 @@ class SettingsDialog(QDialog):
             QCheckBox, QRadioButton {{
                 color: {text};
                 spacing: 8px;
+            }}
+            QRadioButton::indicator {{
+                width: 14px;
+                height: 14px;
+                border-radius: 7px;
+                border: 1px solid {border};
+                background-color: {control_bg};
+            }}
+            QRadioButton::indicator:hover {{
+                border-color: {accent_str};
+            }}
+            QRadioButton::indicator:checked {{
+                border-color: {accent_str};
+                background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, stop:0 {radio_dot}, stop:0.34 {radio_dot}, stop:0.36 {accent_str}, stop:1 {accent_str});
             }}
             QTabBar::tab {{
                 background: {control_bg};
