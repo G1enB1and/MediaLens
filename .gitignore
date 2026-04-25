@@ -21,9 +21,12 @@ data/
 /paddleocr_cache/
 /ai-runtimes/
 /logs/*
+/logs/**/*
 !/logs/.gitkeep
 !/logs/*/
+!/logs/**/
 !/logs/*/.gitkeep
+!/logs/**/.gitkeep
 
 # Local env/editor
 .venv/

@@ -797,6 +797,7 @@ class BulkSelectedFileRow(QWidget):
     _TAG_CONTENT_HEIGHT = 92
     _CAPTION_CONTENT_HEIGHT = 132
     _GENERATE_BUTTON_HEIGHT = 28
+    _GENERATE_BUTTON_GAP = 5
     _RIGHT_GUTTER = 5
     _MIN_EDITOR_WIDTH = 140
 
@@ -888,7 +889,7 @@ class BulkSelectedFileRow(QWidget):
         self.tags_edit_host.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         tags_host_layout = QVBoxLayout(self.tags_edit_host)
         tags_host_layout.setContentsMargins(0, 0, 0, 0)
-        tags_host_layout.setSpacing(5)
+        tags_host_layout.setSpacing(self._GENERATE_BUTTON_GAP)
         tags_host_layout.addWidget(self.tags_edit)
         self.generate_btn = QPushButton(str(generate_button_text or ""))
         self.generate_btn.setObjectName("bulkSelectedFileGenerateButton")
@@ -898,6 +899,9 @@ class BulkSelectedFileRow(QWidget):
         self.generate_btn.setVisible(bool(str(generate_button_text or "").strip()))
         self.generate_btn.clicked.connect(self._emit_generate_requested)
         tags_host_layout.addWidget(self.generate_btn)
+        generate_extra = self._generate_button_extra_height()
+        if generate_extra:
+            self.tags_edit_host.setFixedHeight(self._content_height + generate_extra)
         self._tags_host_layout = tags_host_layout
         content_row.addWidget(self.tags_edit_host, 1)
         content_row.addSpacing(4)
@@ -923,6 +927,14 @@ class BulkSelectedFileRow(QWidget):
                 self.generate_btn.setEnabled(bool(enabled))
         except RuntimeError:
             pass
+
+    def _generate_button_extra_height(self) -> int:
+        try:
+            if self.generate_btn.isVisible():
+                return int(self._GENERATE_BUTTON_HEIGHT + self._GENERATE_BUTTON_GAP + 8)
+        except RuntimeError:
+            pass
+        return 0
 
     def set_thumbnail(self, thumbnail: QPixmap | None, thumbnail_bg_hint: str = "") -> None:
         try:
@@ -1031,8 +1043,7 @@ class BulkSelectedFileRow(QWidget):
             pass
 
     def item_height(self) -> int:
-        extra = self._GENERATE_BUTTON_HEIGHT + 8 if getattr(self, "generate_btn", None) is not None and self.generate_btn.isVisible() else 0
-        return int(self._content_height) + 60 + extra
+        return int(self._content_height) + 68 + self._generate_button_extra_height()
 
 
 class BulkSelectedFilesListWidget(QListWidget):

@@ -351,18 +351,27 @@ class SettingsDialog(QDialog):
                 background-color: {close_hover};
                 border-color: {accent_str};
             }}
-            QToolButton#settingsExpandableHeader {{
-                background-color: {control_bg};
-                color: {text};
+            QWidget#settingsExpandableGroup {{
+                background-color: {Theme.mix(control_bg, bg, 0.42)};
                 border: 1px solid {border};
-                border-radius: 6px;
-                padding: 6px 10px;
+                border-radius: 8px;
+            }}
+            QToolButton#settingsExpandableHeader {{
+                background: transparent;
+                color: {text};
+                border: none;
+                padding: 2px 0px;
                 font-weight: 600;
                 text-align: left;
             }}
             QToolButton#settingsExpandableHeader:hover {{
-                background-color: {category_hover};
-                border-color: {accent_str};
+                color: {accent_str};
+            }}
+            QFrame#settingsExpandableDivider {{
+                background-color: {Theme.mix(border, accent, 0.26)};
+                min-height: 1px;
+                max-height: 1px;
+                border: none;
             }}
             QPushButton:disabled, QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled {{
                 background-color: transparent;

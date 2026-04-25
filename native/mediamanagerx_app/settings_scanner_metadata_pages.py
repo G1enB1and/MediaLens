@@ -77,17 +77,22 @@ class ScannersSettingsPage(SettingsPage):
             schedule_row.addStretch(1)
 
             source_group = QWidget()
+            source_group.setObjectName("settingsExpandableGroup")
             source_group_layout = QVBoxLayout(source_group)
-            source_group_layout.setContentsMargins(0, 0, 0, 0)
+            source_group_layout.setContentsMargins(10, 8, 10, 10)
             source_group_layout.setSpacing(6)
             source_header = QToolButton()
-            source_header.setText("Folders to Scan")
+            source_header.setText("v  Folders to Scan")
             source_header.setObjectName("settingsExpandableHeader")
             source_header.setCheckable(True)
             source_header.setChecked(True)
-            source_header.setArrowType(Qt.ArrowType.DownArrow)
-            source_header.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+            source_header.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
             source_header.setCursor(Qt.CursorShape.PointingHandCursor)
+            source_header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            source_divider = QFrame()
+            source_divider.setObjectName("settingsExpandableDivider")
+            source_divider.setFrameShape(QFrame.Shape.HLine)
+            source_divider.setFrameShadow(QFrame.Shadow.Plain)
             source_body = QWidget()
             source_layout = QVBoxLayout(source_body)
             source_layout.setContentsMargins(0, 0, 0, 0)
@@ -109,6 +114,7 @@ class ScannersSettingsPage(SettingsPage):
             source_layout.addWidget(source_list)
             source_layout.addLayout(source_buttons)
             source_group_layout.addWidget(source_header)
+            source_group_layout.addWidget(source_divider)
             source_group_layout.addWidget(source_body)
 
             action_row = QHBoxLayout()
@@ -150,6 +156,7 @@ class ScannersSettingsPage(SettingsPage):
                 "interval": interval,
                 "source_group": source_group,
                 "source_header": source_header,
+                "source_divider": source_divider,
                 "source_body": source_body,
                 "source_list": source_list,
                 "add_source": add_source_btn,
@@ -167,7 +174,7 @@ class ScannersSettingsPage(SettingsPage):
             ocr_scope_detected_radio.toggled.connect(lambda checked: checked and self._set_ocr_scope_all_files(False))
             ocr_scope_all_radio.toggled.connect(lambda checked: checked and self._set_ocr_scope_all_files(True))
             interval.valueChanged.connect(lambda value, scanner_key=key: self._set_interval(scanner_key, int(value)))
-            source_header.toggled.connect(lambda checked, header=source_header, body=source_body: self._toggle_source_folder_section(header, body, checked))
+            source_header.toggled.connect(lambda checked, header=source_header, body=source_body, divider=source_divider: self._toggle_source_folder_section(header, body, divider, checked))
             add_source_btn.clicked.connect(lambda _checked=False, scanner_key=key: self._add_source_folder(scanner_key))
             remove_source_btn.clicked.connect(lambda _checked=False, scanner_key=key: self._remove_selected_source_folders(scanner_key))
             add_above_source_btn.clicked.connect(lambda _checked=False, scanner_key=key: self._add_folders_from_list_above(scanner_key))
@@ -206,9 +213,10 @@ class ScannersSettingsPage(SettingsPage):
         self.dialog.set_setting_bool("scanners.ocr_text.all_files", checked)
 
     @staticmethod
-    def _toggle_source_folder_section(header: QToolButton, body: QWidget, checked: bool) -> None:
+    def _toggle_source_folder_section(header: QToolButton, body: QWidget, divider: QFrame, checked: bool) -> None:
         body.setVisible(bool(checked))
-        header.setArrowType(Qt.ArrowType.DownArrow if checked else Qt.ArrowType.RightArrow)
+        divider.setVisible(bool(checked))
+        header.setText(("v  " if checked else ">  ") + "Folders to Scan")
 
     @staticmethod
     def _clean_source_folders(values: list[object]) -> list[str]:
