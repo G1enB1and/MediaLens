@@ -1,6 +1,42 @@
 # Change Log
 
-## v1.1.36 (Current)
+## v1.1.37 (Current)
+
+### Summary
+
+This release makes Paddle OCR setup clearer and more reliable, especially on systems with NVIDIA GPUs. MediaLens now avoids misleading install/status states and gives developers a faster way to test installed-runtime behavior without rebuilding.
+
+### Highlights
+
+- Paddle OCR setup is more transparent about whether GPU is active, CPU fallback is in use, or repair is needed.
+- AI Models status no longer looks like it starts installs while it is only checking runtimes.
+- Source runs now use installed AI runtime paths by default, making Paddle fixes faster to test before packaging.
+
+### Added
+
+- Added installed-build AI runtime path behavior to `python run.py` dev launches.
+- Added a `MEDIALENS_USE_INSTALLED_AI_PATHS=1` switch for source runs that should use AppData AI runtime and model paths.
+
+### Changed
+
+- Changed Paddle OCR installation so PaddleOCR dependency resolution cannot replace the final selected GPU runtime with CPU Paddle.
+- Changed Paddle OCR installation to check and repair pip without upgrading pip itself on every install.
+- Changed Paddle OCR GPU detection to try absolute `nvidia-smi` paths and report the attempted detection failures.
+- Changed Paddle OCR status details to distinguish installing, checking, NVIDIA detected but inactive, valid CPU fallback, and runtime probe errors.
+- Changed Paddle status so CPU-only Paddle on a detected NVIDIA GPU is shown as a repairable GPU error, not a clean install.
+- Changed the Paddle install button on the AI Models status page to wait for install progress signals instead of immediately refreshing back to a not-installed probe result.
+- Changed AI Models status refreshes to show `Checking` instead of `Installing` while probing runtimes.
+- Changed the AI Models status expand and collapse controls to use theme-appropriate SVG arrows instead of text characters.
+- Changed model install status updates so other model rows stay collapsed unless explicitly expanded.
+- Changed the gallery loading message to remove encoded text.
+
+### Removed
+
+- Removed no user-facing features in this release.
+
+---
+
+## v1.1.36
 
 ### Summary
 
@@ -34,17 +70,6 @@ This release focuses on startup reliability and a clearer OCR setup experience. 
 - Changed Paddle OCR worker startup so `auto` with GPU preference actually passes the GPU device to PaddleOCR.
 - Changed Paddle OCR status so partial failed runtimes no longer appear as installed, while valid CPU fallback runtimes still do.
 - Changed Paddle CPU fallback to try PyPI if Paddle's CPU package index cannot be reached.
-- Changed Paddle OCR installation so PaddleOCR dependency resolution cannot replace the final selected GPU runtime with CPU Paddle.
-- Changed Paddle OCR status details to distinguish installing, NVIDIA detected but inactive, valid CPU fallback, and runtime probe errors instead of showing unknown GPU state as CPU.
-- Changed the Paddle install button on the AI Models status page to wait for install progress signals instead of immediately refreshing back to a not-installed probe result.
-- Added a dev switch, `MEDIALENS_USE_INSTALLED_AI_PATHS=1`, so source runs can use the same AppData AI runtime and model paths as installed builds.
-- Changed `python run.py` dev launches to use installed-build AI runtime and model paths by default.
-- Changed Paddle OCR install to check/repair pip and install packaging tools without upgrading pip itself on every run.
-- Changed AI Models status refreshes to show `Checking` instead of `Installing` while probing runtimes.
-- Changed Paddle status so CPU-only Paddle on a detected NVIDIA GPU is shown as a repairable GPU error, not a clean install.
-- Changed the AI Models status expand and collapse controls to use theme-appropriate SVG arrows instead of text characters.
-- Changed model install status updates so other model rows stay collapsed unless explicitly expanded.
-- Changed the gallery loading message to remove encoded text.
 
 ### Removed
 
