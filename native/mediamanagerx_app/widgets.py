@@ -888,7 +888,7 @@ class BulkSelectedFileRow(QWidget):
         self.tags_edit_host.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         tags_host_layout = QVBoxLayout(self.tags_edit_host)
         tags_host_layout.setContentsMargins(0, 0, 0, 0)
-        tags_host_layout.setSpacing(4)
+        tags_host_layout.setSpacing(5)
         tags_host_layout.addWidget(self.tags_edit)
         self.generate_btn = QPushButton(str(generate_button_text or ""))
         self.generate_btn.setObjectName("bulkSelectedFileGenerateButton")

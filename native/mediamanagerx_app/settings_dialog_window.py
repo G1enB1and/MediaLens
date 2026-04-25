@@ -351,6 +351,19 @@ class SettingsDialog(QDialog):
                 background-color: {close_hover};
                 border-color: {accent_str};
             }}
+            QToolButton#settingsExpandableHeader {{
+                background-color: {control_bg};
+                color: {text};
+                border: 1px solid {border};
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-weight: 600;
+                text-align: left;
+            }}
+            QToolButton#settingsExpandableHeader:hover {{
+                background-color: {category_hover};
+                border-color: {accent_str};
+            }}
             QPushButton:disabled, QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled {{
                 background-color: transparent;
                 color: {muted};
