@@ -318,11 +318,61 @@ class BridgeVideoMetadataMixin:
             python_path = self._ocr_runtime_python_path()
             device = str(self.settings.value("ocr/paddle_device", "auto", type=str) or "auto")
             prefer_gpu = bool(self.settings.value("ocr/paddle_prefer_gpu", True, type=bool))
+            probe: dict = {}
+            if python_path.is_file():
+                code = (
+                    "import json\n"
+                    "payload={'ok': True}\n"
+                    "try:\n"
+                    " import paddle\n"
+                    " payload['compiled_with_cuda']=bool(paddle.device.is_compiled_with_cuda())\n"
+                    " payload['current_device']=str(paddle.get_device())\n"
+                    "except Exception as exc:\n"
+                    " payload={'ok': False, 'error': str(exc)}\n"
+                    "print(json.dumps(payload), flush=True)\n"
+                )
+                try:
+                    cache_root = Path(str(self.settings.value("ai_caption/models_dir", self._local_ai_models_dir_default(), type=str) or self._local_ai_models_dir_default())) / "paddleocr_cache"
+                    home_dir = cache_root / "home"
+                    temp_dir = cache_root / "tmp"
+                    child_env = self._local_ai_subprocess_env(str(self._local_ai_worker_source_root()))
+                    for directory in (cache_root, home_dir, temp_dir, cache_root / "paddle", cache_root / "ppocr", cache_root / "xdg", cache_root / "hf_home"):
+                        try:
+                            directory.mkdir(parents=True, exist_ok=True)
+                        except Exception:
+                            pass
+                    child_env["PADDLE_PDX_CACHE_HOME"] = str(cache_root / "paddlex")
+                    child_env["PADDLE_HOME"] = str(cache_root / "paddle")
+                    child_env["PPOCR_HOME"] = str(cache_root / "ppocr")
+                    child_env["XDG_CACHE_HOME"] = str(cache_root / "xdg")
+                    child_env["HF_HOME"] = str(cache_root / "hf_home")
+                    child_env["HOME"] = str(home_dir)
+                    child_env["USERPROFILE"] = str(home_dir)
+                    child_env["TEMP"] = str(temp_dir)
+                    child_env["TMP"] = str(temp_dir)
+                    completed = _run_hidden_subprocess(
+                        [str(python_path), "-c", code],
+                        capture_output=True,
+                        text=True,
+                        timeout=12,
+                        env=child_env,
+                    )
+                    if completed.returncode == 0:
+                        probe = json.loads((completed.stdout or "{}").strip() or "{}")
+                    else:
+                        probe = {"ok": False, "error": (completed.stderr or completed.stdout or "").strip()[-500:]}
+                except Exception as exc:
+                    probe = {"ok": False, "error": str(exc)}
+            current_device = str(probe.get("current_device") or "").strip().lower()
+            gpu_active = current_device.startswith("gpu") or current_device.startswith("cuda")
             return {
                 "installed": python_path.is_file(),
                 "python_path": str(python_path),
                 "device": device,
                 "prefer_gpu": prefer_gpu,
+                "runtime_probe": probe,
+                "gpu_active": gpu_active,
+                "current_device": current_device,
                 "fast_enabled": True,
                 "accurate_enabled": False,
             }
@@ -505,6 +555,30 @@ class BridgeVideoMetadataMixin:
             return True
         except Exception as exc:
             self._log(f"Keep OCR result failed: {exc}")
+            return False
+
+    @Slot(int, str, result=bool)
+    def keep_latest_ocr_result_source(self, media_id: int, source: str) -> bool:
+        from app.mediamanager.db.ocr_repo import set_ocr_winner
+
+        try:
+            row = self.conn.execute(
+                """
+                SELECT id
+                FROM media_ocr_results
+                WHERE media_id = ? AND source = ? AND COALESCE(text, '') != ''
+                ORDER BY created_at_utc DESC, id DESC
+                LIMIT 1
+                """,
+                (int(media_id), str(source or "")),
+            ).fetchone()
+            if not row:
+                return False
+            set_ocr_winner(self.conn, int(media_id), int(row["id"] if hasattr(row, "keys") else row[0]), selected_by="user")
+            self.galleryScopeChanged.emit()
+            return True
+        except Exception as exc:
+            self._log(f"Keep latest OCR result failed: {exc}")
             return False
 
     @Slot(int, str, result=bool)

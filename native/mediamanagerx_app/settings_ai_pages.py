@@ -51,6 +51,7 @@ class AISettingsPage(SettingsPage):
         self.ai_section_tabs.addTab("Tags")
         self.ai_section_tabs.addTab("Descriptions")
         self.ai_section_tabs.addTab("Text and OCR")
+        self.ai_section_tabs.addTab("Local Models")
         content_layout.addWidget(self.ai_section_tabs)
 
         self.ai_section_stack = QStackedWidget()
@@ -73,6 +74,12 @@ class AISettingsPage(SettingsPage):
         ocr_page_layout.setContentsMargins(0, 0, 0, 0)
         ocr_page_layout.setSpacing(12)
         self.ai_section_stack.addWidget(ocr_page)
+
+        local_models_page = QWidget()
+        local_models_page_layout = QVBoxLayout(local_models_page)
+        local_models_page_layout.setContentsMargins(0, 0, 0, 0)
+        local_models_page_layout.setSpacing(12)
+        self.ai_section_stack.addWidget(local_models_page)
         self.ai_section_tabs.currentChanged.connect(self.ai_section_stack.setCurrentIndex)
 
         tags_group = QGroupBox("Tags")
@@ -285,18 +292,14 @@ class AISettingsPage(SettingsPage):
         self.paddle_fast_status_label = QLabel("")
         self.paddle_fast_status_label.setTextFormat(Qt.TextFormat.RichText)
         self.paddle_fast_status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.paddle_accurate_status_label = QLabel("")
-        self.paddle_accurate_status_label.setTextFormat(Qt.TextFormat.RichText)
-        self.paddle_accurate_status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         paddle_form.addRow("Paddle Fast", self.paddle_fast_status_label)
-        paddle_form.addRow("Paddle Accurate", self.paddle_accurate_status_label)
         ocr_page_layout.addStretch(1)
 
         models_group = QGroupBox("Models")
         models_form = QFormLayout(models_group)
         models_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         models_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
-        content_layout.addWidget(models_group)
+        local_models_page_layout.addWidget(models_group)
 
         models_row = QWidget()
         models_layout = QHBoxLayout(models_row)
@@ -309,6 +312,11 @@ class AISettingsPage(SettingsPage):
         models_layout.addWidget(self.models_dir_edit, 1)
         models_layout.addWidget(browse_btn)
         models_form.addRow("Models Folder", models_row)
+
+        models_status_btn = QPushButton("AI Models Status")
+        models_status_btn.clicked.connect(lambda: self.dialog.main_window.open_local_ai_setup("captioner", show_advanced=True))
+        models_form.addRow("Status Page", models_status_btn)
+        local_models_page_layout.addStretch(1)
 
         save_btn = QPushButton("Save AI Settings")
         save_btn.clicked.connect(self._save)
@@ -462,14 +470,21 @@ class AISettingsPage(SettingsPage):
         except Exception as exc:
             status = {"installed": False, "error": str(exc)}
         installed = bool(status.get("installed"))
-        device = str(status.get("device") or "auto").strip().upper()
-        gpu_text = "GPU preferred" if bool(status.get("prefer_gpu", True)) else "CPU"
         if installed:
-            self.paddle_fast_status_label.setText(f'<span style="color:{ok_color};">Installed</span><br>{html.escape(device)} / {html.escape(gpu_text)}')
+            current_device = str(status.get("current_device") or "").strip()
+            probe = dict(status.get("runtime_probe") or {})
+            gpu_active = bool(status.get("gpu_active"))
+            if gpu_active:
+                gpu_line = f"GPU active ({html.escape(current_device or 'GPU')})"
+            else:
+                reason = str(probe.get("error") or "").strip()
+                gpu_line = "GPU not active; Paddle runtime is using CPU"
+                if reason:
+                    gpu_line = f"{gpu_line}<br>{html.escape(reason)}"
+            self.paddle_fast_status_label.setText(f'<span style="color:{ok_color};">Installed</span><br>{gpu_line}')
         else:
             detail = html.escape(str(status.get("error") or status.get("python_path") or "Runtime not installed."))
             self.paddle_fast_status_label.setText(f'<span style="color:{bad_color};">Not installed</span><br>{detail}')
-        self.paddle_accurate_status_label.setText("Disabled while the advanced preprocessing profile is retired.")
 
     def _install_selected_ai_model(self, kind: str) -> None:
         model_id = self._selected_ai_model_id(kind)

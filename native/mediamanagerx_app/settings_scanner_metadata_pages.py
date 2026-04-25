@@ -29,15 +29,14 @@ class ScannersSettingsPage(SettingsPage):
             desc_label = _description(description)
             enable_toggle = QCheckBox("Run this scanner in the background")
             ocr_source_row = QWidget()
-            ocr_source_layout = QHBoxLayout(ocr_source_row)
+            ocr_source_layout = QVBoxLayout(ocr_source_row)
             ocr_source_layout.setContentsMargins(0, 0, 0, 0)
-            ocr_source_layout.setSpacing(12)
-            ocr_fast_toggle = QCheckBox("Fast")
-            ocr_ai_toggle = QCheckBox("AI")
-            ocr_source_layout.addWidget(QLabel("Run OCR"))
+            ocr_source_layout.setSpacing(4)
+            ocr_fast_toggle = QCheckBox("Fast OCR")
+            ocr_ai_toggle = QCheckBox("AI Generated OCR")
+            ocr_source_layout.addWidget(QLabel("OCR Versions to run:"))
             ocr_source_layout.addWidget(ocr_fast_toggle)
             ocr_source_layout.addWidget(ocr_ai_toggle)
-            ocr_source_layout.addStretch(1)
             ocr_source_row.setVisible(key == "ocr_text")
 
             schedule_row = QHBoxLayout()
@@ -237,6 +236,7 @@ class OcrReviewDialog(QDialog):
         self.page = page
         self.bridge = page.bridge
         self._pending_ocr_paths: set[str] = set()
+        self._pending_ocr_cells: dict[str, tuple[str, QPlainTextEdit, QPushButton]] = {}
         self.setWindowTitle("Review OCR Results")
         self.resize(1100, 720)
         layout = QVBoxLayout(self)
@@ -387,7 +387,10 @@ class OcrReviewDialog(QDialog):
         if is_user_text:
             keep_btn.clicked.connect(lambda _checked=False, mid=media_id, edit=text: self._keep_user_text(mid, edit.toPlainText()))
         else:
-            keep_btn.clicked.connect(lambda _checked=False, mid=media_id, rid=result_id: self._keep_result(mid, rid))
+            if result_id > 0:
+                keep_btn.clicked.connect(lambda _checked=False, mid=media_id, rid=result_id: self._keep_result(mid, rid))
+            else:
+                keep_btn.clicked.connect(lambda _checked=False, mid=media_id, src=source: self._keep_source_result(mid, src))
             keep_btn.setEnabled(result_id > 0)
         button_row = QHBoxLayout()
         button_row.setContentsMargins(0, 0, 0, 0)
@@ -395,7 +398,7 @@ class OcrReviewDialog(QDialog):
         button_row.addWidget(keep_btn)
         if source in {"paddle_fast", "gemma4"}:
             generate_btn = QPushButton("Generate")
-            generate_btn.clicked.connect(lambda _checked=False, p=path, s=source, edit=text: self._generate_ocr(p, s, edit))
+            generate_btn.clicked.connect(lambda _checked=False, p=path, s=source, edit=text, keep=keep_btn: self._generate_ocr(p, s, edit, keep))
             button_row.addWidget(generate_btn)
         button_row.addStretch(1)
         layout.addWidget(label)
@@ -403,11 +406,12 @@ class OcrReviewDialog(QDialog):
         layout.addLayout(button_row)
         return cell
 
-    def _generate_ocr(self, path: str, source: str, edit: QPlainTextEdit) -> None:
+    def _generate_ocr(self, path: str, source: str, edit: QPlainTextEdit, keep_btn: QPushButton) -> None:
         clean_path = str(path or "").strip()
         if not clean_path or not hasattr(self.bridge, "run_manual_ocr_with_source"):
             return
         self._pending_ocr_paths.add(clean_path)
+        self._pending_ocr_cells[clean_path] = (str(source or "paddle_fast"), edit, keep_btn)
         edit.setPlainText("Running OCR...")
         self.bridge.run_manual_ocr_with_source(clean_path, str(source or "paddle_fast"))
 
@@ -417,14 +421,25 @@ class OcrReviewDialog(QDialog):
         if clean_path not in self._pending_ocr_paths:
             return
         self._pending_ocr_paths.discard(clean_path)
+        source, edit, keep_btn = self._pending_ocr_cells.pop(clean_path, ("", None, None))
         if error:
             QMessageBox.warning(self, "OCR Failed", str(error or "OCR failed."))
             return
-        self._reload()
+        if edit is not None:
+            edit.setPlainText(str(text or ""))
+        if keep_btn is not None:
+            keep_btn.setEnabled(bool(str(text or "").strip()))
 
     def _keep_result(self, media_id: int, result_id: int) -> None:
         try:
             if self.bridge.keep_ocr_result(int(media_id), int(result_id)):
+                self._reload()
+        except Exception:
+            pass
+
+    def _keep_source_result(self, media_id: int, source: str) -> None:
+        try:
+            if hasattr(self.bridge, "keep_latest_ocr_result_source") and self.bridge.keep_latest_ocr_result_source(int(media_id), str(source or "")):
                 self._reload()
         except Exception:
             pass
