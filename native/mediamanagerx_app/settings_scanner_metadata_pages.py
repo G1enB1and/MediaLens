@@ -214,8 +214,10 @@ class ScannersSettingsPage(SettingsPage):
             action_row.addWidget(cancel_btn)
             action_row.addWidget(status_label, 1)
 
-            last_run_label = QLabel("Last run: Never")
+            last_run_label = QLabel("Last Ran: Never")
             last_run_label.setWordWrap(True)
+            next_run_label = QLabel("Next Scheduled Run: Never")
+            next_run_label.setWordWrap(True)
             review_btn = QPushButton("Review Flagged OCR")
             review_btn.setVisible(key == "ocr_text")
 
@@ -228,6 +230,7 @@ class ScannersSettingsPage(SettingsPage):
             group_layout.addLayout(action_row)
             group_layout.addWidget(review_btn)
             group_layout.addWidget(last_run_label)
+            group_layout.addWidget(next_run_label)
             content_layout.addWidget(group)
 
             self._widgets[key] = {
@@ -263,6 +266,7 @@ class ScannersSettingsPage(SettingsPage):
                 "review": review_btn,
                 "status": status_label,
                 "last_run": last_run_label,
+                "next_run": next_run_label,
             }
             enable_toggle.toggled.connect(lambda checked, scanner_key=key: self._set_enabled(scanner_key, checked))
             ocr_fast_toggle.toggled.connect(lambda checked, source_key="run_fast": self._set_ocr_source_enabled(source_key, checked))
@@ -523,6 +527,7 @@ class ScannersSettingsPage(SettingsPage):
         day_toggles = list(widgets.get("schedule_day_toggles") or [])
         status = widgets.get("status")
         last_run = widgets.get("last_run")
+        next_run = widgets.get("next_run")
         cancel_btn = widgets.get("cancel")
         running = bool(payload.get("running"))
         ocr_fast = widgets.get("ocr_fast")
@@ -575,7 +580,10 @@ class ScannersSettingsPage(SettingsPage):
         if isinstance(status, QLabel):
             status.setText(f"Status: {payload.get('status') or 'Idle'}")
         if isinstance(last_run, QLabel):
-            last_run.setText(f"Last run: {self._format_last_run(payload.get('last_run_utc'))}")
+            last_run.setText(f"Last Ran: {self._format_last_run(payload.get('last_run_utc'))}")
+        if isinstance(next_run, QLabel):
+            next_run.setText(f"Next Scheduled Run: {self._format_last_run(payload.get('next_run_utc'))}")
+            next_run.setVisible(enabled and bool(str(payload.get("next_run_utc") or "").strip()))
         self._sync_enabled_state(scanner_key)
         if cancel_btn is not None:
             cancel_btn.setEnabled(running)
@@ -600,6 +608,7 @@ class ScannersSettingsPage(SettingsPage):
                     "schedule_days": self._schedule_days_from_settings(scanner_key),
                     "schedule_month_day": int(self.settings.value(f"scanners/{scanner_key}/schedule_month_day", 1, type=int) or 1),
                     "last_run_utc": str(self.settings.value(f"scanners/{scanner_key}/last_run_utc", "", type=str) or ""),
+                    "next_run_utc": "",
                     "status": str(self.settings.value(f"scanners/{scanner_key}/status", "Idle", type=str) or "Idle"),
                     "run_fast": bool(self.settings.value("scanners/ocr_text/run_fast", True, type=bool)),
                     "run_ai": bool(self.settings.value("scanners/ocr_text/run_ai", False, type=bool)),

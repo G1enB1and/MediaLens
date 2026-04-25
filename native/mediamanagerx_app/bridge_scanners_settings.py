@@ -324,6 +324,69 @@ class BridgeScannersSettingsMixin:
     def _scanner_last_run_utc(self, scanner_key: str) -> str:
         return str(self.settings.value(self._scanner_setting_key(scanner_key, "last_run_utc"), "", type=str) or "")
 
+    @staticmethod
+    def _scanner_parse_last_run(value: str) -> datetime | None:
+        try:
+            if not value:
+                return None
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed
+        except Exception:
+            return None
+
+    @staticmethod
+    def _scanner_add_month(value: datetime) -> datetime:
+        year = value.year + (1 if value.month == 12 else 0)
+        month = 1 if value.month == 12 else value.month + 1
+        day = min(value.day, monthrange(year, month)[1])
+        return value.replace(year=year, month=month, day=day)
+
+    def _scanner_next_run_utc(self, scanner_key: str) -> str:
+        if not self._scanner_enabled(scanner_key):
+            return ""
+        mode = self._scanner_schedule_mode(scanner_key)
+        last_dt = self._scanner_parse_last_run(self._scanner_last_run_utc(scanner_key))
+        now_utc = datetime.now(timezone.utc)
+        if mode == "hours":
+            if last_dt is None:
+                return now_utc.replace(microsecond=0).isoformat()
+            return max(now_utc, last_dt + timedelta(hours=self._scanner_interval_hours(scanner_key))).replace(microsecond=0).isoformat()
+
+        now_local = datetime.now().astimezone()
+        last_local = last_dt.astimezone() if last_dt is not None else None
+        hour, minute = (int(part) for part in self._scanner_schedule_time(scanner_key).split(":", 1))
+
+        if mode == "daily":
+            candidate = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if candidate <= now_local or (last_local is not None and last_local.date() == candidate.date()):
+                candidate += timedelta(days=1)
+            return candidate.astimezone(timezone.utc).replace(microsecond=0).isoformat()
+
+        if mode == "weekly":
+            days = self._scanner_schedule_days(scanner_key) or list(range(7))
+            for offset in range(8):
+                candidate_date = now_local.date() + timedelta(days=offset)
+                if candidate_date.weekday() not in days:
+                    continue
+                candidate = datetime.combine(candidate_date, datetime.min.time(), tzinfo=now_local.tzinfo).replace(hour=hour, minute=minute)
+                if candidate <= now_local:
+                    continue
+                if last_local is not None and last_local.date() == candidate.date():
+                    continue
+                return candidate.astimezone(timezone.utc).replace(microsecond=0).isoformat()
+
+        if mode == "monthly":
+            base = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            for _ in range(2):
+                target_day = min(self._scanner_schedule_month_day(scanner_key), monthrange(base.year, base.month)[1])
+                candidate = base.replace(day=target_day)
+                if candidate > now_local and not (last_local is not None and last_local.date() == candidate.date()):
+                    return candidate.astimezone(timezone.utc).replace(microsecond=0).isoformat()
+                base = self._scanner_add_month(base)
+        return ""
+
     def _set_scanner_status(self, scanner_key: str, status: str, *, mark_run: bool = False) -> None:
         self.settings.setValue(self._scanner_setting_key(scanner_key, "status"), str(status or "Idle"))
         if mark_run:
@@ -338,6 +401,10 @@ class BridgeScannersSettingsMixin:
         enabled = self._scanner_enabled(scanner_key)
         status = str(self.settings.value(self._scanner_setting_key(scanner_key, "status"), "Idle", type=str) or "Idle")
         running = bool(scanner_key == "ocr_text" and getattr(self, "_ocr_text_processing_active", False))
+        if not enabled:
+            status = "Disabled"
+        elif not running and status in {"", "Idle", "Disabled"}:
+            status = "Scheduled"
         return {
             "key": scanner_key,
             "name": self._scanner_display_name(scanner_key),
@@ -349,6 +416,7 @@ class BridgeScannersSettingsMixin:
             "schedule_days": self._scanner_schedule_days(scanner_key),
             "schedule_month_day": self._scanner_schedule_month_day(scanner_key),
             "last_run_utc": self._scanner_last_run_utc(scanner_key),
+            "next_run_utc": self._scanner_next_run_utc(scanner_key),
             "status": status,
             "source_folders": self._scanner_source_folders(scanner_key),
             "run_fast": self._ocr_scanner_run_fast() if scanner_key == "ocr_text" else False,
@@ -1176,6 +1244,7 @@ class BridgeScannersSettingsMixin:
                 data[f"scanners.{scanner_key}.schedule_days"] = payload["schedule_days"]
                 data[f"scanners.{scanner_key}.schedule_month_day"] = payload["schedule_month_day"]
                 data[f"scanners.{scanner_key}.last_run_utc"] = payload["last_run_utc"]
+                data[f"scanners.{scanner_key}.next_run_utc"] = payload["next_run_utc"]
                 data[f"scanners.{scanner_key}.status"] = payload["status"]
             for qkey in self.settings.allKeys():
                 if qkey.startswith("metadata/display/") or qkey.startswith("metadata/layout/") or qkey.startswith("duplicate/"):
