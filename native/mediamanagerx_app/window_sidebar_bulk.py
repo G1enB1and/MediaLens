@@ -401,6 +401,7 @@ class WindowSidebarBulkMixin:
         self._sync_sidebar_panel_widths()
 
     def _set_bulk_select_all_pending(self, pending: bool, message: str = "") -> None:
+        self._bulk_select_all_pending = bool(pending)
         widgets = [
             getattr(self, "bulk_btn_select_all_gallery", None),
             getattr(self, "bulk_caption_btn_select_all_gallery", None),
@@ -411,10 +412,16 @@ class WindowSidebarBulkMixin:
         label = getattr(self, "bulk_caption_status_lbl", None) if self._current_bulk_editor_mode() == "captions" else getattr(self, "bulk_status_lbl", None)
         if label is not None:
             label.setText(str(message or ""))
-        try:
-            QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
-        except Exception:
-            pass
+            try:
+                label.repaint()
+            except Exception:
+                pass
+        for widget in widgets:
+            if widget is not None:
+                try:
+                    widget.repaint()
+                except Exception:
+                    pass
 
     def _select_all_visible_gallery_items(self, _checked: bool = False) -> None:
         self._set_bulk_select_all_pending(True, "Selecting files...")
@@ -597,7 +604,7 @@ class WindowSidebarBulkMixin:
             except Exception:
                 pass
         self._refresh_bulk_caption_editor_summary()
-        self.bulk_caption_status_lbl.setText(f"âœ“ Descriptions saved for {updated} items")
+        self.bulk_caption_status_lbl.setText(f"Descriptions saved for {updated} items")
         QTimer.singleShot(3000, lambda: self.bulk_caption_status_lbl.setText(""))
 
     def _clear_bulk_descriptions(self) -> None:
@@ -621,7 +628,7 @@ class WindowSidebarBulkMixin:
             except Exception:
                 pass
         self._refresh_bulk_caption_editor_summary()
-        self.bulk_caption_status_lbl.setText(f"âœ“ Descriptions cleared for {len(paths)} items")
+        self.bulk_caption_status_lbl.setText(f"Descriptions cleared for {len(paths)} items")
         QTimer.singleShot(3000, lambda: self.bulk_caption_status_lbl.setText(""))
 
     @staticmethod
@@ -660,7 +667,11 @@ class WindowSidebarBulkMixin:
         elif hasattr(self, "details_workspace"):
             self.right_workspace_stack.setCurrentWidget(self.details_workspace)
         self._sync_sidebar_panel_widths()
-        if hasattr(self, "tag_list_panel") and self.tag_list_panel.isVisible():
+        if (
+            hasattr(self, "tag_list_panel")
+            and self.tag_list_panel.isVisible()
+            and not bool(getattr(self, "_bulk_select_all_pending", False))
+        ):
             self._refresh_tag_list_rows_state()
 
     def _active_tag_editor(self):
@@ -849,7 +860,7 @@ class WindowSidebarBulkMixin:
             pass
         self._refresh_bulk_tag_editor_summary()
         if self._is_bulk_editor_active():
-            self.bulk_status_lbl.setText(f"âœ“ Saved tags for {Path(clean_path).name}")
+            self.bulk_status_lbl.setText(f"Saved tags for {Path(clean_path).name}")
             QTimer.singleShot(2500, lambda: self.bulk_status_lbl.setText(""))
 
     def _save_bulk_selected_file_description(self, path: str, text: str) -> None:
@@ -873,7 +884,7 @@ class WindowSidebarBulkMixin:
             pass
         self._refresh_bulk_caption_editor_summary()
         if self._is_bulk_editor_active():
-            self.bulk_caption_status_lbl.setText(f"âœ“ Saved description for {Path(clean_path).name}")
+            self.bulk_caption_status_lbl.setText(f"Saved description for {Path(clean_path).name}")
             QTimer.singleShot(2500, lambda: self.bulk_caption_status_lbl.setText(""))
 
     @staticmethod
@@ -1629,7 +1640,7 @@ class WindowSidebarBulkMixin:
                     self._invalidate_tag_list_scope_counts_cache()
                 except Exception:
                     pass
-            self.bulk_status_lbl.setText(f"âœ“ Added '{tag_name}' to {len(paths)} selected files")
+            self.bulk_status_lbl.setText(f"Added '{tag_name}' to {len(paths)} selected files")
             QTimer.singleShot(3000, lambda: self.bulk_status_lbl.setText(""))
             self._refresh_bulk_tag_editor_summary()
             self._refresh_tag_list_rows_state()
@@ -1645,7 +1656,7 @@ class WindowSidebarBulkMixin:
             self._invalidate_tag_list_scope_counts_cache()
         except Exception:
             pass
-        self.meta_status_lbl.setText(f"âœ“ Added '{tag_name}'")
+        self.meta_status_lbl.setText(f"Added '{tag_name}'")
         QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
         self._refresh_tag_list_rows_state()
 
@@ -1665,7 +1676,7 @@ class WindowSidebarBulkMixin:
                     self._invalidate_tag_list_scope_counts_cache()
                 except Exception:
                     pass
-            self.bulk_status_lbl.setText(f"âœ“ Removed '{tag_name}' from {len(paths)} selected files")
+            self.bulk_status_lbl.setText(f"Removed '{tag_name}' from {len(paths)} selected files")
             QTimer.singleShot(3000, lambda: self.bulk_status_lbl.setText(""))
             self._refresh_bulk_tag_editor_summary()
         self._refresh_tag_list_rows_state()
@@ -1681,7 +1692,7 @@ class WindowSidebarBulkMixin:
                 self._invalidate_tag_list_scope_counts_cache()
             except Exception:
                 pass
-        self.meta_status_lbl.setText(f"Ã¢Å“â€œ Removed '{tag_name}'")
+        self.meta_status_lbl.setText(f"Removed '{tag_name}'")
         QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
         self._refresh_tag_list_rows_state()
 

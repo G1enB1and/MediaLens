@@ -528,7 +528,7 @@ class TagListTagRow(QWidget):
         self.name_lbl.customContextMenuRequested.connect(lambda _pos: self.filterRequested.emit(self._tag_name))
         layout.addWidget(self.name_lbl, 1)
 
-        self.remove_from_selection_btn = QPushButton("X")
+        self.remove_from_selection_btn = QPushButton("")
         self.remove_from_selection_btn.setObjectName("tagListRemoveFromSelectionButton")
         self.remove_from_selection_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.remove_from_selection_btn.setFixedSize(26, 24)
@@ -536,7 +536,7 @@ class TagListTagRow(QWidget):
         self.remove_from_selection_btn.clicked.connect(self._on_remove_from_selection_clicked)
         layout.addWidget(self.remove_from_selection_btn, 0)
 
-        self.add_btn = QPushButton("â†’")
+        self.add_btn = QPushButton("")
         self.add_btn.setObjectName("tagListAddButton")
         self.add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.add_btn.setFixedSize(26, 24)
@@ -581,7 +581,12 @@ class TagListTagRow(QWidget):
         trash_svg_name = "trashcan.svg" if is_light else "trashcan-white.svg"
         trash_svg = (Path(__file__).with_name("web") / "icons" / trash_svg_name).as_posix()
         trash_red_svg = (Path(__file__).with_name("web") / "icons" / "trashcan-red.svg").as_posix()
-        trash_disabled_svg = (Path(__file__).with_name("web") / "icons" / "trashcan-gray.svg").as_posix()
+        close_svg_name = "close-dark.svg" if is_light else "close.svg"
+        close_svg = (Path(__file__).with_name("web") / "icons" / close_svg_name).as_posix()
+        close_disabled_svg = (Path(__file__).with_name("web") / "icons" / "close-gray.svg").as_posix()
+        close_red_svg = (Path(__file__).with_name("web") / "icons" / "close-red.svg").as_posix()
+        add_svg_name = "arrow-right-dark.svg" if is_light else "arrow-right-light.svg"
+        add_svg = (Path(__file__).with_name("web") / "icons" / add_svg_name).as_posix()
         self._drag_bg_color = QColor(Theme.get_accent_soft(QColor(accent_color)))
         self._drag_border_color = QColor(accent_color)
         is_selected = self._selection_state in {"selected", "common"}
@@ -630,17 +635,15 @@ class TagListTagRow(QWidget):
             f"""
             QPushButton#tagListAddButton {{
                 background-color: {btn_bg};
-                color: {text};
                 border: 1px solid {btn_border};
                 border-radius: 6px;
                 padding: 0px;
-                font-weight: 700;
+                image: url('{add_svg}');
             }}
             QPushButton#tagListAddButton:hover {{
                 background-color: {btn_hover};
-                color: {'#000000' if is_light else '#ffffff'};
                 border-color: {accent_color};
-                font-weight: 800;
+                image: url('{add_svg}');
             }}
             """
         )
@@ -681,21 +684,20 @@ class TagListTagRow(QWidget):
             f"""
             QPushButton#tagListRemoveFromSelectionButton {{
                 background-color: {btn_bg};
-                color: {'#ffffff' if can_remove_from_selection else text_muted};
                 border: 1px solid {btn_border};
                 border-radius: 6px;
-                padding: 0px;
-                font-weight: 700;
+                padding: 5px;
+                image: url('{close_svg if can_remove_from_selection else close_disabled_svg}');
             }}
             QPushButton#tagListRemoveFromSelectionButton:hover {{
                 background-color: {btn_bg};
-                color: #d45a5a;
                 border-color: #d45a5a;
+                image: url('{close_red_svg if can_remove_from_selection else close_disabled_svg}');
             }}
             QPushButton#tagListRemoveFromSelectionButton[removeEnabled="false"] {{
                 background-color: {btn_bg};
-                color: {text_muted};
                 border-color: {btn_border};
+                image: url('{close_disabled_svg}');
             }}
             """
         )
@@ -867,7 +869,7 @@ class BulkSelectedFileRow(QWidget):
             self.thumb_lbl.setPixmap(thumbnail)
             self._thumbnail_loaded = True
         else:
-            self.thumb_lbl.setText("â€¢")
+            self.thumb_lbl.setText("")
         if not hasattr(self, "_thumbnail_loaded"):
             self._thumbnail_loaded = False
         content_row.addWidget(self.thumb_lbl, 0, Qt.AlignmentFlag.AlignTop)
