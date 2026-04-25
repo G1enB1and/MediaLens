@@ -2439,16 +2439,30 @@ class WindowPreviewMetadataMixin:
         if not paths:
             self._set_local_ai_progress_text("Select one or more media files first.", "tags")
             return
+        self._run_local_ai_tags_for_paths(paths, "all")
+
+    def _run_local_ai_tags_for_path(self, path: str) -> None:
+        clean_path = str(path or "").strip()
+        if not clean_path:
+            return
+        self._run_local_ai_tags_for_paths([clean_path], "file")
+
+    def _run_local_ai_tags_for_paths(self, paths: list[str], scope_label: str = "all") -> None:
+        clean_paths = [str(path or "").strip() for path in list(paths or []) if str(path or "").strip()]
+        if not clean_paths:
+            self._set_local_ai_progress_text("Select one or more media files first.", "tags")
+            return
         if not self._ensure_local_ai_model_ready("tagger"):
             return
         if hasattr(self.bridge, "run_local_ai_tags"):
             self._local_ai_operation = "tags"
-            self._local_ai_total = len(paths)
+            self._local_ai_scope_label = str(scope_label or "all")
+            self._local_ai_total = len(clean_paths)
             self._local_ai_completed = 0
             self._set_local_ai_progress_text("", "descriptions")
-            self._set_local_ai_progress_text(self._local_ai_progress_message(0, len(paths)), "tags")
-            self._set_bulk_local_ai_status(f"Generating tags for all: 0/{len(paths)}")
-            started = self.bridge.run_local_ai_tags(paths)
+            self._set_local_ai_progress_text(self._local_ai_progress_message(0, len(clean_paths)), "tags")
+            self._set_bulk_local_ai_status(f"Generating tags for {self._local_ai_scope_label}: 0/{len(clean_paths)}")
+            started = self.bridge.run_local_ai_tags(clean_paths)
             if not started:
                 self._set_local_ai_progress_text("Local AI tags are already running or no valid files were selected.", "tags")
                 self._set_bulk_local_ai_status("Local AI tags are already running or no valid files were selected.")
@@ -2458,16 +2472,30 @@ class WindowPreviewMetadataMixin:
         if not paths:
             self._set_local_ai_progress_text("Select one or more media files first.", "descriptions")
             return
+        self._run_local_ai_description_for_paths(paths, "all")
+
+    def _run_local_ai_description_for_path(self, path: str) -> None:
+        clean_path = str(path or "").strip()
+        if not clean_path:
+            return
+        self._run_local_ai_description_for_paths([clean_path], "file")
+
+    def _run_local_ai_description_for_paths(self, paths: list[str], scope_label: str = "all") -> None:
+        clean_paths = [str(path or "").strip() for path in list(paths or []) if str(path or "").strip()]
+        if not clean_paths:
+            self._set_local_ai_progress_text("Select one or more media files first.", "descriptions")
+            return
         if not self._ensure_local_ai_model_ready("captioner"):
             return
         if hasattr(self.bridge, "run_local_ai_descriptions"):
             self._local_ai_operation = "descriptions"
-            self._local_ai_total = len(paths)
+            self._local_ai_scope_label = str(scope_label or "all")
+            self._local_ai_total = len(clean_paths)
             self._local_ai_completed = 0
             self._set_local_ai_progress_text("", "tags")
-            self._set_local_ai_progress_text(self._local_ai_progress_message(0, len(paths)), "descriptions")
-            self._set_bulk_local_ai_status(f"Generating descriptions for all: 0/{len(paths)}")
-            started = self.bridge.run_local_ai_descriptions(paths)
+            self._set_local_ai_progress_text(self._local_ai_progress_message(0, len(clean_paths)), "descriptions")
+            self._set_bulk_local_ai_status(f"Generating descriptions for {self._local_ai_scope_label}: 0/{len(clean_paths)}")
+            started = self.bridge.run_local_ai_descriptions(clean_paths)
             if not started:
                 self._set_local_ai_progress_text("Local AI descriptions are already running or no valid files were selected.", "descriptions")
                 self._set_bulk_local_ai_status("Local AI descriptions are already running or no valid files were selected.")
@@ -2481,6 +2509,19 @@ class WindowPreviewMetadataMixin:
         ):
             if btn is not None:
                 btn.setEnabled(enabled)
+        for list_widget in (
+            getattr(self, "bulk_selected_files_list", None),
+            getattr(self, "bulk_caption_selected_files_list", None),
+        ):
+            if list_widget is None:
+                continue
+            for i in range(list_widget.count()):
+                try:
+                    row = list_widget.itemWidget(list_widget.item(i))
+                    if hasattr(row, "set_generate_enabled"):
+                        row.set_generate_enabled(enabled)
+                except RuntimeError:
+                    pass
 
     @Slot(int)
     def _on_local_ai_captioning_started(self, total: int) -> None:
@@ -2488,19 +2529,21 @@ class WindowPreviewMetadataMixin:
         self._local_ai_total = int(total or 0)
         self._local_ai_completed = 0
         self._set_local_ai_progress_text(self._local_ai_progress_message(0, int(total or 0)))
+        scope_label = str(getattr(self, "_local_ai_scope_label", "all") or "all")
         if getattr(self, "_local_ai_operation", "tags") == "tags":
-            self._set_bulk_local_ai_status(f"Generating tags for all: 0/{int(total or 0)}")
+            self._set_bulk_local_ai_status(f"Generating tags for {scope_label}: 0/{int(total or 0)}")
         elif getattr(self, "_local_ai_operation", "tags") == "descriptions":
-            self._set_bulk_local_ai_status(f"Generating descriptions for all: 0/{int(total or 0)}")
+            self._set_bulk_local_ai_status(f"Generating descriptions for {scope_label}: 0/{int(total or 0)}")
 
     @Slot(str, int, int)
     def _on_local_ai_captioning_progress(self, path: str, current: int, total: int) -> None:
         completed_before_current = max(0, int(current or 0) - 1)
         self._set_local_ai_progress_text(self._local_ai_progress_message(completed_before_current, int(total or 0)))
+        scope_label = str(getattr(self, "_local_ai_scope_label", "all") or "all")
         if getattr(self, "_local_ai_operation", "tags") == "tags":
-            self._set_bulk_local_ai_status(f"Generating tags for all: {completed_before_current}/{int(total or 0)}")
+            self._set_bulk_local_ai_status(f"Generating tags for {scope_label}: {completed_before_current}/{int(total or 0)}")
         elif getattr(self, "_local_ai_operation", "tags") == "descriptions":
-            self._set_bulk_local_ai_status(f"Generating descriptions for all: {completed_before_current}/{int(total or 0)}")
+            self._set_bulk_local_ai_status(f"Generating descriptions for {scope_label}: {completed_before_current}/{int(total or 0)}")
 
     @Slot(str)
     def _on_local_ai_captioning_status(self, message: str) -> None:
@@ -2533,12 +2576,15 @@ class WindowPreviewMetadataMixin:
         completed = min(total, int(getattr(self, "_local_ai_completed", 0) or 0) + 1) if total else 0
         self._local_ai_completed = completed
         self._set_local_ai_progress_text(self._local_ai_progress_message(completed, total))
+        scope_label = str(getattr(self, "_local_ai_scope_label", "all") or "all")
         if getattr(self, "_local_ai_operation", "tags") == "tags":
-            self._set_bulk_local_ai_status(f"Generating tags for all: {completed}/{total}")
+            self._set_bulk_local_ai_status(f"Generating tags for {scope_label}: {completed}/{total}")
             self._refresh_bulk_tag_selected_files_list()
         elif getattr(self, "_local_ai_operation", "tags") == "descriptions":
-            self._set_bulk_local_ai_status(f"Generating descriptions for all: {completed}/{total}")
+            self._set_bulk_local_ai_status(f"Generating descriptions for {scope_label}: {completed}/{total}")
             self._refresh_bulk_caption_selected_files_list()
+        if completed < total:
+            self._set_local_ai_buttons_enabled(False)
         if current_path and os.path.normcase(os.path.abspath(current_path)) == os.path.normcase(os.path.abspath(str(path or ""))):
             clean_tags = [str(tag) for tag in (tags or []) if str(tag).strip()]
             if clean_tags:
@@ -2560,11 +2606,12 @@ class WindowPreviewMetadataMixin:
         total = int(getattr(self, "_local_ai_total", completed) or completed or 0)
         self._local_ai_completed = int(completed or 0)
         self._set_local_ai_progress_text(f"Complete: 100% ({int(completed or 0)}/{total})")
+        scope_label = str(getattr(self, "_local_ai_scope_label", "all") or "all")
         if getattr(self, "_local_ai_operation", "tags") == "tags":
-            self._set_bulk_local_ai_status(f"Generating tags for all: {int(completed or 0)}/{total}")
+            self._set_bulk_local_ai_status(f"Generating tags for {scope_label}: {int(completed or 0)}/{total}")
             self._refresh_bulk_tag_selected_files_list()
         elif getattr(self, "_local_ai_operation", "tags") == "descriptions":
-            self._set_bulk_local_ai_status(f"Generating descriptions for all: {int(completed or 0)}/{total}")
+            self._set_bulk_local_ai_status(f"Generating descriptions for {scope_label}: {int(completed or 0)}/{total}")
             self._refresh_bulk_caption_selected_files_list()
         if getattr(self, "_current_paths", None):
             self._show_metadata_for_path(self._current_paths)

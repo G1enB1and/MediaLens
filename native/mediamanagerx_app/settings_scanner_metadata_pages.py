@@ -17,9 +17,22 @@ class ScannersSettingsPage(SettingsPage):
         self._widgets: dict[str, dict[str, QWidget]] = {}
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(14)
-        layout.addWidget(_section_title("Scanners"))
-        layout.addWidget(_description("Control optional background scanners. The main file scanner is intentionally not configurable here."))
+        layout.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        layout.addWidget(scroll)
+
+        content = QWidget(scroll)
+        scroll.setWidget(content)
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 8, 0)
+        content_layout.setSpacing(14)
+        content_layout.addWidget(_section_title("Scanners"))
+        content_layout.addWidget(_description("Control optional background scanners. The main file scanner is intentionally not configurable here."))
 
         for key, title, description in self.SCANNERS:
             group = QGroupBox(title)
@@ -108,7 +121,7 @@ class ScannersSettingsPage(SettingsPage):
             group_layout.addLayout(action_row)
             group_layout.addWidget(review_btn)
             group_layout.addWidget(last_run_label)
-            layout.addWidget(group)
+            content_layout.addWidget(group)
 
             self._widgets[key] = {
                 "enable": enable_toggle,
@@ -141,7 +154,7 @@ class ScannersSettingsPage(SettingsPage):
             cancel_btn.clicked.connect(lambda _checked=False, scanner_key=key: self._cancel(scanner_key))
             review_btn.clicked.connect(self._open_ocr_review)
 
-        layout.addStretch(1)
+        content_layout.addStretch(1)
         if hasattr(self.bridge, "scannerStatusChanged"):
             self.bridge.scannerStatusChanged.connect(self._on_scanner_status_changed)
 

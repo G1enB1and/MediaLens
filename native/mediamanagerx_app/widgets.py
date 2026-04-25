@@ -793,8 +793,10 @@ class TagListTagRow(QWidget):
 
 class BulkSelectedFileRow(QWidget):
     tagsEdited = Signal(str, str)
+    generateRequested = Signal(str)
     _TAG_CONTENT_HEIGHT = 92
     _CAPTION_CONTENT_HEIGHT = 132
+    _GENERATE_BUTTON_HEIGHT = 28
     _RIGHT_GUTTER = 5
     _MIN_EDITOR_WIDTH = 140
 
@@ -816,6 +818,7 @@ class BulkSelectedFileRow(QWidget):
         content_height: int | None = None,
         placeholder_text: str = "Tags for this file",
         thumbnail_bg_hint: str = "",
+        generate_button_text: str = "",
     ) -> None:
         super().__init__(parent)
         self._path = str(path or "")
@@ -885,8 +888,16 @@ class BulkSelectedFileRow(QWidget):
         self.tags_edit_host.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         tags_host_layout = QVBoxLayout(self.tags_edit_host)
         tags_host_layout.setContentsMargins(0, 0, 0, 0)
-        tags_host_layout.setSpacing(0)
+        tags_host_layout.setSpacing(4)
         tags_host_layout.addWidget(self.tags_edit)
+        self.generate_btn = QPushButton(str(generate_button_text or ""))
+        self.generate_btn.setObjectName("bulkSelectedFileGenerateButton")
+        self.generate_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.generate_btn.setFixedHeight(self._GENERATE_BUTTON_HEIGHT)
+        self.generate_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.generate_btn.setVisible(bool(str(generate_button_text or "").strip()))
+        self.generate_btn.clicked.connect(self._emit_generate_requested)
+        tags_host_layout.addWidget(self.generate_btn)
         self._tags_host_layout = tags_host_layout
         content_row.addWidget(self.tags_edit_host, 1)
         content_row.addSpacing(4)
@@ -897,6 +908,19 @@ class BulkSelectedFileRow(QWidget):
     def _emit_tags_edited(self) -> None:
         try:
             self.tagsEdited.emit(self._path, self.tags_edit.toPlainText())
+        except RuntimeError:
+            pass
+
+    def _emit_generate_requested(self) -> None:
+        try:
+            self.generateRequested.emit(self._path)
+        except RuntimeError:
+            pass
+
+    def set_generate_enabled(self, enabled: bool) -> None:
+        try:
+            if self.generate_btn.isVisible():
+                self.generate_btn.setEnabled(bool(enabled))
         except RuntimeError:
             pass
 
@@ -959,6 +983,8 @@ class BulkSelectedFileRow(QWidget):
         clamped_width = max(self._MIN_EDITOR_WIDTH, int(host_width or 0))
         self.tags_edit_host.setFixedWidth(clamped_width)
         self.tags_edit.setFixedWidth(clamped_width)
+        if hasattr(self, "generate_btn"):
+            self.generate_btn.setFixedWidth(clamped_width)
 
     def _sync_editor_width(self) -> None:
         try:
@@ -999,11 +1025,14 @@ class BulkSelectedFileRow(QWidget):
             )
             self.tags_edit_host.setFixedWidth(host_width)
             self.tags_edit.setFixedWidth(host_width)
+            if hasattr(self, "generate_btn"):
+                self.generate_btn.setFixedWidth(host_width)
         except RuntimeError:
             pass
 
     def item_height(self) -> int:
-        return int(self._content_height) + 60
+        extra = self._GENERATE_BUTTON_HEIGHT + 8 if getattr(self, "generate_btn", None) is not None and self.generate_btn.isVisible() else 0
+        return int(self._content_height) + 60 + extra
 
 
 class BulkSelectedFilesListWidget(QListWidget):

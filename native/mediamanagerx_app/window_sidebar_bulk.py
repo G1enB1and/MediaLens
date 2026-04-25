@@ -976,6 +976,8 @@ class WindowSidebarBulkMixin:
         value_getter,
         edit_handler,
         placeholder_text: str,
+        generate_handler=None,
+        generate_button_text: str = "",
     ) -> None:
         if list_widget is None:
             return
@@ -997,9 +999,12 @@ class WindowSidebarBulkMixin:
                 str(value_getter(tags, metadata) or ""),
                 content_height=content_height,
                 placeholder_text=placeholder_text,
+                generate_button_text=generate_button_text,
             )
             item.setSizeHint(QSize(0, row.item_height()))
             row.tagsEdited.connect(edit_handler)
+            if generate_handler is not None:
+                row.generateRequested.connect(generate_handler)
             list_widget.addItem(item)
             list_widget.setItemWidget(item, row)
         list_widget.doItemsLayout()
@@ -1038,6 +1043,8 @@ class WindowSidebarBulkMixin:
             value_getter=lambda tags, metadata: self._bulk_selected_file_tags_text(tags),
             edit_handler=self._save_bulk_selected_file_tags,
             placeholder_text="Tags for this file",
+            generate_handler=self._run_local_ai_tags_for_path,
+            generate_button_text="Generate Tags",
         )
         self._queue_bulk_selected_files_layout_sync()
 
@@ -1048,6 +1055,8 @@ class WindowSidebarBulkMixin:
             value_getter=lambda tags, metadata: str(metadata.get("description") or ""),
             edit_handler=self._save_bulk_selected_file_description,
             placeholder_text="Description for this file",
+            generate_handler=self._run_local_ai_description_for_path,
+            generate_button_text="Generate Description",
         )
         self._queue_bulk_caption_selected_files_layout_sync()
 
