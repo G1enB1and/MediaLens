@@ -10,7 +10,7 @@ from native.mediamanagerx_app.settings_general_pages import *
 class ScannersSettingsPage(SettingsPage):
     SCANNERS = [
         ("text_detection", "Text Detection", "Finds whether images/videos likely contain visible text."),
-        ("ocr_text", "OCR for Text Detected Files", "Reads actual text only from files already marked as Text Detected."),
+        ("ocr_text", "OCR (Optical Character Recognition) - Reads Text in Images", ""),
     ]
 
     def __init__(self, dialog: "SettingsDialog") -> None:
@@ -41,6 +41,7 @@ class ScannersSettingsPage(SettingsPage):
             group_layout.setSpacing(10)
 
             desc_label = _description(description)
+            desc_label.setVisible(bool(str(description or "").strip()))
             enable_toggle = QCheckBox("Run this scanner in the background")
             ocr_source_row = QWidget()
             ocr_source_layout = QVBoxLayout(ocr_source_row)
@@ -66,16 +67,6 @@ class ScannersSettingsPage(SettingsPage):
             ocr_scope_layout.addWidget(ocr_scope_detected_radio)
             ocr_scope_layout.addWidget(ocr_scope_all_radio)
             ocr_scope_row.setVisible(key == "ocr_text")
-
-            schedule_row = QHBoxLayout()
-            schedule_row.setContentsMargins(0, 0, 0, 0)
-            schedule_label = QLabel("Run every")
-            interval = QSpinBox()
-            interval.setRange(1, 24 * 30)
-            interval.setSuffix(" hours")
-            schedule_row.addWidget(schedule_label)
-            schedule_row.addWidget(interval)
-            schedule_row.addStretch(1)
 
             source_group = QWidget()
             source_group.setObjectName("settingsExpandableGroup")
@@ -120,6 +111,89 @@ class ScannersSettingsPage(SettingsPage):
             source_group_layout.addWidget(source_divider)
             source_group_layout.addWidget(source_body)
 
+            schedule_group = QWidget()
+            schedule_group.setObjectName("settingsExpandableGroup")
+            schedule_group_layout = QVBoxLayout(schedule_group)
+            schedule_group_layout.setContentsMargins(10, 8, 10, 10)
+            schedule_group_layout.setSpacing(6)
+            schedule_header = QToolButton()
+            schedule_header.setText("Schedule")
+            schedule_header.setObjectName("settingsExpandableHeader")
+            schedule_header.setCheckable(True)
+            schedule_header.setChecked(True)
+            schedule_header.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+            schedule_header.setIcon(self._source_folder_section_icon(True))
+            schedule_header.setIconSize(QSize(10, 10))
+            schedule_header.setCursor(Qt.CursorShape.PointingHandCursor)
+            schedule_header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            schedule_divider = QFrame()
+            schedule_divider.setObjectName("settingsExpandableDivider")
+            schedule_divider.setFrameShape(QFrame.Shape.HLine)
+            schedule_divider.setFrameShadow(QFrame.Shadow.Plain)
+            schedule_body = QWidget()
+            schedule_layout = QVBoxLayout(schedule_body)
+            schedule_layout.setContentsMargins(0, 0, 0, 0)
+            schedule_layout.setSpacing(8)
+
+            schedule_mode = QComboBox()
+            schedule_mode.addItem("Every X Hours", "hours")
+            schedule_mode.addItem("Daily", "daily")
+            schedule_mode.addItem("Weekly", "weekly")
+            schedule_mode.addItem("Monthly", "monthly")
+            schedule_layout.addWidget(schedule_mode)
+
+            interval_row = QWidget()
+            interval_layout = QHBoxLayout(interval_row)
+            interval_layout.setContentsMargins(0, 0, 0, 0)
+            interval_label = QLabel("Run every")
+            interval = QSpinBox()
+            interval.setRange(1, 24 * 30)
+            interval.setSuffix(" hours")
+            interval_layout.addWidget(interval_label)
+            interval_layout.addWidget(interval)
+            interval_layout.addStretch(1)
+            schedule_layout.addWidget(interval_row)
+
+            time_row = QWidget()
+            time_layout = QHBoxLayout(time_row)
+            time_layout.setContentsMargins(0, 0, 0, 0)
+            time_label = QLabel("Time of day")
+            schedule_time = QTimeEdit()
+            schedule_time.setDisplayFormat("h:mm AP")
+            schedule_time.setTime(QTime(2, 0))
+            time_layout.addWidget(time_label)
+            time_layout.addWidget(schedule_time)
+            time_layout.addStretch(1)
+            schedule_layout.addWidget(time_row)
+
+            days_row = QWidget()
+            days_layout = QHBoxLayout(days_row)
+            days_layout.setContentsMargins(0, 0, 0, 0)
+            days_layout.setSpacing(6)
+            days_layout.addWidget(QLabel("Days"))
+            day_toggles: list[QCheckBox] = []
+            for day_index, day_label in enumerate(("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")):
+                day_toggle = QCheckBox(day_label)
+                day_toggle.setProperty("dayIndex", day_index)
+                day_toggles.append(day_toggle)
+                days_layout.addWidget(day_toggle)
+            days_layout.addStretch(1)
+            schedule_layout.addWidget(days_row)
+
+            month_row = QWidget()
+            month_layout = QHBoxLayout(month_row)
+            month_layout.setContentsMargins(0, 0, 0, 0)
+            month_layout.addWidget(QLabel("Day of month"))
+            month_day = QSpinBox()
+            month_day.setRange(1, 31)
+            month_layout.addWidget(month_day)
+            month_layout.addStretch(1)
+            schedule_layout.addWidget(month_row)
+
+            schedule_group_layout.addWidget(schedule_header)
+            schedule_group_layout.addWidget(schedule_divider)
+            schedule_group_layout.addWidget(schedule_body)
+
             action_row = QHBoxLayout()
             action_row.setContentsMargins(0, 0, 0, 0)
             run_btn = QPushButton("Run Now")
@@ -141,8 +215,8 @@ class ScannersSettingsPage(SettingsPage):
             group_layout.addWidget(enable_toggle)
             group_layout.addWidget(ocr_source_row)
             group_layout.addWidget(ocr_scope_row)
-            group_layout.addLayout(schedule_row)
             group_layout.addWidget(source_group)
+            group_layout.addWidget(schedule_group)
             group_layout.addLayout(action_row)
             group_layout.addWidget(review_btn)
             group_layout.addWidget(last_run_label)
@@ -157,6 +231,17 @@ class ScannersSettingsPage(SettingsPage):
                 "ocr_scope_detected": ocr_scope_detected_radio,
                 "ocr_scope_all": ocr_scope_all_radio,
                 "interval": interval,
+                "schedule_group": schedule_group,
+                "schedule_header": schedule_header,
+                "schedule_divider": schedule_divider,
+                "schedule_body": schedule_body,
+                "schedule_mode": schedule_mode,
+                "schedule_time": schedule_time,
+                "schedule_days_row": days_row,
+                "schedule_day_toggles": day_toggles,
+                "schedule_month_row": month_row,
+                "schedule_month_day": month_day,
+                "schedule_interval_row": interval_row,
                 "source_group": source_group,
                 "source_header": source_header,
                 "source_divider": source_divider,
@@ -177,7 +262,13 @@ class ScannersSettingsPage(SettingsPage):
             ocr_scope_detected_radio.toggled.connect(lambda checked: checked and self._set_ocr_scope_all_files(False))
             ocr_scope_all_radio.toggled.connect(lambda checked: checked and self._set_ocr_scope_all_files(True))
             interval.valueChanged.connect(lambda value, scanner_key=key: self._set_interval(scanner_key, int(value)))
-            source_header.toggled.connect(lambda checked, header=source_header, body=source_body, divider=source_divider: self._toggle_source_folder_section(header, body, divider, checked))
+            schedule_mode.currentIndexChanged.connect(lambda _index, scanner_key=key: self._set_schedule_mode(scanner_key))
+            schedule_time.timeChanged.connect(lambda value, scanner_key=key: self._set_schedule_time(scanner_key, value))
+            month_day.valueChanged.connect(lambda value, scanner_key=key: self._set_schedule_month_day(scanner_key, int(value)))
+            for day_toggle in day_toggles:
+                day_toggle.toggled.connect(lambda _checked=False, scanner_key=key: self._set_schedule_days(scanner_key))
+            source_header.toggled.connect(lambda checked, header=source_header, body=source_body, divider=source_divider: self._toggle_source_folder_section(header, body, divider, "Folders to Scan", checked))
+            schedule_header.toggled.connect(lambda checked, header=schedule_header, body=schedule_body, divider=schedule_divider: self._toggle_source_folder_section(header, body, divider, "Schedule", checked))
             add_source_btn.clicked.connect(lambda _checked=False, scanner_key=key: self._add_source_folder(scanner_key))
             remove_source_btn.clicked.connect(lambda _checked=False, scanner_key=key: self._remove_selected_source_folders(scanner_key))
             add_above_source_btn.clicked.connect(lambda _checked=False, scanner_key=key: self._add_folders_from_list_above(scanner_key))
@@ -209,6 +300,30 @@ class ScannersSettingsPage(SettingsPage):
     def _set_interval(self, scanner_key: str, value: int) -> None:
         self.dialog.set_setting_str(f"scanners.{scanner_key}.interval_hours", str(max(1, int(value))))
 
+    def _set_schedule_mode(self, scanner_key: str) -> None:
+        widgets = self._widgets.get(scanner_key) or {}
+        combo = widgets.get("schedule_mode")
+        if not isinstance(combo, QComboBox):
+            return
+        mode = str(combo.currentData() or "hours")
+        self.dialog.set_setting_str(f"scanners.{scanner_key}.schedule_mode", mode)
+        self._sync_schedule_controls(scanner_key)
+
+    def _set_schedule_time(self, scanner_key: str, value: QTime) -> None:
+        self.dialog.set_setting_str(f"scanners.{scanner_key}.schedule_time", value.toString("HH:mm"))
+
+    def _set_schedule_days(self, scanner_key: str) -> None:
+        widgets = self._widgets.get(scanner_key) or {}
+        toggles = list(widgets.get("schedule_day_toggles") or [])
+        days = []
+        for toggle in toggles:
+            if isinstance(toggle, QCheckBox) and toggle.isChecked():
+                days.append(int(toggle.property("dayIndex") or 0))
+        self.dialog.set_setting_str(f"scanners.{scanner_key}.schedule_days", json.dumps(days))
+
+    def _set_schedule_month_day(self, scanner_key: str, value: int) -> None:
+        self.dialog.set_setting_str(f"scanners.{scanner_key}.schedule_month_day", str(max(1, min(31, int(value)))))
+
     def _set_ocr_source_enabled(self, source_key: str, checked: bool) -> None:
         self.dialog.set_setting_bool(f"scanners.ocr_text.{source_key}", checked)
 
@@ -233,10 +348,27 @@ class ScannersSettingsPage(SettingsPage):
         return QIcon(pixmap)
 
     @staticmethod
-    def _toggle_source_folder_section(header: QToolButton, body: QWidget, divider: QFrame, checked: bool) -> None:
+    def _toggle_source_folder_section(header: QToolButton, body: QWidget, divider: QFrame, _title: str, checked: bool) -> None:
         body.setVisible(bool(checked))
         divider.setVisible(bool(checked))
         header.setIcon(ScannersSettingsPage._source_folder_section_icon(bool(checked)))
+
+    def _sync_schedule_controls(self, scanner_key: str) -> None:
+        widgets = self._widgets.get(scanner_key) or {}
+        combo = widgets.get("schedule_mode")
+        mode = str(combo.currentData() or "hours") if isinstance(combo, QComboBox) else "hours"
+        interval_row = widgets.get("schedule_interval_row")
+        time_row = widgets.get("schedule_time").parentWidget() if isinstance(widgets.get("schedule_time"), QTimeEdit) else None
+        days_row = widgets.get("schedule_days_row")
+        month_row = widgets.get("schedule_month_row")
+        if interval_row is not None:
+            interval_row.setVisible(mode == "hours")
+        if time_row is not None:
+            time_row.setVisible(mode in {"daily", "weekly", "monthly"})
+        if days_row is not None:
+            days_row.setVisible(mode == "weekly")
+        if month_row is not None:
+            month_row.setVisible(mode == "monthly")
 
     @staticmethod
     def _clean_source_folders(values: list[object]) -> list[str]:
@@ -267,6 +399,22 @@ class ScannersSettingsPage(SettingsPage):
         except Exception:
             parsed = []
         return self._clean_source_folders(list(parsed or []) if isinstance(parsed, list) else [])
+
+    def _schedule_days_from_settings(self, scanner_key: str) -> list[int]:
+        try:
+            raw = str(self.settings.value(f"scanners/{scanner_key}/schedule_days", "", type=str) or "")
+            parsed = json.loads(raw or "[]")
+        except Exception:
+            parsed = []
+        days: list[int] = []
+        for value in parsed if isinstance(parsed, list) else []:
+            try:
+                day = int(value)
+            except Exception:
+                continue
+            if 0 <= day <= 6 and day not in days:
+                days.append(day)
+        return sorted(days)
 
     def _save_source_folders(self, scanner_key: str, folders: list[str]) -> None:
         self.dialog.set_setting_str(f"scanners.{scanner_key}.source_folders", json.dumps(self._clean_source_folders(list(folders or []))))
@@ -344,10 +492,13 @@ class ScannersSettingsPage(SettingsPage):
         widgets = self._widgets.get(scanner_key) or {}
         enable = widgets.get("enable")
         enabled = bool(enable.isChecked()) if isinstance(enable, QCheckBox) else True
-        for child_key in ("interval",):
+        for child_key in ("interval", "schedule_mode", "schedule_time", "schedule_month_day"):
             widget = widgets.get(child_key)
             if widget is not None:
                 widget.setEnabled(enabled)
+        for toggle in list(widgets.get("schedule_day_toggles") or []):
+            if isinstance(toggle, QCheckBox):
+                toggle.setEnabled(enabled)
         run_btn = widgets.get("run")
         if run_btn is not None:
             run_btn.setEnabled(True)
@@ -367,6 +518,10 @@ class ScannersSettingsPage(SettingsPage):
         interval_value = int(payload.get("interval_hours") or 24)
         enable = widgets.get("enable")
         interval = widgets.get("interval")
+        schedule_mode = widgets.get("schedule_mode")
+        schedule_time = widgets.get("schedule_time")
+        schedule_month_day = widgets.get("schedule_month_day")
+        day_toggles = list(widgets.get("schedule_day_toggles") or [])
         status = widgets.get("status")
         last_run = widgets.get("last_run")
         cancel_btn = widgets.get("cancel")
@@ -395,6 +550,29 @@ class ScannersSettingsPage(SettingsPage):
         if isinstance(interval, QSpinBox):
             with QSignalBlocker(interval):
                 interval.setValue(max(1, interval_value))
+        mode_value = str(payload.get("schedule_mode") or "hours")
+        if isinstance(schedule_mode, QComboBox):
+            with QSignalBlocker(schedule_mode):
+                idx = schedule_mode.findData(mode_value)
+                schedule_mode.setCurrentIndex(idx if idx >= 0 else 0)
+        time_value = str(payload.get("schedule_time") or "02:00")
+        parsed_time = QTime.fromString(time_value, "HH:mm")
+        if not parsed_time.isValid():
+            parsed_time = QTime(2, 0)
+        if isinstance(schedule_time, QTimeEdit):
+            with QSignalBlocker(schedule_time):
+                schedule_time.setTime(parsed_time)
+        selected_days = set(int(day) for day in list(payload.get("schedule_days") or []))
+        if not selected_days:
+            selected_days = set(range(7))
+        for toggle in day_toggles:
+            if isinstance(toggle, QCheckBox):
+                with QSignalBlocker(toggle):
+                    toggle.setChecked(int(toggle.property("dayIndex") or 0) in selected_days)
+        if isinstance(schedule_month_day, QSpinBox):
+            with QSignalBlocker(schedule_month_day):
+                schedule_month_day.setValue(max(1, min(31, int(payload.get("schedule_month_day") or 1))))
+        self._sync_schedule_controls(scanner_key)
         if isinstance(status, QLabel):
             status.setText(f"Status: {payload.get('status') or 'Idle'}")
         if isinstance(last_run, QLabel):
@@ -418,6 +596,10 @@ class ScannersSettingsPage(SettingsPage):
                 payload = {
                     "enabled": bool(self.settings.value(f"scanners/{scanner_key}/enabled", default_enabled, type=bool)),
                     "interval_hours": int(self.settings.value(f"scanners/{scanner_key}/interval_hours", 24, type=int) or 24),
+                    "schedule_mode": str(self.settings.value(f"scanners/{scanner_key}/schedule_mode", "hours", type=str) or "hours"),
+                    "schedule_time": str(self.settings.value(f"scanners/{scanner_key}/schedule_time", "02:00", type=str) or "02:00"),
+                    "schedule_days": self._schedule_days_from_settings(scanner_key),
+                    "schedule_month_day": int(self.settings.value(f"scanners/{scanner_key}/schedule_month_day", 1, type=int) or 1),
                     "last_run_utc": str(self.settings.value(f"scanners/{scanner_key}/last_run_utc", "", type=str) or ""),
                     "status": str(self.settings.value(f"scanners/{scanner_key}/status", "Idle", type=str) or "Idle"),
                     "run_fast": bool(self.settings.value("scanners/ocr_text/run_fast", True, type=bool)),

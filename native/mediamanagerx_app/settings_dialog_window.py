@@ -304,7 +304,7 @@ class SettingsDialog(QDialog):
                 padding: 0 6px;
                 color: {muted};
             }}
-            QLineEdit, QTextEdit, QComboBox, QSpinBox, QListWidget#qt_spinbox_lineedit {{
+            QLineEdit, QTextEdit, QComboBox, QSpinBox, QTimeEdit, QListWidget#qt_spinbox_lineedit {{
                 background-color: {control_bg};
                 color: {text};
                 border: 1px solid {border};
@@ -313,7 +313,7 @@ class SettingsDialog(QDialog):
                 selection-background-color: {accent_str};
                 selection-color: {selection_text};
             }}
-            QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBox:focus {{
+            QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBox:focus, QTimeEdit:focus {{
                 border: 1px solid {accent_str};
             }}
             QComboBox::drop-down {{
@@ -374,7 +374,7 @@ class SettingsDialog(QDialog):
                 max-height: 1px;
                 border: none;
             }}
-            QPushButton:disabled, QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled {{
+            QPushButton:disabled, QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled, QTimeEdit:disabled {{
                 background-color: transparent;
                 color: {muted};
                 border: 1px solid {border};

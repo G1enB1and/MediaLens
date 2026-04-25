@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from calendar import monthrange
+
 from native.mediamanagerx_app.common import *
 from native.mediamanagerx_app.image_utils import *
 from native.mediamanagerx_app.runtime_paths import *
@@ -243,7 +245,7 @@ class BridgeScannersSettingsMixin:
 
     @staticmethod
     def _scanner_display_name(scanner_key: str) -> str:
-        return "OCR for Text Detected Files" if scanner_key == "ocr_text" else "Text Detection"
+        return "OCR (Optical Character Recognition) - Reads Text in Images" if scanner_key == "ocr_text" else "Text Detection"
 
     def _scanner_enabled(self, scanner_key: str) -> bool:
         default_enabled = scanner_key != "ocr_text"
@@ -254,6 +256,42 @@ class BridgeScannersSettingsMixin:
             return max(1, int(self.settings.value(self._scanner_setting_key(scanner_key, "interval_hours"), 24, type=int) or 24))
         except Exception:
             return 24
+
+    def _scanner_schedule_mode(self, scanner_key: str) -> str:
+        value = str(self.settings.value(self._scanner_setting_key(scanner_key, "schedule_mode"), "hours", type=str) or "hours").strip().lower()
+        return value if value in {"hours", "daily", "weekly", "monthly"} else "hours"
+
+    def _scanner_schedule_time(self, scanner_key: str) -> str:
+        value = str(self.settings.value(self._scanner_setting_key(scanner_key, "schedule_time"), "02:00", type=str) or "02:00").strip()
+        match = re.match(r"^([01]?\d|2[0-3]):([0-5]\d)$", value)
+        if not match:
+            return "02:00"
+        return f"{int(match.group(1)):02d}:{int(match.group(2)):02d}"
+
+    def _scanner_schedule_days(self, scanner_key: str) -> list[int]:
+        raw = self.settings.value(self._scanner_setting_key(scanner_key, "schedule_days"), "", type=str)
+        try:
+            parsed = json.loads(str(raw or "[]"))
+        except Exception:
+            parsed = []
+        days: list[int] = []
+        seen: set[int] = set()
+        for value in parsed if isinstance(parsed, list) else []:
+            try:
+                day = int(value)
+            except Exception:
+                continue
+            if day < 0 or day > 6 or day in seen:
+                continue
+            seen.add(day)
+            days.append(day)
+        return sorted(days)
+
+    def _scanner_schedule_month_day(self, scanner_key: str) -> int:
+        try:
+            return max(1, min(31, int(self.settings.value(self._scanner_setting_key(scanner_key, "schedule_month_day"), 1, type=int) or 1)))
+        except Exception:
+            return 1
 
     def _ocr_scanner_run_fast(self) -> bool:
         return bool(self.settings.value(self._scanner_setting_key("ocr_text", "run_fast"), True, type=bool))
@@ -306,6 +344,10 @@ class BridgeScannersSettingsMixin:
             "enabled": enabled,
             "running": running,
             "interval_hours": self._scanner_interval_hours(scanner_key),
+            "schedule_mode": self._scanner_schedule_mode(scanner_key),
+            "schedule_time": self._scanner_schedule_time(scanner_key),
+            "schedule_days": self._scanner_schedule_days(scanner_key),
+            "schedule_month_day": self._scanner_schedule_month_day(scanner_key),
             "last_run_utc": self._scanner_last_run_utc(scanner_key),
             "status": status,
             "source_folders": self._scanner_source_folders(scanner_key),
@@ -317,16 +359,42 @@ class BridgeScannersSettingsMixin:
     def _scanner_due(self, scanner_key: str) -> bool:
         if not self._scanner_enabled(scanner_key):
             return False
+        mode = self._scanner_schedule_mode(scanner_key)
         last_run = self._scanner_last_run_utc(scanner_key)
-        if not last_run:
-            return True
+        last_dt: datetime | None = None
         try:
-            dt = datetime.fromisoformat(last_run.replace("Z", "+00:00"))
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
+            if last_run:
+                last_dt = datetime.fromisoformat(last_run.replace("Z", "+00:00"))
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=timezone.utc)
         except Exception:
+            last_dt = None
+        if mode == "hours":
+            if last_dt is None:
+                return True
+            return datetime.now(timezone.utc) - last_dt >= timedelta(hours=self._scanner_interval_hours(scanner_key))
+
+        now_local = datetime.now().astimezone()
+        last_local = last_dt.astimezone() if last_dt is not None else None
+        hour, minute = (int(part) for part in self._scanner_schedule_time(scanner_key).split(":", 1))
+        if now_local.time() < now_local.replace(hour=hour, minute=minute, second=0, microsecond=0).time():
+            return False
+        if last_local is not None and last_local.date() == now_local.date():
+            return False
+
+        if mode == "daily":
             return True
-        return datetime.now(timezone.utc) - dt >= timedelta(hours=self._scanner_interval_hours(scanner_key))
+        if mode == "weekly":
+            days = self._scanner_schedule_days(scanner_key)
+            if not days:
+                days = list(range(7))
+            return now_local.weekday() in days
+        if mode == "monthly":
+            target_day = min(self._scanner_schedule_month_day(scanner_key), monthrange(now_local.year, now_local.month)[1])
+            return now_local.day == target_day
+        if last_dt is None:
+            return True
+        return False
 
     def _check_scanner_schedules(self) -> None:
         if self._scanner_due("text_detection"):
@@ -1103,6 +1171,10 @@ class BridgeScannersSettingsMixin:
                 payload = self._scanner_status_payload(scanner_key)
                 data[f"scanners.{scanner_key}.enabled"] = payload["enabled"]
                 data[f"scanners.{scanner_key}.interval_hours"] = payload["interval_hours"]
+                data[f"scanners.{scanner_key}.schedule_mode"] = payload["schedule_mode"]
+                data[f"scanners.{scanner_key}.schedule_time"] = payload["schedule_time"]
+                data[f"scanners.{scanner_key}.schedule_days"] = payload["schedule_days"]
+                data[f"scanners.{scanner_key}.schedule_month_day"] = payload["schedule_month_day"]
                 data[f"scanners.{scanner_key}.last_run_utc"] = payload["last_run_utc"]
                 data[f"scanners.{scanner_key}.status"] = payload["status"]
             for qkey in self.settings.allKeys():

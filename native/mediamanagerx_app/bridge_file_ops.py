@@ -64,7 +64,21 @@ class BridgeFileOpsMixin:
     @Slot(str, str, result=bool)
     def set_setting_str(self, key: str, value: str) -> bool:
         try:
-            if key not in ("gallery.start_folder", "gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "gallery.similarity_threshold", "ui.accent_color", "ui.theme_mode", "ui.advanced_search_saved_queries", "metadata.display.order", "duplicate.settings.active_tab", "player.video_loop_mode", "player.video_loop_cutoff_seconds", "scanners.text_detection.interval_hours", "scanners.ocr_text.interval_hours", "scanners.text_detection.source_folders", "scanners.ocr_text.source_folders") and not key.startswith("metadata.layout.") and not key.startswith("duplicate.rules.") and key != "duplicate.priorities.order":
+            scanner_schedule_keys = {
+                "scanners.text_detection.interval_hours",
+                "scanners.ocr_text.interval_hours",
+                "scanners.text_detection.source_folders",
+                "scanners.ocr_text.source_folders",
+                "scanners.text_detection.schedule_mode",
+                "scanners.ocr_text.schedule_mode",
+                "scanners.text_detection.schedule_time",
+                "scanners.ocr_text.schedule_time",
+                "scanners.text_detection.schedule_days",
+                "scanners.ocr_text.schedule_days",
+                "scanners.text_detection.schedule_month_day",
+                "scanners.ocr_text.schedule_month_day",
+            }
+            if key not in ("gallery.start_folder", "gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "gallery.similarity_threshold", "ui.accent_color", "ui.theme_mode", "ui.advanced_search_saved_queries", "metadata.display.order", "duplicate.settings.active_tab", "player.video_loop_mode", "player.video_loop_cutoff_seconds") and key not in scanner_schedule_keys and not key.startswith("metadata.layout.") and not key.startswith("duplicate.rules.") and key != "duplicate.priorities.order":
                 return False
             if key == "gallery.view_mode":
                 allowed = {"masonry", "grid_small", "grid_medium", "grid_large", "grid_xlarge", "list", "content", "details", "duplicates", "similar", "similar_only"}
@@ -93,6 +107,36 @@ class BridgeFileOpsMixin:
             elif key in {"scanners.text_detection.interval_hours", "scanners.ocr_text.interval_hours"}:
                 try:
                     value = str(max(1, int(str(value or "24").strip())))
+                except Exception:
+                    return False
+            elif key in {"scanners.text_detection.schedule_mode", "scanners.ocr_text.schedule_mode"}:
+                value = str(value or "hours").strip().lower()
+                if value not in {"hours", "daily", "weekly", "monthly"}:
+                    return False
+            elif key in {"scanners.text_detection.schedule_time", "scanners.ocr_text.schedule_time"}:
+                match = re.match(r"^([01]?\d|2[0-3]):([0-5]\d)$", str(value or "02:00").strip())
+                if not match:
+                    return False
+                value = f"{int(match.group(1)):02d}:{int(match.group(2)):02d}"
+            elif key in {"scanners.text_detection.schedule_days", "scanners.ocr_text.schedule_days"}:
+                try:
+                    parsed = json.loads(str(value or "[]"))
+                except Exception:
+                    return False
+                if not isinstance(parsed, list):
+                    return False
+                clean_days: list[int] = []
+                for item in parsed:
+                    try:
+                        day = int(item)
+                    except Exception:
+                        continue
+                    if 0 <= day <= 6 and day not in clean_days:
+                        clean_days.append(day)
+                value = json.dumps(sorted(clean_days))
+            elif key in {"scanners.text_detection.schedule_month_day", "scanners.ocr_text.schedule_month_day"}:
+                try:
+                    value = str(max(1, min(31, int(str(value or "1").strip()))))
                 except Exception:
                     return False
             elif key in {"scanners.text_detection.source_folders", "scanners.ocr_text.source_folders"}:
