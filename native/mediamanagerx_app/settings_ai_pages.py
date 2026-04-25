@@ -352,7 +352,7 @@ class AISettingsPage(SettingsPage):
         self.ocr_prompt_edit.textChanged.connect(self._save)
         self.tag_max_tags_spin.valueChanged.connect(self._save)
         self.max_tokens_spin.valueChanged.connect(self._save)
-        self.refresh()
+        self._load_settings_values()
 
     def _setting(self, key: str, default, value_type=None):
         qkey = key.replace(".", "/")
@@ -590,7 +590,7 @@ class AISettingsPage(SettingsPage):
         s.setValue("ai_caption/no_repeat_ngram_size", 3)
         s.sync()
 
-    def refresh(self) -> None:
+    def _load_settings_values(self) -> None:
         self._loading = True
         try:
             self.models_dir_edit.setText(str(self._setting("ai_caption.models_dir", self.defaults["models_dir"], str) or self.defaults["models_dir"]))
@@ -609,6 +609,9 @@ class AISettingsPage(SettingsPage):
             self.max_tokens_spin.setValue(int(self._setting("ai_caption.max_new_tokens", 200, int) or 200))
         finally:
             self._loading = False
+
+    def refresh(self) -> None:
+        self._load_settings_values()
         self._refresh_ai_model_statuses()
 
 

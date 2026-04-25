@@ -63,7 +63,7 @@ class SettingsDialog(QDialog):
             self.category_list.addItem(title)
             self.pages.addWidget(page)
 
-        self.category_list.currentRowChanged.connect(self.pages.setCurrentIndex)
+        self.category_list.currentRowChanged.connect(self._on_category_changed)
         self.category_list.setCurrentRow(0)
         self.bridge.accentColorChanged.connect(lambda _value: self.refresh_from_settings())
         self.bridge.uiFlagChanged.connect(self._on_ui_flag_changed)
@@ -94,10 +94,17 @@ class SettingsDialog(QDialog):
     def refresh_from_settings(self) -> None:
         current_row = max(self.category_list.currentRow(), 0)
         self._apply_theme()
-        for _title, page in self._page_defs:
-            page.refresh()
         if self.category_list.count():
             self.category_list.setCurrentRow(current_row)
+            page = self.pages.widget(current_row)
+            if page is not None:
+                page.refresh()
+
+    def _on_category_changed(self, index: int) -> None:
+        self.pages.setCurrentIndex(index)
+        page = self.pages.widget(int(index))
+        if page is not None:
+            page.refresh()
 
     def _on_ui_flag_changed(self, key: str, _value: bool) -> None:
         if key == "ui.theme_mode":
