@@ -480,15 +480,15 @@ class AISettingsPage(SettingsPage):
             probe = dict(status.get("runtime_probe") or {})
             gpu_active = bool(status.get("gpu_active"))
             if gpu_active:
-                gpu_line = "GPU"
+                gpu_line = f'<span style="color:{ok_color};">✓</span> GPU'
             else:
-                reason = str(probe.get("error") or "").strip()
-                gpu_line = "CPU"
+                reason = str(status.get("gpu_issue") or probe.get("gpu_error") or probe.get("error") or "").strip()
+                gpu_line = "CPU fallback" if not bool(status.get("gpu_detected")) else "GPU inactive"
                 if reason:
                     gpu_line = f"{gpu_line}<br>{html.escape(reason)}"
             self.paddle_fast_status_label.setText(f'<b><span style="color:{ok_color};">✓</span> Installed</b><br><b>{gpu_line}</b>')
         else:
-            detail = html.escape(str(status.get("error") or status.get("python_path") or "Runtime not installed."))
+            detail = html.escape(str(status.get("error") or status.get("message") or status.get("python_path") or "Runtime not installed."))
             self.paddle_fast_status_label.setText(f'<span style="color:{bad_color};">Not installed</span><br>{detail}')
         if hasattr(self, "paddle_install_btn"):
             self.paddle_install_btn.setEnabled(True)
@@ -760,6 +760,8 @@ class LocalAiSetupDialog(QDialog):
             title_btn.setChecked(False)
             title_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             title_btn.setFlat(True)
+            title_btn.setIconSize(QSize(12, 12))
+            title_btn.setToolTip("Expand model details")
             header_layout.addWidget(title_btn, 1)
 
             status_badge = QLabel("Checking")
@@ -924,6 +926,7 @@ class LocalAiSetupDialog(QDialog):
         if title_btn is not None:
             spec = row.get("spec")
             title_btn.setText(self._row_header_text(spec, bool(checked)))
+            self._sync_row_header_icon(row, bool(checked))
 
     def _set_advanced_visible(self, visible: bool) -> None:
         self._advanced_visible = bool(visible)
@@ -945,6 +948,7 @@ class LocalAiSetupDialog(QDialog):
                 panel.setVisible(self._advanced_visible and bool(title_btn.isChecked()))
                 spec = row.get("spec")
                 title_btn.setText(self._row_header_text(spec, bool(title_btn.isChecked())))
+                self._sync_row_header_icon(row, bool(title_btn.isChecked()))
 
     def _toggle_advanced_options(self) -> None:
         self._set_advanced_visible(not self._advanced_visible)
@@ -1002,7 +1006,21 @@ class LocalAiSetupDialog(QDialog):
     @staticmethod
     def _row_header_text(spec, expanded: bool) -> str:
         title = "Gemma 4 (Recommended)" if getattr(spec, "settings_key", "") == "gemma4" else str(getattr(spec, "label", "") or "")
-        return f"{'v' if expanded else '>'} {title}"
+        return title
+
+    def _row_header_icon(self, expanded: bool) -> QIcon:
+        Theme = _theme_api()
+        mode = "light" if Theme.get_is_light() else "dark"
+        direction = "down" if expanded else "right"
+        icon_path = Path(__file__).with_name("web") / "scrollbar_arrows" / f"{mode}_{direction}.svg"
+        return QIcon(str(icon_path))
+
+    def _sync_row_header_icon(self, row: dict, expanded: bool) -> None:
+        button = row.get("title_button")
+        if button is None:
+            return
+        button.setIcon(self._row_header_icon(expanded))
+        button.setToolTip("Collapse model details" if expanded else "Expand model details")
 
     def _use_recommended_models(self) -> None:
         recommended = self._recommended_gemma_profile()
@@ -1018,9 +1036,23 @@ class LocalAiSetupDialog(QDialog):
         if getattr(spec, "settings_key", "") == "paddle_ocr":
             state = str(status.get("state") or "").strip()
             message = str(status.get("message") or "").strip()
-            gpu_summary = "Enabled" if bool(status.get("gpu_active")) else "CPU"
-            current_device = str(status.get("current_device") or "").strip()
             runtime_probe = dict(status.get("runtime_probe") or {})
+            gpu_target = dict(status.get("gpu_target") or {})
+            if state == "installing":
+                gpu_summary = "Checking"
+            elif bool(status.get("gpu_active")):
+                gpu_summary = "✓ GPU"
+            elif str(status.get("gpu_issue") or "").strip():
+                gpu_summary = "GPU error"
+            elif bool(status.get("gpu_available")):
+                gpu_summary = "GPU inactive"
+            elif bool(status.get("gpu_detected")):
+                gpu_summary = "GPU inactive"
+            elif status.get("installed"):
+                gpu_summary = "CPU fallback"
+            else:
+                gpu_summary = "Not installed"
+            current_device = str(status.get("current_device") or "").strip()
             summary_lines = [
                 "<b>Use:</b> OCR",
                 f"<b>Description:</b> {html.escape(str(spec.description or ''))}",
@@ -1035,8 +1067,16 @@ class LocalAiSetupDialog(QDialog):
                 f"<b>Device:</b> {html.escape(current_device or 'cpu')}",
                 f"<b>Compiled CUDA:</b> {html.escape(str(bool(runtime_probe.get('compiled_with_cuda'))))}",
             ]
+            if runtime_probe.get("gpu_error"):
+                technical_lines.append(f"<b>GPU error:</b> {html.escape(str(runtime_probe.get('gpu_error') or ''))}")
+            if status.get("gpu_issue"):
+                technical_lines.append(f"<b>GPU status:</b> {html.escape(str(status.get('gpu_issue') or ''))}")
             if runtime_probe.get("error"):
                 technical_lines.append(f"<b>Probe error:</b> {html.escape(str(runtime_probe.get('error') or ''))}")
+            if runtime_probe.get("traceback"):
+                technical_lines.append(f"<b>Probe traceback:</b> {html.escape(str(runtime_probe.get('traceback') or ''))}")
+            if gpu_target:
+                technical_lines.append(f"<b>GPU target:</b> {html.escape(str(gpu_target.get('label') or gpu_target.get('reason') or ''))}")
             return "<br>".join(summary_lines), "", "<br>".join(technical_lines)
         state = str(status.get("state") or "").strip()
         message = str(status.get("message") or "").strip()
@@ -1239,7 +1279,7 @@ class LocalAiSetupDialog(QDialog):
         generation = self._refresh_generation
         for status_key, row in self._rows.items():
             spec = row["spec"]
-            self._apply_status(status_key, {"state": "installing", "message": "Checking runtime status..."})
+            self._apply_status(status_key, {"state": "checking", "message": "Checking runtime status..."})
             if status_key == "paddle_ocr":
                 threading.Thread(
                     target=self._resolve_paddle_status_async,
@@ -1270,6 +1310,9 @@ class LocalAiSetupDialog(QDialog):
         installed = bool(status.get("installed"))
         if not str(status.get("state") or "").strip():
             status["state"] = "installed" if installed else "not_installed"
+        if installed and str(status.get("gpu_issue") or "").strip() and bool(status.get("prefer_gpu")):
+            status["state"] = "error"
+            status["message"] = str(status.get("gpu_issue") or "").strip()
         status.setdefault("id", "paddle_ocr")
         status.setdefault("label", "Paddle OCR")
         status.setdefault("settings_key", "paddle_ocr")
@@ -1320,6 +1363,8 @@ class LocalAiSetupDialog(QDialog):
             badge.setText(f'<span style="color:{ok_color};">✓</span> Installed')
         elif state == "installing":
             badge.setText("Installing")
+        elif state == "checking":
+            badge.setText("Checking")
         elif state == "error":
             badge.setText(f'<span style="color:{bad_color};">✕</span> Error')
         elif state == "not_installed":
@@ -1329,11 +1374,12 @@ class LocalAiSetupDialog(QDialog):
         frame.setProperty("installState", state or "unknown")
         badge.setProperty("installState", state or "unknown")
         title_button.setText(self._row_header_text(spec, bool(title_button.isChecked())))
+        self._sync_row_header_icon(row, bool(title_button.isChecked()))
         frame.style().unpolish(frame)
         frame.style().polish(frame)
         badge.style().unpolish(badge)
         badge.style().polish(badge)
-        badge.setVisible(state in {"installed", "error"})
+        badge.setVisible(state in {"installed", "error", "checking"})
         profile_downloading = bool(status.get("gemma_profile_downloading"))
         button.setVisible(state in {"not_installed", "error", "installing"} and not profile_downloading)
         button.setEnabled(state in {"not_installed", "error"})
@@ -1370,14 +1416,15 @@ class LocalAiSetupDialog(QDialog):
             gemma_row.setVisible(spec.settings_key == "gemma4")
             if spec.settings_key == "gemma4":
                 self._sync_gemma_profile_controls(row)
-        if self._advanced_visible and state == "installing" and not title_button.isChecked():
-            title_button.setChecked(True)
-
     def _install_model(self, spec) -> None:
         if getattr(spec, "settings_key", "") == "paddle_ocr":
             if hasattr(self.bridge, "install_paddle_ocr_runtime"):
-                self.bridge.install_paddle_ocr_runtime()
-            self.refresh_statuses()
+                self._apply_status("paddle_ocr", {"state": "installing", "running": True, "message": "Starting Paddle OCR runtime install..."})
+                started = bool(self.bridge.install_paddle_ocr_runtime())
+                if not started:
+                    self._apply_status("paddle_ocr", {"state": "error", "message": "Paddle OCR runtime install did not start."})
+            else:
+                self._apply_status("paddle_ocr", {"state": "error", "message": "Paddle OCR install is not available in this build."})
             return
         if not hasattr(self.bridge, "install_local_ai_model"):
             self._apply_status(spec.settings_key, {"state": "error", "message": "Model installation is not available in this build."})

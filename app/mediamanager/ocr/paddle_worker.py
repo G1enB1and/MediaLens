@@ -156,8 +156,10 @@ def _run_paddle(source: Path, profile: str, settings: dict[str, Any]) -> dict[st
         "cpu_threads": max(1, int(settings.get("cpu_threads") or 4)),
     }
     common.update({"use_textline_orientation": False})
-    if device in {"cpu", "gpu", "cuda"}:
-        common["device"] = "gpu" if device in {"gpu", "cuda"} else "cpu"
+    if use_gpu:
+        common["device"] = "gpu"
+    elif device == "cpu":
+        common["device"] = "cpu"
 
     try:
         engine = PaddleOCR(**common)

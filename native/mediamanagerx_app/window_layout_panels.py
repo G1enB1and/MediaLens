@@ -270,7 +270,7 @@ class WindowLayoutPanelsMixin:
         center_layout_loading.setContentsMargins(0, 0, 0, 0)
         center_layout_loading.setSpacing(10)
 
-        self.web_loading_label = QLabel("Loading gallery UIâ€¦")
+        self.web_loading_label = QLabel("Loading gallery UI...")
         self.web_loading_label.setObjectName("webLoadingLabel")
         self.web_loading_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         center_layout_loading.addWidget(self.web_loading_label)

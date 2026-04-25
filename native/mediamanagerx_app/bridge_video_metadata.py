@@ -318,17 +318,31 @@ class BridgeVideoMetadataMixin:
             python_path = self._ocr_runtime_python_path()
             device = str(self.settings.value("ocr/paddle_device", "auto", type=str) or "auto")
             prefer_gpu = bool(self.settings.value("ocr/paddle_prefer_gpu", True, type=bool))
+            gpu_target = self._paddle_ocr_gpu_install_target()
             probe: dict = {}
             if python_path.is_file():
                 code = (
                     "import json\n"
+                    "import traceback\n"
+                    "from importlib import metadata\n"
                     "payload={'ok': True}\n"
                     "try:\n"
                     " import paddle\n"
+                    " import paddleocr\n"
+                    " payload['paddle_version']=str(getattr(paddle, '__version__', ''))\n"
+                    " payload['paddleocr_version']=str(getattr(paddleocr, '__version__', ''))\n"
+                    " payload['paddle_path']=str(getattr(paddle, '__file__', ''))\n"
+                    " payload['paddlepaddle_dist']=metadata.version('paddlepaddle') if any(d.metadata.get('Name','').lower() == 'paddlepaddle' for d in metadata.distributions()) else ''\n"
+                    " payload['paddlepaddle_gpu_dist']=metadata.version('paddlepaddle-gpu') if any(d.metadata.get('Name','').lower() == 'paddlepaddle-gpu' for d in metadata.distributions()) else ''\n"
                     " payload['compiled_with_cuda']=bool(paddle.device.is_compiled_with_cuda())\n"
+                    " if payload['compiled_with_cuda']:\n"
+                    "  try:\n"
+                    "   paddle.set_device('gpu')\n"
+                    "  except Exception as device_exc:\n"
+                    "   payload['gpu_error']=str(device_exc)\n"
                     " payload['current_device']=str(paddle.get_device())\n"
                     "except Exception as exc:\n"
-                    " payload={'ok': False, 'error': str(exc)}\n"
+                    " payload={'ok': False, 'error': str(exc), 'traceback': traceback.format_exc()[-1600:]}\n"
                     "print(json.dumps(payload), flush=True)\n"
                 )
                 try:
@@ -365,17 +379,37 @@ class BridgeVideoMetadataMixin:
                     probe = {"ok": False, "error": str(exc)}
             current_device = str(probe.get("current_device") or "").strip().lower()
             gpu_active = current_device.startswith("gpu") or current_device.startswith("cuda")
-            return {
-                "installed": python_path.is_file(),
+            installed = bool(python_path.is_file() and probe.get("ok") and not probe.get("error"))
+            gpu_issue = ""
+            if installed and prefer_gpu and bool(gpu_target.get("available")) and not gpu_active:
+                if probe.get("gpu_error"):
+                    gpu_issue = str(probe.get("gpu_error") or "").strip()
+                elif probe.get("paddlepaddle_dist") and not probe.get("paddlepaddle_gpu_dist"):
+                    gpu_issue = "CPU Paddle package is installed even though an NVIDIA GPU was detected."
+                elif probe.get("compiled_with_cuda"):
+                    gpu_issue = f"Paddle reports CUDA support, but the active device is {current_device or 'cpu'}."
+                else:
+                    gpu_issue = "Installed Paddle runtime is not CUDA-enabled."
+            payload = {
+                "installed": installed,
                 "python_path": str(python_path),
                 "device": device,
                 "prefer_gpu": prefer_gpu,
                 "runtime_probe": probe,
                 "gpu_active": gpu_active,
+                "gpu_available": bool(probe.get("compiled_with_cuda")),
+                "gpu_detected": bool(gpu_target.get("available")),
+                "gpu_target": gpu_target,
+                "gpu_issue": gpu_issue,
                 "current_device": current_device,
                 "fast_enabled": True,
                 "accurate_enabled": False,
             }
+            if python_path.is_file() and not installed:
+                detail = str(probe.get("error") or probe.get("gpu_error") or probe.get("traceback") or "").strip()
+                if detail:
+                    payload["error"] = detail
+            return payload
         except Exception as exc:
             return {"installed": False, "error": str(exc) or "Could not read Paddle OCR status."}
 
@@ -430,18 +464,41 @@ class BridgeVideoMetadataMixin:
     def _driver_at_least(current: tuple[int, int, int], minimum: tuple[int, int, int]) -> bool:
         return tuple(current) >= tuple(minimum)
 
+    def _nvidia_smi_candidates(self) -> list[str]:
+        candidates: list[str] = []
+        for value in (
+            shutil.which("nvidia-smi"),
+            str(Path(os.environ.get("WINDIR", r"C:\Windows")) / "System32" / "nvidia-smi.exe") if os.name == "nt" else "",
+            str(Path(os.environ.get("WINDIR", r"C:\Windows")) / "Sysnative" / "nvidia-smi.exe") if os.name == "nt" else "",
+            r"C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe" if os.name == "nt" else "",
+            "nvidia-smi",
+        ):
+            text = str(value or "").strip()
+            if not text or text in candidates:
+                continue
+            candidates.append(text)
+        return candidates
+
     def _paddle_ocr_gpu_install_target(self) -> dict:
-        try:
-            completed = _run_hidden_subprocess(
-                ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
-                capture_output=True,
-                text=True,
-                timeout=8,
-                env=self._local_ai_subprocess_env(""),
-            )
-            if completed.returncode != 0:
-                return {"available": False, "reason": "NVIDIA GPU was not detected."}
-            driver_text = (completed.stdout or "").strip().splitlines()[0].strip()
+        errors: list[str] = []
+        for executable in self._nvidia_smi_candidates():
+            try:
+                completed = _run_hidden_subprocess(
+                    [executable, "--query-gpu=driver_version", "--format=csv,noheader"],
+                    capture_output=True,
+                    text=True,
+                    timeout=8,
+                    env=self._local_ai_subprocess_env(""),
+                )
+            except Exception as exc:
+                errors.append(f"{executable}: {exc}")
+                continue
+            output = str(completed.stdout or "").strip()
+            detail = str(completed.stderr or output or "").strip()
+            if completed.returncode != 0 or not output:
+                errors.append(f"{executable}: {detail or self._local_ai_exit_code_text(completed.returncode)}")
+                continue
+            driver_text = output.splitlines()[0].strip()
             driver = self._parse_driver_version(driver_text)
             if self._driver_at_least(driver, (550, 54, 14)):
                 return {
@@ -460,8 +517,7 @@ class BridgeVideoMetadataMixin:
                     "label": "CUDA 11.8",
                 }
             return {"available": False, "driver": driver_text, "reason": f"NVIDIA driver {driver_text} is too old for Paddle GPU wheels."}
-        except Exception as exc:
-            return {"available": False, "reason": str(exc) or "Could not detect NVIDIA GPU."}
+        return {"available": False, "reason": f"NVIDIA GPU was not detected. Tried: {'; '.join(errors[-4:]) if errors else 'nvidia-smi not found'}"}
 
     def _paddle_ocr_runtime_env(self) -> dict[str, str]:
         cache_root = Path(str(self.settings.value("ai_caption/models_dir", self._local_ai_models_dir_default(), type=str) or self._local_ai_models_dir_default())) / "paddleocr_cache"
@@ -484,16 +540,24 @@ class BridgeVideoMetadataMixin:
         child_env["TMP"] = str(temp_dir)
         return child_env
 
-    def _paddle_ocr_run_command(self, command: list[str], message: str, emit_status) -> None:
+    def _paddle_ocr_run_command(self, command: list[str], message: str, emit_status, *, runtime_env: bool = False) -> None:
         emit_status(message)
         returncode, last_line = self._local_ai_run_command_stream(
             command,
             self._local_ai_worker_source_root(),
             message,
             emit_status,
+            env=self._paddle_ocr_runtime_env() if runtime_env else None,
         )
         if returncode != 0:
             raise RuntimeError(f"{message} failed ({self._local_ai_exit_code_text(returncode)}). {last_line}")
+
+    def _ensure_paddle_ocr_packaging_tools(self, python_path: Path, emit_status) -> None:
+        try:
+            self._paddle_ocr_run_command([str(python_path), "-m", "pip", "--version"], "Checking Paddle OCR package installer...", emit_status)
+        except Exception:
+            self._paddle_ocr_run_command([str(python_path), "-m", "ensurepip", "--upgrade"], "Repairing Paddle OCR package installer...", emit_status)
+        self._paddle_ocr_run_command([str(python_path), "-m", "pip", "install", "--disable-pip-version-check", "--no-input", "setuptools", "wheel"], "Installing Paddle OCR packaging tools...", emit_status)
 
     @Slot(result=bool)
     def install_paddle_ocr_runtime(self) -> bool:
@@ -517,54 +581,88 @@ class BridgeVideoMetadataMixin:
                     raise RuntimeError("MediaLens could not prepare the Python bootstrap needed to create the OCR runtime.")
                 if not python_path.is_file():
                     self._paddle_ocr_run_command([bootstrap_python, "-m", "venv", str(runtime_dir)], "Creating Paddle OCR runtime...", emit_status)
-                self._paddle_ocr_run_command([str(python_path), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"], "Updating Paddle OCR package installer...", emit_status)
+                self._ensure_paddle_ocr_packaging_tools(python_path, emit_status)
                 self._paddle_ocr_run_command([str(python_path), "-m", "pip", "uninstall", "-y", "paddlepaddle", "paddlepaddle-gpu"], "Removing existing Paddle package...", emit_status)
-
-                gpu_target = self._paddle_ocr_gpu_install_target()
-                installed_gpu = False
-                gpu_error = ""
-                if bool(gpu_target.get("available")):
-                    try:
-                        self._paddle_ocr_run_command(
-                            [
-                                str(python_path),
-                                "-m",
-                                "pip",
-                                "install",
-                                str(gpu_target["package"]),
-                                "-i",
-                                str(gpu_target["index_url"]),
-                            ],
-                            f"Installing Paddle GPU runtime ({gpu_target.get('label')})...",
-                            emit_status,
-                        )
-                        installed_gpu = True
-                    except Exception as exc:
-                        gpu_error = str(exc)
-                        self._log(f"Paddle OCR GPU runtime install failed; falling back to CPU: {exc}")
-                if not installed_gpu:
-                    fallback_reason = gpu_error or str(gpu_target.get("reason") or "No compatible NVIDIA GPU was detected.")
-                    emit_status(f"Installing Paddle CPU runtime... GPU fallback reason: {fallback_reason}")
-                    self._paddle_ocr_run_command(
-                        [str(python_path), "-m", "pip", "install", "paddlepaddle==3.2.0", "-i", "https://www.paddlepaddle.org.cn/packages/stable/cpu/"],
-                        "Installing Paddle CPU runtime...",
-                        emit_status,
-                    )
 
                 requirements_path = self._local_ai_requirements_path(type("Spec", (), {"requirements_file": "requirements-local-ocr-paddle.txt"})())
                 self._paddle_ocr_run_command([str(python_path), "-m", "pip", "install", "-r", str(requirements_path)], "Installing PaddleOCR support...", emit_status)
+                self._paddle_ocr_run_command([str(python_path), "-m", "pip", "uninstall", "-y", "paddlepaddle", "paddlepaddle-gpu"], "Removing Paddle package selected by dependency resolver...", emit_status)
+
+                def clean_install_error(value: object) -> str:
+                    text = " ".join(str(value or "").split()).strip()
+                    text = re.sub(r"<pip\._vendor\.urllib3\.connection\.HTTPSConnection object at 0x[0-9a-fA-F]+>", "pip HTTPS connection", text)
+                    return text[-700:]
+
+                def install_paddle_package(package_base: str, index_urls: list[str], message_prefix: str) -> str:
+                    versions = ("3.2.2", "3.2.1", "3.2.0")
+                    errors: list[str] = []
+                    for version in versions:
+                        package = f"{package_base}=={version}"
+                        for index_url in index_urls:
+                            source_label = "PyPI" if not index_url else str(index_url).rstrip("/")
+                            command = [str(python_path), "-m", "pip", "install", package]
+                            if index_url:
+                                command.extend(["-i", index_url])
+                            try:
+                                self._paddle_ocr_run_command(
+                                    command,
+                                    f"{message_prefix} ({version}, {source_label})...",
+                                    emit_status,
+                                )
+                                return package
+                            except Exception as exc:
+                                cleaned = clean_install_error(exc)
+                                errors.append(cleaned)
+                                self._log(f"{message_prefix} {version} from {source_label} failed: {cleaned}")
+                    raise RuntimeError(errors[-1] if errors else f"{message_prefix} failed.")
+
+                gpu_target = self._paddle_ocr_gpu_install_target()
+                gpu_error = ""
+                installed_package = ""
+                if bool(gpu_target.get("available")):
+                    try:
+                        installed_package = install_paddle_package(
+                            "paddlepaddle-gpu",
+                            [str(gpu_target["index_url"])],
+                            f"Installing Paddle GPU runtime ({gpu_target.get('label')})",
+                        )
+                        status = self.get_paddle_ocr_status()
+                        if status.get("gpu_active"):
+                            payload = dict(status)
+                            payload.update({"state": "installed", "running": False, "message": f"Paddle OCR runtime is installed. GPU is active ({installed_package})."})
+                            self.paddleOcrRuntimeInstallStatus.emit(payload)
+                            return
+                        probe = dict(status.get("runtime_probe") or {})
+                        gpu_error = str(probe.get("gpu_error") or "GPU package installed, but Paddle did not activate the GPU.")
+                        self._log(f"Paddle OCR GPU runtime inactive; falling back to CPU: {gpu_error}")
+                    except Exception as exc:
+                        gpu_error = str(exc)
+                        self._log(f"Paddle OCR GPU runtime install failed; falling back to CPU: {exc}")
+                else:
+                    gpu_error = str(gpu_target.get("reason") or "No compatible NVIDIA GPU was detected.")
+
+                emit_status(f"Installing Paddle CPU runtime... GPU fallback reason: {gpu_error}")
+                try:
+                    self._paddle_ocr_run_command([str(python_path), "-m", "pip", "uninstall", "-y", "paddlepaddle", "paddlepaddle-gpu"], "Removing inactive Paddle GPU package...", emit_status)
+                except Exception as exc:
+                    self._log(f"Paddle OCR cleanup before CPU fallback failed: {exc}")
+                installed_package = install_paddle_package(
+                    "paddlepaddle",
+                    ["https://www.paddlepaddle.org.cn/packages/stable/cpu/", ""],
+                    "Installing Paddle CPU runtime",
+                )
                 status = self.get_paddle_ocr_status()
+                if not status.get("installed"):
+                    probe = dict(status.get("runtime_probe") or {})
+                    detail = str(probe.get("error") or probe.get("gpu_error") or probe.get("traceback") or "Paddle OCR runtime probe failed after install.")
+                    raise RuntimeError(detail)
                 message = "Paddle OCR runtime is installed."
                 if status.get("gpu_active"):
                     message = f"{message} GPU is active."
-                elif installed_gpu:
-                    message = f"{message} GPU package installed, but Paddle is still reporting CPU."
-                elif gpu_error:
-                    message = f"{message} CPU fallback was used because GPU install failed."
                 else:
-                    message = f"{message} CPU fallback was used."
+                    message = f"{message} CPU fallback is active. GPU fallback reason: {gpu_error}"
                 payload = dict(status)
-                payload.update({"state": "installed", "running": False, "message": message})
+                payload.update({"state": "installed", "running": False, "message": f"{message} ({installed_package})."})
                 self.paddleOcrRuntimeInstallStatus.emit(payload)
             except Exception as exc:
                 self.paddleOcrRuntimeInstallStatus.emit({"state": "error", "running": False, "installed": False, "message": str(exc) or "Paddle OCR runtime installation failed."})

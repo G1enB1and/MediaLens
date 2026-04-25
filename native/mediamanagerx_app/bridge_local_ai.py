@@ -27,7 +27,12 @@ class BridgeLocalAiMixin:
         raise RuntimeError("No preview image is available for local AI captioning.")
 
     def _local_ai_models_dir_default(self) -> str:
-        if bool(getattr(sys, "frozen", False)):
+        use_installed_paths = str(os.environ.get("MEDIALENS_USE_INSTALLED_AI_PATHS", "") or "").strip().lower() in {"1", "true", "yes", "on"}
+        try:
+            use_installed_paths = use_installed_paths or bool(self.settings.value("ai_caption/use_installed_ai_paths", False, type=bool))
+        except Exception:
+            pass
+        if bool(getattr(sys, "frozen", False)) or use_installed_paths:
             return str(_appdata_runtime_dir() / "local_ai_models")
         from app.mediamanager.ai_captioning.local_captioning import project_models_dir
 
@@ -52,7 +57,12 @@ class BridgeLocalAiMixin:
         configured = str(self.settings.value("ai_caption/runtime_root", "", type=str) or "").strip()
         if configured:
             return Path(configured)
-        if bool(getattr(sys, "frozen", False)):
+        use_installed_paths = str(os.environ.get("MEDIALENS_USE_INSTALLED_AI_PATHS", "") or "").strip().lower() in {"1", "true", "yes", "on"}
+        try:
+            use_installed_paths = use_installed_paths or bool(self.settings.value("ai_caption/use_installed_ai_paths", False, type=bool))
+        except Exception:
+            pass
+        if bool(getattr(sys, "frozen", False)) or use_installed_paths:
             return _appdata_runtime_dir() / "ai-runtimes"
         return Path(__file__).resolve().parents[2]
 
