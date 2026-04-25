@@ -372,7 +372,7 @@ class BridgeVideoMetadataMixin:
                         env=child_env,
                     )
                     if completed.returncode == 0:
-                        probe = json.loads((completed.stdout or "{}").strip() or "{}")
+                        probe = self._parse_paddle_ocr_probe_stdout(completed.stdout)
                     else:
                         probe = {"ok": False, "error": (completed.stderr or completed.stdout or "").strip()[-500:]}
                 except Exception as exc:
@@ -452,6 +452,27 @@ class BridgeVideoMetadataMixin:
         if worker_script.is_file():
             return [str(python_path), str(worker_script)], self._local_ai_runtime_root(), str(source_root)
         return [str(python_path), "-m", "app.mediamanager.ocr.paddle_worker"], source_root, str(source_root)
+
+    @staticmethod
+    def _parse_paddle_ocr_probe_stdout(stdout: str | None) -> dict:
+        text = str(stdout or "").strip()
+        if not text:
+            return {}
+        try:
+            return json.loads(text)
+        except Exception:
+            pass
+        for line in reversed(text.splitlines()):
+            candidate = line.strip()
+            if not (candidate.startswith("{") and candidate.endswith("}")):
+                continue
+            try:
+                parsed = json.loads(candidate)
+            except Exception:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+        raise ValueError(f"Paddle OCR runtime probe returned non-JSON output: {text[-500:]}")
 
     @staticmethod
     def _parse_driver_version(value: str) -> tuple[int, int, int]:
