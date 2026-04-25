@@ -2275,7 +2275,6 @@ class WindowPreviewMetadataMixin:
         return [
             widget for widget in (
                 getattr(self, "btn_use_ocr", None),
-                getattr(self, "btn_use_ocr_accurate", None),
                 getattr(self, "btn_use_ocr_gemma", None),
             )
             if widget is not None
@@ -2339,7 +2338,6 @@ class WindowPreviewMetadataMixin:
         self._set_ocr_buttons_enabled(False)
         self._set_ocr_error_text("")
         label = {
-            "paddle_accurate": "Running accurate OCR...",
             "gemma4": "Running AI OCR...",
         }.get(str(source or ""), "Running fast OCR...")
         self._set_ocr_progress_text(label)

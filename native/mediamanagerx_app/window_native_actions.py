@@ -1124,7 +1124,7 @@ class WindowNativeActionsMixin:
             QPushButton#btnPreviewOverlayPlay:pressed {{
                 background-color: {"rgba(255, 255, 255, 115)" if is_light else "rgba(0, 0, 0, 115)"};
             }}
-            QPushButton#btnSaveMeta, QPushButton#btnUseOcr, QPushButton#btnUseOcrAccurate, QPushButton#btnUseOcrGemma, QPushButton#btnGenerateTags, QPushButton#btnGenerateDescription, QPushButton#btnImportExif, QPushButton#btnMergeHiddenMeta, QPushButton#btnSaveToExif, QPushButton#btnOpenTagList, QPushButton#metaEmptySelectAllButton {{
+            QPushButton#btnSaveMeta, QPushButton#btnUseOcr, QPushButton#btnUseOcrGemma, QPushButton#btnGenerateTags, QPushButton#btnGenerateDescription, QPushButton#btnImportExif, QPushButton#btnMergeHiddenMeta, QPushButton#btnSaveToExif, QPushButton#btnOpenTagList, QPushButton#metaEmptySelectAllButton {{
                 background-color: {Theme.get_btn_save_bg(accent)};
                 color: {text};
                 border: 1px solid {Theme.get_border(accent)};
@@ -1133,7 +1133,7 @@ class WindowNativeActionsMixin:
                 font-size: 11px;
                 font-weight: 500;
             }}
-            QPushButton#btnSaveMeta:hover, QPushButton#btnUseOcr:hover, QPushButton#btnUseOcrAccurate:hover, QPushButton#btnUseOcrGemma:hover, QPushButton#btnGenerateTags:hover, QPushButton#btnGenerateDescription:hover, QPushButton#btnImportExif:hover, QPushButton#btnMergeHiddenMeta:hover, QPushButton#btnSaveToExif:hover, QPushButton#btnOpenTagList:hover, QPushButton#metaEmptySelectAllButton:hover {{
+            QPushButton#btnSaveMeta:hover, QPushButton#btnUseOcr:hover, QPushButton#btnUseOcrGemma:hover, QPushButton#btnGenerateTags:hover, QPushButton#btnGenerateDescription:hover, QPushButton#btnImportExif:hover, QPushButton#btnMergeHiddenMeta:hover, QPushButton#btnSaveToExif:hover, QPushButton#btnOpenTagList:hover, QPushButton#metaEmptySelectAllButton:hover {{
                 background-color: {Theme.get_btn_save_hover(accent)};
                 color: {"#000" if is_light else "#fff"};
                 border-color: {accent_str};

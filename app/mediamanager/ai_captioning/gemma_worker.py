@@ -24,6 +24,11 @@ DEFAULT_CAPTION_PROMPT = (
     "hair, background, and colors. Emphasize elegance, softness, or power where appropriate. "
     "Use the following tags as context: {tags}"
 )
+DEFAULT_OCR_PROMPT = (
+    "Transcribe only text that is visibly present in this image. Preserve line breaks when possible. "
+    "Do not describe the image. Do not infer missing words. Do not add labels, explanations, or markdown. "
+    "If no readable text is visible, return an empty response."
+)
 
 try:
     from app.mediamanager.ai_captioning.gemma_gguf import GEMMA_GGUF_BACKEND_ID
@@ -633,7 +638,7 @@ def _split_tags(raw: str, settings: dict[str, Any]) -> list[str]:
     return out[: max(1, int(settings.get("tag_max_tags") or 75))]
 
 
-def _build_ocr_prompt(previous_ocr: list[dict[str, Any]] | None = None) -> str:
+def _build_ocr_prompt(prompt_template: str = "", previous_ocr: list[dict[str, Any]] | None = None) -> str:
     previous_lines: list[str] = []
     for item in previous_ocr or []:
         source = str(item.get("source") or "").strip()
@@ -647,12 +652,8 @@ def _build_ocr_prompt(previous_ocr: list[dict[str, Any]] | None = None) -> str:
             "Do not copy them unless the text is visibly supported by the image.\n"
             + "\n".join(previous_lines[:8])
         )
-    return (
-        "Transcribe only text that is visibly present in this image. Preserve line breaks when possible. "
-        "Do not describe the image. Do not infer missing words. Do not add labels, explanations, or markdown. "
-        "If no readable text is visible, return an empty response."
-        f"{context}"
-    ).strip()
+    prompt = str(prompt_template or DEFAULT_OCR_PROMPT).strip() or DEFAULT_OCR_PROMPT
+    return f"{prompt}{context}".strip()
 
 
 def _run_cli() -> int:
@@ -695,7 +696,7 @@ def _run_cli() -> int:
             inference_settings = settings
             if _gguf_enabled(settings):
                 inference_settings = tune_gguf_description_settings(settings)
-            prompt = _build_ocr_prompt(previous_ocr)
+            prompt = _build_ocr_prompt(str(settings.get("ocr_prompt") or DEFAULT_OCR_PROMPT), previous_ocr)
             max_new_tokens = max(64, min(1024, int(settings.get("ocr_max_new_tokens") or settings.get("max_new_tokens") or 300)))
             with contextlib.redirect_stdout(sys.stderr):
                 raw_text = _generate_text(args.source, prompt, inference_settings, max_new_tokens)

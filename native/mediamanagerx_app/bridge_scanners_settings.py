@@ -255,6 +255,12 @@ class BridgeScannersSettingsMixin:
         except Exception:
             return 24
 
+    def _ocr_scanner_run_fast(self) -> bool:
+        return bool(self.settings.value(self._scanner_setting_key("ocr_text", "run_fast"), True, type=bool))
+
+    def _ocr_scanner_run_ai(self) -> bool:
+        return bool(self.settings.value(self._scanner_setting_key("ocr_text", "run_ai"), False, type=bool))
+
     def _scanner_last_run_utc(self, scanner_key: str) -> str:
         return str(self.settings.value(self._scanner_setting_key(scanner_key, "last_run_utc"), "", type=str) or "")
 
@@ -280,6 +286,8 @@ class BridgeScannersSettingsMixin:
             "interval_hours": self._scanner_interval_hours(scanner_key),
             "last_run_utc": self._scanner_last_run_utc(scanner_key),
             "status": status,
+            "run_fast": self._ocr_scanner_run_fast() if scanner_key == "ocr_text" else False,
+            "run_ai": self._ocr_scanner_run_ai() if scanner_key == "ocr_text" else False,
         }
 
     def _scanner_due(self, scanner_key: str) -> bool:
@@ -733,6 +741,14 @@ class BridgeScannersSettingsMixin:
         if not entries:
             self._set_scanner_status("ocr_text", "Idle (no active scope)")
             return False
+        selected_sources: list[str] = []
+        if self._ocr_scanner_run_fast():
+            selected_sources.append("paddle_fast")
+        if self._ocr_scanner_run_ai():
+            selected_sources.append("gemma4")
+        if not selected_sources:
+            self._set_scanner_status("ocr_text", "Idle (no OCR engines selected)")
+            return False
         try:
             self._ocr_text_cancel.clear()
         except Exception:
@@ -749,11 +765,11 @@ class BridgeScannersSettingsMixin:
 
                 ensure_ocr_tables(self.conn)
 
-                def has_fast_ocr(media_id: int) -> bool:
+                def has_ocr_source(media_id: int, source: str) -> bool:
                     try:
                         row = self.conn.execute(
                             "SELECT 1 FROM media_ocr_results WHERE media_id = ? AND source = ? LIMIT 1",
-                            (int(media_id), "paddle_fast"),
+                            (int(media_id), str(source or "")),
                         ).fetchone()
                         return bool(row)
                     except Exception:
@@ -764,7 +780,7 @@ class BridgeScannersSettingsMixin:
                     if entry.get("is_folder") or not self._effective_text_detected(entry):
                         continue
                     media_id = int(entry.get("id") or -1)
-                    if media_id >= 0 and has_fast_ocr(media_id):
+                    if media_id >= 0 and all(has_ocr_source(media_id, source) for source in selected_sources):
                         continue
                     if media_id < 0 or force or not str(entry.get("detected_text") or "").strip():
                         eligible.append(entry)
@@ -790,13 +806,21 @@ class BridgeScannersSettingsMixin:
                             real_path = str(entry.get("_real_path") or path)
                             media_id = add_media_item(self.conn, real_path, media_type)
                             entry["id"] = media_id
+                        else:
+                            media_id = int(entry.get("id") or -1)
                         ocr_source_path = self._manual_ocr_source_path(p)
-                        payload = self._run_paddle_ocr_worker(ocr_source_path, "fast")
-                        text = self._save_ocr_payload(path, payload, select_as_winner=False)
-                        if not text.strip():
-                            continue
-                        entry["detected_text"] = text
-                        saved += 1
+                        for source in selected_sources:
+                            if media_id >= 0 and has_ocr_source(media_id, source):
+                                continue
+                            if source == "gemma4":
+                                payload = self._run_gemma_ocr_worker(ocr_source_path, media_id)
+                            else:
+                                payload = self._run_paddle_ocr_worker(ocr_source_path, "fast")
+                            text = self._save_ocr_payload(path, payload, select_as_winner=False)
+                            if not text.strip():
+                                continue
+                            entry["detected_text"] = text
+                            saved += 1
                     except Exception as exc:
                         try:
                             self._log(f"OCR text scanner failed for {path}: {exc}")

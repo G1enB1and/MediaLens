@@ -229,7 +229,6 @@ class WindowSidebarBulkMixin:
             getattr(self, "btn_clear_bulk_tags", None),
             getattr(self, "btn_save_meta", None),
             getattr(self, "btn_use_ocr", None),
-            getattr(self, "btn_use_ocr_accurate", None),
             getattr(self, "btn_use_ocr_gemma", None),
             getattr(self, "btn_generate_tags", None),
             getattr(self, "btn_generate_description", None),

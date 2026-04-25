@@ -312,6 +312,23 @@ class BridgeVideoMetadataMixin:
                 return candidate
         return default_path
 
+    @Slot(result="QVariantMap")
+    def get_paddle_ocr_status(self) -> dict:
+        try:
+            python_path = self._ocr_runtime_python_path()
+            device = str(self.settings.value("ocr/paddle_device", "auto", type=str) or "auto")
+            prefer_gpu = bool(self.settings.value("ocr/paddle_prefer_gpu", True, type=bool))
+            return {
+                "installed": python_path.is_file(),
+                "python_path": str(python_path),
+                "device": device,
+                "prefer_gpu": prefer_gpu,
+                "fast_enabled": True,
+                "accurate_enabled": False,
+            }
+        except Exception as exc:
+            return {"installed": False, "error": str(exc) or "Could not read Paddle OCR status."}
+
     def _ocr_worker_launcher(self, python_path: str | Path) -> tuple[list[str], Path, str]:
         source_root = self._local_ai_worker_source_root()
         worker_script = source_root / "app" / "mediamanager" / "ocr" / "paddle_worker.py"

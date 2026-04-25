@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from PySide6.QtCore import Slot
+
 from native.mediamanagerx_app.image_utils import _read_image_with_svg_support, _render_svg_image
 from native.mediamanagerx_app.settings_common import *
 from native.mediamanagerx_app.settings_general_pages import *
@@ -26,6 +28,17 @@ class ScannersSettingsPage(SettingsPage):
 
             desc_label = _description(description)
             enable_toggle = QCheckBox("Run this scanner in the background")
+            ocr_source_row = QWidget()
+            ocr_source_layout = QHBoxLayout(ocr_source_row)
+            ocr_source_layout.setContentsMargins(0, 0, 0, 0)
+            ocr_source_layout.setSpacing(12)
+            ocr_fast_toggle = QCheckBox("Fast")
+            ocr_ai_toggle = QCheckBox("AI")
+            ocr_source_layout.addWidget(QLabel("Run OCR"))
+            ocr_source_layout.addWidget(ocr_fast_toggle)
+            ocr_source_layout.addWidget(ocr_ai_toggle)
+            ocr_source_layout.addStretch(1)
+            ocr_source_row.setVisible(key == "ocr_text")
 
             schedule_row = QHBoxLayout()
             schedule_row.setContentsMargins(0, 0, 0, 0)
@@ -56,6 +69,7 @@ class ScannersSettingsPage(SettingsPage):
 
             group_layout.addWidget(desc_label)
             group_layout.addWidget(enable_toggle)
+            group_layout.addWidget(ocr_source_row)
             group_layout.addLayout(schedule_row)
             group_layout.addLayout(action_row)
             group_layout.addWidget(review_btn)
@@ -64,6 +78,9 @@ class ScannersSettingsPage(SettingsPage):
 
             self._widgets[key] = {
                 "enable": enable_toggle,
+                "ocr_source_row": ocr_source_row,
+                "ocr_fast": ocr_fast_toggle,
+                "ocr_ai": ocr_ai_toggle,
                 "interval": interval,
                 "run": run_btn,
                 "cancel": cancel_btn,
@@ -72,6 +89,8 @@ class ScannersSettingsPage(SettingsPage):
                 "last_run": last_run_label,
             }
             enable_toggle.toggled.connect(lambda checked, scanner_key=key: self._set_enabled(scanner_key, checked))
+            ocr_fast_toggle.toggled.connect(lambda checked, source_key="run_fast": self._set_ocr_source_enabled(source_key, checked))
+            ocr_ai_toggle.toggled.connect(lambda checked, source_key="run_ai": self._set_ocr_source_enabled(source_key, checked))
             interval.valueChanged.connect(lambda value, scanner_key=key: self._set_interval(scanner_key, int(value)))
             run_btn.clicked.connect(lambda _checked=False, scanner_key=key: self._run_now(scanner_key))
             cancel_btn.clicked.connect(lambda _checked=False, scanner_key=key: self._cancel(scanner_key))
@@ -100,6 +119,9 @@ class ScannersSettingsPage(SettingsPage):
 
     def _set_interval(self, scanner_key: str, value: int) -> None:
         self.dialog.set_setting_str(f"scanners.{scanner_key}.interval_hours", str(max(1, int(value))))
+
+    def _set_ocr_source_enabled(self, source_key: str, checked: bool) -> None:
+        self.dialog.set_setting_bool(f"scanners.ocr_text.{source_key}", checked)
 
     def _run_now(self, scanner_key: str) -> None:
         widgets = self._widgets.get(scanner_key) or {}
@@ -157,9 +179,17 @@ class ScannersSettingsPage(SettingsPage):
         last_run = widgets.get("last_run")
         cancel_btn = widgets.get("cancel")
         running = bool(payload.get("running"))
+        ocr_fast = widgets.get("ocr_fast")
+        ocr_ai = widgets.get("ocr_ai")
         if isinstance(enable, QCheckBox):
             with QSignalBlocker(enable):
                 enable.setChecked(enabled)
+        if isinstance(ocr_fast, QCheckBox):
+            with QSignalBlocker(ocr_fast):
+                ocr_fast.setChecked(bool(payload.get("run_fast", True)))
+        if isinstance(ocr_ai, QCheckBox):
+            with QSignalBlocker(ocr_ai):
+                ocr_ai.setChecked(bool(payload.get("run_ai", False)))
         if isinstance(interval, QSpinBox):
             with QSignalBlocker(interval):
                 interval.setValue(max(1, interval_value))
@@ -188,6 +218,8 @@ class ScannersSettingsPage(SettingsPage):
                     "interval_hours": int(self.settings.value(f"scanners/{scanner_key}/interval_hours", 24, type=int) or 24),
                     "last_run_utc": str(self.settings.value(f"scanners/{scanner_key}/last_run_utc", "", type=str) or ""),
                     "status": str(self.settings.value(f"scanners/{scanner_key}/status", "Idle", type=str) or "Idle"),
+                    "run_fast": bool(self.settings.value("scanners/ocr_text/run_fast", True, type=bool)),
+                    "run_ai": bool(self.settings.value("scanners/ocr_text/run_ai", False, type=bool)),
                 }
             self._apply_status(scanner_key, payload)
 
@@ -195,7 +227,6 @@ class ScannersSettingsPage(SettingsPage):
 class OcrReviewDialog(QDialog):
     SOURCE_LABELS = {
         "paddle_fast": "Fast OCR",
-        "paddle_accurate": "Accurate OCR",
         "gemma4": "Gemma OCR",
         "user": "User Typed",
         "windows_ocr_legacy": "Windows OCR",
@@ -205,6 +236,7 @@ class OcrReviewDialog(QDialog):
         super().__init__(page)
         self.page = page
         self.bridge = page.bridge
+        self._pending_ocr_paths: set[str] = set()
         self.setWindowTitle("Review OCR Results")
         self.resize(1100, 720)
         layout = QVBoxLayout(self)
@@ -227,6 +259,8 @@ class OcrReviewDialog(QDialog):
         close_btn.clicked.connect(self.accept)
         close_row.addWidget(close_btn)
         layout.addLayout(close_row)
+        if hasattr(self.bridge, "manualOcrFinished"):
+            self.bridge.manualOcrFinished.connect(self._on_manual_ocr_finished)
         self._reload()
 
     def _reload(self) -> None:
@@ -287,13 +321,22 @@ class OcrReviewDialog(QDialog):
                 "text": str(item.get("detected_text") or winner.get("text") or ""),
                 "confidence": 1.0,
             }
-        ordered_sources = ["paddle_fast", "paddle_accurate", "gemma4", "user", "windows_ocr_legacy"]
+        for required_source in ("paddle_fast", "gemma4", "user"):
+            if required_source not in latest_by_source:
+                latest_by_source[required_source] = {
+                    "id": 0,
+                    "media_id": int(item.get("media_id") or 0),
+                    "source": required_source,
+                    "text": "",
+                    "confidence": None,
+                }
+        ordered_sources = ["paddle_fast", "gemma4", "user", "windows_ocr_legacy"]
         col = 1
         for source in ordered_sources:
             result = latest_by_source.get(source)
             if result is None:
                 continue
-            grid.addWidget(self._build_result_cell(int(item.get("media_id") or 0), result), 0, col)
+            grid.addWidget(self._build_result_cell(int(item.get("media_id") or 0), str(item.get("path") or ""), result), 0, col)
             col += 1
         panel_layout.addLayout(grid)
         return panel
@@ -324,7 +367,7 @@ class OcrReviewDialog(QDialog):
         except Exception:
             return None
 
-    def _build_result_cell(self, media_id: int, result: dict) -> QWidget:
+    def _build_result_cell(self, media_id: int, path: str, result: dict) -> QWidget:
         cell = QFrame()
         cell.setFrameShape(QFrame.Shape.StyledPanel)
         layout = QVBoxLayout(cell)
@@ -345,10 +388,39 @@ class OcrReviewDialog(QDialog):
             keep_btn.clicked.connect(lambda _checked=False, mid=media_id, edit=text: self._keep_user_text(mid, edit.toPlainText()))
         else:
             keep_btn.clicked.connect(lambda _checked=False, mid=media_id, rid=result_id: self._keep_result(mid, rid))
+            keep_btn.setEnabled(result_id > 0)
+        button_row = QHBoxLayout()
+        button_row.setContentsMargins(0, 0, 0, 0)
+        button_row.setSpacing(6)
+        button_row.addWidget(keep_btn)
+        if source in {"paddle_fast", "gemma4"}:
+            generate_btn = QPushButton("Generate")
+            generate_btn.clicked.connect(lambda _checked=False, p=path, s=source, edit=text: self._generate_ocr(p, s, edit))
+            button_row.addWidget(generate_btn)
+        button_row.addStretch(1)
         layout.addWidget(label)
         layout.addWidget(text, 1)
-        layout.addWidget(keep_btn)
+        layout.addLayout(button_row)
         return cell
+
+    def _generate_ocr(self, path: str, source: str, edit: QPlainTextEdit) -> None:
+        clean_path = str(path or "").strip()
+        if not clean_path or not hasattr(self.bridge, "run_manual_ocr_with_source"):
+            return
+        self._pending_ocr_paths.add(clean_path)
+        edit.setPlainText("Running OCR...")
+        self.bridge.run_manual_ocr_with_source(clean_path, str(source or "paddle_fast"))
+
+    @Slot(str, str, str)
+    def _on_manual_ocr_finished(self, path: str, text: str, error: str) -> None:
+        clean_path = str(path or "").strip()
+        if clean_path not in self._pending_ocr_paths:
+            return
+        self._pending_ocr_paths.discard(clean_path)
+        if error:
+            QMessageBox.warning(self, "OCR Failed", str(error or "OCR failed."))
+            return
+        self._reload()
 
     def _keep_result(self, media_id: int, result_id: int) -> None:
         try:

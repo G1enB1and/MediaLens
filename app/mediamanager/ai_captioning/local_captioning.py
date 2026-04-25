@@ -40,6 +40,11 @@ DEFAULT_CAPTION_PROMPT = (
 )
 DEFAULT_CAPTION_START = "This image showcases "
 DEFAULT_BAD_WORDS = "Appears, Seems, Possibly"
+DEFAULT_OCR_PROMPT = (
+    "Transcribe only text that is visibly present in this image. Preserve line breaks when possible. "
+    "Do not describe the image. Do not infer missing words. Do not add labels, explanations, or markdown. "
+    "If no readable text is visible, return an empty response."
+)
 
 KAOMOJIS = {
     "0_0", "(o)_(o)", "+_+", "+_-", "._.", "<o>_<o>", "<|>_<|>", "=_=",
@@ -68,6 +73,7 @@ class LocalAiSettings:
     tag_prompt: str = ""
     tag_write_mode: str = "union"
     caption_prompt: str = DEFAULT_CAPTION_PROMPT
+    ocr_prompt: str = DEFAULT_OCR_PROMPT
     caption_start: str = DEFAULT_CAPTION_START
     description_write_mode: str = "overwrite"
     device: str = "gpu"

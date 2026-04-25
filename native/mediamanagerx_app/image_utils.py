@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from native.mediamanagerx_app.common import *
 
+_THUMBNAIL_BG_HINT_CACHE: dict[tuple[str, int, int], str] = {}
+
 def _render_svg_image(path: str | Path, target_size: QSize | None = None) -> QImage | None:
     clean = str(path or "").strip()
     if not clean:

@@ -1535,6 +1535,7 @@ class BridgeLocalAiMixin:
             DEFAULT_BAD_WORDS,
             DEFAULT_CAPTION_PROMPT,
             DEFAULT_CAPTION_START,
+            DEFAULT_OCR_PROMPT,
             TAG_MODEL_ID,
             LocalAiSettings,
         )
@@ -1561,6 +1562,7 @@ class BridgeLocalAiMixin:
             tag_prompt=str(self.settings.value("ai_caption/tag_prompt", "", type=str) or ""),
             tag_write_mode=str(self.settings.value("ai_caption/tag_write_mode", "union", type=str) or "union"),
             caption_prompt=str(self.settings.value("ai_caption/caption_prompt", DEFAULT_CAPTION_PROMPT, type=str) or DEFAULT_CAPTION_PROMPT),
+            ocr_prompt=str(self.settings.value("ai_caption/ocr_prompt", DEFAULT_OCR_PROMPT, type=str) or DEFAULT_OCR_PROMPT),
             caption_start=str(self.settings.value("ai_caption/caption_start", DEFAULT_CAPTION_START, type=str) or DEFAULT_CAPTION_START),
             description_write_mode=str(self.settings.value("ai_caption/description_write_mode", "overwrite", type=str) or "overwrite"),
             device=str(self.settings.value("ai_caption/device", "gpu", type=str) or "gpu"),
@@ -1667,6 +1669,7 @@ class BridgeLocalAiMixin:
             "tag_prompt": str(ai_settings.tag_prompt),
             "tag_write_mode": str(ai_settings.tag_write_mode),
             "caption_prompt": str(ai_settings.caption_prompt),
+            "ocr_prompt": str(ai_settings.ocr_prompt),
             "caption_start": str(ai_settings.caption_start),
             "description_write_mode": str(ai_settings.description_write_mode),
             "device": str(ai_settings.device),

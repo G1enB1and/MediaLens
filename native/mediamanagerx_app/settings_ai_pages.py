@@ -13,17 +13,20 @@ class AISettingsPage(SettingsPage):
             DEFAULT_BAD_WORDS,
             DEFAULT_CAPTION_PROMPT,
             DEFAULT_CAPTION_START,
+            DEFAULT_OCR_PROMPT,
             TAG_MODEL_ID,
         )
-        from app.mediamanager.ai_captioning.model_registry import MODEL_SPECS
+        from app.mediamanager.ai_captioning.model_registry import GEMMA4_MODEL_ID, MODEL_SPECS
         models_dir_default = self.bridge._local_ai_models_dir_default() if hasattr(self.bridge, "_local_ai_models_dir_default") else ""
 
         self.defaults = {
             "models_dir": models_dir_default,
             "tag_model_id": TAG_MODEL_ID,
             "caption_model_id": CAPTION_MODEL_ID,
+            "ocr_model_id": GEMMA4_MODEL_ID,
             "tag_prompt": "",
             "caption_prompt": DEFAULT_CAPTION_PROMPT,
+            "ocr_prompt": DEFAULT_OCR_PROMPT,
             "caption_start": DEFAULT_CAPTION_START,
             "bad_words": DEFAULT_BAD_WORDS,
         }
@@ -43,6 +46,35 @@ class AISettingsPage(SettingsPage):
         content_layout.setContentsMargins(0, 0, 8, 0)
         content_layout.setSpacing(12)
 
+        self.ai_section_tabs = QTabBar()
+        self.ai_section_tabs.setExpanding(False)
+        self.ai_section_tabs.addTab("Tags")
+        self.ai_section_tabs.addTab("Descriptions")
+        self.ai_section_tabs.addTab("Text and OCR")
+        content_layout.addWidget(self.ai_section_tabs)
+
+        self.ai_section_stack = QStackedWidget()
+        content_layout.addWidget(self.ai_section_stack)
+
+        tags_page = QWidget()
+        tags_page_layout = QVBoxLayout(tags_page)
+        tags_page_layout.setContentsMargins(0, 0, 0, 0)
+        tags_page_layout.setSpacing(12)
+        self.ai_section_stack.addWidget(tags_page)
+
+        descriptions_page = QWidget()
+        descriptions_page_layout = QVBoxLayout(descriptions_page)
+        descriptions_page_layout.setContentsMargins(0, 0, 0, 0)
+        descriptions_page_layout.setSpacing(12)
+        self.ai_section_stack.addWidget(descriptions_page)
+
+        ocr_page = QWidget()
+        ocr_page_layout = QVBoxLayout(ocr_page)
+        ocr_page_layout.setContentsMargins(0, 0, 0, 0)
+        ocr_page_layout.setSpacing(12)
+        self.ai_section_stack.addWidget(ocr_page)
+        self.ai_section_tabs.currentChanged.connect(self.ai_section_stack.setCurrentIndex)
+
         tags_group = QGroupBox("Tags")
         tags_form = QFormLayout(tags_group)
         tags_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
@@ -50,7 +82,7 @@ class AISettingsPage(SettingsPage):
         tags_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         tags_form.setVerticalSpacing(5)
         tags_form.setHorizontalSpacing(12)
-        content_layout.addWidget(tags_group)
+        tags_page_layout.addWidget(tags_group)
 
         self.tag_model_combo = QComboBox()
         for spec in MODEL_SPECS:
@@ -125,7 +157,7 @@ class AISettingsPage(SettingsPage):
         descriptions_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         descriptions_form.setVerticalSpacing(5)
         descriptions_form.setHorizontalSpacing(12)
-        content_layout.addWidget(descriptions_group)
+        descriptions_page_layout.addWidget(descriptions_group)
 
         self.caption_model_combo = QComboBox()
         for spec in MODEL_SPECS:
@@ -189,6 +221,77 @@ class AISettingsPage(SettingsPage):
         self.max_tokens_spin.setRange(1, 2048)
         descriptions_form.addRow("Maximum Tokens", self.max_tokens_spin)
 
+        ocr_ai_group = QGroupBox("AI OCR")
+        ocr_ai_form = QFormLayout(ocr_ai_group)
+        ocr_ai_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        ocr_ai_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        ocr_ai_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        ocr_ai_form.setVerticalSpacing(5)
+        ocr_ai_form.setHorizontalSpacing(12)
+        ocr_page_layout.addWidget(ocr_ai_group)
+
+        self.ocr_model_combo = QComboBox()
+        self.ocr_model_combo.addItem("Gemma 4", self.defaults["ocr_model_id"])
+        self.ocr_model_combo.setEnabled(False)
+        ocr_ai_form.addRow("OCR Model", self.ocr_model_combo)
+
+        self.ocr_model_description_label = QLabel("Gemma 4 image transcription.")
+        self.ocr_model_description_label.setWordWrap(True)
+        self.ocr_model_description_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.ocr_model_description_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.ocr_model_status_label = QLabel("")
+        self.ocr_model_status_label.setObjectName("aiSettingsModelStatus")
+        self.ocr_model_status_label.setTextFormat(Qt.TextFormat.RichText)
+        self.ocr_model_status_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.ocr_model_status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.ocr_model_submodel_combo = QComboBox()
+        self.ocr_model_submodel_combo.setVisible(False)
+        self.ocr_model_submodel_combo.currentIndexChanged.connect(lambda _index: self._on_gemma_submodel_changed("ocr"))
+        self.ocr_model_advanced_btn = QPushButton("Advanced")
+        self.ocr_model_advanced_btn.setFlat(True)
+        self.ocr_model_advanced_btn.clicked.connect(lambda: self.dialog.main_window.open_local_ai_setup("captioner", show_advanced=True))
+        self.ocr_model_install_btn = QPushButton("Install Model")
+        self.ocr_model_install_btn.clicked.connect(lambda: self._install_selected_ai_model("ocr"))
+        ocr_model_status_row = QWidget()
+        ocr_model_status_layout = QHBoxLayout(ocr_model_status_row)
+        ocr_model_status_layout.setContentsMargins(0, 0, 0, 0)
+        ocr_model_status_layout.setSpacing(8)
+        ocr_model_status_panel = QWidget()
+        ocr_model_status_panel_layout = QVBoxLayout(ocr_model_status_panel)
+        ocr_model_status_panel_layout.setContentsMargins(0, 0, 0, 0)
+        ocr_model_status_panel_layout.setSpacing(4)
+        ocr_model_status_panel_layout.addWidget(self.ocr_model_status_label)
+        ocr_model_status_panel_layout.addWidget(self.ocr_model_submodel_combo)
+        ocr_model_status_panel_layout.addWidget(self.ocr_model_advanced_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        ocr_model_status_layout.addWidget(ocr_model_status_panel, 1)
+        ocr_model_status_layout.addWidget(self.ocr_model_install_btn)
+        ocr_ai_form.addRow("Description", self.ocr_model_description_label)
+        ocr_ai_form.addRow("Status", ocr_model_status_row)
+
+        self.ocr_prompt_edit = QTextEdit()
+        self.ocr_prompt_edit.setFixedHeight(80)
+        self.ocr_prompt_edit.setPlaceholderText("OCR prompt and rules.")
+        ocr_ai_form.addRow("OCR Prompt", self.ocr_prompt_edit)
+
+        paddle_group = QGroupBox("Non-AI OCR")
+        paddle_form = QFormLayout(paddle_group)
+        paddle_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        paddle_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        paddle_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        paddle_form.setVerticalSpacing(5)
+        paddle_form.setHorizontalSpacing(12)
+        ocr_page_layout.addWidget(paddle_group)
+
+        self.paddle_fast_status_label = QLabel("")
+        self.paddle_fast_status_label.setTextFormat(Qt.TextFormat.RichText)
+        self.paddle_fast_status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.paddle_accurate_status_label = QLabel("")
+        self.paddle_accurate_status_label.setTextFormat(Qt.TextFormat.RichText)
+        self.paddle_accurate_status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        paddle_form.addRow("Paddle Fast", self.paddle_fast_status_label)
+        paddle_form.addRow("Paddle Accurate", self.paddle_accurate_status_label)
+        ocr_page_layout.addStretch(1)
+
         models_group = QGroupBox("Models")
         models_form = QFormLayout(models_group)
         models_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
@@ -233,6 +336,7 @@ class AISettingsPage(SettingsPage):
             self.bridge.localAiModelInstallStatus.connect(self._on_local_ai_model_install_status)
         self.tag_prompt_edit.textChanged.connect(self._save)
         self.caption_prompt_edit.textChanged.connect(self._save)
+        self.ocr_prompt_edit.textChanged.connect(self._save)
         self.tag_max_tags_spin.valueChanged.connect(self._save)
         self.max_tokens_spin.valueChanged.connect(self._save)
         self.refresh()
@@ -248,12 +352,20 @@ class AISettingsPage(SettingsPage):
         combo.setCurrentIndex(idx if idx >= 0 else 0)
 
     def _selected_ai_model_id(self, kind: str) -> str:
+        if kind == "ocr":
+            return str(self.ocr_model_combo.currentData() or self.defaults["ocr_model_id"])
         combo = self.tag_model_combo if kind == "tagger" else self.caption_model_combo
         return str(combo.currentData() or "")
+
+    @staticmethod
+    def _model_status_kind(kind: str) -> str:
+        return "captioner" if kind == "ocr" else kind
 
     def _status_widgets(self, kind: str):
         if kind == "tagger":
             return self.tag_model_description_label, self.tag_model_status_label, self.tag_model_install_btn, self.tag_model_submodel_combo, self.tag_model_advanced_btn
+        if kind == "ocr":
+            return self.ocr_model_description_label, self.ocr_model_status_label, self.ocr_model_install_btn, self.ocr_model_submodel_combo, self.ocr_model_advanced_btn
         return self.caption_model_description_label, self.caption_model_status_label, self.caption_model_install_btn, self.caption_model_submodel_combo, self.caption_model_advanced_btn
 
     def _populate_gemma_submodels(self, combo: QComboBox, status: dict) -> None:
@@ -274,7 +386,12 @@ class AISettingsPage(SettingsPage):
                 combo.setCurrentIndex(idx if idx >= 0 else 0)
 
     def _on_gemma_submodel_changed(self, kind: str) -> None:
-        combo = self.tag_model_submodel_combo if kind == "tagger" else self.caption_model_submodel_combo
+        if kind == "tagger":
+            combo = self.tag_model_submodel_combo
+        elif kind == "ocr":
+            combo = self.ocr_model_submodel_combo
+        else:
+            combo = self.caption_model_submodel_combo
         profile_id = str(combo.currentData() or "").strip()
         if not profile_id:
             return
@@ -324,21 +441,42 @@ class AISettingsPage(SettingsPage):
     def _refresh_ai_model_statuses(self) -> None:
         if bool(getattr(self, "_loading", False)):
             return
-        for kind in ("tagger", "captioner"):
+        for kind in ("tagger", "captioner", "ocr"):
             model_id = self._selected_ai_model_id(kind)
             if not model_id:
                 continue
             if hasattr(self.bridge, "get_local_ai_model_status"):
                 try:
-                    self._apply_ai_model_status(kind, dict(self.bridge.get_local_ai_model_status(model_id, kind) or {}))
+                    self._apply_ai_model_status(kind, dict(self.bridge.get_local_ai_model_status(model_id, self._model_status_kind(kind)) or {}))
                 except Exception as exc:
                     self._apply_ai_model_status(kind, {"state": "error", "message": str(exc) or "Could not read model status."})
+        self._refresh_paddle_ocr_status()
+
+    def _refresh_paddle_ocr_status(self) -> None:
+        Theme = _theme_api()
+        is_light = Theme.get_is_light()
+        ok_color = "#238636" if is_light else "#7ee787"
+        bad_color = "#c62828" if is_light else "#ff7b72"
+        try:
+            status = dict(self.bridge.get_paddle_ocr_status() or {}) if hasattr(self.bridge, "get_paddle_ocr_status") else {}
+        except Exception as exc:
+            status = {"installed": False, "error": str(exc)}
+        installed = bool(status.get("installed"))
+        device = str(status.get("device") or "auto").strip().upper()
+        gpu_text = "GPU preferred" if bool(status.get("prefer_gpu", True)) else "CPU"
+        if installed:
+            self.paddle_fast_status_label.setText(f'<span style="color:{ok_color};">Installed</span><br>{html.escape(device)} / {html.escape(gpu_text)}')
+        else:
+            detail = html.escape(str(status.get("error") or status.get("python_path") or "Runtime not installed."))
+            self.paddle_fast_status_label.setText(f'<span style="color:{bad_color};">Not installed</span><br>{detail}')
+        self.paddle_accurate_status_label.setText("Disabled while the advanced preprocessing profile is retired.")
 
     def _install_selected_ai_model(self, kind: str) -> None:
         model_id = self._selected_ai_model_id(kind)
         if not model_id or not hasattr(self.bridge, "install_local_ai_model"):
             return
-        status = dict(self.bridge.get_local_ai_model_status(model_id, kind) or {}) if hasattr(self.bridge, "get_local_ai_model_status") else {}
+        status_kind = self._model_status_kind(kind)
+        status = dict(self.bridge.get_local_ai_model_status(model_id, status_kind) or {}) if hasattr(self.bridge, "get_local_ai_model_status") else {}
         label = str(status.get("label") or "this model")
         size = str(status.get("estimated_size") or "").strip()
         message = f"Install {label} local AI support?"
@@ -348,17 +486,17 @@ class AISettingsPage(SettingsPage):
         reply = QMessageBox.question(self, "Install AI Model", message, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
         if reply != QMessageBox.StandardButton.Yes:
             return
-        started = bool(self.bridge.install_local_ai_model(model_id, kind))
+        started = bool(self.bridge.install_local_ai_model(model_id, status_kind))
         if not started:
             self._refresh_ai_model_statuses()
 
     def _on_local_ai_model_install_status(self, status_key: str, payload: dict) -> None:
         payload = dict(payload or {})
-        for kind in ("tagger", "captioner"):
+        for kind in ("tagger", "captioner", "ocr"):
             current = {}
             if hasattr(self.bridge, "get_local_ai_model_status"):
                 try:
-                    current = dict(self.bridge.get_local_ai_model_status(self._selected_ai_model_id(kind), kind) or {})
+                    current = dict(self.bridge.get_local_ai_model_status(self._selected_ai_model_id(kind), self._model_status_kind(kind)) or {})
                 except Exception:
                     current = {}
             if str(current.get("settings_key") or "") == str(status_key or ""):
@@ -382,6 +520,7 @@ class AISettingsPage(SettingsPage):
         s.setValue("ai_caption/description_write_mode", self.description_write_mode_combo.currentData() or "overwrite")
         s.setValue("ai_caption/tag_prompt", self.tag_prompt_edit.toPlainText().strip())
         s.setValue("ai_caption/caption_prompt", self.caption_prompt_edit.toPlainText().strip() or self.defaults["caption_prompt"])
+        s.setValue("ai_caption/ocr_prompt", self.ocr_prompt_edit.toPlainText().strip() or self.defaults["ocr_prompt"])
         s.setValue("ai_caption/caption_start", self.caption_start_edit.text())
         s.setValue("ai_caption/bad_words", self.bad_words_edit.text())
         s.setValue("ai_caption/tags_to_exclude", self.tags_to_exclude_edit.text())
@@ -413,6 +552,7 @@ class AISettingsPage(SettingsPage):
             self._set_combo_data(self.description_write_mode_combo, str(self._setting("ai_caption.description_write_mode", "overwrite", str) or "overwrite"))
             self.tag_prompt_edit.setPlainText(str(self._setting("ai_caption.tag_prompt", self.defaults["tag_prompt"], str) or self.defaults["tag_prompt"]))
             self.caption_prompt_edit.setPlainText(str(self._setting("ai_caption.caption_prompt", self.defaults["caption_prompt"], str) or self.defaults["caption_prompt"]))
+            self.ocr_prompt_edit.setPlainText(str(self._setting("ai_caption.ocr_prompt", self.defaults["ocr_prompt"], str) or self.defaults["ocr_prompt"]))
             self.caption_start_edit.setText(str(self._setting("ai_caption.caption_start", self.defaults["caption_start"], str) or self.defaults["caption_start"]))
             self.bad_words_edit.setText(str(self._setting("ai_caption.bad_words", self.defaults["bad_words"], str) or self.defaults["bad_words"]))
             self.tags_to_exclude_edit.setText(str(self._setting("ai_caption.tags_to_exclude", "", str) or ""))
