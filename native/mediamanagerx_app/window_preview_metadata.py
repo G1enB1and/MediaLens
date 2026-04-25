@@ -1766,7 +1766,13 @@ class WindowPreviewMetadataMixin:
         self.lbl_text_detected_note.setVisible(not is_bulk and show_text_detected)
         self.lbl_detected_text_cap.setVisible(not is_bulk and show_text_detected)
         self.meta_detected_text_edit.setVisible(not is_bulk and show_text_detected)
-        self.btn_use_ocr.setVisible(not is_bulk and show_text_detected)
+        self.ocr_progress_lbl.setVisible(
+            not is_bulk and show_text_detected and bool(self.ocr_progress_lbl.text().strip())
+        )
+        self.ocr_error_edit.setVisible(
+            not is_bulk and show_text_detected and bool(self.ocr_error_edit.toPlainText().strip())
+        )
+        self.ocr_button_row.setVisible(not is_bulk and show_text_detected)
         self.meta_duration_lbl.setVisible(not is_bulk and show_duration)
         self.meta_fps_lbl.setVisible(not is_bulk and show_fps)
         self.meta_codec_lbl.setVisible(not is_bulk and show_codec)
@@ -2265,38 +2271,102 @@ class WindowPreviewMetadataMixin:
             }
         return {"general": image_general, "camera": image_camera, "ai": image_ai}
 
-    def _run_text_ocr(self) -> None:
+    def _ocr_buttons(self) -> list:
+        return [
+            widget for widget in (
+                getattr(self, "btn_use_ocr", None),
+                getattr(self, "btn_use_ocr_accurate", None),
+                getattr(self, "btn_use_ocr_gemma", None),
+            )
+            if widget is not None
+        ]
+
+    def _set_ocr_buttons_enabled(self, enabled: bool) -> None:
+        for button in self._ocr_buttons():
+            button.setEnabled(bool(enabled))
+
+    def _details_scroll_value(self) -> int | None:
+        try:
+            return int(self.scroll_area.verticalScrollBar().value())
+        except Exception:
+            return None
+
+    def _restore_details_scroll_value(self, value: int | None) -> None:
+        if value is None:
+            return
+        try:
+            bar = self.scroll_area.verticalScrollBar()
+            bar.setValue(max(bar.minimum(), min(int(value), bar.maximum())))
+        except Exception:
+            pass
+
+    def _set_ocr_error_text(self, text: str) -> None:
+        widget = getattr(self, "ocr_error_edit", None)
+        if widget is None:
+            return
+        clean_text = str(text or "").strip()
+        scroll_value = self._details_scroll_value()
+        widget.setPlainText(clean_text)
+        widget.setVisible(bool(clean_text) and bool(getattr(self, "ocr_button_row", QWidget()).isVisible()))
+        if clean_text and hasattr(self, "meta_status_lbl"):
+            self.meta_status_lbl.setVisible(False)
+        try:
+            self._sync_sidebar_panel_widths()
+        except Exception:
+            pass
+        QTimer.singleShot(0, lambda value=scroll_value: self._restore_details_scroll_value(value))
+
+    def _set_ocr_progress_text(self, text: str) -> None:
+        widget = getattr(self, "ocr_progress_lbl", None)
+        if widget is None:
+            return
+        clean_text = str(text or "").strip()
+        scroll_value = self._details_scroll_value()
+        widget.setText(clean_text)
+        widget.setVisible(bool(clean_text) and bool(getattr(self, "ocr_button_row", QWidget()).isVisible()))
+        if clean_text and hasattr(self, "meta_status_lbl"):
+            self.meta_status_lbl.setVisible(False)
+        try:
+            self._sync_sidebar_panel_widths()
+        except Exception:
+            pass
+        QTimer.singleShot(0, lambda value=scroll_value: self._restore_details_scroll_value(value))
+
+    def _run_text_ocr(self, source: str = "paddle_fast") -> None:
         path = str(getattr(self, "_current_path", "") or "").strip()
         if not path:
             return
-        self.btn_use_ocr.setEnabled(False)
-        self.btn_use_ocr.setProperty("baseText", "Running OCR...")
-        self._wrap_button_text(self.btn_use_ocr, "Running OCR...", self._right_panel_content_width())
-        self.meta_status_lbl.setText("Running OCR...")
-        self.bridge.run_manual_ocr(path)
+        self._set_ocr_buttons_enabled(False)
+        self._set_ocr_error_text("")
+        label = {
+            "paddle_accurate": "Running accurate OCR...",
+            "gemma4": "Running AI OCR...",
+        }.get(str(source or ""), "Running fast OCR...")
+        self._set_ocr_progress_text(label)
+        if hasattr(self.bridge, "run_manual_ocr_with_source"):
+            self.bridge.run_manual_ocr_with_source(path, source)
+        else:
+            self.bridge.run_manual_ocr(path)
 
     @Slot(str, str, str)
     def _on_manual_ocr_finished(self, path: str, text: str, error: str) -> None:
-        if hasattr(self, "btn_use_ocr"):
-            self.btn_use_ocr.setEnabled(True)
-            self.btn_use_ocr.setProperty("baseText", "Use OCR")
-            self._wrap_button_text(self.btn_use_ocr, "Use OCR", self._right_panel_content_width())
+        self._set_ocr_buttons_enabled(True)
         if str(getattr(self, "_current_path", "") or "") != str(path or ""):
             return
         if error:
-            self.meta_status_lbl.setText(f"OCR Error: {error}")
-            QTimer.singleShot(4000, lambda: self.meta_status_lbl.setText(""))
+            self._set_ocr_progress_text("")
+            self._set_ocr_error_text(f"Error: {error}")
             return
+        self._set_ocr_error_text("")
         clean_text = str(text or "").strip()
         if clean_text:
             self.meta_detected_text_edit.setPlainText(clean_text)
             self._set_metadata_switch(self.meta_text_detected_toggle, True)
             self._current_user_confirmed_text_detected = True
             self._text_detected_override_dirty = False
-            self.meta_status_lbl.setText("OCR text saved")
+            self._set_ocr_progress_text("OCR text saved")
         else:
-            self.meta_status_lbl.setText("No OCR text found")
-        QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
+            self._set_ocr_progress_text("No OCR text found")
 
     def _local_ai_target_paths(self) -> list[str]:
         paths = self._current_file_paths()
@@ -2951,7 +3021,9 @@ class WindowPreviewMetadataMixin:
                 self.lbl_text_detected_note,
                 self.lbl_detected_text_cap,
                 self.meta_detected_text_edit,
-                self.btn_use_ocr,
+                self.ocr_progress_lbl,
+                self.ocr_error_edit,
+                self.ocr_button_row,
             ],
             "duration": [self.meta_duration_lbl],
             "fps": [self.meta_fps_lbl],
@@ -3108,6 +3180,8 @@ class WindowPreviewMetadataMixin:
         self.meta_notes.setPlainText("")
         self.generate_description_progress_lbl.setText("")
         self.generate_description_error_edit.setPlainText("")
+        self.ocr_progress_lbl.setText("")
+        self.ocr_error_edit.setPlainText("")
         self.generate_tags_progress_lbl.setText("")
         self.generate_tags_error_edit.setPlainText("")
         self._clear_embedded_labels()

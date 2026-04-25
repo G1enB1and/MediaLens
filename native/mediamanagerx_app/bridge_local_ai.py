@@ -1727,6 +1727,10 @@ class BridgeLocalAiMixin:
 
         kind = "tagger" if operation == "tags" else "captioner"
         selected_model = ai_settings.tag_model_id if operation == "tags" else ai_settings.caption_model_id
+        if operation == "ocr":
+            from app.mediamanager.ai_captioning.model_registry import GEMMA4_MODEL_ID
+
+            selected_model = GEMMA4_MODEL_ID
         spec = model_spec(selected_model, kind)
         configured = str(self.settings.value(f"ai_caption/runtime_python/{spec.settings_key}", "", type=str) or "").strip()
         if not configured and spec.settings_key == "gemma4":
@@ -1743,10 +1747,10 @@ class BridgeLocalAiMixin:
                 )
         return str(python_path), spec.worker_module
 
-    def _run_local_ai_worker_process(self, operation: str, source_path: Path, ai_settings, tags: list[str] | None = None) -> dict:
+    def _run_local_ai_worker_process(self, operation: str, source_path: Path, ai_settings, tags: list[str] | None = None, previous_ocr: list[dict] | None = None) -> dict:
         timeout_seconds = int(self.settings.value("ai_caption/item_timeout_seconds", 900, type=int) or 900)
         timeout_seconds = max(30, timeout_seconds)
-        operation_label = "description" if operation == "description" else "tags"
+        operation_label = "description" if operation == "description" else ("OCR" if operation == "ocr" else "tags")
         python_exe, worker_module = self._local_ai_worker_command(operation, ai_settings)
         launcher, worker_cwd, worker_pythonpath = self._local_ai_worker_launcher(python_exe, worker_module)
         settings_payload = self._local_ai_settings_payload(ai_settings)
@@ -1761,6 +1765,8 @@ class BridgeLocalAiMixin:
         ]
         if tags is not None:
             command.extend(["--tags-json", json.dumps(tags, ensure_ascii=False)])
+        if previous_ocr is not None:
+            command.extend(["--previous-ocr-json", json.dumps(previous_ocr, ensure_ascii=False)])
         if str(settings_payload.get("gemma_backend") or "").strip().lower() == "llama_cpp_gguf":
             self._log(
                 "Local AI Gemma launch: "

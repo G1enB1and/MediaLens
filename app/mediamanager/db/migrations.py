@@ -128,6 +128,12 @@ def _ensure_media_item_date_columns(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_media_items_text_more_likely ON media_items(text_more_likely)")
 
 
+def _ensure_ocr_tables(conn: sqlite3.Connection) -> None:
+    from app.mediamanager.db.ocr_repo import ensure_ocr_tables
+
+    ensure_ocr_tables(conn)
+
+
 def init_db(db_path: str) -> None:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     sql = _load_schema_sql()
@@ -150,6 +156,7 @@ def init_db(db_path: str) -> None:
         _ensure_media_metadata_columns(conn)
         _ensure_is_hidden_columns(conn)
         _ensure_media_item_date_columns(conn)
+        _ensure_ocr_tables(conn)
         conn.commit()
     finally:
         conn.close()

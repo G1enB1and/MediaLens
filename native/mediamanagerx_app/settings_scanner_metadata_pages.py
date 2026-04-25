@@ -46,11 +46,14 @@ class ScannersSettingsPage(SettingsPage):
 
             last_run_label = QLabel("Last run: Never")
             last_run_label.setWordWrap(True)
+            review_btn = QPushButton("Review Flagged OCR")
+            review_btn.setVisible(key == "ocr_text")
 
             group_layout.addWidget(desc_label)
             group_layout.addWidget(enable_toggle)
             group_layout.addLayout(schedule_row)
             group_layout.addLayout(action_row)
+            group_layout.addWidget(review_btn)
             group_layout.addWidget(last_run_label)
             layout.addWidget(group)
 
@@ -58,12 +61,14 @@ class ScannersSettingsPage(SettingsPage):
                 "enable": enable_toggle,
                 "interval": interval,
                 "run": run_btn,
+                "review": review_btn,
                 "status": status_label,
                 "last_run": last_run_label,
             }
             enable_toggle.toggled.connect(lambda checked, scanner_key=key: self._set_enabled(scanner_key, checked))
             interval.valueChanged.connect(lambda value, scanner_key=key: self._set_interval(scanner_key, int(value)))
             run_btn.clicked.connect(lambda _checked=False, scanner_key=key: self._run_now(scanner_key))
+            review_btn.clicked.connect(self._open_ocr_review)
 
         layout.addStretch(1)
         if hasattr(self.bridge, "scannerStatusChanged"):
@@ -96,7 +101,9 @@ class ScannersSettingsPage(SettingsPage):
             status.setText("Status: Starting...")
         try:
             if hasattr(self.bridge, "run_scanner_now"):
-                self.bridge.run_scanner_now(scanner_key)
+                started = bool(self.bridge.run_scanner_now(scanner_key))
+                if not started and isinstance(status, QLabel):
+                    status.setText("Status: Nothing to run")
         except Exception:
             if isinstance(status, QLabel):
                 status.setText("Status: Error starting scanner")
@@ -105,10 +112,17 @@ class ScannersSettingsPage(SettingsPage):
         widgets = self._widgets.get(scanner_key) or {}
         enable = widgets.get("enable")
         enabled = bool(enable.isChecked()) if isinstance(enable, QCheckBox) else True
-        for child_key in ("interval", "run"):
+        for child_key in ("interval",):
             widget = widgets.get(child_key)
             if widget is not None:
                 widget.setEnabled(enabled)
+        run_btn = widgets.get("run")
+        if run_btn is not None:
+            run_btn.setEnabled(True)
+
+    def _open_ocr_review(self) -> None:
+        dialog = OcrReviewDialog(self)
+        dialog.exec()
 
     def _apply_status(self, scanner_key: str, payload: dict) -> None:
         widgets = self._widgets.get(scanner_key) or {}
@@ -151,6 +165,135 @@ class ScannersSettingsPage(SettingsPage):
                     "status": str(self.settings.value(f"scanners/{scanner_key}/status", "Idle", type=str) or "Idle"),
                 }
             self._apply_status(scanner_key, payload)
+
+
+class OcrReviewDialog(QDialog):
+    SOURCE_LABELS = {
+        "paddle_fast": "Fast OCR",
+        "paddle_accurate": "Accurate OCR",
+        "gemma4": "Gemma OCR",
+        "user": "User Typed",
+        "windows_ocr_legacy": "Windows OCR",
+    }
+
+    def __init__(self, page: ScannersSettingsPage) -> None:
+        super().__init__(page)
+        self.page = page
+        self.bridge = page.bridge
+        self.setWindowTitle("Review OCR Results")
+        self.resize(1100, 720)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        header = QLabel("Files with conflicting or low-confidence OCR results")
+        header.setObjectName("settingsFieldTitle")
+        layout.addWidget(header)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.content = QWidget()
+        self.content_layout = QVBoxLayout(self.content)
+        self.content_layout.setSpacing(12)
+        self.scroll.setWidget(self.content)
+        layout.addWidget(self.scroll, 1)
+
+        close_row = QHBoxLayout()
+        close_row.addStretch(1)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        close_row.addWidget(close_btn)
+        layout.addLayout(close_row)
+        self._reload()
+
+    def _reload(self) -> None:
+        while self.content_layout.count():
+            item = self.content_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        try:
+            rows = self.bridge.get_ocr_review_items() if hasattr(self.bridge, "get_ocr_review_items") else []
+        except Exception:
+            rows = []
+        if not rows:
+            empty = QLabel("No OCR results need review.")
+            empty.setWordWrap(True)
+            self.content_layout.addWidget(empty)
+            self.content_layout.addStretch(1)
+            return
+        for item in rows:
+            self.content_layout.addWidget(self._build_review_row(dict(item or {})))
+        self.content_layout.addStretch(1)
+
+    def _build_review_row(self, item: dict) -> QWidget:
+        panel = QFrame()
+        panel.setFrameShape(QFrame.Shape.StyledPanel)
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setSpacing(8)
+        title = QLabel(Path(str(item.get("path") or "")).name or str(item.get("path") or ""))
+        title.setObjectName("settingsFieldTitle")
+        title.setWordWrap(True)
+        reason = QLabel(f"Review reason: {item.get('reason') or 'review needed'}")
+        reason.setWordWrap(True)
+        panel_layout.addWidget(title)
+        panel_layout.addWidget(reason)
+
+        grid = QGridLayout()
+        grid.setSpacing(8)
+        preview = QLabel()
+        preview.setMinimumSize(180, 120)
+        preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        preview.setText("Preview")
+        try:
+            pixmap = QPixmap(str(item.get("path") or ""))
+            if not pixmap.isNull():
+                preview.setPixmap(pixmap.scaled(220, 160, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        except Exception:
+            pass
+        grid.addWidget(preview, 0, 0)
+
+        results = list(item.get("results") or [])
+        latest_by_source: dict[str, dict] = {}
+        for result in results:
+            latest_by_source.setdefault(str(result.get("source") or ""), dict(result or {}))
+        ordered_sources = ["paddle_fast", "paddle_accurate", "gemma4", "user", "windows_ocr_legacy"]
+        col = 1
+        for source in ordered_sources:
+            result = latest_by_source.get(source)
+            if result is None:
+                continue
+            grid.addWidget(self._build_result_cell(int(item.get("media_id") or 0), result), 0, col)
+            col += 1
+        panel_layout.addLayout(grid)
+        return panel
+
+    def _build_result_cell(self, media_id: int, result: dict) -> QWidget:
+        cell = QFrame()
+        cell.setFrameShape(QFrame.Shape.StyledPanel)
+        layout = QVBoxLayout(cell)
+        layout.setSpacing(6)
+        source = str(result.get("source") or "")
+        confidence = result.get("confidence")
+        confidence_text = "" if confidence is None else f" ({float(confidence):.0%})"
+        label = QLabel(f"{self.SOURCE_LABELS.get(source, source or 'OCR')}{confidence_text}")
+        label.setObjectName("settingsFieldTitle")
+        text = QPlainTextEdit(str(result.get("text") or ""))
+        text.setReadOnly(True)
+        text.setMinimumWidth(190)
+        text.setMinimumHeight(120)
+        keep_btn = QPushButton("Keep")
+        result_id = int(result.get("id") or 0)
+        keep_btn.clicked.connect(lambda _checked=False, mid=media_id, rid=result_id: self._keep_result(mid, rid))
+        layout.addWidget(label)
+        layout.addWidget(text, 1)
+        layout.addWidget(keep_btn)
+        return cell
+
+    def _keep_result(self, media_id: int, result_id: int) -> None:
+        try:
+            if self.bridge.keep_ocr_result(int(media_id), int(result_id)):
+                self._reload()
+        except Exception:
+            pass
 
 
 class MetadataSettingsPage(SettingsPage):

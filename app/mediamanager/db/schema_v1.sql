@@ -38,6 +38,46 @@ CREATE INDEX IF NOT EXISTS idx_media_items_type ON media_items(media_type);
 CREATE INDEX IF NOT EXISTS idx_media_items_text_likely ON media_items(text_likely);
 CREATE INDEX IF NOT EXISTS idx_media_items_text_more_likely ON media_items(text_more_likely);
 
+CREATE TABLE IF NOT EXISTS media_ocr_results (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  media_id INTEGER NOT NULL,
+  source TEXT NOT NULL,
+  text TEXT NOT NULL,
+  confidence REAL,
+  engine_version TEXT,
+  preprocess_profile TEXT,
+  run_id TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  is_user_selected INTEGER NOT NULL DEFAULT 0,
+  created_at_utc TEXT NOT NULL,
+  FOREIGN KEY(media_id) REFERENCES media_items(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_ocr_results_media ON media_ocr_results(media_id, created_at_utc);
+CREATE INDEX IF NOT EXISTS idx_media_ocr_results_source ON media_ocr_results(source);
+
+CREATE TABLE IF NOT EXISTS media_ocr_winners (
+  media_id INTEGER PRIMARY KEY,
+  result_id INTEGER,
+  source TEXT NOT NULL,
+  text TEXT NOT NULL,
+  selected_by TEXT NOT NULL DEFAULT 'rules',
+  updated_at_utc TEXT NOT NULL,
+  FOREIGN KEY(media_id) REFERENCES media_items(id) ON DELETE CASCADE,
+  FOREIGN KEY(result_id) REFERENCES media_ocr_results(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS media_ocr_review_items (
+  media_id INTEGER PRIMARY KEY,
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  created_at_utc TEXT NOT NULL,
+  updated_at_utc TEXT NOT NULL,
+  FOREIGN KEY(media_id) REFERENCES media_items(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_ocr_review_status ON media_ocr_review_items(status, updated_at_utc);
+
 CREATE TABLE IF NOT EXISTS media_paths_history (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   media_id INTEGER NOT NULL,

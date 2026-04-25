@@ -229,6 +229,8 @@ class WindowSidebarBulkMixin:
             getattr(self, "btn_clear_bulk_tags", None),
             getattr(self, "btn_save_meta", None),
             getattr(self, "btn_use_ocr", None),
+            getattr(self, "btn_use_ocr_accurate", None),
+            getattr(self, "btn_use_ocr_gemma", None),
             getattr(self, "btn_generate_tags", None),
             getattr(self, "btn_generate_description", None),
             getattr(self, "btn_import_exif", None),
@@ -263,6 +265,7 @@ class WindowSidebarBulkMixin:
             getattr(self, "generate_description_btn_row", None),
             getattr(self, "generate_tags_btn_row", None),
             getattr(self, "tag_list_open_btn_row", None),
+            getattr(self, "ocr_button_row", None),
         ]:
             if wrapper is None:
                 continue
@@ -274,6 +277,8 @@ class WindowSidebarBulkMixin:
         for label in [
             getattr(self, "generate_description_progress_lbl", None),
             getattr(self, "generate_description_error_edit", None),
+            getattr(self, "ocr_progress_lbl", None),
+            getattr(self, "ocr_error_edit", None),
             getattr(self, "generate_tags_progress_lbl", None),
             getattr(self, "generate_tags_error_edit", None),
             getattr(self, "meta_status_lbl", None),

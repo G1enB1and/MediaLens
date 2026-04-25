@@ -400,6 +400,7 @@ class BridgeScannersSettingsMixin:
             self._set_scanner_status("text_detection", "Idle (no active scope)")
             return
         if self._text_processing_active and not self._text_processing_paused and self._text_processing_scope_key == scope_key:
+            self._set_scanner_status("text_detection", "Already running")
             return
 
         self._text_processing_generation += 1
@@ -723,6 +724,7 @@ class BridgeScannersSettingsMixin:
 
     def _run_ocr_text_scanner(self, *, force: bool = False) -> bool:
         if self._ocr_text_processing_active:
+            self._set_scanner_status("ocr_text", "Already running")
             return False
         if not force and not self._scanner_enabled("ocr_text"):
             self._set_scanner_status("ocr_text", "Disabled")
@@ -738,18 +740,17 @@ class BridgeScannersSettingsMixin:
             processed = 0
             saved = 0
             try:
-                from app.mediamanager.db.media_repo import add_media_item, update_media_detected_text
-                from app.mediamanager.utils.text_detection import extract_text_windows_ocr
+                from app.mediamanager.db.media_repo import add_media_item
 
                 eligible = [
                     entry for entry in entries
                     if not entry.get("is_folder")
                     and self._effective_text_detected(entry)
-                    and not str(entry.get("detected_text") or "").strip()
+                    and (force or not str(entry.get("detected_text") or "").strip())
                 ]
                 total = len(eligible)
                 if total <= 0:
-                    self._set_scanner_status("ocr_text", "Idle", mark_run=True)
+                    self._set_scanner_status("ocr_text", "Idle (no eligible files)", mark_run=True)
                     return
                 for entry in eligible:
                     processed += 1
@@ -767,10 +768,10 @@ class BridgeScannersSettingsMixin:
                             media_id = add_media_item(self.conn, real_path, media_type)
                             entry["id"] = media_id
                         ocr_source_path = self._manual_ocr_source_path(p)
-                        text = extract_text_windows_ocr(ocr_source_path)
+                        payload = self._run_paddle_ocr_worker(ocr_source_path, "fast")
+                        text = self._save_ocr_payload(path, payload, select_as_winner=False)
                         if not text.strip():
                             continue
-                        update_media_detected_text(self.conn, int(entry["id"]), text)
                         entry["detected_text"] = text
                         saved += 1
                     except Exception as exc:

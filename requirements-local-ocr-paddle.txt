@@ -1,0 +1,6 @@
+# Optional OCR runtime dependencies for PaddleOCR.
+# Install into a separate .venv-paddleocr runtime.
+paddleocr>=3.0.0
+paddlepaddle>=3.0.0
+opencv-python-headless>=4.13.0.92
+Pillow>=10.0.0

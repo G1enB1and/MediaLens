@@ -295,8 +295,144 @@ class BridgeVideoMetadataMixin:
             return poster
         raise RuntimeError("No video preview image is available for OCR.")
 
+    def _ocr_runtime_python_path(self) -> Path:
+        configured = str(self.settings.value("ocr/paddle_python", "", type=str) or "").strip()
+        if configured:
+            return Path(configured)
+        scripts_dir = "Scripts" if os.name == "nt" else "bin"
+        exe_name = "python.exe" if os.name == "nt" else "python"
+        default_path = self._local_ai_runtime_root() / ".venv-paddleocr" / scripts_dir / exe_name
+        candidates = [
+            default_path,
+            self._local_ai_worker_source_root() / ".venv-paddleocr" / scripts_dir / exe_name,
+            Path.cwd() / ".venv-paddleocr" / scripts_dir / exe_name,
+        ]
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+        return default_path
+
+    def _ocr_worker_launcher(self, python_path: str | Path) -> tuple[list[str], Path, str]:
+        source_root = self._local_ai_worker_source_root()
+        worker_script = source_root / "app" / "mediamanager" / "ocr" / "paddle_worker.py"
+        if worker_script.is_file():
+            return [str(python_path), str(worker_script)], self._local_ai_runtime_root(), str(source_root)
+        return [str(python_path), "-m", "app.mediamanager.ocr.paddle_worker"], source_root, str(source_root)
+
+    def _run_paddle_ocr_worker(self, source_path: Path, profile: str) -> dict:
+        python_path = self._ocr_runtime_python_path()
+        if not python_path.is_file():
+            # Developer fallback only. Packaged installs should use the isolated OCR runtime.
+            try:
+                import paddleocr  # noqa: F401
+                python_path = Path(sys.executable)
+            except Exception as exc:
+                expected = self._local_ai_runtime_root() / ".venv-paddleocr"
+                raise RuntimeError(
+                    "PaddleOCR runtime is not installed yet. "
+                    f"Expected runtime folder: {expected}. "
+                    "Install the optional OCR runtime before using Paddle OCR."
+                ) from exc
+        launcher, worker_cwd, worker_pythonpath = self._ocr_worker_launcher(python_path)
+        settings_payload = {
+            "lang": str(self.settings.value("ocr/paddle_lang", "en", type=str) or "en"),
+            "device": str(self.settings.value("ocr/paddle_device", "auto", type=str) or "auto"),
+            "prefer_gpu": bool(self.settings.value("ocr/paddle_prefer_gpu", True, type=bool)),
+            "cache_dir": str(Path(str(self.settings.value("ai_caption/models_dir", self._local_ai_models_dir_default(), type=str) or self._local_ai_models_dir_default())) / "paddleocr_cache"),
+        }
+        command = [
+            *launcher,
+            "--source",
+            str(source_path),
+            "--profile",
+            str(profile or "fast"),
+            "--settings-json",
+            json.dumps(settings_payload, ensure_ascii=False),
+        ]
+        child_env = self._local_ai_subprocess_env(worker_pythonpath)
+        cache_root = Path(str(settings_payload["cache_dir"]))
+        home_dir = cache_root / "home"
+        temp_dir = cache_root / "tmp"
+        child_env["PADDLE_PDX_CACHE_HOME"] = str(cache_root)
+        child_env["PADDLE_HOME"] = str(cache_root / "paddle")
+        child_env["PPOCR_HOME"] = str(cache_root / "ppocr")
+        child_env["XDG_CACHE_HOME"] = str(cache_root / "xdg")
+        child_env["HF_HOME"] = str(cache_root / "hf_home")
+        child_env["HOME"] = str(home_dir)
+        child_env["USERPROFILE"] = str(home_dir)
+        child_env["TEMP"] = str(temp_dir)
+        child_env["TMP"] = str(temp_dir)
+        child_env.setdefault("FLAGS_use_mkldnn", "0")
+        child_env.setdefault("FLAGS_enable_pir_api", "0")
+        if os.name == "nt":
+            child_env["HOMEDRIVE"] = str(home_dir.drive or "C:")
+            child_env["HOMEPATH"] = str(home_dir)[len(str(home_dir.drive or "")) :] or "\\"
+        popen_kwargs = dict(
+            cwd=str(worker_cwd),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=child_env,
+        )
+        if _WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS:
+            popen_kwargs.update(_WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS)
+        completed = subprocess.run(command, timeout=300, **popen_kwargs)
+        if completed.stderr.strip():
+            self._log(f"Paddle OCR worker stderr for {source_path}: {completed.stderr.strip()[-2000:]}")
+        payload = None
+        for line in reversed([line.strip() for line in completed.stdout.splitlines() if line.strip()]):
+            try:
+                payload = json.loads(line)
+                break
+            except Exception:
+                continue
+        if not isinstance(payload, dict):
+            detail = (completed.stderr or completed.stdout or "").strip()
+            raise RuntimeError(detail[-500:] if detail else "Paddle OCR worker exited without a result.")
+        if not payload.get("ok"):
+            raise RuntimeError(str(payload.get("error") or "Paddle OCR failed."))
+        return payload
+
+    def _save_ocr_payload(self, path: str, payload: dict, *, select_as_winner: bool = False) -> str:
+        from app.mediamanager.db.ocr_repo import add_ocr_result, get_ocr_winner
+
+        media = self._ensure_media_record_for_tag_write(path)
+        if not media:
+            raise FileNotFoundError("Selected media record could not be created.")
+        text = str(payload.get("text") or "").strip()
+        if not text:
+            return ""
+        add_ocr_result(
+            self.conn,
+            int(media["id"]),
+            source=str(payload.get("source") or "unknown"),
+            text=text,
+            confidence=payload.get("confidence"),
+            engine_version=str(payload.get("engine_version") or ""),
+            preprocess_profile=str(payload.get("preprocess_profile") or ""),
+            metadata=dict(payload.get("metadata") or {}),
+            select_as_winner=bool(select_as_winner),
+            selected_by="manual" if select_as_winner else "rules",
+        )
+        self.galleryScopeChanged.emit()
+        winner = get_ocr_winner(self.conn, int(media["id"])) or {}
+        return str(winner.get("text") or text).strip()
+
+    def _run_gemma_ocr_worker(self, source_path: Path, media_id: int | None = None) -> dict:
+        from app.mediamanager.db.ocr_repo import get_ocr_results
+
+        ai_settings = self._local_ai_caption_settings()
+        previous = get_ocr_results(self.conn, int(media_id)) if media_id else []
+        return self._run_local_ai_worker_process("ocr", source_path, ai_settings, previous_ocr=previous)
+
     @Slot(str)
     def run_manual_ocr(self, path: str) -> None:
+        self.run_manual_ocr_with_source(path, "paddle_fast")
+
+    @Slot(str, str)
+    def run_manual_ocr_with_source(self, path: str, source: str) -> None:
         def work() -> None:
             text = ""
             error = ""
@@ -304,22 +440,55 @@ class BridgeVideoMetadataMixin:
                 media_path = Path(path)
                 if not media_path.exists() or not media_path.is_file():
                     raise FileNotFoundError("Selected file was not found.")
-                from app.mediamanager.db.media_repo import update_media_detected_text, update_user_confirmed_text_detected
-                from app.mediamanager.utils.text_detection import extract_text_windows_ocr
-
+                m = self._ensure_media_record_for_tag_write(path)
+                if not m:
+                    raise FileNotFoundError("Selected media record could not be created.")
                 ocr_source_path = self._manual_ocr_source_path(media_path)
-                text = extract_text_windows_ocr(ocr_source_path)
-                if text.strip():
-                    m = self._ensure_media_record_for_tag_write(path)
-                    if m:
-                        update_media_detected_text(self.conn, m["id"], text)
-                        update_user_confirmed_text_detected(self.conn, m["id"], True)
-                        self.galleryScopeChanged.emit()
+                mode = str(source or "paddle_fast").strip().lower()
+                if mode == "gemma4":
+                    payload = self._run_gemma_ocr_worker(ocr_source_path, int(m["id"]))
+                elif mode == "windows_ocr_legacy":
+                    from app.mediamanager.utils.text_detection import extract_text_windows_ocr
+
+                    legacy_text = extract_text_windows_ocr(ocr_source_path)
+                    payload = {
+                        "source": "windows_ocr_legacy",
+                        "text": legacy_text,
+                        "confidence": None,
+                        "engine_version": "windows_media_ocr",
+                        "preprocess_profile": "legacy_variants",
+                    }
+                else:
+                    profile = "accurate" if mode in {"paddle_accurate", "accurate"} else "fast"
+                    payload = self._run_paddle_ocr_worker(ocr_source_path, profile)
+                text = self._save_ocr_payload(path, payload, select_as_winner=False)
             except Exception as exc:
                 error = str(exc) or "OCR failed."
             self.manualOcrFinished.emit(path, text, error)
 
-        threading.Thread(target=work, daemon=True, name="manual-ocr").start()
+        threading.Thread(target=work, daemon=True, name=f"manual-ocr-{str(source or 'paddle_fast')}").start()
+
+    @Slot(result=list)
+    def get_ocr_review_items(self) -> list:
+        from app.mediamanager.db.ocr_repo import list_open_ocr_reviews
+
+        try:
+            return list_open_ocr_reviews(self.conn)
+        except Exception as exc:
+            self._log(f"List OCR reviews failed: {exc}")
+            return []
+
+    @Slot(int, int, result=bool)
+    def keep_ocr_result(self, media_id: int, result_id: int) -> bool:
+        from app.mediamanager.db.ocr_repo import set_ocr_winner
+
+        try:
+            set_ocr_winner(self.conn, int(media_id), int(result_id), selected_by="user")
+            self.galleryScopeChanged.emit()
+            return True
+        except Exception as exc:
+            self._log(f"Keep OCR result failed: {exc}")
+            return False
 
 
 

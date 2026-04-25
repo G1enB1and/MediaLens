@@ -633,12 +633,35 @@ def _split_tags(raw: str, settings: dict[str, Any]) -> list[str]:
     return out[: max(1, int(settings.get("tag_max_tags") or 75))]
 
 
+def _build_ocr_prompt(previous_ocr: list[dict[str, Any]] | None = None) -> str:
+    previous_lines: list[str] = []
+    for item in previous_ocr or []:
+        source = str(item.get("source") or "").strip()
+        text = str(item.get("text") or "").strip()
+        if source and text:
+            previous_lines.append(f"{source}: {text}")
+    context = ""
+    if previous_lines:
+        context = (
+            "\nPrevious OCR attempts are provided only as uncertain hints. "
+            "Do not copy them unless the text is visibly supported by the image.\n"
+            + "\n".join(previous_lines[:8])
+        )
+    return (
+        "Transcribe only text that is visibly present in this image. Preserve line breaks when possible. "
+        "Do not describe the image. Do not infer missing words. Do not add labels, explanations, or markdown. "
+        "If no readable text is visible, return an empty response."
+        f"{context}"
+    ).strip()
+
+
 def _run_cli() -> int:
     parser = argparse.ArgumentParser(description="Run one isolated MediaLens Gemma 4 local AI task.")
-    parser.add_argument("--operation", choices=("tags", "description", "preload"), required=True)
+    parser.add_argument("--operation", choices=("tags", "description", "ocr", "preload"), required=True)
     parser.add_argument("--source", required=True)
     parser.add_argument("--settings-json", required=True)
     parser.add_argument("--tags-json", default="[]")
+    parser.add_argument("--previous-ocr-json", default="[]")
     args = parser.parse_args()
 
     try:
@@ -666,6 +689,30 @@ def _run_cli() -> int:
             if not tags:
                 raise RuntimeError(f"Gemma 4 returned no parseable tags. Raw response: {text[:240]}")
             print(json.dumps({"ok": True, "tags": tags}, ensure_ascii=False), flush=True)
+            return 0
+        if args.operation == "ocr":
+            previous_ocr = [dict(item) for item in json.loads(args.previous_ocr_json or "[]") if isinstance(item, dict)]
+            inference_settings = settings
+            if _gguf_enabled(settings):
+                inference_settings = tune_gguf_description_settings(settings)
+            prompt = _build_ocr_prompt(previous_ocr)
+            max_new_tokens = max(64, min(1024, int(settings.get("ocr_max_new_tokens") or settings.get("max_new_tokens") or 300)))
+            with contextlib.redirect_stdout(sys.stderr):
+                raw_text = _generate_text(args.source, prompt, inference_settings, max_new_tokens)
+            text = clean_response_text(raw_text).strip()
+            lowered = text.casefold()
+            for prefix in ("transcription:", "ocr:", "text:"):
+                if lowered.startswith(prefix):
+                    text = text[len(prefix):].strip()
+                    break
+            print(json.dumps({
+                "ok": True,
+                "text": text,
+                "confidence": None,
+                "source": "gemma4",
+                "engine_version": str(settings.get("gemma_profile_label") or settings.get("gemma_profile_id") or "gemma4"),
+                "preprocess_profile": "gemma4_exact_transcription",
+            }, ensure_ascii=False), flush=True)
             return 0
         tags = [str(tag) for tag in json.loads(args.tags_json or "[]") if str(tag).strip()]
         inference_settings = settings

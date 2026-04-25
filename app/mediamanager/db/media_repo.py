@@ -108,6 +108,12 @@ def _ensure_media_items_scan_columns(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_media_items_phash ON media_items(phash)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_media_items_text_likely ON media_items(text_likely)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_media_items_text_more_likely ON media_items(text_more_likely)")
+    try:
+        from app.mediamanager.db.ocr_repo import ensure_ocr_tables
+
+        ensure_ocr_tables(conn)
+    except Exception:
+        pass
     conn.commit()
 
 
@@ -364,15 +370,30 @@ def update_user_confirmed_text_detected(
 
 def update_media_detected_text(conn: sqlite3.Connection, media_id: int, detected_text: str | None) -> None:
     _ensure_media_items_scan_columns(conn)
-    conn.execute(
-        """
-        UPDATE media_items
-        SET detected_text = ?, updated_at_utc = ?
-        WHERE id = ?
-        """,
-        (str(detected_text or "").strip(), _utc_now_iso(), int(media_id)),
-    )
-    conn.commit()
+    try:
+        from app.mediamanager.db.ocr_repo import add_ocr_result
+
+        add_ocr_result(
+            conn,
+            int(media_id),
+            source="user",
+            text=str(detected_text or "").strip(),
+            confidence=1.0 if str(detected_text or "").strip() else 0.0,
+            engine_version="manual",
+            preprocess_profile="user_entry",
+            select_as_winner=True,
+            selected_by="user",
+        )
+    except Exception:
+        conn.execute(
+            """
+            UPDATE media_items
+            SET detected_text = ?, updated_at_utc = ?
+            WHERE id = ?
+            """,
+            (str(detected_text or "").strip(), _utc_now_iso(), int(media_id)),
+        )
+        conn.commit()
 
 
 def rename_media_path(conn: sqlite3.Connection, old_path: str, new_path: str) -> bool:
