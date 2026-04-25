@@ -293,6 +293,9 @@ class AISettingsPage(SettingsPage):
         self.paddle_fast_status_label.setTextFormat(Qt.TextFormat.RichText)
         self.paddle_fast_status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         paddle_form.addRow("Paddle Fast", self.paddle_fast_status_label)
+        self.paddle_install_btn = QPushButton("Install / Repair Paddle OCR Runtime")
+        self.paddle_install_btn.clicked.connect(self._install_paddle_ocr_runtime)
+        paddle_form.addRow("Runtime", self.paddle_install_btn)
         ocr_page_layout.addStretch(1)
 
         models_group = QGroupBox("Models")
@@ -342,6 +345,8 @@ class AISettingsPage(SettingsPage):
         self.caption_model_combo.currentIndexChanged.connect(lambda _index: self._refresh_ai_model_statuses())
         if hasattr(self.bridge, "localAiModelInstallStatus"):
             self.bridge.localAiModelInstallStatus.connect(self._on_local_ai_model_install_status)
+        if hasattr(self.bridge, "paddleOcrRuntimeInstallStatus"):
+            self.bridge.paddleOcrRuntimeInstallStatus.connect(self._on_paddle_ocr_runtime_install_status)
         self.tag_prompt_edit.textChanged.connect(self._save)
         self.caption_prompt_edit.textChanged.connect(self._save)
         self.ocr_prompt_edit.textChanged.connect(self._save)
@@ -475,16 +480,44 @@ class AISettingsPage(SettingsPage):
             probe = dict(status.get("runtime_probe") or {})
             gpu_active = bool(status.get("gpu_active"))
             if gpu_active:
-                gpu_line = f"GPU active ({html.escape(current_device or 'GPU')})"
+                gpu_line = "GPU"
             else:
                 reason = str(probe.get("error") or "").strip()
-                gpu_line = "GPU not active; Paddle runtime is using CPU"
+                gpu_line = "CPU"
                 if reason:
                     gpu_line = f"{gpu_line}<br>{html.escape(reason)}"
-            self.paddle_fast_status_label.setText(f'<span style="color:{ok_color};">Installed</span><br>{gpu_line}')
+            self.paddle_fast_status_label.setText(f'<b><span style="color:{ok_color};">✓</span> Installed</b><br><b>{gpu_line}</b>')
         else:
             detail = html.escape(str(status.get("error") or status.get("python_path") or "Runtime not installed."))
             self.paddle_fast_status_label.setText(f'<span style="color:{bad_color};">Not installed</span><br>{detail}')
+        if hasattr(self, "paddle_install_btn"):
+            self.paddle_install_btn.setEnabled(True)
+
+    def _install_paddle_ocr_runtime(self) -> None:
+        if not hasattr(self.bridge, "install_paddle_ocr_runtime"):
+            return
+        self.paddle_install_btn.setEnabled(False)
+        self.paddle_fast_status_label.setText("Installing Paddle OCR runtime...")
+        started = bool(self.bridge.install_paddle_ocr_runtime())
+        if not started:
+            self.paddle_install_btn.setEnabled(True)
+            self._refresh_paddle_ocr_status()
+
+    def _on_paddle_ocr_runtime_install_status(self, payload: dict) -> None:
+        payload = dict(payload or {})
+        state = str(payload.get("state") or "").strip()
+        message = html.escape(str(payload.get("message") or "").strip() or "Installing Paddle OCR runtime...")
+        if state == "installed":
+            self.paddle_install_btn.setEnabled(True)
+            self._refresh_paddle_ocr_status()
+            current = self.paddle_fast_status_label.text()
+            self.paddle_fast_status_label.setText(f"{current}<br>{message}")
+        elif state == "error":
+            self.paddle_install_btn.setEnabled(True)
+            self.paddle_fast_status_label.setText(f'<span style="color:#c62828;">Install failed</span><br>{message}')
+        else:
+            self.paddle_install_btn.setEnabled(False)
+            self.paddle_fast_status_label.setText(message)
 
     def _install_selected_ai_model(self, kind: str) -> None:
         model_id = self._selected_ai_model_id(kind)
@@ -581,6 +614,7 @@ class AISettingsPage(SettingsPage):
 
 class LocalAiSetupDialog(QDialog):
     statusResolved = Signal(str, "QVariantMap", int)
+    paddleStatusResolved = Signal("QVariantMap", int)
 
     def __init__(self, main_window: QWidget, focus_kind: str = "") -> None:
         super().__init__(main_window)
@@ -650,9 +684,12 @@ class LocalAiSetupDialog(QDialog):
 
         if hasattr(self.bridge, "localAiModelInstallStatus"):
             self.bridge.localAiModelInstallStatus.connect(self._on_install_status)
+        if hasattr(self.bridge, "paddleOcrRuntimeInstallStatus"):
+            self.bridge.paddleOcrRuntimeInstallStatus.connect(self._on_paddle_install_status)
         if hasattr(self.bridge, "accentColorChanged"):
             self.bridge.accentColorChanged.connect(lambda _value: self._apply_theme())
         self.statusResolved.connect(self._on_status_resolved)
+        self.paddleStatusResolved.connect(self._on_paddle_status_resolved)
 
         self._build_rows()
         self._set_advanced_visible(False)
@@ -661,6 +698,7 @@ class LocalAiSetupDialog(QDialog):
 
     def _unique_model_specs(self):
         from app.mediamanager.ai_captioning.model_registry import MODEL_SPECS
+        from types import SimpleNamespace
 
         rows: dict[str, dict[str, object]] = {}
         for spec in MODEL_SPECS:
@@ -672,7 +710,19 @@ class LocalAiSetupDialog(QDialog):
                 },
             )
             row["kinds"].add(spec.kind)
-        order = {"gemma4": 0, "wd_swinv2": 1, "internlm_xcomposer2": 2}
+        rows["paddle_ocr"] = {
+            "spec": SimpleNamespace(
+                id="paddle_ocr",
+                kind="ocr",
+                label="Paddle OCR",
+                settings_key="paddle_ocr",
+                install_label="Paddle OCR",
+                description="Fast local OCR runtime for text recognition.",
+                estimated_size="Approx. 0.5-2.2 GB depending on CPU/GPU runtime.",
+            ),
+            "kinds": {"ocr"},
+        }
+        order = {"gemma4": 0, "paddle_ocr": 1, "wd_swinv2": 2, "internlm_xcomposer2": 3}
         return dict(sorted(rows.items(), key=lambda item: (order.get(item[0], 99), str(item[0]))))
 
     @staticmethod
@@ -682,6 +732,8 @@ class LocalAiSetupDialog(QDialog):
             labels.append("tags")
         if "captioner" in kinds:
             labels.append("descriptions")
+        if "ocr" in kinds:
+            labels.append("OCR")
         return ", ".join(labels) if labels else "local AI"
 
     def _build_rows(self) -> None:
@@ -947,7 +999,7 @@ class LocalAiSetupDialog(QDialog):
     @staticmethod
     def _row_header_text(spec, expanded: bool) -> str:
         title = "Gemma 4 (Recommended)" if getattr(spec, "settings_key", "") == "gemma4" else str(getattr(spec, "label", "") or "")
-        return f"{'▾' if expanded else '▸'} {title}"
+        return f"{'v' if expanded else '>'} {title}"
 
     def _use_recommended_models(self) -> None:
         recommended = self._recommended_gemma_profile()
@@ -960,6 +1012,29 @@ class LocalAiSetupDialog(QDialog):
             self.bridge.install_local_ai_model("google/gemma-4-E2B-it", "captioner")
 
     def _row_details_html(self, spec, kinds: set[str], status: dict) -> tuple[str, str, str]:
+        if getattr(spec, "settings_key", "") == "paddle_ocr":
+            state = str(status.get("state") or "").strip()
+            message = str(status.get("message") or "").strip()
+            gpu_summary = "Enabled" if bool(status.get("gpu_active")) else "CPU"
+            current_device = str(status.get("current_device") or "").strip()
+            runtime_probe = dict(status.get("runtime_probe") or {})
+            summary_lines = [
+                "<b>Use:</b> OCR",
+                f"<b>Description:</b> {html.escape(str(spec.description or ''))}",
+                f"<b>Size:</b> {html.escape(str(spec.estimated_size or ''))}",
+                f"<b>Runtime:</b> {'Installed' if bool(status.get('installed')) else 'Not installed'}",
+                f"<b>GPU:</b> {html.escape(gpu_summary)}",
+            ]
+            if message and state in {"installing", "error", "installed", "not_installed"}:
+                summary_lines.append(html.escape(message))
+            technical_lines = [
+                f"<b>Python:</b> {html.escape(str(status.get('python_path') or ''))}",
+                f"<b>Device:</b> {html.escape(current_device or 'cpu')}",
+                f"<b>Compiled CUDA:</b> {html.escape(str(bool(runtime_probe.get('compiled_with_cuda'))))}",
+            ]
+            if runtime_probe.get("error"):
+                technical_lines.append(f"<b>Probe error:</b> {html.escape(str(runtime_probe.get('error') or ''))}")
+            return "<br>".join(summary_lines), "", "<br>".join(technical_lines)
         state = str(status.get("state") or "").strip()
         message = str(status.get("message") or "").strip()
         download_message = str(status.get("download_message") or "").strip()
@@ -1162,18 +1237,53 @@ class LocalAiSetupDialog(QDialog):
         for status_key, row in self._rows.items():
             spec = row["spec"]
             self._apply_status(status_key, {"state": "installing", "message": "Checking runtime status..."})
-            threading.Thread(
-                target=self._resolve_status_async,
-                args=(status_key, spec, generation),
-                daemon=True,
-                name=f"local-ai-status-{status_key}",
-            ).start()
+            if status_key == "paddle_ocr":
+                threading.Thread(
+                    target=self._resolve_paddle_status_async,
+                    args=(generation,),
+                    daemon=True,
+                    name="local-ai-status-paddle-ocr",
+                ).start()
+            else:
+                threading.Thread(
+                    target=self._resolve_status_async,
+                    args=(status_key, spec, generation),
+                    daemon=True,
+                    name=f"local-ai-status-{status_key}",
+                ).start()
 
     def _resolve_status_async(self, status_key: str, spec, generation: int) -> None:
         status = self._status_for_spec(spec)
         self.statusResolved.emit(str(status_key or ""), dict(status or {}), int(generation))
 
+    def _resolve_paddle_status_async(self, generation: int) -> None:
+        status = self._paddle_status_payload()
+        self.paddleStatusResolved.emit(dict(status or {}), int(generation))
+
+    def _paddle_status_payload(self, payload: dict | None = None) -> dict:
+        status = dict(payload or {})
+        if not status and hasattr(self.bridge, "get_paddle_ocr_status"):
+            status = dict(self.bridge.get_paddle_ocr_status() or {})
+        installed = bool(status.get("installed"))
+        if not str(status.get("state") or "").strip():
+            status["state"] = "installed" if installed else "not_installed"
+        status.setdefault("id", "paddle_ocr")
+        status.setdefault("label", "Paddle OCR")
+        status.setdefault("settings_key", "paddle_ocr")
+        status.setdefault("message", "Installed." if installed else "Not installed.")
+        status["model_files_cached"] = self._paddle_cache_exists()
+        return status
+
+    def _paddle_cache_exists(self) -> bool:
+        try:
+            models_dir = Path(str(self.bridge.settings.value("ai_caption/models_dir", self.bridge._local_ai_models_dir_default(), type=str) or self.bridge._local_ai_models_dir_default()))
+            return (models_dir / "paddleocr_cache").exists()
+        except Exception:
+            return False
+
     def _status_for_spec(self, spec) -> dict:
+        if getattr(spec, "settings_key", "") == "paddle_ocr":
+            return self._paddle_status_payload()
         if not hasattr(self.bridge, "get_local_ai_model_status"):
             return {"state": "error", "message": "Local AI status is not available in this build."}
         try:
@@ -1227,8 +1337,14 @@ class LocalAiSetupDialog(QDialog):
         button.setText("Installing..." if state == "installing" else "Install")
         uninstall_button.setVisible(state == "installed")
         uninstall_button.setEnabled(state == "installed")
-        delete_button.setVisible(state != "installed" and bool(status.get("model_files_cached")))
-        delete_button.setEnabled(state != "installed" and bool(status.get("model_files_cached")))
+        if getattr(spec, "settings_key", "") == "paddle_ocr":
+            delete_button.setVisible(bool(status.get("model_files_cached")))
+            delete_button.setEnabled(bool(status.get("model_files_cached")))
+            delete_button.setText("Delete Cache")
+        else:
+            delete_button.setVisible(state != "installed" and bool(status.get("model_files_cached")))
+            delete_button.setEnabled(state != "installed" and bool(status.get("model_files_cached")))
+            delete_button.setText("Delete Model")
         summary_html, download_html, technical_html = self._row_details_html(spec, kinds, status)
         summary_view.setProperty("installState", state)
         summary_view.set_rich_text(summary_html)
@@ -1255,6 +1371,11 @@ class LocalAiSetupDialog(QDialog):
             title_button.setChecked(True)
 
     def _install_model(self, spec) -> None:
+        if getattr(spec, "settings_key", "") == "paddle_ocr":
+            if hasattr(self.bridge, "install_paddle_ocr_runtime"):
+                self.bridge.install_paddle_ocr_runtime()
+            self.refresh_statuses()
+            return
         if not hasattr(self.bridge, "install_local_ai_model"):
             self._apply_status(spec.settings_key, {"state": "error", "message": "Model installation is not available in this build."})
             return
@@ -1262,6 +1383,22 @@ class LocalAiSetupDialog(QDialog):
         self.refresh_statuses()
 
     def _uninstall_model(self, spec) -> None:
+        if getattr(spec, "settings_key", "") == "paddle_ocr":
+            if not hasattr(self.bridge, "uninstall_paddle_ocr_runtime"):
+                self._apply_status("paddle_ocr", {"state": "error", "message": "Paddle OCR uninstall is not available in this build."})
+                return
+            reply = QMessageBox.question(
+                self,
+                "Uninstall Paddle OCR",
+                "Uninstall the Paddle OCR runtime?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            self.bridge.uninstall_paddle_ocr_runtime()
+            self.refresh_statuses()
+            return
         if not hasattr(self.bridge, "uninstall_local_ai_model"):
             self._apply_status(spec.settings_key, {"state": "error", "message": "Model uninstall is not available in this build."})
             return
@@ -1278,6 +1415,22 @@ class LocalAiSetupDialog(QDialog):
         self.refresh_statuses()
 
     def _delete_model_files(self, spec) -> None:
+        if getattr(spec, "settings_key", "") == "paddle_ocr":
+            if not hasattr(self.bridge, "delete_paddle_ocr_cache"):
+                self._apply_status("paddle_ocr", {"state": "error", "message": "Paddle OCR cache delete is not available in this build."})
+                return
+            reply = QMessageBox.question(
+                self,
+                "Delete Paddle OCR Cache",
+                "Delete cached Paddle OCR model and runtime cache files?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            self.bridge.delete_paddle_ocr_cache()
+            self.refresh_statuses()
+            return
         if not hasattr(self.bridge, "delete_local_ai_model_files"):
             self._apply_status(spec.settings_key, {"state": "error", "message": "Delete model files is not available in this build."})
             return
@@ -1312,6 +1465,14 @@ class LocalAiSetupDialog(QDialog):
                     "Gemma 4 is setup. No further action needed.\nYou can start generating descriptions and tags using local private AI anytime now.",
                     active=False,
                 )
+
+    def _on_paddle_install_status(self, payload: dict) -> None:
+        self._apply_status("paddle_ocr", self._paddle_status_payload(dict(payload or {})))
+
+    def _on_paddle_status_resolved(self, payload: dict, generation: int) -> None:
+        if int(generation) != int(self._refresh_generation):
+            return
+        self._apply_status("paddle_ocr", self._paddle_status_payload(dict(payload or {})))
 
     def _apply_theme(self) -> None:
         Theme = _theme_api()

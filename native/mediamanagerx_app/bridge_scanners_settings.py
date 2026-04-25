@@ -261,6 +261,9 @@ class BridgeScannersSettingsMixin:
     def _ocr_scanner_run_ai(self) -> bool:
         return bool(self.settings.value(self._scanner_setting_key("ocr_text", "run_ai"), False, type=bool))
 
+    def _ocr_scanner_all_files(self) -> bool:
+        return bool(self.settings.value(self._scanner_setting_key("ocr_text", "all_files"), False, type=bool))
+
     def _scanner_last_run_utc(self, scanner_key: str) -> str:
         return str(self.settings.value(self._scanner_setting_key(scanner_key, "last_run_utc"), "", type=str) or "")
 
@@ -288,6 +291,7 @@ class BridgeScannersSettingsMixin:
             "status": status,
             "run_fast": self._ocr_scanner_run_fast() if scanner_key == "ocr_text" else False,
             "run_ai": self._ocr_scanner_run_ai() if scanner_key == "ocr_text" else False,
+            "all_files": self._ocr_scanner_all_files() if scanner_key == "ocr_text" else False,
         }
 
     def _scanner_due(self, scanner_key: str) -> bool:
@@ -777,7 +781,9 @@ class BridgeScannersSettingsMixin:
 
                 eligible = []
                 for entry in entries:
-                    if entry.get("is_folder") or not self._effective_text_detected(entry):
+                    if entry.get("is_folder"):
+                        continue
+                    if not self._ocr_scanner_all_files() and not self._effective_text_detected(entry):
                         continue
                     media_id = int(entry.get("id") or -1)
                     if media_id >= 0 and all(has_ocr_source(media_id, source) for source in selected_sources):

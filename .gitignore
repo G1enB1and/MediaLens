@@ -15,6 +15,11 @@ htmlcov/
 # Local runtime data
 data/
 /local_ai_models/
+/pip/
+/pip-cache/
+/.cache/
+/paddleocr_cache/
+/ai-runtimes/
 /logs/*
 !/logs/.gitkeep
 !/logs/*/

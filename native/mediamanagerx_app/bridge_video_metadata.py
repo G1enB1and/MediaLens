@@ -379,12 +379,200 @@ class BridgeVideoMetadataMixin:
         except Exception as exc:
             return {"installed": False, "error": str(exc) or "Could not read Paddle OCR status."}
 
+    @Slot(result=bool)
+    def uninstall_paddle_ocr_runtime(self) -> bool:
+        if bool(getattr(self, "_paddle_ocr_runtime_installing", False)):
+            self.paddleOcrRuntimeInstallStatus.emit({"state": "error", "message": "Paddle OCR runtime is currently installing."})
+            return False
+        try:
+            runtime_dir = self._ocr_runtime_python_path().parent.parent
+            if runtime_dir.exists():
+                shutil.rmtree(runtime_dir)
+            self.settings.remove("ocr/paddle_python")
+            self.settings.sync()
+            payload = self.get_paddle_ocr_status()
+            payload.update({"state": "not_installed", "running": False, "message": "Paddle OCR runtime was uninstalled."})
+            self.paddleOcrRuntimeInstallStatus.emit(payload)
+            return True
+        except Exception as exc:
+            self.paddleOcrRuntimeInstallStatus.emit({"state": "error", "running": False, "message": str(exc) or "Paddle OCR runtime uninstall failed."})
+            return False
+
+    @Slot(result=bool)
+    def delete_paddle_ocr_cache(self) -> bool:
+        try:
+            cache_root = Path(str(self.settings.value("ai_caption/models_dir", self._local_ai_models_dir_default(), type=str) or self._local_ai_models_dir_default())) / "paddleocr_cache"
+            if cache_root.exists():
+                shutil.rmtree(cache_root)
+            payload = self.get_paddle_ocr_status()
+            payload.update({"state": "installed" if payload.get("installed") else "not_installed", "running": False, "message": "Paddle OCR cache was deleted."})
+            self.paddleOcrRuntimeInstallStatus.emit(payload)
+            return True
+        except Exception as exc:
+            self.paddleOcrRuntimeInstallStatus.emit({"state": "error", "running": False, "message": str(exc) or "Paddle OCR cache delete failed."})
+            return False
+
     def _ocr_worker_launcher(self, python_path: str | Path) -> tuple[list[str], Path, str]:
         source_root = self._local_ai_worker_source_root()
         worker_script = source_root / "app" / "mediamanager" / "ocr" / "paddle_worker.py"
         if worker_script.is_file():
             return [str(python_path), str(worker_script)], self._local_ai_runtime_root(), str(source_root)
         return [str(python_path), "-m", "app.mediamanager.ocr.paddle_worker"], source_root, str(source_root)
+
+    @staticmethod
+    def _parse_driver_version(value: str) -> tuple[int, int, int]:
+        parts = [int(part) for part in re.findall(r"\d+", str(value or ""))[:3]]
+        while len(parts) < 3:
+            parts.append(0)
+        return int(parts[0]), int(parts[1]), int(parts[2])
+
+    @staticmethod
+    def _driver_at_least(current: tuple[int, int, int], minimum: tuple[int, int, int]) -> bool:
+        return tuple(current) >= tuple(minimum)
+
+    def _paddle_ocr_gpu_install_target(self) -> dict:
+        try:
+            completed = _run_hidden_subprocess(
+                ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                env=self._local_ai_subprocess_env(""),
+            )
+            if completed.returncode != 0:
+                return {"available": False, "reason": "NVIDIA GPU was not detected."}
+            driver_text = (completed.stdout or "").strip().splitlines()[0].strip()
+            driver = self._parse_driver_version(driver_text)
+            if self._driver_at_least(driver, (550, 54, 14)):
+                return {
+                    "available": True,
+                    "driver": driver_text,
+                    "package": "paddlepaddle-gpu==3.2.0",
+                    "index_url": "https://www.paddlepaddle.org.cn/packages/stable/cu126/",
+                    "label": "CUDA 12.6",
+                }
+            if self._driver_at_least(driver, (452, 39, 0)):
+                return {
+                    "available": True,
+                    "driver": driver_text,
+                    "package": "paddlepaddle-gpu==3.2.0",
+                    "index_url": "https://www.paddlepaddle.org.cn/packages/stable/cu118/",
+                    "label": "CUDA 11.8",
+                }
+            return {"available": False, "driver": driver_text, "reason": f"NVIDIA driver {driver_text} is too old for Paddle GPU wheels."}
+        except Exception as exc:
+            return {"available": False, "reason": str(exc) or "Could not detect NVIDIA GPU."}
+
+    def _paddle_ocr_runtime_env(self) -> dict[str, str]:
+        cache_root = Path(str(self.settings.value("ai_caption/models_dir", self._local_ai_models_dir_default(), type=str) or self._local_ai_models_dir_default())) / "paddleocr_cache"
+        home_dir = cache_root / "home"
+        temp_dir = cache_root / "tmp"
+        child_env = self._local_ai_subprocess_env(str(self._local_ai_worker_source_root()))
+        for directory in (cache_root, home_dir, temp_dir, cache_root / "paddle", cache_root / "ppocr", cache_root / "xdg", cache_root / "hf_home", cache_root / "paddlex"):
+            try:
+                directory.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+        child_env["PADDLE_PDX_CACHE_HOME"] = str(cache_root / "paddlex")
+        child_env["PADDLE_HOME"] = str(cache_root / "paddle")
+        child_env["PPOCR_HOME"] = str(cache_root / "ppocr")
+        child_env["XDG_CACHE_HOME"] = str(cache_root / "xdg")
+        child_env["HF_HOME"] = str(cache_root / "hf_home")
+        child_env["HOME"] = str(home_dir)
+        child_env["USERPROFILE"] = str(home_dir)
+        child_env["TEMP"] = str(temp_dir)
+        child_env["TMP"] = str(temp_dir)
+        return child_env
+
+    def _paddle_ocr_run_command(self, command: list[str], message: str, emit_status) -> None:
+        emit_status(message)
+        returncode, last_line = self._local_ai_run_command_stream(
+            command,
+            self._local_ai_worker_source_root(),
+            message,
+            emit_status,
+        )
+        if returncode != 0:
+            raise RuntimeError(f"{message} failed ({self._local_ai_exit_code_text(returncode)}). {last_line}")
+
+    @Slot(result=bool)
+    def install_paddle_ocr_runtime(self) -> bool:
+        if bool(getattr(self, "_paddle_ocr_runtime_installing", False)):
+            self.paddleOcrRuntimeInstallStatus.emit({"state": "installing", "message": "Paddle OCR runtime is already installing."})
+            return False
+        self._paddle_ocr_runtime_installing = True
+
+        def work() -> None:
+            def emit_status(message: str, **extra) -> None:
+                payload = {"state": "installing", "running": True, "message": str(message or "").strip()}
+                payload.update(extra)
+                self.paddleOcrRuntimeInstallStatus.emit(payload)
+
+            try:
+                python_path = self._ocr_runtime_python_path()
+                runtime_dir = Path(python_path).parent.parent
+                runtime_dir.parent.mkdir(parents=True, exist_ok=True)
+                bootstrap_python = self._ensure_local_ai_python_bootstrap(lambda msg: emit_status(msg))
+                if not bootstrap_python:
+                    raise RuntimeError("MediaLens could not prepare the Python bootstrap needed to create the OCR runtime.")
+                if not python_path.is_file():
+                    self._paddle_ocr_run_command([bootstrap_python, "-m", "venv", str(runtime_dir)], "Creating Paddle OCR runtime...", emit_status)
+                self._paddle_ocr_run_command([str(python_path), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"], "Updating Paddle OCR package installer...", emit_status)
+                self._paddle_ocr_run_command([str(python_path), "-m", "pip", "uninstall", "-y", "paddlepaddle", "paddlepaddle-gpu"], "Removing existing Paddle package...", emit_status)
+
+                gpu_target = self._paddle_ocr_gpu_install_target()
+                installed_gpu = False
+                gpu_error = ""
+                if bool(gpu_target.get("available")):
+                    try:
+                        self._paddle_ocr_run_command(
+                            [
+                                str(python_path),
+                                "-m",
+                                "pip",
+                                "install",
+                                str(gpu_target["package"]),
+                                "-i",
+                                str(gpu_target["index_url"]),
+                            ],
+                            f"Installing Paddle GPU runtime ({gpu_target.get('label')})...",
+                            emit_status,
+                        )
+                        installed_gpu = True
+                    except Exception as exc:
+                        gpu_error = str(exc)
+                        self._log(f"Paddle OCR GPU runtime install failed; falling back to CPU: {exc}")
+                if not installed_gpu:
+                    fallback_reason = gpu_error or str(gpu_target.get("reason") or "No compatible NVIDIA GPU was detected.")
+                    emit_status(f"Installing Paddle CPU runtime... GPU fallback reason: {fallback_reason}")
+                    self._paddle_ocr_run_command(
+                        [str(python_path), "-m", "pip", "install", "paddlepaddle==3.2.0", "-i", "https://www.paddlepaddle.org.cn/packages/stable/cpu/"],
+                        "Installing Paddle CPU runtime...",
+                        emit_status,
+                    )
+
+                requirements_path = self._local_ai_requirements_path(type("Spec", (), {"requirements_file": "requirements-local-ocr-paddle.txt"})())
+                self._paddle_ocr_run_command([str(python_path), "-m", "pip", "install", "-r", str(requirements_path)], "Installing PaddleOCR support...", emit_status)
+                status = self.get_paddle_ocr_status()
+                message = "Paddle OCR runtime is installed."
+                if status.get("gpu_active"):
+                    message = f"{message} GPU is active."
+                elif installed_gpu:
+                    message = f"{message} GPU package installed, but Paddle is still reporting CPU."
+                elif gpu_error:
+                    message = f"{message} CPU fallback was used because GPU install failed."
+                else:
+                    message = f"{message} CPU fallback was used."
+                payload = dict(status)
+                payload.update({"state": "installed", "running": False, "message": message})
+                self.paddleOcrRuntimeInstallStatus.emit(payload)
+            except Exception as exc:
+                self.paddleOcrRuntimeInstallStatus.emit({"state": "error", "running": False, "installed": False, "message": str(exc) or "Paddle OCR runtime installation failed."})
+            finally:
+                self._paddle_ocr_runtime_installing = False
+
+        threading.Thread(target=work, daemon=True, name="paddle-ocr-runtime-install").start()
+        return True
 
     def _run_paddle_ocr_worker(self, source_path: Path, profile: str) -> dict:
         python_path = self._ocr_runtime_python_path()
@@ -602,6 +790,35 @@ class BridgeVideoMetadataMixin:
             return True
         except Exception as exc:
             self._log(f"Keep edited OCR text failed: {exc}")
+            return False
+
+    @Slot(int, result=bool)
+    def mark_ocr_review_no_text(self, media_id: int) -> bool:
+        try:
+            now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+            self.conn.execute(
+                "UPDATE media_items SET detected_text = '', user_confirmed_text_detected = 0, updated_at_utc = ? WHERE id = ?",
+                (now, int(media_id)),
+            )
+            self.conn.execute(
+                "DELETE FROM media_ocr_winners WHERE media_id = ?",
+                (int(media_id),),
+            )
+            self.conn.execute(
+                "UPDATE media_ocr_results SET is_user_selected = 0 WHERE media_id = ?",
+                (int(media_id),),
+            )
+            self.conn.execute(
+                "UPDATE media_ocr_review_items SET status = 'resolved', updated_at_utc = ? WHERE media_id = ?",
+                (now, int(media_id)),
+            )
+            self.conn.commit()
+            if self._current_gallery_filter_uses_text():
+                self.galleryFilterSensitiveMetadataChanged.emit()
+            self.galleryScopeChanged.emit()
+            return True
+        except Exception as exc:
+            self._log(f"Mark OCR review no-text failed: {exc}")
             return False
 
 

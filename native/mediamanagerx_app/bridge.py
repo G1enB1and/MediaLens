@@ -72,6 +72,7 @@ class Bridge(BridgeMediaListingScanMixin, BridgeTagsMetadataMixin, BridgeLocalAi
     localAiCaptioningItemFinished = Signal(str, list, str, str)
     localAiCaptioningFinished = Signal(int, str)
     localAiModelInstallStatus = Signal(str, "QVariantMap")
+    paddleOcrRuntimeInstallStatus = Signal("QVariantMap")
     scannerStatusChanged = Signal(str, "QVariantMap")
     progressToastsRevealRequested = Signal()
     
@@ -113,6 +114,7 @@ class Bridge(BridgeMediaListingScanMixin, BridgeTagsMetadataMixin, BridgeLocalAi
         self._local_ai_shutting_down = False
         self._local_ai_model_installs: set[str] = set()
         self._local_ai_runtime_status_cache: dict[str, tuple[float, dict]] = {}
+        self._paddle_ocr_runtime_installing = False
         
         appdata = _appdata_runtime_dir()
         _migrate_legacy_debugging_logs(appdata)

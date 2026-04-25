@@ -38,6 +38,20 @@ class ScannersSettingsPage(SettingsPage):
             ocr_source_layout.addWidget(ocr_fast_toggle)
             ocr_source_layout.addWidget(ocr_ai_toggle)
             ocr_source_row.setVisible(key == "ocr_text")
+            ocr_scope_row = QWidget()
+            ocr_scope_layout = QVBoxLayout(ocr_scope_row)
+            ocr_scope_layout.setContentsMargins(0, 0, 0, 0)
+            ocr_scope_layout.setSpacing(4)
+            ocr_scope_label = QLabel("Files to scan:")
+            ocr_scope_detected_radio = QRadioButton("Only files set to Text Detected")
+            ocr_scope_all_radio = QRadioButton("All files in scope")
+            ocr_scope_group = QButtonGroup(ocr_scope_row)
+            ocr_scope_group.addButton(ocr_scope_detected_radio)
+            ocr_scope_group.addButton(ocr_scope_all_radio)
+            ocr_scope_layout.addWidget(ocr_scope_label)
+            ocr_scope_layout.addWidget(ocr_scope_detected_radio)
+            ocr_scope_layout.addWidget(ocr_scope_all_radio)
+            ocr_scope_row.setVisible(key == "ocr_text")
 
             schedule_row = QHBoxLayout()
             schedule_row.setContentsMargins(0, 0, 0, 0)
@@ -69,6 +83,7 @@ class ScannersSettingsPage(SettingsPage):
             group_layout.addWidget(desc_label)
             group_layout.addWidget(enable_toggle)
             group_layout.addWidget(ocr_source_row)
+            group_layout.addWidget(ocr_scope_row)
             group_layout.addLayout(schedule_row)
             group_layout.addLayout(action_row)
             group_layout.addWidget(review_btn)
@@ -80,6 +95,9 @@ class ScannersSettingsPage(SettingsPage):
                 "ocr_source_row": ocr_source_row,
                 "ocr_fast": ocr_fast_toggle,
                 "ocr_ai": ocr_ai_toggle,
+                "ocr_scope_row": ocr_scope_row,
+                "ocr_scope_detected": ocr_scope_detected_radio,
+                "ocr_scope_all": ocr_scope_all_radio,
                 "interval": interval,
                 "run": run_btn,
                 "cancel": cancel_btn,
@@ -90,6 +108,8 @@ class ScannersSettingsPage(SettingsPage):
             enable_toggle.toggled.connect(lambda checked, scanner_key=key: self._set_enabled(scanner_key, checked))
             ocr_fast_toggle.toggled.connect(lambda checked, source_key="run_fast": self._set_ocr_source_enabled(source_key, checked))
             ocr_ai_toggle.toggled.connect(lambda checked, source_key="run_ai": self._set_ocr_source_enabled(source_key, checked))
+            ocr_scope_detected_radio.toggled.connect(lambda checked: checked and self._set_ocr_scope_all_files(False))
+            ocr_scope_all_radio.toggled.connect(lambda checked: checked and self._set_ocr_scope_all_files(True))
             interval.valueChanged.connect(lambda value, scanner_key=key: self._set_interval(scanner_key, int(value)))
             run_btn.clicked.connect(lambda _checked=False, scanner_key=key: self._run_now(scanner_key))
             cancel_btn.clicked.connect(lambda _checked=False, scanner_key=key: self._cancel(scanner_key))
@@ -121,6 +141,9 @@ class ScannersSettingsPage(SettingsPage):
 
     def _set_ocr_source_enabled(self, source_key: str, checked: bool) -> None:
         self.dialog.set_setting_bool(f"scanners.ocr_text.{source_key}", checked)
+
+    def _set_ocr_scope_all_files(self, checked: bool) -> None:
+        self.dialog.set_setting_bool("scanners.ocr_text.all_files", checked)
 
     def _run_now(self, scanner_key: str) -> None:
         widgets = self._widgets.get(scanner_key) or {}
@@ -180,6 +203,8 @@ class ScannersSettingsPage(SettingsPage):
         running = bool(payload.get("running"))
         ocr_fast = widgets.get("ocr_fast")
         ocr_ai = widgets.get("ocr_ai")
+        ocr_scope_detected = widgets.get("ocr_scope_detected")
+        ocr_scope_all = widgets.get("ocr_scope_all")
         if isinstance(enable, QCheckBox):
             with QSignalBlocker(enable):
                 enable.setChecked(enabled)
@@ -189,6 +214,13 @@ class ScannersSettingsPage(SettingsPage):
         if isinstance(ocr_ai, QCheckBox):
             with QSignalBlocker(ocr_ai):
                 ocr_ai.setChecked(bool(payload.get("run_ai", False)))
+        all_files = bool(payload.get("all_files", False))
+        if isinstance(ocr_scope_detected, QRadioButton):
+            with QSignalBlocker(ocr_scope_detected):
+                ocr_scope_detected.setChecked(not all_files)
+        if isinstance(ocr_scope_all, QRadioButton):
+            with QSignalBlocker(ocr_scope_all):
+                ocr_scope_all.setChecked(all_files)
         if isinstance(interval, QSpinBox):
             with QSignalBlocker(interval):
                 interval.setValue(max(1, interval_value))
@@ -219,6 +251,7 @@ class ScannersSettingsPage(SettingsPage):
                     "status": str(self.settings.value(f"scanners/{scanner_key}/status", "Idle", type=str) or "Idle"),
                     "run_fast": bool(self.settings.value("scanners/ocr_text/run_fast", True, type=bool)),
                     "run_ai": bool(self.settings.value("scanners/ocr_text/run_ai", False, type=bool)),
+                    "all_files": bool(self.settings.value("scanners/ocr_text/all_files", False, type=bool)),
                 }
             self._apply_status(scanner_key, payload)
 
@@ -396,6 +429,10 @@ class OcrReviewDialog(QDialog):
         button_row.setContentsMargins(0, 0, 0, 0)
         button_row.setSpacing(6)
         button_row.addWidget(keep_btn)
+        if is_user_text:
+            no_text_btn = QPushButton("No Text")
+            no_text_btn.clicked.connect(lambda _checked=False, mid=media_id: self._mark_no_text(mid))
+            button_row.addWidget(no_text_btn)
         if source in {"paddle_fast", "gemma4"}:
             generate_btn = QPushButton("Generate")
             generate_btn.clicked.connect(lambda _checked=False, p=path, s=source, edit=text, keep=keep_btn: self._generate_ocr(p, s, edit, keep))
@@ -447,6 +484,13 @@ class OcrReviewDialog(QDialog):
     def _keep_user_text(self, media_id: int, text: str) -> None:
         try:
             if self.bridge.keep_user_ocr_text(int(media_id), str(text or "")):
+                self._reload()
+        except Exception:
+            pass
+
+    def _mark_no_text(self, media_id: int) -> None:
+        try:
+            if hasattr(self.bridge, "mark_ocr_review_no_text") and self.bridge.mark_ocr_review_no_text(int(media_id)):
                 self._reload()
         except Exception:
             pass
