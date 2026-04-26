@@ -1,18 +1,19 @@
-## MediaLens v1.2.1
+## MediaLens v1.2.2
 
 ### Summary
 
-This release makes MediaLens’ bulk editing tools much more practical for everyday use. Tags, descriptions, and Text OCR now share a polished workflow with per-file and batch editing, generation, review, saving, and responsive layouts that scale to large selections.
+This release makes MediaLens easier to repair, reinstall, and move safely. It adds library backup and restore tools, gives uninstall a real cleanup choice, and improves the startup updater path used to recover from broken builds.
 
 ### Highlights
 
-- Bulk Editor now brings Tags, Descriptions, and Text OCR together in a single, consistent workspace.
-- Text OCR Review now provides a large image view with side-by-side Fast OCR, AI OCR, and User Typed text, along with clear source confirmation and navigation.
-- Scanner schedules now support saved folders plus hourly, daily, weekly, and monthly options.
+- Export and import a MediaLens library backup from the File menu.
+- Choose whether imported recycle-bin files, thumbnails, local AI models, and AI runtimes merge with or replace what is already installed.
+- Uninstall can now remove selected app-data categories, including legacy leftovers, for a cleaner reinstall.
 
 ### Notes
 
-- Paddle Runtime install and repair now lives only in the AI Models Status window, keeping model/runtime setup in one place.
+- Startup update dialogs are now parented to the splash screen, reducing stray window flashes before the main app opens.
+- Library backups intentionally exclude old MediaManagerX legacy files.
 
 Full Changelog:
 https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md

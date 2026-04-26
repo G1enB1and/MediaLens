@@ -1,6 +1,41 @@
 # Change Log
 
-## v1.2.1 (Current)
+## v1.2.2 (Current)
+
+### Summary
+
+This release makes MediaLens safer to repair, reinstall, and move between machines. It adds full library backup and restore tools, gives import and uninstall workflows category-level choices for app data, and improves startup update diagnostics for broken-install recovery.
+
+### Highlights
+
+- Library backup export and import are now available from the File menu.
+- Import can merge or replace supported app-data categories independently, including recycle-bin retention files, thumbnails, downloaded AI models, and AI runtime environments.
+- Uninstall now asks which MediaLens data categories to keep or delete and cleans up unselected app-data files, including legacy leftovers.
+
+### Added
+
+- Added File menu tools to export and import MediaLens library backups.
+- Added backup support for the main database, recycle-bin retention system, settings, thumbnails, downloaded AI models, managed Python, Python bootstrap files, and AI runtime environments.
+- Added timestamped safety backups before library import restores the main database.
+- Added per-category import merge options for recycle-bin retention data, thumbnails, downloaded AI models, and AI runtime environments.
+- Added installer uninstall prompts for database, settings, recycle-bin retention data, thumbnails, AI models, AI runtimes, debug logs, import backups, legacy files, and other app-data.
+- Added startup update diagnostics before the app bridge initializes.
+
+### Changed
+
+- Changed startup update dialogs so they are parented to the splash screen instead of appearing as stray top-level windows.
+- Changed startup update checks to log failures and fall back to the GitHub latest-release API when the raw version check fails.
+- Changed update-check setting synchronization so changes apply immediately.
+- Changed library import so the main database is restored as the selected backup while supported app-data categories can merge or replace independently.
+- Changed interactive uninstall cleanup so app-data files are removed unless the user explicitly selects the matching category to keep.
+
+### Removed
+
+- Removed active carry-forward of old MediaManagerX legacy files from the library backup format.
+
+---
+
+## v1.2.1
 
 ### Summary
 
