@@ -71,6 +71,16 @@ class WindowMenuShortcutMixin:
 
         file_menu.addSeparator()
 
+        export_library_action = QAction("Export Library Backup...", self)
+        export_library_action.triggered.connect(self.export_library_backup)
+        file_menu.addAction(export_library_action)
+
+        import_library_action = QAction("Import Library Backup...", self)
+        import_library_action.triggered.connect(self.import_library_backup)
+        file_menu.addAction(import_library_action)
+
+        file_menu.addSeparator()
+
         quit_action = QAction("&Quit", self)
         quit_action.triggered.connect(self.close)
         file_menu.addAction(quit_action)

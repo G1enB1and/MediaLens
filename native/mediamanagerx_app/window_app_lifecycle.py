@@ -11,6 +11,189 @@ from native.mediamanagerx_app.bridge import *
 from native.mediamanagerx_app.gallery import *
 
 class WindowAppLifecycleMixin:
+    def _library_backup_options_dialog(self, *, importing: bool, manifest: dict | None = None) -> tuple[bool, bool, bool, bool, bool]:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Import Library Backup" if importing else "Export Library Backup")
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        title = QLabel("Choose optional data to restore." if importing else "Choose what to include.")
+        title.setWordWrap(True)
+        layout.addWidget(title)
+
+        includes = dict((manifest or {}).get("includes") or {})
+        settings_available = not importing or bool(includes.get("settings"))
+        thumbs_available = not importing or bool(includes.get("thumbs"))
+        local_ai_models_available = not importing or bool(includes.get("local_ai_models"))
+        ai_runtimes_available = not importing or any(
+            bool(includes.get(key)) for key in ("ai_runtimes", "python_runtime", "python_bootstrap")
+        )
+
+        settings_cb = QCheckBox("App settings")
+        settings_cb.setChecked(True)
+        settings_cb.setEnabled(settings_available)
+        if importing and not settings_available:
+            settings_cb.setToolTip("This backup does not include app settings.")
+        layout.addWidget(settings_cb)
+
+        thumbs_cb = QCheckBox("Thumbnails")
+        thumbs_cb.setChecked(False)
+        thumbs_cb.setEnabled(thumbs_available)
+        if importing and not thumbs_available:
+            thumbs_cb.setToolTip("This backup does not include thumbnails.")
+        layout.addWidget(thumbs_cb)
+
+        local_ai_models_cb = QCheckBox("Downloaded local AI models")
+        local_ai_models_cb.setChecked(False)
+        local_ai_models_cb.setEnabled(local_ai_models_available)
+        if importing and not local_ai_models_available:
+            local_ai_models_cb.setToolTip("This backup does not include downloaded local AI models.")
+        layout.addWidget(local_ai_models_cb)
+
+        ai_runtimes_cb = QCheckBox("Local AI runtime environments")
+        ai_runtimes_cb.setChecked(False)
+        ai_runtimes_cb.setEnabled(ai_runtimes_available)
+        if importing and not ai_runtimes_available:
+            ai_runtimes_cb.setToolTip("This backup does not include local AI runtime environments.")
+        layout.addWidget(ai_runtimes_cb)
+
+        if importing:
+            note = QLabel("The current database and MediaLens retention system will be overwritten. A local backup of the existing supported files is created first.")
+        else:
+            note = QLabel("The database and full MediaLens retention system are always included. Legacy MediaManagerX files and debug logs are excluded. AI models and runtimes can be large.")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        buttons = QWidget(dialog)
+        buttons_layout = QHBoxLayout(buttons)
+        buttons_layout.setContentsMargins(0, 8, 0, 0)
+        buttons_layout.addStretch(1)
+        cancel_btn = QPushButton("Cancel")
+        ok_btn = QPushButton("Import" if importing else "Export")
+        cancel_btn.clicked.connect(dialog.reject)
+        ok_btn.clicked.connect(dialog.accept)
+        buttons_layout.addWidget(cancel_btn)
+        buttons_layout.addWidget(ok_btn)
+        layout.addWidget(buttons)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return False, False, False, False, False
+        return (
+            True,
+            settings_cb.isChecked() and settings_available,
+            thumbs_cb.isChecked() and thumbs_available,
+            local_ai_models_cb.isChecked() and local_ai_models_available,
+            ai_runtimes_cb.isChecked() and ai_runtimes_available,
+        )
+
+    def export_library_backup(self) -> None:
+        try:
+            ok, include_settings, include_thumbs, include_local_ai_models, include_ai_runtimes = self._library_backup_options_dialog(importing=False)
+            if not ok:
+                return
+            default_name = f"MediaLens-Library-Backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}.zip"
+            target, _selected_filter = QFileDialog.getSaveFileName(
+                self,
+                "Export Library Backup",
+                str(Path.home() / default_name),
+                "MediaLens Library Backup (*.zip)",
+            )
+            if not target:
+                return
+            if not target.lower().endswith(".zip"):
+                target += ".zip"
+
+            from native.mediamanagerx_app.library_backup import LibraryBackupOptions, create_library_backup
+
+            try:
+                self.bridge.settings.sync()
+            except Exception:
+                pass
+            result = create_library_backup(
+                target,
+                options=LibraryBackupOptions(
+                    include_settings=include_settings,
+                    include_thumbs=include_thumbs,
+                    include_local_ai_models=include_local_ai_models,
+                    include_ai_runtimes=include_ai_runtimes,
+                ),
+            )
+            included = [name.replace("_", " ") for name, enabled in result.included.items() if enabled]
+            QMessageBox.information(
+                self,
+                "Export Library Backup",
+                "Library backup created:\n"
+                f"{result.archive_path}\n\n"
+                f"Included: {', '.join(included) if included else 'manifest only'}",
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Export Library Backup", f"Unable to create library backup:\n{exc}")
+
+    def import_library_backup(self) -> None:
+        try:
+            source, _selected_filter = QFileDialog.getOpenFileName(
+                self,
+                "Import Library Backup",
+                str(Path.home()),
+                "MediaLens Library Backup (*.zip)",
+            )
+            if not source:
+                return
+
+            from native.mediamanagerx_app.library_backup import (
+                LibraryRestoreOptions,
+                read_library_backup_manifest,
+                restore_library_backup,
+            )
+
+            manifest = read_library_backup_manifest(source)
+            ok, include_settings, include_thumbs, include_local_ai_models, include_ai_runtimes = self._library_backup_options_dialog(importing=True, manifest=manifest)
+            if not ok:
+                return
+            answer = QMessageBox.question(
+                self,
+                "Import Library Backup",
+                "Importing this backup will overwrite the current MediaLens database and retention data. "
+                "A local backup of the current supported files will be created first.\n\n"
+                "Continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+
+            try:
+                self.bridge._scan_abort = True
+                self.bridge._local_ai_shutting_down = True
+                self.bridge.settings.sync()
+                self.bridge.conn.close_all()
+            except Exception:
+                pass
+
+            result = restore_library_backup(
+                source,
+                options=LibraryRestoreOptions(
+                    include_settings=include_settings,
+                    include_thumbs=include_thumbs,
+                    include_local_ai_models=include_local_ai_models,
+                    include_ai_runtimes=include_ai_runtimes,
+                    backup_existing=True,
+                ),
+            )
+            restored = [name.replace("_", " ") for name, enabled in result.restored.items() if enabled]
+            backup_text = f"\n\nPrevious supported files were backed up to:\n{result.existing_backup_dir}" if result.existing_backup_dir else ""
+            QMessageBox.information(
+                self,
+                "Import Library Backup",
+                "Library backup imported. MediaLens will close now so the restored database and settings load cleanly.\n\n"
+                f"Restored: {', '.join(restored) if restored else 'nothing'}"
+                f"{backup_text}",
+            )
+            QApplication.quit()
+        except Exception as exc:
+            QMessageBox.warning(self, "Import Library Backup", f"Unable to import library backup:\n{exc}")
+
     def showEvent(self, event) -> None:
         """Trigger native style update when window actually becomes visible to ensure valid winId for DWM."""
         super().showEvent(event)
