@@ -911,6 +911,17 @@ class BridgeVideoMetadataMixin:
             self._log(f"Keep edited OCR text failed: {exc}")
             return False
 
+    @Slot(str, str, result=bool)
+    def keep_user_ocr_text_for_path(self, path: str, text: str) -> bool:
+        try:
+            media = self._ensure_media_record_for_tag_write(str(path or ""))
+            if not media:
+                return False
+            return bool(self.keep_user_ocr_text(int(media["id"]), str(text or "")))
+        except Exception as exc:
+            self._log(f"Keep edited OCR text for path failed: {exc}")
+            return False
+
     @Slot(int, result=bool)
     def mark_ocr_review_no_text(self, media_id: int) -> bool:
         try:
@@ -938,6 +949,17 @@ class BridgeVideoMetadataMixin:
             return True
         except Exception as exc:
             self._log(f"Mark OCR review no-text failed: {exc}")
+            return False
+
+    @Slot(str, result=bool)
+    def mark_ocr_no_text_for_path(self, path: str) -> bool:
+        try:
+            media = self._ensure_media_record_for_tag_write(str(path or ""))
+            if not media:
+                return False
+            return bool(self.mark_ocr_review_no_text(int(media["id"])))
+        except Exception as exc:
+            self._log(f"Mark OCR no-text for path failed: {exc}")
             return False
 
 

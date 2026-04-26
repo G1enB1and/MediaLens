@@ -1634,6 +1634,8 @@ class WindowPreviewMetadataMixin:
             self._refresh_preview_for_path(None)
             if self._current_bulk_editor_mode() == "captions":
                 self._configure_bulk_caption_editor(len(file_paths))
+            elif self._current_bulk_editor_mode() == "ocr":
+                self._configure_bulk_ocr_editor(len(file_paths))
             else:
                 self._configure_bulk_tag_editor(len(file_paths))
             self.bulk_meta_tags.blockSignals(True)
@@ -1642,6 +1644,8 @@ class WindowPreviewMetadataMixin:
             self.bulk_status_lbl.setText("")
             if hasattr(self, "bulk_caption_status_lbl"):
                 self.bulk_caption_status_lbl.setText("")
+            if hasattr(self, "bulk_ocr_status_lbl"):
+                self.bulk_ocr_status_lbl.setText("")
             if hasattr(self, "_set_bulk_select_all_pending"):
                 self._set_bulk_select_all_pending(False, "")
             self._sync_tag_list_panel_visibility(refresh_contents=False)
@@ -2348,6 +2352,8 @@ class WindowPreviewMetadataMixin:
 
     @Slot(str, str, str)
     def _on_manual_ocr_finished(self, path: str, text: str, error: str) -> None:
+        if hasattr(self, "_handle_bulk_manual_ocr_finished") and self._handle_bulk_manual_ocr_finished(path, text, error):
+            return
         self._set_ocr_buttons_enabled(True)
         if str(getattr(self, "_current_path", "") or "") != str(path or ""):
             return

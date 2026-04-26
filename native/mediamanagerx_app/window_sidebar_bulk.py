@@ -241,6 +241,7 @@ class WindowSidebarBulkMixin:
             getattr(self, "bulk_btn_run_local_ai", None),
             getattr(self, "bulk_btn_save_meta", None),
             getattr(self, "bulk_btn_save_to_exif", None),
+            getattr(self, "bulk_ocr_btn_select_all_gallery", None),
         ]
         for button in buttons:
             if button is None:
@@ -251,6 +252,18 @@ class WindowSidebarBulkMixin:
             button.setMaximumWidth(16777215)
             button.setFixedWidth(available_w)
             self._wrap_button_text(button, base_text, available_w)
+            button.updateGeometry()
+        for button in (
+            getattr(self, "bulk_ocr_btn_run_fast", None),
+            getattr(self, "bulk_ocr_btn_run_ai", None),
+        ):
+            if button is None:
+                continue
+            base_text = str(button.property("baseText") or button.text()).replace("\n", " ").strip()
+            button.setProperty("baseText", base_text)
+            button.setMinimumWidth(0)
+            button.setMaximumWidth(16777215)
+            self._wrap_button_text(button, base_text, max(80, int((available_w - 6) / 2)))
             button.updateGeometry()
 
     def _update_sidebar_input_widths(self, available_w: int | None = None) -> None:
@@ -351,10 +364,15 @@ class WindowSidebarBulkMixin:
 
     def _current_bulk_editor_mode(self) -> str:
         mode = str(getattr(self, "_bulk_editor_mode", "tags") or "tags").strip().lower()
-        return "captions" if mode == "captions" else "tags"
+        if mode == "captions":
+            return "captions"
+        if mode == "ocr":
+            return "ocr"
+        return "tags"
 
     def _set_active_bulk_editor_mode(self, mode: str) -> None:
-        next_mode = "captions" if str(mode or "").strip().lower() == "captions" else "tags"
+        raw_mode = str(mode or "").strip().lower()
+        next_mode = "captions" if raw_mode == "captions" else ("ocr" if raw_mode == "ocr" else "tags")
         self._bulk_editor_mode = next_mode
         if hasattr(self, "bulk_mode_tags_btn"):
             self.bulk_mode_tags_btn.blockSignals(True)
@@ -364,14 +382,25 @@ class WindowSidebarBulkMixin:
             self.bulk_mode_captions_btn.blockSignals(True)
             self.bulk_mode_captions_btn.setChecked(next_mode == "captions")
             self.bulk_mode_captions_btn.blockSignals(False)
+        if hasattr(self, "bulk_mode_ocr_btn"):
+            self.bulk_mode_ocr_btn.blockSignals(True)
+            self.bulk_mode_ocr_btn.setChecked(next_mode == "ocr")
+            self.bulk_mode_ocr_btn.blockSignals(False)
         if hasattr(self, "bulk_pages_stack"):
-            target = getattr(self, "bulk_captions_page", None) if next_mode == "captions" else getattr(self, "bulk_tags_page", None)
+            if next_mode == "captions":
+                target = getattr(self, "bulk_captions_page", None)
+            elif next_mode == "ocr":
+                target = getattr(self, "bulk_ocr_page", None)
+            else:
+                target = getattr(self, "bulk_tags_page", None)
             if target is not None:
                 self.bulk_pages_stack.setCurrentWidget(target)
         if self._is_bulk_editor_active():
             selection_count = len(self._current_file_paths())
             if next_mode == "captions":
                 self._configure_bulk_caption_editor(selection_count)
+            elif next_mode == "ocr":
+                self._configure_bulk_ocr_editor(selection_count)
             else:
                 self._configure_bulk_tag_editor(selection_count)
 
@@ -400,16 +429,32 @@ class WindowSidebarBulkMixin:
         self._refresh_bulk_caption_editor_summary()
         self._sync_sidebar_panel_widths()
 
+    def _configure_bulk_ocr_editor(self, selection_count: int) -> None:
+        self._set_active_right_workspace("bulk")
+        self._set_active_bulk_editor_mode("ocr") if self._current_bulk_editor_mode() != "ocr" else None
+        self.bulk_ocr_selection_lbl.setText(f"<span style=\"font-weight:700;\">{selection_count}</span> files selected")
+        self.bulk_ocr_btn_select_all_gallery.setProperty("baseText", "Select All Files in Gallery")
+        self.bulk_ocr_btn_run_fast.setProperty("baseText", f"Fast OCR for All ({selection_count} Files)")
+        self.bulk_ocr_btn_run_ai.setProperty("baseText", f"AI OCR for All ({selection_count} Files)")
+        self._refresh_bulk_ocr_editor_summary()
+        self._sync_sidebar_panel_widths()
+
     def _set_bulk_select_all_pending(self, pending: bool, message: str = "") -> None:
         self._bulk_select_all_pending = bool(pending)
         widgets = [
             getattr(self, "bulk_btn_select_all_gallery", None),
             getattr(self, "bulk_caption_btn_select_all_gallery", None),
+            getattr(self, "bulk_ocr_btn_select_all_gallery", None),
         ]
         for widget in widgets:
             if widget is not None:
                 widget.setEnabled(not bool(pending))
-        label = getattr(self, "bulk_caption_status_lbl", None) if self._current_bulk_editor_mode() == "captions" else getattr(self, "bulk_status_lbl", None)
+        if self._current_bulk_editor_mode() == "captions":
+            label = getattr(self, "bulk_caption_status_lbl", None)
+        elif self._current_bulk_editor_mode() == "ocr":
+            label = getattr(self, "bulk_ocr_status_lbl", None)
+        else:
+            label = getattr(self, "bulk_status_lbl", None)
         if label is not None:
             label.setText(str(message or ""))
             try:
@@ -694,6 +739,8 @@ class WindowSidebarBulkMixin:
 
     def _active_status_label(self):
         if self._is_bulk_editor_active():
+            if self._current_bulk_editor_mode() == "ocr" and hasattr(self, "bulk_ocr_status_lbl"):
+                return self.bulk_ocr_status_lbl
             if self._current_bulk_editor_mode() == "captions" and hasattr(self, "bulk_caption_status_lbl"):
                 return self.bulk_caption_status_lbl
             if hasattr(self, "bulk_status_lbl"):
@@ -887,6 +934,98 @@ class WindowSidebarBulkMixin:
             self.bulk_caption_status_lbl.setText(f"Saved description for {Path(clean_path).name}")
             QTimer.singleShot(2500, lambda: self.bulk_caption_status_lbl.setText(""))
 
+    def _save_bulk_selected_file_ocr_text(self, _path: str, _text: str) -> None:
+        # OCR row edits are committed by the confirm button so accidental focus changes
+        # do not mark text as user-confirmed.
+        return
+
+    def _bulk_ai_ocr_source(self) -> str:
+        return "gemma4"
+
+    def _bulk_ocr_status(self, text: str) -> None:
+        label = getattr(self, "bulk_ocr_status_lbl", None)
+        if label is not None:
+            label.setText(str(text or ""))
+
+    def _bulk_ocr_row_for_path(self, path: str):
+        target = str(path or "").casefold()
+        list_widget = getattr(self, "bulk_ocr_selected_files_list", None)
+        if not target or list_widget is None:
+            return None
+        for i in range(list_widget.count()):
+            row = list_widget.itemWidget(list_widget.item(i))
+            if self._is_valid_bulk_selected_file_row(row) and str(getattr(row, "_path", "") or "").casefold() == target:
+                return row
+        return None
+
+    def _set_bulk_ocr_row_text(self, path: str, text: str) -> None:
+        row = self._bulk_ocr_row_for_path(path)
+        if not self._is_valid_bulk_selected_file_row(row):
+            return
+        try:
+            row.tags_edit.blockSignals(True)
+            row.tags_edit.setPlainText(str(text or ""))
+            row.tags_edit.blockSignals(False)
+        except RuntimeError:
+            pass
+
+    def _handle_bulk_ocr_row_action(self, path: str, action_key: str) -> None:
+        clean_path = str(path or "").strip()
+        action = str(action_key or "").strip().lower()
+        if not clean_path:
+            return
+        if action == "no_text":
+            if hasattr(self.bridge, "mark_ocr_no_text_for_path") and self.bridge.mark_ocr_no_text_for_path(clean_path):
+                self._set_bulk_ocr_row_text(clean_path, "")
+                self._bulk_ocr_status(f"Marked no text for {Path(clean_path).name}")
+            return
+        if action == "confirm_text":
+            row = self._bulk_ocr_row_for_path(clean_path)
+            text = row.tags_edit.toPlainText() if self._is_valid_bulk_selected_file_row(row) else ""
+            if not str(text or "").strip():
+                self._bulk_ocr_status("No text to confirm.")
+                return
+            if hasattr(self.bridge, "keep_user_ocr_text_for_path") and self.bridge.keep_user_ocr_text_for_path(clean_path, str(text or "")):
+                self._bulk_ocr_status(f"Confirmed OCR text for {Path(clean_path).name}")
+            return
+        if action == "fast_ocr":
+            self._run_bulk_ocr_for_paths("paddle_fast", [clean_path])
+            return
+        if action == "ai_ocr":
+            self._run_bulk_ocr_for_paths(self._bulk_ai_ocr_source(), [clean_path])
+
+    def _run_bulk_ocr_for_paths(self, source: str, paths: list[str] | None = None) -> None:
+        clean_paths = self._current_file_paths(paths)
+        if not clean_paths or not hasattr(self.bridge, "run_manual_ocr_with_source"):
+            return
+        source_key = str(source or "paddle_fast").strip() or "paddle_fast"
+        pending = getattr(self, "_bulk_ocr_pending", None)
+        if not isinstance(pending, dict):
+            pending = {}
+            self._bulk_ocr_pending = pending
+        for path in clean_paths:
+            pending[str(path)] = source_key
+            self.bridge.run_manual_ocr_with_source(str(path), source_key)
+        label = "AI OCR" if source_key == self._bulk_ai_ocr_source() else "Fast OCR"
+        self._bulk_ocr_status(f"Running {label} for {len(clean_paths)} file{'s' if len(clean_paths) != 1 else ''}...")
+
+    def _handle_bulk_manual_ocr_finished(self, path: str, text: str, error: str) -> bool:
+        pending = getattr(self, "_bulk_ocr_pending", None)
+        clean_path = str(path or "").strip()
+        if not isinstance(pending, dict) or clean_path not in pending:
+            return False
+        pending.pop(clean_path, None)
+        if error:
+            self._bulk_ocr_status(f"OCR failed for {Path(clean_path).name}: {error}")
+            return True
+        clean_text = str(text or "").strip()
+        self._set_bulk_ocr_row_text(clean_path, clean_text)
+        if clean_text:
+            self._bulk_ocr_status(f"OCR text updated for {Path(clean_path).name}")
+        else:
+            self._bulk_ocr_status(f"No OCR text found for {Path(clean_path).name}")
+        return True
+
     @staticmethod
     def _bulk_selected_file_tags_text(tags: list[str]) -> str:
         clean = [str(tag or "").strip() for tag in list(tags or []) if str(tag or "").strip()]
@@ -949,7 +1088,7 @@ class WindowSidebarBulkMixin:
                     f"""
                     SELECT mi.path, mm.title, mm.description, mm.notes, mm.embedded_tags,
                            mm.embedded_comments, mm.ai_prompt, mm.ai_negative_prompt, mm.ai_params,
-                           mm.embedded_metadata_summary
+                           mm.embedded_metadata_summary, mi.detected_text
                     FROM media_items mi
                     LEFT JOIN media_metadata mm ON mm.media_id = mi.id
                     WHERE LOWER(mi.path) IN ({placeholders})
@@ -973,6 +1112,7 @@ class WindowSidebarBulkMixin:
                             "ai_negative_prompt": row[7] or "",
                             "ai_params": row[8] or "",
                             "embedded_metadata_summary": row[9] or "",
+                            "detected_text": row[10] or "",
                         },
                     )
         except Exception:
@@ -989,6 +1129,8 @@ class WindowSidebarBulkMixin:
         placeholder_text: str,
         generate_handler=None,
         generate_button_text: str = "",
+        action_handler=None,
+        action_buttons: list[dict] | None = None,
     ) -> None:
         if list_widget is None:
             return
@@ -1015,11 +1157,14 @@ class WindowSidebarBulkMixin:
                     content_height=content_height,
                     placeholder_text=placeholder_text,
                     generate_button_text=generate_button_text,
+                    action_buttons=action_buttons,
                 )
                 item.setSizeHint(QSize(0, row.item_height()))
                 row.tagsEdited.connect(edit_handler)
                 if generate_handler is not None:
                     row.generateRequested.connect(generate_handler)
+                if action_handler is not None:
+                    row.actionRequested.connect(action_handler)
                 list_widget.addItem(item)
                 list_widget.setItemWidget(item, row)
             list_widget.doItemsLayout()
@@ -1076,6 +1221,45 @@ class WindowSidebarBulkMixin:
             generate_button_text="Generate Description",
         )
         self._queue_bulk_caption_selected_files_layout_sync()
+
+    def _bulk_ocr_action_buttons(self) -> list[dict]:
+        icons_dir = Path(__file__).with_name("web") / "icons"
+        return [
+            {
+                "key": "no_text",
+                "label": "No Text",
+                "icon": str(icons_dir / "text-disabled.svg"),
+                "tooltip": "Mark this file as no text detected",
+            },
+            {
+                "key": "fast_ocr",
+                "label": "Fast OCR",
+                "tooltip": "Run fast OCR for this file",
+            },
+            {
+                "key": "ai_ocr",
+                "label": "AI OCR",
+                "tooltip": "Run AI OCR for this file",
+            },
+            {
+                "key": "confirm_text",
+                "label": "",
+                "icon": str(icons_dir / "check-green.svg"),
+                "tooltip": "Confirm this OCR text and protect it from future OCR replacement",
+            },
+        ]
+
+    def _refresh_bulk_ocr_selected_files_list(self) -> None:
+        self._refresh_bulk_selected_files_list(
+            getattr(self, "bulk_ocr_selected_files_list", None),
+            content_height=BulkSelectedFileRow._CAPTION_CONTENT_HEIGHT,
+            value_getter=lambda tags, metadata: str(metadata.get("detected_text") or ""),
+            edit_handler=self._save_bulk_selected_file_ocr_text,
+            placeholder_text="Detected text for this file",
+            action_handler=self._handle_bulk_ocr_row_action,
+            action_buttons=self._bulk_ocr_action_buttons(),
+        )
+        self._queue_bulk_ocr_selected_files_layout_sync()
 
     def _queue_bulk_selected_files_layout_sync(self) -> None:
         if not hasattr(self, "bulk_selected_files_list"):
@@ -1227,6 +1411,61 @@ class WindowSidebarBulkMixin:
             ),
         )
 
+    def _queue_bulk_ocr_selected_files_layout_sync(self) -> None:
+        if not hasattr(self, "bulk_ocr_selected_files_list"):
+            return
+        QTimer.singleShot(0, self._sync_bulk_ocr_selected_files_layout)
+
+    def _sync_bulk_ocr_selected_files_layout(self) -> None:
+        if not hasattr(self, "bulk_ocr_selected_files_list"):
+            return
+        list_widget = self.bulk_ocr_selected_files_list
+        viewport = list_widget.viewport()
+        if viewport is None:
+            return
+        viewport_width = max(0, viewport.width())
+        if viewport_width <= 0 or list_widget.count() <= 0:
+            return
+        first_row = list_widget.itemWidget(list_widget.item(0))
+        if not self._is_valid_bulk_selected_file_row(first_row):
+            return
+        try:
+            root_margins = first_row._root_layout.contentsMargins()
+            row_margins = first_row._content_row.contentsMargins()
+            thumb_width = first_row.thumb_lbl.width()
+            spacing = first_row._content_row.spacing()
+        except RuntimeError:
+            return
+        host_width = max(
+            BulkSelectedFileRow._MIN_EDITOR_WIDTH,
+            viewport_width
+            - root_margins.left()
+            - root_margins.right()
+            - row_margins.left()
+            - row_margins.right()
+            - thumb_width
+            - spacing
+            - BulkSelectedFileRow._RIGHT_GUTTER,
+        )
+        list_widget.doItemsLayout()
+        for i in range(list_widget.count()):
+            row = list_widget.itemWidget(list_widget.item(i))
+            if self._is_valid_bulk_selected_file_row(row):
+                try:
+                    row.set_shared_editor_widths(host_width)
+                    row.updateGeometry()
+                    row.update()
+                except RuntimeError:
+                    pass
+        viewport.update()
+        QTimer.singleShot(
+            0,
+            lambda: self._load_visible_bulk_selected_file_thumbnails(
+                list_widget,
+                BulkSelectedFileRow._CAPTION_CONTENT_HEIGHT,
+            ),
+        )
+
     def _refresh_bulk_tag_editor_summary(self) -> None:
         if not hasattr(self, "bulk_common_tags_text"):
             return
@@ -1239,6 +1478,11 @@ class WindowSidebarBulkMixin:
         if not hasattr(self, "bulk_caption_selected_files_list"):
             return
         self._refresh_bulk_caption_selected_files_list()
+
+    def _refresh_bulk_ocr_editor_summary(self) -> None:
+        if not hasattr(self, "bulk_ocr_selected_files_list"):
+            return
+        self._refresh_bulk_ocr_selected_files_list()
 
     def _configure_tag_list_combo(self, combo: QComboBox) -> None:
         is_tag_list_selector = combo.objectName() == "tagListSelect"

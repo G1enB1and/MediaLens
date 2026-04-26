@@ -1164,6 +1164,7 @@ class WindowNativeActionsMixin:
                 }}
                 QWidget#bulkTagEditorScrollContainer {{ background-color: {sb_bg_str}; color: {text}; }}
                 QWidget#bulkCaptionEditorScrollContainer {{ background-color: {sb_bg_str}; color: {text}; }}
+                QWidget#bulkOcrEditorScrollContainer {{ background-color: {sb_bg_str}; color: {text}; }}
                 QLabel {{
                     color: {text};
                     background: transparent;
@@ -1292,6 +1293,8 @@ class WindowNativeActionsMixin:
             self.bulk_scroll_container.setStyleSheet(bulk_editor_style)
             if hasattr(self, "bulk_caption_scroll_container"):
                 self.bulk_caption_scroll_container.setStyleSheet(bulk_editor_style)
+            if hasattr(self, "bulk_ocr_scroll_container"):
+                self.bulk_ocr_scroll_container.setStyleSheet(bulk_editor_style)
         self._update_preview_play_button_icon()
         self._apply_tag_list_theme()
         
