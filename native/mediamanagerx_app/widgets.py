@@ -863,11 +863,12 @@ class BulkSelectedFileRow(QWidget):
         thumb_host_layout = QVBoxLayout(self.thumb_host)
         thumb_host_layout.setContentsMargins(0, 0, 0, 0)
         thumb_host_layout.setSpacing(self._GENERATE_BUTTON_GAP)
+        thumb_host_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         self.thumb_lbl = QLabel(self.thumb_host)
         self.thumb_lbl.setObjectName("bulkSelectedFileThumb")
         self.thumb_lbl.setFixedSize(self._content_height, self._content_height)
-        self.thumb_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+        self.thumb_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         thumb_hint = str(thumbnail_bg_hint or "").strip().lower()
         if thumb_hint == "light":
             thumb_bg = "#ffffff" if Theme.get_is_light() else "#f7f8fa"
@@ -911,6 +912,7 @@ class BulkSelectedFileRow(QWidget):
         tags_host_layout = QVBoxLayout(self.tags_edit_host)
         tags_host_layout.setContentsMargins(0, 0, 0, 0)
         tags_host_layout.setSpacing(self._GENERATE_BUTTON_GAP)
+        tags_host_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         self.tags_edit = self._TagsEdit(self.tags_edit_host)
         self.tags_edit.setObjectName("bulkSelectedFileTagsEdit")
@@ -1082,11 +1084,60 @@ class BulkSelectedFileRow(QWidget):
         if hasattr(self, "generate_btn"):
             self.generate_btn.setFixedWidth(clamped_width)
         if getattr(self, "action_buttons", None):
-            spacing_total = max(0, (len(self.action_buttons) - 1) * 5)
-            min_button_width = 34 if stacked else 42
-            button_width = max(min_button_width, int((clamped_width - spacing_total) / max(1, len(self.action_buttons))))
-            for button in self.action_buttons:
-                button.setFixedWidth(button_width)
+            self._apply_action_button_widths(clamped_width, stacked)
+
+    def _button_width_limits(self, button: QPushButton, stacked: bool) -> tuple[int, int]:
+        key = str(button.property("bulkActionKey") or "").strip()
+        if key == "confirm_text":
+            return (28 if stacked else 30), 44
+        if key == "no_text":
+            return 58, 64
+        if key == "fast_ocr":
+            return 76, 82
+        if key == "ai_ocr":
+            return 66, 72
+        text_width = button.fontMetrics().horizontalAdvance(button.text())
+        minimum = max(46, text_width + 18)
+        return minimum, minimum + 10
+
+    def minimum_unstacked_editor_width(self) -> int:
+        if not getattr(self, "action_buttons", None):
+            return self._MIN_EDITOR_WIDTH
+        spacing_total = max(0, (len(self.action_buttons) - 1) * 5)
+        return max(
+            self._MIN_EDITOR_WIDTH,
+            spacing_total + sum(self._button_width_limits(button, False)[0] for button in self.action_buttons),
+        )
+
+    def _apply_action_button_widths(self, host_width: int, stacked: bool) -> None:
+        buttons = list(getattr(self, "action_buttons", []) or [])
+        if not buttons:
+            return
+        spacing_total = max(0, (len(buttons) - 1) * 5)
+        available = max(0, int(host_width or 0) - spacing_total)
+        minimums = [self._button_width_limits(button, stacked)[0] for button in buttons]
+        preferred = [self._button_width_limits(button, stacked)[1] for button in buttons]
+        widths = list(preferred)
+        overflow = max(0, sum(widths) - available)
+        for key in ("confirm_text", "no_text", "fast_ocr", "ai_ocr"):
+            if overflow <= 0:
+                break
+            for index, button in enumerate(buttons):
+                if str(button.property("bulkActionKey") or "").strip() != key:
+                    continue
+                reduction = min(overflow, max(0, widths[index] - minimums[index]))
+                widths[index] -= reduction
+                overflow -= reduction
+                break
+        if overflow > 0:
+            for index in range(len(widths)):
+                if overflow <= 0:
+                    break
+                reduction = min(overflow, max(0, widths[index] - 24))
+                widths[index] -= reduction
+                overflow -= reduction
+        for button, width in zip(buttons, widths):
+            button.setFixedWidth(max(24, int(width)))
 
     def _set_content_stacked(self, stacked: bool) -> None:
         if bool(getattr(self, "_stacked_content", False)) == bool(stacked):
@@ -1160,11 +1211,7 @@ class BulkSelectedFileRow(QWidget):
             if hasattr(self, "generate_btn"):
                 self.generate_btn.setFixedWidth(host_width)
             if getattr(self, "action_buttons", None):
-                spacing_total = max(0, (len(self.action_buttons) - 1) * 5)
-                min_button_width = 34 if bool(getattr(self, "_stacked_content", False)) else 42
-                button_width = max(min_button_width, int((host_width - spacing_total) / max(1, len(self.action_buttons))))
-                for button in self.action_buttons:
-                    button.setFixedWidth(button_width)
+                self._apply_action_button_widths(host_width, bool(getattr(self, "_stacked_content", False)))
         except RuntimeError:
             pass
 

@@ -1565,7 +1565,8 @@ class WindowSidebarBulkMixin:
             - BulkSelectedFileRow._RIGHT_GUTTER
             - 14,
         )
-        if normal_width >= BulkSelectedFileRow._STACKED_EDITOR_THRESHOLD:
+        stacked_threshold = max(BulkSelectedFileRow._STACKED_EDITOR_THRESHOLD, row.minimum_unstacked_editor_width())
+        if normal_width >= stacked_threshold:
             return normal_width, False
         stacked_width = max(
             BulkSelectedFileRow._MIN_EDITOR_WIDTH,
