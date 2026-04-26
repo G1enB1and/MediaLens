@@ -840,6 +840,11 @@ class BulkSelectedFileRow(QWidget):
         self._shared_width_managed = False
         self._stacked_content = False
         self._action_buttons_grid = False
+        self._stretch_preview_to_actions = (
+            bool(str(generate_button_text or "").strip())
+            and not bool(str(thumbnail_button_text or "").strip())
+            and not bool(action_buttons)
+        )
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 0, 12, 4)
         layout.setSpacing(9)
@@ -1116,17 +1121,21 @@ class BulkSelectedFileRow(QWidget):
         clamped_width = max(self._MIN_EDITOR_WIDTH, int(host_width or 0))
         self.tags_edit_host.setFixedWidth(clamped_width)
         self.tags_edit.setFixedWidth(clamped_width)
-        self._sync_thumbnail_column_width(clamped_width, bool(stacked))
+        self._sync_thumbnail_column_size(clamped_width, bool(stacked))
         if hasattr(self, "generate_btn"):
             self.generate_btn.setFixedWidth(clamped_width)
         if getattr(self, "action_buttons", None):
             self._apply_action_button_widths(clamped_width, stacked)
         self._refresh_tags_host_height()
 
-    def _sync_thumbnail_column_width(self, host_width: int, stacked: bool) -> None:
+    def _sync_thumbnail_column_size(self, host_width: int, stacked: bool) -> None:
         width = max(self._content_height, int(host_width or 0)) if stacked else self._content_height
+        height = int(self._content_height)
+        if bool(getattr(self, "_stretch_preview_to_actions", False)) and not stacked:
+            height = max(height, int(self.tags_edit_host.height() or 0))
         self.thumb_host.setFixedWidth(width)
-        self.thumb_lbl.setFixedWidth(width)
+        self.thumb_host.setFixedHeight(height)
+        self.thumb_lbl.setFixedSize(width, height)
         self.thumbnail_action_btn.setFixedWidth(width)
         self._apply_thumbnail_pixmap()
 
@@ -1229,7 +1238,7 @@ class BulkSelectedFileRow(QWidget):
             QBoxLayout.Direction.TopToBottom if stacked else QBoxLayout.Direction.LeftToRight
         )
         self._content_row.setSpacing(6 if stacked else 12)
-        self._sync_thumbnail_column_width(self.tags_edit_host.width(), stacked)
+        self._sync_thumbnail_column_size(self.tags_edit_host.width(), stacked)
         try:
             self._content_row.setAlignment(self.thumb_host, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
             self._content_row.setAlignment(self.tags_edit_host, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
@@ -1290,7 +1299,7 @@ class BulkSelectedFileRow(QWidget):
                 )
             self.tags_edit_host.setFixedWidth(host_width)
             self.tags_edit.setFixedWidth(host_width)
-            self._sync_thumbnail_column_width(host_width, bool(getattr(self, "_stacked_content", False)))
+            self._sync_thumbnail_column_size(host_width, bool(getattr(self, "_stacked_content", False)))
             if hasattr(self, "generate_btn"):
                 self.generate_btn.setFixedWidth(host_width)
             if getattr(self, "action_buttons", None):
