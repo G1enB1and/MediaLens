@@ -4,12 +4,12 @@
 
 ### Summary
 
-This release makes MediaLens' bulk editing tools much more practical for everyday library cleanup. Bulk tags, descriptions, and Text OCR now share a polished workflow with per-file editing, generation, review, saving, and responsive layouts that hold up with larger selections.
+This release makes MediaLens’ bulk editing tools much more practical for everyday use. Tags, descriptions, and Text OCR now share a polished workflow with per-file and batch editing, generation, review, saving, and responsive layouts that scale to large selections.
 
 ### Highlights
 
-- Bulk Editor now includes strong tools for Tags, Descriptions, and Text OCR in one tabbed workspace.
-- Text OCR Review is easier to trust with a large image view, Fast OCR, AI OCR, User Typed text, No Text marking, and visible confirmed-source highlighting.
+- Bulk Editor now brings Tags, Descriptions, and Text OCR together in a single, consistent workspace.
+- Text OCR Review now provides a large image view with side-by-side Fast OCR, AI OCR, and User Typed text, along with clear source confirmation and navigation.
 - Scanner scheduling is more practical with saved folders, configurable intervals, and clearer schedule status.
 
 ### Added
@@ -24,7 +24,7 @@ This release makes MediaLens' bulk editing tools much more practical for everyda
 - Added source folder lists for scheduled scanner runs instead of relying on the current gallery selection.
 - Added scanner schedule options for hourly, daily, weekly, and monthly runs with time and day controls.
 - Added Next Scheduled Run display when scheduling is enabled.
-- Added an OCR folder action to copy all folders from the list above into the OCR scanner folder list.
+- Added an OCR action to copy all folders from the list above into the OCR scanner folder list.
 
 ### Changed
 

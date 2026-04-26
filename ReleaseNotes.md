@@ -2,12 +2,12 @@
 
 ### Summary
 
-This release turns the Bulk Editor into a much more practical cleanup workspace. Tags, descriptions, and Text OCR now sit together in one workflow with per-file editing, generation, review, saving, and layouts that hold up better with large selections.
+This release makes MediaLens’ bulk editing tools much more practical for everyday use. Tags, descriptions, and Text OCR now share a polished workflow with per-file and batch editing, generation, review, saving, and responsive layouts that scale to large selections.
 
 ### Highlights
 
-- Bulk Editor now supports Tags, Descriptions, and Text OCR with per-file controls and full-list actions.
-- Text OCR Review adds a large image view with Fast OCR, AI OCR, User Typed text, No Text marking, and clear Keep indicators.
+- Bulk Editor now brings Tags, Descriptions, and Text OCR together in a single, consistent workspace.
+- Text OCR Review now provides a large image view with side-by-side Fast OCR, AI OCR, and User Typed text, along with clear source confirmation and navigation.
 - Scanner schedules now support saved folders plus hourly, daily, weekly, and monthly options.
 
 ### Notes
