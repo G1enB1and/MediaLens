@@ -835,8 +835,11 @@ class BulkSelectedFileRow(QWidget):
         self.setObjectName("bulkSelectedFileRow")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setAutoFillBackground(True)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self._shared_width_managed = False
         self._stacked_content = False
+        self._action_buttons_grid = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 0, 12, 12)
         layout.setSpacing(4)
@@ -859,6 +862,7 @@ class BulkSelectedFileRow(QWidget):
 
         self.thumb_host = QWidget(self)
         self.thumb_host.setObjectName("bulkSelectedFileThumbHost")
+        self.thumb_host.setMinimumWidth(0)
         self.thumb_host.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         thumb_host_layout = QVBoxLayout(self.thumb_host)
         thumb_host_layout.setContentsMargins(0, 0, 0, 0)
@@ -908,6 +912,7 @@ class BulkSelectedFileRow(QWidget):
 
         self.tags_edit_host = QWidget(self)
         self.tags_edit_host.setObjectName("bulkSelectedFileTagsHost")
+        self.tags_edit_host.setMinimumWidth(0)
         self.tags_edit_host.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         tags_host_layout = QVBoxLayout(self.tags_edit_host)
         tags_host_layout.setContentsMargins(0, 0, 0, 0)
@@ -939,9 +944,11 @@ class BulkSelectedFileRow(QWidget):
         self.action_buttons: list[QPushButton] = []
         self.action_button_row = QWidget(self.tags_edit_host)
         self.action_button_row.setObjectName("bulkSelectedFileActionButtonRow")
-        action_layout = QHBoxLayout(self.action_button_row)
+        action_layout = QGridLayout(self.action_button_row)
         action_layout.setContentsMargins(0, 0, 0, 0)
-        action_layout.setSpacing(5)
+        action_layout.setHorizontalSpacing(5)
+        action_layout.setVerticalSpacing(5)
+        self._action_layout = action_layout
         for button_cfg in action_buttons:
             button = QPushButton(str(button_cfg.get("label") or ""), self.action_button_row)
             button.setObjectName(str(button_cfg.get("object_name") or "bulkSelectedFileGenerateButton"))
@@ -966,8 +973,7 @@ class BulkSelectedFileRow(QWidget):
                         button.setIconSize(QSize(16, 16))
             button.clicked.connect(lambda _checked=False, key=str(button_cfg.get("key") or ""): self._emit_action_requested(key))
             self.action_buttons.append(button)
-            action_layout.addWidget(button)
-        action_layout.addStretch(1)
+        self._layout_action_buttons(False)
         self.action_button_row.setVisible(bool(self.action_buttons))
         tags_host_layout.addWidget(self.action_button_row)
         generate_extra = self._generate_button_extra_height()
@@ -1015,11 +1021,21 @@ class BulkSelectedFileRow(QWidget):
 
     def _generate_button_extra_height(self) -> int:
         try:
-            if self.generate_btn.isVisible() or self.action_button_row.isVisible():
+            if not self.generate_btn.isHidden():
                 return int(self._GENERATE_BUTTON_HEIGHT + self._GENERATE_BUTTON_GAP + self._GENERATE_BUTTON_BOTTOM_PADDING)
+            if not self.action_button_row.isHidden():
+                rows = 2 if bool(getattr(self, "_action_buttons_grid", False)) else 1
+                return int((self._GENERATE_BUTTON_HEIGHT * rows) + (self._GENERATE_BUTTON_GAP * rows) + self._GENERATE_BUTTON_BOTTOM_PADDING)
         except RuntimeError:
             pass
         return 0
+
+    def _refresh_tags_host_height(self) -> None:
+        try:
+            generate_extra = self._generate_button_extra_height()
+            self.tags_edit_host.setFixedHeight(self._content_height + generate_extra)
+        except RuntimeError:
+            pass
 
     def set_thumbnail(self, thumbnail: QPixmap | None, thumbnail_bg_hint: str = "") -> None:
         try:
@@ -1081,10 +1097,18 @@ class BulkSelectedFileRow(QWidget):
         clamped_width = max(self._MIN_EDITOR_WIDTH, int(host_width or 0))
         self.tags_edit_host.setFixedWidth(clamped_width)
         self.tags_edit.setFixedWidth(clamped_width)
+        self._sync_thumbnail_column_width(clamped_width, bool(stacked))
         if hasattr(self, "generate_btn"):
             self.generate_btn.setFixedWidth(clamped_width)
         if getattr(self, "action_buttons", None):
             self._apply_action_button_widths(clamped_width, stacked)
+        self._refresh_tags_host_height()
+
+    def _sync_thumbnail_column_width(self, host_width: int, stacked: bool) -> None:
+        width = max(self._content_height, int(host_width or 0)) if stacked else self._content_height
+        self.thumb_host.setFixedWidth(width)
+        self.thumb_lbl.setFixedWidth(width)
+        self.thumbnail_action_btn.setFixedWidth(width)
 
     def _button_width_limits(self, button: QPushButton, stacked: bool) -> tuple[int, int]:
         key = str(button.property("bulkActionKey") or "").strip()
@@ -1113,10 +1137,18 @@ class BulkSelectedFileRow(QWidget):
         buttons = list(getattr(self, "action_buttons", []) or [])
         if not buttons:
             return
-        spacing_total = max(0, (len(buttons) - 1) * 5)
+        use_grid = bool(stacked and int(host_width or 0) < 260 and len(buttons) >= 4)
+        self._layout_action_buttons(use_grid)
+        spacing_total = 5 if use_grid else max(0, (len(buttons) - 1) * 5)
         available = max(0, int(host_width or 0) - spacing_total)
         minimums = [self._button_width_limits(button, stacked)[0] for button in buttons]
         preferred = [self._button_width_limits(button, stacked)[1] for button in buttons]
+        if use_grid:
+            column_width = max(24, int(available / 2))
+            for button in buttons:
+                button.setFixedWidth(column_width)
+            self._refresh_tags_host_height()
+            return
         widths = list(preferred)
         overflow = max(0, sum(widths) - available)
         for key in ("confirm_text", "no_text", "fast_ocr", "ai_ocr"):
@@ -1144,6 +1176,30 @@ class BulkSelectedFileRow(QWidget):
                 widths[index] += increment + (1 if index < remainder else 0)
         for button, width in zip(buttons, widths):
             button.setFixedWidth(max(24, int(width)))
+        self._refresh_tags_host_height()
+
+    def _layout_action_buttons(self, grid: bool) -> None:
+        layout = getattr(self, "_action_layout", None)
+        buttons = list(getattr(self, "action_buttons", []) or [])
+        if layout is None:
+            return
+        if bool(getattr(self, "_action_buttons_grid", False)) == bool(grid) and layout.count() >= len(buttons):
+            return
+        self._action_buttons_grid = bool(grid)
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                layout.removeWidget(widget)
+        for index, button in enumerate(buttons):
+            if grid:
+                layout.addWidget(button, index // 2, index % 2)
+            else:
+                layout.addWidget(button, 0, index)
+        if isinstance(layout, QGridLayout):
+            for column in range(2 if grid else max(1, len(buttons))):
+                layout.setColumnStretch(column, 1)
+        self._refresh_tags_host_height()
 
     def _set_content_stacked(self, stacked: bool) -> None:
         if bool(getattr(self, "_stacked_content", False)) == bool(stacked):
@@ -1153,6 +1209,7 @@ class BulkSelectedFileRow(QWidget):
             QBoxLayout.Direction.TopToBottom if stacked else QBoxLayout.Direction.LeftToRight
         )
         self._content_row.setSpacing(6 if stacked else 12)
+        self._sync_thumbnail_column_width(self.tags_edit_host.width(), stacked)
         try:
             self._content_row.setAlignment(self.thumb_host, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
             self._content_row.setAlignment(self.tags_edit_host, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
@@ -1214,6 +1271,7 @@ class BulkSelectedFileRow(QWidget):
                 )
             self.tags_edit_host.setFixedWidth(host_width)
             self.tags_edit.setFixedWidth(host_width)
+            self._sync_thumbnail_column_width(host_width, bool(getattr(self, "_stacked_content", False)))
             if hasattr(self, "generate_btn"):
                 self.generate_btn.setFixedWidth(host_width)
             if getattr(self, "action_buttons", None):
