@@ -735,6 +735,9 @@ class WindowNativeActionsMixin:
                     padding: 4px;
                     selection-background-color: {Theme.get_accent_soft(accent)};
                 }}
+                QPlainTextEdit#ocrReviewTextEdit[ocrWinner="true"] {{
+                    border: 1px solid #2fbf5b;
+                }}
                 QPlainTextEdit#bulkTagEditorStatusLabel, QLabel#bulkTagEditorStatusLabel {{
                     background: transparent;
                     border: none;
@@ -755,6 +758,9 @@ class WindowNativeActionsMixin:
                     color: {text};
                     padding: 0px;
                     margin: 0px;
+                }}
+                QPushButton#ocrReviewKeepButton[ocrWinner="true"] {{
+                    border: 1px solid #2fbf5b;
                 }}
                 QPushButton#tagListCloseButton:hover, QPushButton#ocrReviewKeepButton:hover {{
                     background-color: {close_hover_bg};

@@ -1158,6 +1158,31 @@ class WindowSidebarBulkMixin:
                 return str(item.get("text") or "")
         return ""
 
+    def _set_ocr_review_winner_state(self, media: dict | None) -> None:
+        winner_source = ""
+        if media:
+            try:
+                from app.mediamanager.db.ocr_repo import get_ocr_winner
+
+                winner = get_ocr_winner(self.bridge.conn, int(media.get("id") or 0)) or {}
+                winner_source = str(winner.get("source") or "").strip()
+            except Exception:
+                winner_source = ""
+        fields = getattr(self, "ocr_review_fields", {}) or {}
+        keep_buttons = getattr(self, "ocr_review_keep_buttons", {}) or {}
+        for key in ("paddle_fast", "ai", "user"):
+            selected = bool(winner_source and winner_source == self._ocr_review_source_key(key))
+            for widget in (fields.get(key), keep_buttons.get(key)):
+                if widget is None:
+                    continue
+                widget.setProperty("ocrWinner", selected)
+                try:
+                    widget.style().unpolish(widget)
+                    widget.style().polish(widget)
+                except Exception:
+                    pass
+                widget.update()
+
     def _refresh_ocr_review_for_path(self, path: str) -> None:
         clean_path = str(path or "").strip()
         if not clean_path:
@@ -1175,6 +1200,7 @@ class WindowSidebarBulkMixin:
             edit.blockSignals(True)
             edit.setPlainText(self._latest_ocr_review_text(results, key))
             edit.blockSignals(False)
+        self._set_ocr_review_winner_state(media)
         self._sync_ocr_review_nav_buttons()
         self._ocr_review_status("")
 
