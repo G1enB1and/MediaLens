@@ -499,7 +499,7 @@ class TagListTagRow(QWidget):
         layout.setContentsMargins(6, 2, 6, 2)
         layout.setSpacing(6)
 
-        self.remove_from_list_btn = QPushButton("")
+        self.remove_from_list_btn = QPushButton("", self)
         self.remove_from_list_btn.setObjectName("tagListRemoveFromListButton")
         self.remove_from_list_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.remove_from_list_btn.setFixedSize(30, 28)
@@ -507,7 +507,7 @@ class TagListTagRow(QWidget):
         self.remove_from_list_btn.clicked.connect(lambda: self.removeFromListRequested.emit(self._tag_id, self._tag_name))
         layout.addWidget(self.remove_from_list_btn, 0)
 
-        self.scope_btn = QPushButton(str(self._scope_use_count))
+        self.scope_btn = QPushButton(str(self._scope_use_count), self)
         self.scope_btn.setObjectName("tagListScopeCountButton")
         self.scope_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.scope_btn.setFixedHeight(24)
@@ -516,7 +516,7 @@ class TagListTagRow(QWidget):
         self.scope_btn.setToolTip(f"The tag {self._tag_name} was found in {self._scope_use_count} files within the current scope")
         layout.addWidget(self.scope_btn, 0)
 
-        self.name_lbl = QLabel(self._tag_name)
+        self.name_lbl = QLabel(self._tag_name, self)
         self.name_lbl.setObjectName("tagListTagName")
         self.name_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.name_lbl.setTextFormat(Qt.TextFormat.PlainText)
@@ -528,7 +528,7 @@ class TagListTagRow(QWidget):
         self.name_lbl.customContextMenuRequested.connect(lambda _pos: self.filterRequested.emit(self._tag_name))
         layout.addWidget(self.name_lbl, 1)
 
-        self.remove_from_selection_btn = QPushButton("")
+        self.remove_from_selection_btn = QPushButton("", self)
         self.remove_from_selection_btn.setObjectName("tagListRemoveFromSelectionButton")
         self.remove_from_selection_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.remove_from_selection_btn.setFixedSize(26, 24)
@@ -536,7 +536,7 @@ class TagListTagRow(QWidget):
         self.remove_from_selection_btn.clicked.connect(self._on_remove_from_selection_clicked)
         layout.addWidget(self.remove_from_selection_btn, 0)
 
-        self.add_btn = QPushButton("")
+        self.add_btn = QPushButton("", self)
         self.add_btn.setObjectName("tagListAddButton")
         self.add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.add_btn.setFixedSize(26, 24)
@@ -836,7 +836,7 @@ class BulkSelectedFileRow(QWidget):
         layout.setSpacing(4)
         self._root_layout = layout
 
-        self.name_lbl = QLabel(str(name or ""))
+        self.name_lbl = QLabel(str(name or ""), self)
         self.name_lbl.setObjectName("bulkSelectedFileName")
         self.name_lbl.setWordWrap(False)
         self.name_lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -851,7 +851,7 @@ class BulkSelectedFileRow(QWidget):
         content_row.setSpacing(12)
         self._content_row = content_row
 
-        self.thumb_lbl = QLabel()
+        self.thumb_lbl = QLabel(self)
         self.thumb_lbl.setObjectName("bulkSelectedFileThumb")
         self.thumb_lbl.setFixedSize(self._content_height, self._content_height)
         self.thumb_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -874,7 +874,14 @@ class BulkSelectedFileRow(QWidget):
             self._thumbnail_loaded = False
         content_row.addWidget(self.thumb_lbl, 0, Qt.AlignmentFlag.AlignTop)
 
-        self.tags_edit = self._TagsEdit()
+        self.tags_edit_host = QWidget(self)
+        self.tags_edit_host.setObjectName("bulkSelectedFileTagsHost")
+        self.tags_edit_host.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        tags_host_layout = QVBoxLayout(self.tags_edit_host)
+        tags_host_layout.setContentsMargins(0, 0, 0, 0)
+        tags_host_layout.setSpacing(self._GENERATE_BUTTON_GAP)
+
+        self.tags_edit = self._TagsEdit(self.tags_edit_host)
         self.tags_edit.setObjectName("bulkSelectedFileTagsEdit")
         self.tags_edit.setPlaceholderText(str(placeholder_text or ""))
         self.tags_edit.setDocumentTitle("bulk-selected-file-tags")
@@ -886,15 +893,8 @@ class BulkSelectedFileRow(QWidget):
         self.tags_edit.setFixedHeight(self._content_height)
         self.tags_edit.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.tags_edit.editingFinished.connect(self._emit_tags_edited)
-
-        self.tags_edit_host = QWidget()
-        self.tags_edit_host.setObjectName("bulkSelectedFileTagsHost")
-        self.tags_edit_host.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        tags_host_layout = QVBoxLayout(self.tags_edit_host)
-        tags_host_layout.setContentsMargins(0, 0, 0, 0)
-        tags_host_layout.setSpacing(self._GENERATE_BUTTON_GAP)
         tags_host_layout.addWidget(self.tags_edit)
-        self.generate_btn = QPushButton(str(generate_button_text or ""))
+        self.generate_btn = QPushButton(str(generate_button_text or ""), self.tags_edit_host)
         self.generate_btn.setObjectName("bulkSelectedFileGenerateButton")
         self.generate_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.generate_btn.setFixedHeight(self._GENERATE_BUTTON_HEIGHT)
