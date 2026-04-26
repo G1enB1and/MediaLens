@@ -1601,7 +1601,7 @@ class WindowSidebarBulkMixin:
             if self._is_valid_bulk_selected_file_row(row):
                 try:
                     row.set_shared_editor_widths(host_width, stacked)
-                    item.setSizeHint(QSize(max(0, viewport_width - 8), row.item_height()))
+                    item.setSizeHint(QSize(0, row.item_height()))
                     row.updateGeometry()
                     row.update()
                 except RuntimeError:
@@ -1641,7 +1641,7 @@ class WindowSidebarBulkMixin:
             if self._is_valid_bulk_selected_file_row(row):
                 try:
                     row.set_shared_editor_widths(host_width, stacked)
-                    item.setSizeHint(QSize(max(0, viewport_width - 8), row.item_height()))
+                    item.setSizeHint(QSize(0, row.item_height()))
                     row.updateGeometry()
                     row.update()
                 except RuntimeError:
@@ -1681,7 +1681,7 @@ class WindowSidebarBulkMixin:
             if self._is_valid_bulk_selected_file_row(row):
                 try:
                     row.set_shared_editor_widths(host_width, stacked)
-                    item.setSizeHint(QSize(max(0, viewport_width - 8), row.item_height()))
+                    item.setSizeHint(QSize(0, row.item_height()))
                     row.updateGeometry()
                     row.update()
                 except RuntimeError:

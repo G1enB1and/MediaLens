@@ -1548,6 +1548,7 @@ class WindowLayoutPanelsMixin:
 
         self.bulk_ocr_bottom_buttons = QWidget(self.bulk_ocr_scroll_container)
         self.bulk_ocr_bottom_buttons.setObjectName("bulkOcrBottomButtons")
+        self.bulk_ocr_bottom_buttons.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         bulk_ocr_bottom_layout = QVBoxLayout(self.bulk_ocr_bottom_buttons)
         bulk_ocr_bottom_layout.setContentsMargins(0, 0, 0, 0)
         bulk_ocr_bottom_layout.setSpacing(6)
