@@ -1302,7 +1302,7 @@ class WindowNativeActionsMixin:
                     background-color: {Theme.mix(Theme.get_control_bg(accent), QColor("#000000" if is_light else "#ffffff"), 0.06)};
                     border: 1px solid {Theme.get_border(accent)};
                     border-radius: 8px;
-                    padding: 6px;
+                    padding: 4px;
                 }}
                 QListWidget#bulkSelectedFilesList::item {{
                     background: transparent;

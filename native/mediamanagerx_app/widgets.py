@@ -856,7 +856,7 @@ class BulkSelectedFileRow(QWidget):
         layout.addWidget(self.name_lbl)
 
         content_row = QHBoxLayout()
-        content_row.setContentsMargins(0, 0, 6, 0)
+        content_row.setContentsMargins(0, 0, 0, 0)
         content_row.setSpacing(12)
         self._content_row = content_row
 
@@ -983,7 +983,6 @@ class BulkSelectedFileRow(QWidget):
             self.tags_edit_host.setFixedHeight(self._content_height + generate_extra)
         self._tags_host_layout = tags_host_layout
         content_row.addWidget(self.tags_edit_host, 1, Qt.AlignmentFlag.AlignTop)
-        content_row.addSpacing(4)
 
         layout.addLayout(content_row, 1)
         self._queue_sync_editor_width()
@@ -1271,7 +1270,7 @@ class BulkSelectedFileRow(QWidget):
                     - row_margins.left()
                     - row_margins.right()
                     - self._RIGHT_GUTTER
-                    - 14,
+                    - 4,
                 )
             else:
                 thumb_widget = getattr(self, "thumb_host", None) or self.thumb_lbl
@@ -1286,9 +1285,8 @@ class BulkSelectedFileRow(QWidget):
                     - row_margins.right()
                     - thumb_width
                     - spacing
-                    - 4
                     - self._RIGHT_GUTTER
-                    - 14,
+                    - 4,
                 )
             self.tags_edit_host.setFixedWidth(host_width)
             self.tags_edit.setFixedWidth(host_width)
@@ -1302,8 +1300,8 @@ class BulkSelectedFileRow(QWidget):
 
     def item_height(self) -> int:
         if bool(getattr(self, "_stacked_content", False)):
-            return int(self.thumb_host.height()) + int(self.tags_edit_host.height()) + int(self._content_row.spacing()) + 50
-        return int(self._content_height) + 76 + self._generate_button_extra_height()
+            return int(self.thumb_host.height()) + int(self.tags_edit_host.height()) + int(self._content_row.spacing()) + 42
+        return int(max(self.thumb_host.height(), self.tags_edit_host.height())) + 42
 
     def sizeHint(self) -> QSize:
         return QSize(self._MIN_EDITOR_WIDTH, self.item_height())

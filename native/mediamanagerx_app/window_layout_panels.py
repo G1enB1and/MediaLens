@@ -1513,7 +1513,7 @@ class WindowLayoutPanelsMixin:
         self.bulk_ocr_scroll_container.setMinimumWidth(0)
         self.bulk_ocr_scroll_container.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.bulk_ocr_right_layout = QVBoxLayout(self.bulk_ocr_scroll_container)
-        self.bulk_ocr_right_layout.setContentsMargins(12, 12, 12, 12)
+        self.bulk_ocr_right_layout.setContentsMargins(4, 12, 4, 12)
         self.bulk_ocr_right_layout.setSpacing(6)
 
         self.bulk_ocr_selection_lbl = QLabel("")
@@ -1544,7 +1544,7 @@ class WindowLayoutPanelsMixin:
         self.bulk_ocr_selected_files_list.setMinimumWidth(0)
         self.bulk_ocr_selected_files_list.setMinimumHeight(120)
         self.bulk_ocr_selected_files_list.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
-        self.bulk_ocr_selected_files_list.setViewportMargins(0, 0, 4, 0)
+        self.bulk_ocr_selected_files_list.setViewportMargins(0, 0, 0, 0)
         self.bulk_ocr_selected_files_list.layoutSyncRequested.connect(self._sync_bulk_ocr_selected_files_layout)
         self.bulk_ocr_selected_files_list.verticalScrollBar().rangeChanged.connect(lambda _min, _max: self._queue_bulk_ocr_selected_files_layout_sync())
         self.bulk_ocr_right_layout.addWidget(self.bulk_ocr_selected_files_list, 1)
