@@ -735,7 +735,7 @@ class WindowNativeActionsMixin:
                     padding: 4px;
                     selection-background-color: {Theme.get_accent_soft(accent)};
                 }}
-                QPlainTextEdit#bulkTagEditorStatusLabel {{
+                QPlainTextEdit#bulkTagEditorStatusLabel, QLabel#bulkTagEditorStatusLabel {{
                     background: transparent;
                     border: none;
                     color: {text_muted};
@@ -1279,7 +1279,7 @@ class WindowNativeActionsMixin:
                 QToolButton#bulkTagEditorSectionToggle:hover {{
                     color: {Theme.mix(text, accent, 0.76)};
                 }}
-                QPlainTextEdit#metaStatusLabel, QPlainTextEdit#bulkTagEditorStatusLabel {{
+                QPlainTextEdit#metaStatusLabel, QPlainTextEdit#bulkTagEditorStatusLabel, QLabel#bulkTagEditorStatusLabel {{
                     background: transparent;
                     border: none;
                     color: {text_muted};
