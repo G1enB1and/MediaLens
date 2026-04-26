@@ -1025,6 +1025,7 @@ class WindowSidebarBulkMixin:
                 self._bulk_ocr_status("No text to confirm.")
                 return
             if hasattr(self.bridge, "keep_user_ocr_text_for_path") and self.bridge.keep_user_ocr_text_for_path(clean_path, str(text or "")):
+                self._set_bulk_ocr_row_text(clean_path, str(text or ""))
                 self._bulk_ocr_status(f"Confirmed OCR text for {Path(clean_path).name}")
             return
         if action == "fast_ocr":
@@ -1236,13 +1237,37 @@ class WindowSidebarBulkMixin:
             self._ocr_review_status("No media record found.")
             return
         key = str(source_key or "").strip()
+        edit = (getattr(self, "ocr_review_fields", {}) or {}).get(key)
+        text = edit.toPlainText() if edit is not None else ""
+        if not str(text or "").strip():
+            self._ocr_review_status("No OCR text available to keep.")
+            return
         ok = False
         if key == "user":
-            edit = (getattr(self, "ocr_review_fields", {}) or {}).get("user")
-            text = edit.toPlainText() if edit is not None else ""
             ok = bool(self.bridge.keep_user_ocr_text_for_path(path, text))
         else:
-            ok = bool(self.bridge.keep_latest_ocr_result_source(int(media.get("id") or 0), self._ocr_review_source_key(key)))
+            try:
+                from app.mediamanager.db.ocr_repo import add_ocr_result
+
+                add_ocr_result(
+                    self.bridge.conn,
+                    int(media.get("id") or 0),
+                    source=self._ocr_review_source_key(key),
+                    text=str(text or ""),
+                    confidence=1.0,
+                    engine_version="manual_review",
+                    preprocess_profile="review_edit",
+                    select_as_winner=True,
+                    selected_by="user",
+                )
+                self.bridge.galleryScopeChanged.emit()
+                ok = True
+            except Exception as exc:
+                try:
+                    self.bridge._log(f"Keep edited OCR review source failed: {exc}")
+                except Exception:
+                    pass
+                ok = False
         if ok:
             self._set_bulk_ocr_row_text(path, self.bridge.get_media_metadata(path).get("detected_text", ""))
             self._refresh_ocr_review_for_path(path)
