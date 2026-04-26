@@ -1,19 +1,18 @@
-## MediaLens v1.2.2
+## MediaLens v1.2.3
 
 ### Summary
 
-This release makes MediaLens easier to repair, reinstall, and move safely. It adds library backup and restore tools, gives uninstall a real cleanup choice, and improves the startup updater path used to recover from broken builds.
+This release protects Fast OCR setups that are already using the GPU. Paddle OCR repair now avoids downgrading a working GPU runtime to CPU fallback and reports repair problems more accurately.
 
 ### Highlights
 
-- Export and import a MediaLens library backup from the File menu.
-- Choose whether imported recycle-bin files, thumbnails, local AI models, and AI runtimes merge with or replace what is already installed.
-- Uninstall can now remove selected app-data categories, including legacy leftovers, for a cleaner reinstall.
+- Fast OCR repair keeps an active Paddle GPU runtime in place instead of removing it before repair is proven safe.
+- Failed Paddle OCR repairs now re-check the runtime so MediaLens does not incorrectly show a working install as missing.
+- CPU fallback setup now tries the package source that works for current Paddle CPU wheels first.
 
 ### Notes
 
-- Startup update dialogs are now parented to the splash screen, reducing stray window flashes before the main app opens.
-- Library backups intentionally exclude old MediaManagerX legacy files.
+- No bundled local AI runtime packages were added to the installer; Paddle OCR still uses the managed per-user runtime under AppData.
 
 Full Changelog:
 https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md

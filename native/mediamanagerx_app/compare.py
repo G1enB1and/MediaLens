@@ -372,7 +372,7 @@ class CompareSlotCard(QFrame):
         self.setAcceptDrops(True)
         self.setMinimumHeight(0)
         self.setMinimumWidth(0)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         self._entry: dict = {}
         self._full_name_text: str = "Drop image here"
         self._drag_start_pos: QPoint | None = None
@@ -407,6 +407,7 @@ class CompareSlotCard(QFrame):
         self.thumb_frame = QFrame()
         self.thumb_frame.setObjectName("compareSlotThumbCard")
         self.thumb_frame.setMinimumHeight(0)
+        self.thumb_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         self.thumb_frame.setCursor(Qt.CursorShape.ArrowCursor)
         thumb_layout = QVBoxLayout(self.thumb_frame)
         thumb_layout.setContentsMargins(6, 4, 6, 4)
@@ -416,6 +417,7 @@ class CompareSlotCard(QFrame):
 
         self.thumb_wrap = QWidget()
         self.thumb_wrap.setMinimumHeight(0)
+        self.thumb_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         self.thumb_wrap.setCursor(Qt.CursorShape.ArrowCursor)
         thumb_wrap_layout = QVBoxLayout(self.thumb_wrap)
         thumb_wrap_layout.setContentsMargins(0, 5, 0, 5)
@@ -435,10 +437,12 @@ class CompareSlotCard(QFrame):
         self.meta_label.setWordWrap(True)
         self.meta_label.setContentsMargins(0, 0, 0, 0)
         self.meta_label.setMinimumHeight(0)
+        self.meta_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         thumb_layout.addWidget(self.meta_label)
 
         self.meta_detail_row = QWidget()
         self.meta_detail_row.setObjectName("compareSlotMetaDetailRow")
+        self.meta_detail_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         meta_detail_layout = QHBoxLayout(self.meta_detail_row)
         meta_detail_layout.setContentsMargins(0, 0, 0, 0)
         meta_detail_layout.setSpacing(6)
@@ -461,11 +465,15 @@ class CompareSlotCard(QFrame):
         self.reasons_label = QLabel("")
         self.reasons_label.setObjectName("compareSlotReasons")
         self.reasons_label.setWordWrap(True)
+        self.reasons_label.setMinimumHeight(0)
+        self.reasons_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout.addWidget(self.reasons_label)
 
         self.best_label = QLabel("")
         self.best_label.setObjectName("compareSlotBest")
         self.best_label.setWordWrap(True)
+        self.best_label.setMinimumHeight(0)
+        self.best_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout.addWidget(self.best_label)
 
         controls = QHBoxLayout()
@@ -497,7 +505,7 @@ class CompareSlotCard(QFrame):
         actions.setContentsMargins(0, 0, 0, 0)
         actions.setSpacing(8)
 
-        self.browse_btn = QPushButton("Browseâ€¦")
+        self.browse_btn = QPushButton("Browse")
         self.browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.browse_btn.clicked.connect(lambda: self.browseRequested.emit(self.slot_name))
         self.browse_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -958,7 +966,7 @@ class ComparePanel(QWidget):
         self.viewer_wrap = QWidget()
         self.viewer_footer = QWidget()
         self.viewer_footer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.viewer_footer.setMinimumHeight(54)
+        self.viewer_footer.setFixedHeight(54)
         footer_layout = QVBoxLayout(self.viewer_footer)
         footer_layout.setContentsMargins(0, 0, 0, 0)
         footer_layout.setSpacing(4)
@@ -978,9 +986,9 @@ class ComparePanel(QWidget):
             scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
             scroll.setMinimumHeight(0)
             scroll.setMinimumWidth(0)
-            scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         self.viewer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
-        self.viewer_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.viewer_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
 
         layout.addWidget(self.left_scroll, 0)
         layout.addWidget(self.viewer_wrap, 1)
@@ -1042,11 +1050,6 @@ class ComparePanel(QWidget):
         self.viewer_hint.setText(self._viewer_hint_text)
         self.viewer_upscale_warning.setText(self._viewer_upscale_text)
         self.viewer_aspect_warning.setText(self._viewer_aspect_text)
-        try:
-            self.viewer_footer.updateGeometry()
-            self.viewer_footer.adjustSize()
-        except Exception:
-            pass
 
     def apply_theme_styles(self, text: str, text_muted: str, accent_hex: str, accent_raw: str, thumb_bg: str, border: str) -> None:
         for slot in (self.left_slot, self.right_slot):

@@ -1,6 +1,27 @@
 # Change Log
 
-## v1.2.2 (Current)
+## v1.2.3 (Current)
+
+### Summary
+
+This release keeps Fast OCR repairs from downgrading a working GPU runtime. MediaLens now preserves an active Paddle GPU setup during repair and gives clearer status when repair fails instead of making the runtime look uninstalled.
+
+### Highlights
+
+- Fast OCR repair now protects an already-working Paddle GPU runtime from being replaced by CPU fallback.
+- Paddle OCR setup now reports when the runtime is still installed after a failed repair attempt.
+- CPU fallback installation now tries the package source that works for current Paddle CPU wheels before trying Paddle's CPU index.
+
+### Changed
+
+- Changed Paddle OCR repair so an existing GPU-active runtime is not removed before the replacement GPU package is proven usable.
+- Changed Paddle OCR repair so CPU fallback is skipped when it would downgrade an existing GPU-active runtime.
+- Changed Paddle OCR install failure handling to re-check the existing runtime before reporting it as not installed.
+- Changed Paddle CPU fallback install order to try PyPI before Paddle's CPU package index.
+
+---
+
+## v1.2.2
 
 ### Summary
 

@@ -243,15 +243,19 @@ class WindowLayoutPanelsMixin:
         center_splitter.setObjectName("centerSplitter")
         center_splitter.setMouseTracking(True)
         center_splitter.setHandleWidth(7)
-        center_splitter.setChildrenCollapsible(False)
+        center_splitter.setChildrenCollapsible(True)
         self.center_splitter = center_splitter
 
         center = QWidget(center_splitter)
+        center.setMinimumHeight(0)
+        center.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         center_layout = QVBoxLayout(center)
         center_layout.setContentsMargins(0, 0, 0, 0)
 
         self.center_workspace_stack = QStackedWidget(center)
         self.center_workspace_stack.setObjectName("centerWorkspaceStack")
+        self.center_workspace_stack.setMinimumHeight(0)
+        self.center_workspace_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         center_layout.addWidget(self.center_workspace_stack)
 
         self.gallery_workspace = QWidget(self.center_workspace_stack)
@@ -261,6 +265,8 @@ class WindowLayoutPanelsMixin:
         gallery_workspace_layout.setSpacing(0)
 
         self.web = GalleryView(self.gallery_workspace)
+        self.web.setMinimumHeight(0)
+        self.web.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         if bool(_WINDOWS_WEBENGINE_RUNTIME.get("use_custom_page", True)):
             self.web.setPage(GalleryWebPage(self.web))
         gallery_workspace_layout.addWidget(self.web)
@@ -1677,6 +1683,7 @@ class WindowLayoutPanelsMixin:
         self.bottom_panel = QWidget(center_splitter)
         self.bottom_panel.setObjectName("bottomPanel")
         self.bottom_panel.setMinimumHeight(0)
+        self.bottom_panel.setMaximumHeight(16777215)
         self.bottom_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         bottom_layout = QVBoxLayout(self.bottom_panel)
         bottom_layout.setContentsMargins(14, 10, 14, 14)
@@ -1778,13 +1785,16 @@ class WindowLayoutPanelsMixin:
         bottom_layout.addWidget(self.bottom_panel_header_row)
 
         self.compare_panel = ComparePanel(self.bridge, self.bottom_panel)
+        self.compare_panel.setMaximumHeight(16777215)
         bottom_layout.addWidget(self.compare_panel, 1)
         self._apply_compare_panel_theme(accent_val)
 
         center_splitter.addWidget(center)
         center_splitter.addWidget(self.bottom_panel)
+        center_splitter.setCollapsible(0, True)
+        center_splitter.setCollapsible(1, True)
         center_splitter.setStretchFactor(0, 1)
-        center_splitter.setStretchFactor(1, 0)
+        center_splitter.setStretchFactor(1, 1)
         center_container_layout.addWidget(center_splitter)
 
         splitter.addWidget(self.left_panel)

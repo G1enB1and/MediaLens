@@ -50,15 +50,17 @@ class WindowSidebarBulkMixin:
                 self._sync_menu_bar_controls()
             elif key == "ui.show_bottom_panel":
                 was_visible = bool(self.bottom_panel.isVisible())
-                if not bool(value):
+                next_visible = bool(value)
+                if was_visible and not next_visible:
                     self._save_bottom_panel_height()
-                self.bottom_panel.setVisible(bool(value))
-                QTimer.singleShot(0, self._restore_center_splitter_sizes)
-                if bool(value) and not was_visible:
+                self.bottom_panel.setVisible(next_visible)
+                if was_visible != next_visible:
+                    QTimer.singleShot(0, self._restore_center_splitter_sizes)
+                if next_visible and not was_visible:
                     QTimer.singleShot(0, self._seed_compare_from_first_review_group)
                     QTimer.singleShot(50, self._refresh_compare_nav_buttons)
                 if hasattr(self, "act_toggle_bottom_panel"):
-                    self.act_toggle_bottom_panel.setChecked(bool(value))
+                    self.act_toggle_bottom_panel.setChecked(next_visible)
                 self._sync_menu_bar_controls()
             elif key == "ui.preview_above_details":
                 if hasattr(self, "preview_header_row"):

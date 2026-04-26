@@ -314,6 +314,9 @@ class BridgeVideoMetadataMixin:
 
     @Slot(result="QVariantMap")
     def get_paddle_ocr_status(self) -> dict:
+        return self._get_paddle_ocr_status(probe_timeout=12)
+
+    def _get_paddle_ocr_status(self, probe_timeout: int = 12) -> dict:
         try:
             python_path = self._ocr_runtime_python_path()
             device = str(self.settings.value("ocr/paddle_device", "auto", type=str) or "auto")
@@ -368,13 +371,19 @@ class BridgeVideoMetadataMixin:
                         [str(python_path), "-c", code],
                         capture_output=True,
                         text=True,
-                        timeout=12,
+                        timeout=max(12, int(probe_timeout or 12)),
                         env=child_env,
                     )
                     if completed.returncode == 0:
                         probe = self._parse_paddle_ocr_probe_stdout(completed.stdout)
                     else:
                         probe = {"ok": False, "error": (completed.stderr or completed.stdout or "").strip()[-500:]}
+                except subprocess.TimeoutExpired as exc:
+                    detail = "Paddle OCR runtime probe timed out."
+                    output = " ".join(str(getattr(exc, "output", "") or getattr(exc, "stdout", "") or getattr(exc, "stderr", "") or "").split()).strip()
+                    if output:
+                        detail = f"{detail} {output[-500:]}"
+                    probe = {"ok": False, "error": detail}
                 except Exception as exc:
                     probe = {"ok": False, "error": str(exc)}
             current_device = str(probe.get("current_device") or "").strip().lower()
@@ -603,11 +612,15 @@ class BridgeVideoMetadataMixin:
                 if not python_path.is_file():
                     self._paddle_ocr_run_command([bootstrap_python, "-m", "venv", str(runtime_dir)], "Creating Paddle OCR runtime...", emit_status)
                 self._ensure_paddle_ocr_packaging_tools(python_path, emit_status)
-                self._paddle_ocr_run_command([str(python_path), "-m", "pip", "uninstall", "-y", "paddlepaddle", "paddlepaddle-gpu"], "Removing existing Paddle package...", emit_status)
+                initial_status = dict(self._get_paddle_ocr_status(probe_timeout=30) or {}) if python_path.is_file() else {}
+                had_gpu_active = bool(initial_status.get("gpu_active"))
+                if not had_gpu_active:
+                    self._paddle_ocr_run_command([str(python_path), "-m", "pip", "uninstall", "-y", "paddlepaddle", "paddlepaddle-gpu"], "Removing existing Paddle package...", emit_status)
 
                 requirements_path = self._local_ai_requirements_path(type("Spec", (), {"requirements_file": "requirements-local-ocr-paddle.txt"})())
                 self._paddle_ocr_run_command([str(python_path), "-m", "pip", "install", "-r", str(requirements_path)], "Installing PaddleOCR support...", emit_status)
-                self._paddle_ocr_run_command([str(python_path), "-m", "pip", "uninstall", "-y", "paddlepaddle", "paddlepaddle-gpu"], "Removing Paddle package selected by dependency resolver...", emit_status)
+                if not had_gpu_active:
+                    self._paddle_ocr_run_command([str(python_path), "-m", "pip", "uninstall", "-y", "paddlepaddle", "paddlepaddle-gpu"], "Removing Paddle package selected by dependency resolver...", emit_status)
 
                 def clean_install_error(value: object) -> str:
                     text = " ".join(str(value or "").split()).strip()
@@ -647,17 +660,37 @@ class BridgeVideoMetadataMixin:
                             [str(gpu_target["index_url"])],
                             f"Installing Paddle GPU runtime ({gpu_target.get('label')})",
                         )
-                        status = self.get_paddle_ocr_status()
+                        status = self._get_paddle_ocr_status(probe_timeout=90)
                         if status.get("gpu_active"):
                             payload = dict(status)
                             payload.update({"state": "installed", "running": False, "message": f"Paddle OCR runtime is installed. GPU is active ({installed_package})."})
                             self.paddleOcrRuntimeInstallStatus.emit(payload)
                             return
                         probe = dict(status.get("runtime_probe") or {})
-                        gpu_error = str(probe.get("gpu_error") or "GPU package installed, but Paddle did not activate the GPU.")
+                        gpu_error = str(probe.get("gpu_error") or probe.get("error") or "GPU package installed, but Paddle did not activate the GPU.")
+                        if str(probe.get("paddlepaddle_gpu_dist") or "").strip() or installed_package:
+                            self._log(f"Paddle OCR GPU runtime probe failed after install; CPU fallback skipped: {gpu_error}")
+                            raise RuntimeError(f"Paddle GPU package installed, but the runtime probe failed. {gpu_error}")
+                        if had_gpu_active:
+                            self._log(f"Paddle OCR GPU repair inactive; CPU fallback skipped to preserve existing GPU runtime: {gpu_error}")
+                            raise RuntimeError(f"Paddle GPU repair did not activate the GPU. {gpu_error}")
                         self._log(f"Paddle OCR GPU runtime inactive; falling back to CPU: {gpu_error}")
                     except Exception as exc:
                         gpu_error = str(exc)
+                        if had_gpu_active:
+                            status = dict(self._get_paddle_ocr_status(probe_timeout=90) or {})
+                            if status.get("gpu_active"):
+                                payload = dict(status)
+                                payload.update(
+                                    {
+                                        "state": "installed",
+                                        "running": False,
+                                        "message": f"Existing Paddle OCR GPU runtime is still active. Repair failed: {gpu_error}",
+                                    }
+                                )
+                                self.paddleOcrRuntimeInstallStatus.emit(payload)
+                                return
+                            raise RuntimeError(f"Paddle GPU repair failed and CPU fallback was skipped to avoid downgrading an existing GPU runtime. {gpu_error}")
                         self._log(f"Paddle OCR GPU runtime install failed; falling back to CPU: {exc}")
                 else:
                     gpu_error = str(gpu_target.get("reason") or "No compatible NVIDIA GPU was detected.")
@@ -669,10 +702,10 @@ class BridgeVideoMetadataMixin:
                     self._log(f"Paddle OCR cleanup before CPU fallback failed: {exc}")
                 installed_package = install_paddle_package(
                     "paddlepaddle",
-                    ["https://www.paddlepaddle.org.cn/packages/stable/cpu/", ""],
+                    ["", "https://www.paddlepaddle.org.cn/packages/stable/cpu/"],
                     "Installing Paddle CPU runtime",
                 )
-                status = self.get_paddle_ocr_status()
+                status = self._get_paddle_ocr_status(probe_timeout=90)
                 if not status.get("installed"):
                     probe = dict(status.get("runtime_probe") or {})
                     detail = str(probe.get("error") or probe.get("gpu_error") or probe.get("traceback") or "Paddle OCR runtime probe failed after install.")
@@ -686,7 +719,22 @@ class BridgeVideoMetadataMixin:
                 payload.update({"state": "installed", "running": False, "message": f"{message} ({installed_package})."})
                 self.paddleOcrRuntimeInstallStatus.emit(payload)
             except Exception as exc:
-                self.paddleOcrRuntimeInstallStatus.emit({"state": "error", "running": False, "installed": False, "message": str(exc) or "Paddle OCR runtime installation failed."})
+                message = str(exc) or "Paddle OCR runtime installation failed."
+                payload = {"state": "error", "running": False, "installed": False, "message": message}
+                try:
+                    status = dict(self._get_paddle_ocr_status(probe_timeout=30) or {})
+                except Exception:
+                    status = {}
+                if status.get("installed"):
+                    payload = dict(status)
+                    payload.update(
+                        {
+                            "state": "error" if str(status.get("gpu_issue") or "").strip() else "installed",
+                            "running": False,
+                            "message": f"Paddle OCR runtime is still installed, but repair failed: {message}",
+                        }
+                    )
+                self.paddleOcrRuntimeInstallStatus.emit(payload)
             finally:
                 self._paddle_ocr_runtime_installing = False
 
