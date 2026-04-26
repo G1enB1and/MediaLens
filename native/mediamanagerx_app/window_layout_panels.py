@@ -330,7 +330,7 @@ class WindowLayoutPanelsMixin:
         self.tag_list_panel.setMinimumWidth(220)
         self.tag_list_panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self.tag_list_panel_layout = QVBoxLayout(self.tag_list_panel)
-        self.tag_list_panel_layout.setContentsMargins(0, 12, 0, 0)
+        self.tag_list_panel_layout.setContentsMargins(12, 12, 12, 12)
         self.tag_list_panel_layout.setSpacing(8)
 
         self.tag_list_header_row = QWidget(self.tag_list_panel)
