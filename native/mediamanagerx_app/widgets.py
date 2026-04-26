@@ -884,10 +884,12 @@ class BulkSelectedFileRow(QWidget):
             f"QLabel#bulkSelectedFileThumb {{ background-color: {thumb_bg}; border-radius: 6px; }}"
         )
         if thumbnail is not None and not thumbnail.isNull():
-            self.thumb_lbl.setPixmap(thumbnail)
+            self._thumbnail_pixmap = QPixmap(thumbnail)
+            self._apply_thumbnail_pixmap()
             self._thumbnail_loaded = True
         else:
             self.thumb_lbl.setText("")
+            self._thumbnail_pixmap = QPixmap()
         if not hasattr(self, "_thumbnail_loaded"):
             self._thumbnail_loaded = False
         thumb_host_layout.addWidget(self.thumb_lbl)
@@ -1051,8 +1053,26 @@ class BulkSelectedFileRow(QWidget):
             )
             if thumbnail is not None and not thumbnail.isNull():
                 self.thumb_lbl.setText("")
-                self.thumb_lbl.setPixmap(thumbnail)
+                self._thumbnail_pixmap = QPixmap(thumbnail)
+                self._apply_thumbnail_pixmap()
             self._thumbnail_loaded = True
+        except RuntimeError:
+            pass
+
+    def _apply_thumbnail_pixmap(self) -> None:
+        try:
+            pixmap = getattr(self, "_thumbnail_pixmap", QPixmap())
+            if pixmap.isNull():
+                return
+            target = self.thumb_lbl.size()
+            if target.width() <= 0 or target.height() <= 0:
+                return
+            scaled = pixmap.scaled(
+                target,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self.thumb_lbl.setPixmap(scaled)
         except RuntimeError:
             pass
 
@@ -1109,6 +1129,7 @@ class BulkSelectedFileRow(QWidget):
         self.thumb_host.setFixedWidth(width)
         self.thumb_lbl.setFixedWidth(width)
         self.thumbnail_action_btn.setFixedWidth(width)
+        self._apply_thumbnail_pixmap()
 
     def _button_width_limits(self, button: QPushButton, stacked: bool) -> tuple[int, int]:
         key = str(button.property("bulkActionKey") or "").strip()

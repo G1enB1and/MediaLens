@@ -183,7 +183,11 @@ class WindowSidebarBulkMixin:
         if not hasattr(self, "scroll_area"):
             return 180
         if self._is_bulk_editor_active() and hasattr(self, "bulk_scroll_area") and hasattr(self, "bulk_right_layout"):
-            if self._current_bulk_editor_mode() == "captions" and hasattr(self, "bulk_caption_scroll_area") and hasattr(self, "bulk_caption_right_layout"):
+            current_mode = self._current_bulk_editor_mode()
+            if current_mode == "ocr" and hasattr(self, "bulk_ocr_scroll_area") and hasattr(self, "bulk_ocr_right_layout"):
+                scroll_area = self.bulk_ocr_scroll_area
+                layout = self.bulk_ocr_right_layout
+            elif current_mode == "captions" and hasattr(self, "bulk_caption_scroll_area") and hasattr(self, "bulk_caption_right_layout"):
                 scroll_area = self.bulk_caption_scroll_area
                 layout = self.bulk_caption_right_layout
             else:
@@ -217,6 +221,8 @@ class WindowSidebarBulkMixin:
             self.bulk_right_layout.activate()
         if hasattr(self, "bulk_caption_right_layout"):
             self.bulk_caption_right_layout.activate()
+        if hasattr(self, "bulk_ocr_right_layout"):
+            self.bulk_ocr_right_layout.activate()
 
     def _update_sidebar_action_buttons(self, available_w: int | None = None) -> None:
         if not hasattr(self, "scroll_area"):
@@ -270,6 +276,7 @@ class WindowSidebarBulkMixin:
             getattr(self, "generate_tags_btn_row", None),
             getattr(self, "tag_list_open_btn_row", None),
             getattr(self, "ocr_button_row", None),
+            getattr(self, "bulk_ocr_bottom_buttons", None),
         ]:
             if wrapper is None:
                 continue
@@ -1547,8 +1554,7 @@ class WindowSidebarBulkMixin:
         try:
             root_margins = row._root_layout.contentsMargins()
             row_margins = row._content_row.contentsMargins()
-            thumb_widget = getattr(row, "thumb_host", None) or getattr(row, "thumb_lbl", None)
-            thumb_width = int(thumb_widget.width() if thumb_widget is not None and thumb_widget.width() > 0 else row.thumb_lbl.width())
+            thumb_width = int(getattr(row, "_content_height", BulkSelectedFileRow._CAPTION_CONTENT_HEIGHT))
             spacing = max(0, int(row._content_row.spacing()))
         except RuntimeError:
             return BulkSelectedFileRow._MIN_EDITOR_WIDTH, False
