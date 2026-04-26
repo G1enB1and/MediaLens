@@ -482,7 +482,18 @@ class WindowLayoutPanelsMixin:
         ocr_review_fields_layout = QVBoxLayout(self.ocr_review_fields_panel)
         ocr_review_fields_layout.setContentsMargins(0, 0, 0, 0)
         ocr_review_fields_layout.setSpacing(8)
-        check_icon = QIcon(str(Path(__file__).with_name("web") / "icons" / "check-green.svg"))
+        icons_dir = Path(__file__).with_name("web") / "icons"
+        check_icon = QIcon(str(icons_dir / "check-green.svg"))
+        self.ocr_review_no_text_btn = QPushButton("")
+        self.ocr_review_no_text_btn.setObjectName("bulkSelectedFileGenerateButton")
+        self.ocr_review_no_text_btn.setToolTip("Mark this file as no text detected")
+        self.ocr_review_no_text_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.ocr_review_no_text_btn.setIcon(QIcon(str(icons_dir / "text-disabled.svg")))
+        self.ocr_review_no_text_btn.setIconSize(QSize(52, 24))
+        self.ocr_review_no_text_btn.setFixedHeight(32)
+        self.ocr_review_no_text_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.ocr_review_no_text_btn.clicked.connect(self._mark_ocr_review_no_text)
+        ocr_review_fields_layout.addWidget(self.ocr_review_no_text_btn)
         self.ocr_review_fields: dict[str, QPlainTextEdit] = {}
         self.ocr_review_keep_buttons: dict[str, QPushButton] = {}
         self.ocr_review_generate_buttons: dict[str, QPushButton] = {}

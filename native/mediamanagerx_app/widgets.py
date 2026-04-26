@@ -885,9 +885,9 @@ class BulkSelectedFileRow(QWidget):
             thumb_bg = "#101114"
         else:
             thumb_bg = "transparent"
-        self.thumb_lbl.setStyleSheet(
-            f"QLabel#bulkSelectedFileThumb {{ background-color: {thumb_bg}; border-radius: 6px; }}"
-        )
+        self._thumb_bg = thumb_bg
+        self._thumb_active_border = ""
+        self._apply_thumbnail_frame_style()
         if thumbnail is not None and not thumbnail.isNull():
             self._thumbnail_pixmap = QPixmap(thumbnail)
             self._apply_thumbnail_pixmap()
@@ -1052,14 +1052,41 @@ class BulkSelectedFileRow(QWidget):
                 thumb_bg = "#101114"
             else:
                 thumb_bg = "transparent"
-            self.thumb_lbl.setStyleSheet(
-                f"QLabel#bulkSelectedFileThumb {{ background-color: {thumb_bg}; border-radius: 6px; }}"
-            )
+            self._thumb_bg = thumb_bg
+            self._apply_thumbnail_frame_style()
             if thumbnail is not None and not thumbnail.isNull():
                 self.thumb_lbl.setText("")
                 self._thumbnail_pixmap = QPixmap(thumbnail)
                 self._apply_thumbnail_pixmap()
             self._thumbnail_loaded = True
+        except RuntimeError:
+            pass
+
+    def set_ocr_review_active(self, active: bool, accent_color: str = "") -> None:
+        try:
+            is_active = bool(active)
+            self.setProperty("ocrReviewActive", is_active)
+            self.thumb_lbl.setProperty("ocrReviewActive", is_active)
+            if str(accent_color or "").strip():
+                self._thumb_frame_accent = str(accent_color or "").strip()
+            self._thumb_active_border = str(accent_color or "").strip() if is_active else ""
+            self._apply_thumbnail_frame_style()
+            for widget in (self, self.thumb_lbl):
+                widget.style().unpolish(widget)
+                widget.style().polish(widget)
+                widget.update()
+        except RuntimeError:
+            pass
+
+    def _apply_thumbnail_frame_style(self) -> None:
+        try:
+            bg = str(getattr(self, "_thumb_bg", "transparent") or "transparent")
+            border = str(getattr(self, "_thumb_active_border", "") or "").strip()
+            frame_accent = QColor(str(getattr(self, "_thumb_frame_accent", "") or "#8ab4f8"))
+            border_color = border if border else Theme.get_input_border(frame_accent)
+            self.thumb_lbl.setStyleSheet(
+                f"QLabel#bulkSelectedFileThumb {{ background-color: {bg}; border: 1px solid {border_color}; border-radius: 6px; }}"
+            )
         except RuntimeError:
             pass
 

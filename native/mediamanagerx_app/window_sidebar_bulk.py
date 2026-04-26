@@ -997,6 +997,71 @@ class WindowSidebarBulkMixin:
                 return row
         return None
 
+    def _current_gallery_filter_is_text_detected(self) -> bool:
+        try:
+            _media_filter, text_filter, _tags_filter, _desc_filter, _ai_filter = self.bridge._parse_filter_groups(
+                getattr(self.bridge, "_current_gallery_filter", "all")
+            )
+            return str(text_filter or "") == "text_detected"
+        except Exception:
+            return False
+
+    def _remove_path_from_current_selection(self, path: str) -> None:
+        target = str(path or "").casefold()
+        if not target:
+            return
+        current_paths = list(getattr(self, "_current_paths", []) or [])
+        self._current_paths = [item for item in current_paths if str(item or "").casefold() != target]
+
+    def _sync_bulk_ocr_selection_controls(self) -> None:
+        selection_count = len(self._current_file_paths())
+        if hasattr(self, "bulk_ocr_selection_lbl"):
+            self.bulk_ocr_selection_lbl.setText(f"<span style=\"font-weight:700;\">{selection_count}</span> files selected")
+        for button, text in (
+            (getattr(self, "bulk_ocr_btn_run_fast", None), f"Fast OCR for All ({selection_count} Files)"),
+            (getattr(self, "bulk_ocr_btn_run_ai", None), f"AI OCR for All ({selection_count} Files)"),
+            (getattr(self, "bulk_ocr_btn_save", None), f"Save OCR Text to DB for {selection_count} Items"),
+            (getattr(self, "bulk_ocr_btn_clear", None), f"Clear OCR Text for {selection_count} Items"),
+        ):
+            if button is None:
+                continue
+            button.setProperty("baseText", text)
+            button.setText(text)
+
+    def _sync_bulk_ocr_review_row_highlight(self, path: str | None = None) -> None:
+        list_widget = getattr(self, "bulk_ocr_selected_files_list", None)
+        if list_widget is None:
+            return
+        target_source = getattr(self, "_ocr_review_path", "") if path is None else path
+        target = str(target_source or "").casefold()
+        target_item = None
+        for i in range(list_widget.count()):
+            item = list_widget.item(i)
+            row = list_widget.itemWidget(item)
+            if not self._is_valid_bulk_selected_file_row(row):
+                continue
+            active = bool(target and str(getattr(row, "_path", "") or "").casefold() == target)
+            if hasattr(row, "set_ocr_review_active"):
+                try:
+                    row.set_ocr_review_active(active, str(getattr(self, "_current_accent", "") or "#8ab4f8"))
+                except Exception:
+                    pass
+            else:
+                row.setProperty("ocrReviewActive", active)
+                try:
+                    row.style().unpolish(row)
+                    row.style().polish(row)
+                except Exception:
+                    pass
+                row.update()
+            if active:
+                target_item = item
+        if target_item is not None:
+            try:
+                list_widget.scrollToItem(target_item, QAbstractItemView.ScrollHint.PositionAtCenter)
+            except Exception:
+                pass
+
     def _set_bulk_ocr_row_text(self, path: str, text: str) -> None:
         row = self._bulk_ocr_row_for_path(path)
         if not self._is_valid_bulk_selected_file_row(row):
@@ -1008,15 +1073,44 @@ class WindowSidebarBulkMixin:
         except RuntimeError:
             pass
 
+    def _mark_bulk_ocr_path_no_text(self, path: str, *, advance_review: bool = False) -> None:
+        clean_path = str(path or "").strip()
+        if not clean_path or not hasattr(self.bridge, "mark_ocr_no_text_for_path"):
+            return
+        review_path = str(getattr(self, "_ocr_review_path", "") or "").strip()
+        review_matches = bool(review_path and review_path.casefold() == clean_path.casefold())
+        review_paths = self._ocr_review_selected_paths() if advance_review and review_matches else []
+        try:
+            current_idx = next(i for i, item in enumerate(review_paths) if str(item).casefold() == clean_path.casefold())
+        except StopIteration:
+            current_idx = -1
+        if not self.bridge.mark_ocr_no_text_for_path(clean_path):
+            return
+        self._set_bulk_ocr_row_text(clean_path, "")
+        removed_for_filter = self._current_gallery_filter_is_text_detected()
+        if removed_for_filter:
+            self._remove_path_from_current_selection(clean_path)
+            self._sync_bulk_ocr_selection_controls()
+            self._refresh_bulk_ocr_editor_summary()
+            self._sync_sidebar_panel_widths()
+        else:
+            self._sync_bulk_ocr_review_row_highlight(review_path)
+        if advance_review and review_matches:
+            remaining_paths = [item for item in review_paths if str(item).casefold() != clean_path.casefold()]
+            if remaining_paths:
+                next_idx = min(max(0, current_idx), len(remaining_paths) - 1)
+                self._refresh_ocr_review_for_path(remaining_paths[next_idx])
+            else:
+                self._close_ocr_review_panel()
+        self._bulk_ocr_status(f"Marked no text for {Path(clean_path).name}")
+
     def _handle_bulk_ocr_row_action(self, path: str, action_key: str) -> None:
         clean_path = str(path or "").strip()
         action = str(action_key or "").strip().lower()
         if not clean_path:
             return
         if action == "no_text":
-            if hasattr(self.bridge, "mark_ocr_no_text_for_path") and self.bridge.mark_ocr_no_text_for_path(clean_path):
-                self._set_bulk_ocr_row_text(clean_path, "")
-                self._bulk_ocr_status(f"Marked no text for {Path(clean_path).name}")
+            self._mark_bulk_ocr_path_no_text(clean_path, advance_review=True)
             return
         if action == "confirm_text":
             row = self._bulk_ocr_row_for_path(clean_path)
@@ -1097,6 +1191,7 @@ class WindowSidebarBulkMixin:
 
     def _close_ocr_review_panel(self) -> None:
         try:
+            self._sync_bulk_ocr_review_row_highlight("")
             if hasattr(self, "center_workspace_stack") and hasattr(self, "gallery_workspace"):
                 self._set_center_gallery_visible()
             self._schedule_gallery_container_relayout(0)
@@ -1202,6 +1297,7 @@ class WindowSidebarBulkMixin:
             edit.blockSignals(False)
         self._set_ocr_review_winner_state(media)
         self._sync_ocr_review_nav_buttons()
+        self._sync_bulk_ocr_review_row_highlight(clean_path)
         self._ocr_review_status("")
 
     def _refresh_ocr_review_image(self, path: str) -> None:
@@ -1310,6 +1406,12 @@ class WindowSidebarBulkMixin:
             return
         self._run_bulk_ocr_for_paths(self._ocr_review_source_key(key), [path])
         self._ocr_review_status(f"Running {'AI OCR' if key == 'ai' else 'Fast OCR'} for {Path(path).name}...")
+
+    def _mark_ocr_review_no_text(self) -> None:
+        path = str(getattr(self, "_ocr_review_path", "") or "").strip()
+        if not path:
+            return
+        self._mark_bulk_ocr_path_no_text(path, advance_review=True)
 
     @staticmethod
     def _bulk_selected_file_tags_text(tags: list[str]) -> str:
@@ -1553,6 +1655,7 @@ class WindowSidebarBulkMixin:
             thumbnail_button_text="Review",
         )
         self._queue_bulk_ocr_selected_files_layout_sync()
+        self._sync_bulk_ocr_review_row_highlight()
 
     def _queue_bulk_selected_files_layout_sync(self) -> None:
         if not hasattr(self, "bulk_selected_files_list"):

@@ -1326,6 +1326,9 @@ class WindowNativeActionsMixin:
                     border: 1px solid {Theme.mix(Theme.get_border(accent), accent, 0.42)};
                     border-radius: 8px;
                 }}
+                QWidget#bulkSelectedFileRow[ocrReviewActive="true"] {{
+                    border-color: {accent_str};
+                }}
                 QLabel#bulkSelectedFileName {{
                     color: {text};
                     font-weight: 700;
@@ -1335,6 +1338,9 @@ class WindowNativeActionsMixin:
                     background-color: {Theme.mix(Theme.get_input_bg(accent), QColor("#ffffff" if is_light else "#000000"), 0.16)};
                     border: 1px solid {Theme.get_input_border(accent)};
                     border-radius: 6px;
+                }}
+                QLabel#bulkSelectedFileThumb[ocrReviewActive="true"] {{
+                    border: 1px solid {accent_str};
                 }}
                 QPlainTextEdit#bulkTagEditorCommonTagsText, QPlainTextEdit#bulkTagEditorUncommonTagsText {{
                     selection-background-color: {Theme.get_accent_soft(accent)};
