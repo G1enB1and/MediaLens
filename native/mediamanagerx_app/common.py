@@ -247,6 +247,7 @@ from PySide6.QtWidgets import (
     QSplitterHandle,
     QSpacerItem,
     QWidget,
+    QBoxLayout,
     QVBoxLayout,
     QSizePolicy,
     QTreeView,

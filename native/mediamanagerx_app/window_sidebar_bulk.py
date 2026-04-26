@@ -365,6 +365,10 @@ class WindowSidebarBulkMixin:
     def _set_active_bulk_editor_mode(self, mode: str) -> None:
         raw_mode = str(mode or "").strip().lower()
         next_mode = "captions" if raw_mode == "captions" else ("ocr" if raw_mode == "ocr" else "tags")
+        if next_mode != "ocr" and hasattr(self, "_is_ocr_review_panel_visible") and self._is_ocr_review_panel_visible():
+            self._close_ocr_review_panel()
+        if next_mode != "tags" and hasattr(self, "_is_tag_list_panel_visible") and self._is_tag_list_panel_visible():
+            self._close_tag_list_panel()
         self._bulk_editor_mode = next_mode
         if hasattr(self, "bulk_mode_tags_btn"):
             self.bulk_mode_tags_btn.blockSignals(True)
@@ -1537,7 +1541,7 @@ class WindowSidebarBulkMixin:
         if pending_more:
             QTimer.singleShot(16, lambda: self._load_visible_bulk_selected_file_thumbnails(list_widget, content_height, max_per_pass=max_per_pass))
 
-    def _bulk_selected_row_editor_width(self, list_widget: QListWidget, row: BulkSelectedFileRow) -> int:
+    def _bulk_selected_row_editor_width(self, list_widget: QListWidget, row: BulkSelectedFileRow) -> tuple[int, bool]:
         viewport = list_widget.viewport()
         viewport_width = max(0, viewport.width() if viewport is not None else 0)
         try:
@@ -1547,8 +1551,8 @@ class WindowSidebarBulkMixin:
             thumb_width = int(thumb_widget.width() if thumb_widget is not None and thumb_widget.width() > 0 else row.thumb_lbl.width())
             spacing = max(0, int(row._content_row.spacing()))
         except RuntimeError:
-            return BulkSelectedFileRow._MIN_EDITOR_WIDTH
-        return max(
+            return BulkSelectedFileRow._MIN_EDITOR_WIDTH, False
+        normal_width = max(
             BulkSelectedFileRow._MIN_EDITOR_WIDTH,
             viewport_width
             - root_margins.left()
@@ -1561,6 +1565,19 @@ class WindowSidebarBulkMixin:
             - BulkSelectedFileRow._RIGHT_GUTTER
             - 14,
         )
+        if normal_width >= BulkSelectedFileRow._STACKED_EDITOR_THRESHOLD:
+            return normal_width, False
+        stacked_width = max(
+            BulkSelectedFileRow._MIN_EDITOR_WIDTH,
+            viewport_width
+            - root_margins.left()
+            - root_margins.right()
+            - row_margins.left()
+            - row_margins.right()
+            - BulkSelectedFileRow._RIGHT_GUTTER
+            - 14,
+        )
+        return stacked_width, True
 
     def _sync_bulk_selected_files_layout(self) -> None:
         if not hasattr(self, "bulk_selected_files_list"):
@@ -1575,13 +1592,15 @@ class WindowSidebarBulkMixin:
         first_row = list_widget.itemWidget(list_widget.item(0))
         if not self._is_valid_bulk_selected_file_row(first_row):
             return
-        host_width = self._bulk_selected_row_editor_width(list_widget, first_row)
+        host_width, stacked = self._bulk_selected_row_editor_width(list_widget, first_row)
         list_widget.doItemsLayout()
         for i in range(list_widget.count()):
-            row = list_widget.itemWidget(list_widget.item(i))
+            item = list_widget.item(i)
+            row = list_widget.itemWidget(item)
             if self._is_valid_bulk_selected_file_row(row):
                 try:
-                    row.set_shared_editor_widths(host_width)
+                    row.set_shared_editor_widths(host_width, stacked)
+                    item.setSizeHint(QSize(0, row.item_height()))
                     row.updateGeometry()
                     row.update()
                 except RuntimeError:
@@ -1613,13 +1632,15 @@ class WindowSidebarBulkMixin:
         first_row = list_widget.itemWidget(list_widget.item(0))
         if not self._is_valid_bulk_selected_file_row(first_row):
             return
-        host_width = self._bulk_selected_row_editor_width(list_widget, first_row)
+        host_width, stacked = self._bulk_selected_row_editor_width(list_widget, first_row)
         list_widget.doItemsLayout()
         for i in range(list_widget.count()):
-            row = list_widget.itemWidget(list_widget.item(i))
+            item = list_widget.item(i)
+            row = list_widget.itemWidget(item)
             if self._is_valid_bulk_selected_file_row(row):
                 try:
-                    row.set_shared_editor_widths(host_width)
+                    row.set_shared_editor_widths(host_width, stacked)
+                    item.setSizeHint(QSize(0, row.item_height()))
                     row.updateGeometry()
                     row.update()
                 except RuntimeError:
@@ -1651,13 +1672,15 @@ class WindowSidebarBulkMixin:
         first_row = list_widget.itemWidget(list_widget.item(0))
         if not self._is_valid_bulk_selected_file_row(first_row):
             return
-        host_width = self._bulk_selected_row_editor_width(list_widget, first_row)
+        host_width, stacked = self._bulk_selected_row_editor_width(list_widget, first_row)
         list_widget.doItemsLayout()
         for i in range(list_widget.count()):
-            row = list_widget.itemWidget(list_widget.item(i))
+            item = list_widget.item(i)
+            row = list_widget.itemWidget(item)
             if self._is_valid_bulk_selected_file_row(row):
                 try:
-                    row.set_shared_editor_widths(host_width)
+                    row.set_shared_editor_widths(host_width, stacked)
+                    item.setSizeHint(QSize(0, row.item_height()))
                     row.updateGeometry()
                     row.update()
                 except RuntimeError:

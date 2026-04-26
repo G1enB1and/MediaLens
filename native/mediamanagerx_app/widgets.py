@@ -805,6 +805,7 @@ class BulkSelectedFileRow(QWidget):
     _GENERATE_BUTTON_BOTTOM_PADDING = 14
     _RIGHT_GUTTER = 5
     _MIN_EDITOR_WIDTH = 140
+    _STACKED_EDITOR_THRESHOLD = 190
 
     class _TagsEdit(QPlainTextEdit):
         editingFinished = Signal()
@@ -835,6 +836,7 @@ class BulkSelectedFileRow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setAutoFillBackground(True)
         self._shared_width_managed = False
+        self._stacked_content = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 0, 12, 12)
         layout.setSpacing(4)
@@ -865,7 +867,7 @@ class BulkSelectedFileRow(QWidget):
         self.thumb_lbl = QLabel(self.thumb_host)
         self.thumb_lbl.setObjectName("bulkSelectedFileThumb")
         self.thumb_lbl.setFixedSize(self._content_height, self._content_height)
-        self.thumb_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.thumb_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         thumb_hint = str(thumbnail_bg_hint or "").strip().lower()
         if thumb_hint == "light":
             thumb_bg = "#ffffff" if Theme.get_is_light() else "#f7f8fa"
@@ -1071,17 +1073,35 @@ class BulkSelectedFileRow(QWidget):
 
         QTimer.singleShot(0, _sync_if_alive)
 
-    def set_shared_editor_widths(self, host_width: int) -> None:
+    def set_shared_editor_widths(self, host_width: int, stacked: bool = False) -> None:
         self._shared_width_managed = True
+        self._set_content_stacked(bool(stacked))
         clamped_width = max(self._MIN_EDITOR_WIDTH, int(host_width or 0))
         self.tags_edit_host.setFixedWidth(clamped_width)
         self.tags_edit.setFixedWidth(clamped_width)
         if hasattr(self, "generate_btn"):
             self.generate_btn.setFixedWidth(clamped_width)
         if getattr(self, "action_buttons", None):
-            button_width = max(58, int((clamped_width - 15) / 4))
+            spacing_total = max(0, (len(self.action_buttons) - 1) * 5)
+            min_button_width = 34 if stacked else 42
+            button_width = max(min_button_width, int((clamped_width - spacing_total) / max(1, len(self.action_buttons))))
             for button in self.action_buttons:
                 button.setFixedWidth(button_width)
+
+    def _set_content_stacked(self, stacked: bool) -> None:
+        if bool(getattr(self, "_stacked_content", False)) == bool(stacked):
+            return
+        self._stacked_content = bool(stacked)
+        self._content_row.setDirection(
+            QBoxLayout.Direction.TopToBottom if stacked else QBoxLayout.Direction.LeftToRight
+        )
+        self._content_row.setSpacing(6 if stacked else 12)
+        try:
+            self._content_row.setAlignment(self.thumb_host, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+            self._content_row.setAlignment(self.tags_edit_host, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        except Exception:
+            pass
+        self.updateGeometry()
 
     def _sync_editor_width(self) -> None:
         try:
@@ -1107,34 +1127,50 @@ class BulkSelectedFileRow(QWidget):
                 return
             root_margins = self._root_layout.contentsMargins()
             row_margins = self._content_row.contentsMargins()
-            thumb_widget = getattr(self, "thumb_host", None) or self.thumb_lbl
-            thumb_width = int(thumb_widget.width() if thumb_widget.width() > 0 else self.thumb_lbl.width())
-            spacing = self._content_row.spacing()
-            host_width = max(
-                self._MIN_EDITOR_WIDTH,
-                total_width
-                - root_margins.left()
-                - root_margins.right()
-                - row_margins.left()
-                - row_margins.right()
-                - thumb_width
-                - spacing
-                - 4
-                - self._RIGHT_GUTTER
-                - 14,
-            )
+            if bool(getattr(self, "_stacked_content", False)):
+                host_width = max(
+                    self._MIN_EDITOR_WIDTH,
+                    total_width
+                    - root_margins.left()
+                    - root_margins.right()
+                    - row_margins.left()
+                    - row_margins.right()
+                    - self._RIGHT_GUTTER
+                    - 14,
+                )
+            else:
+                thumb_widget = getattr(self, "thumb_host", None) or self.thumb_lbl
+                thumb_width = int(thumb_widget.width() if thumb_widget.width() > 0 else self.thumb_lbl.width())
+                spacing = self._content_row.spacing()
+                host_width = max(
+                    self._MIN_EDITOR_WIDTH,
+                    total_width
+                    - root_margins.left()
+                    - root_margins.right()
+                    - row_margins.left()
+                    - row_margins.right()
+                    - thumb_width
+                    - spacing
+                    - 4
+                    - self._RIGHT_GUTTER
+                    - 14,
+                )
             self.tags_edit_host.setFixedWidth(host_width)
             self.tags_edit.setFixedWidth(host_width)
             if hasattr(self, "generate_btn"):
                 self.generate_btn.setFixedWidth(host_width)
             if getattr(self, "action_buttons", None):
-                button_width = max(58, int((host_width - 15) / 4))
+                spacing_total = max(0, (len(self.action_buttons) - 1) * 5)
+                min_button_width = 34 if bool(getattr(self, "_stacked_content", False)) else 42
+                button_width = max(min_button_width, int((host_width - spacing_total) / max(1, len(self.action_buttons))))
                 for button in self.action_buttons:
                     button.setFixedWidth(button_width)
         except RuntimeError:
             pass
 
     def item_height(self) -> int:
+        if bool(getattr(self, "_stacked_content", False)):
+            return int(self.thumb_host.height()) + int(self.tags_edit_host.height()) + int(self._content_row.spacing()) + 50
         return int(self._content_height) + 76 + self._generate_button_extra_height()
 
 
