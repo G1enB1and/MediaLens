@@ -1142,9 +1142,37 @@ function setAllGroupsCollapsed(collapsed) {
 }
 
 function scrollToGroup(groupKey) {
+  const main = document.querySelector('main');
   const target = document.querySelector(`.gallery-group[data-group-key="${CSS.escape(groupKey)}"]`);
   if (!target) return;
-  target.scrollIntoView({ block: 'start', behavior: gTimelineScrubActive ? 'auto' : 'smooth' });
+  if (!main) {
+    target.scrollIntoView({ block: 'start', behavior: gTimelineScrubActive ? 'auto' : 'smooth' });
+    return;
+  }
+  const mainRect = main.getBoundingClientRect();
+  const targetRect = target.getBoundingClientRect();
+  const stickyOffset = getReviewStickyHeaderOffset(main);
+  const targetScrollTop = main.scrollTop + (targetRect.top - mainRect.top) - stickyOffset;
+  main.scrollTo({
+    top: Math.max(0, targetScrollTop),
+    behavior: gTimelineScrubActive ? 'auto' : 'smooth',
+  });
+}
+
+const REVIEW_GROUP_SCROLL_CLEARANCE_PX = 12;
+
+function getReviewStickyHeaderOffset(main) {
+  if (!main) return 0;
+  let offset = 0;
+  document.querySelectorAll('.duplicate-summary').forEach((header) => {
+    const style = window.getComputedStyle(header);
+    if (style.display === 'none' || style.visibility === 'hidden') return;
+    const rect = header.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const stickyTop = Number.parseFloat(style.top || '0') || 0;
+    offset = Math.max(offset, rect.height + Math.min(0, stickyTop));
+  });
+  return Math.ceil(Math.max(0, offset)) + REVIEW_GROUP_SCROLL_CLEARANCE_PX;
 }
 
 function getReviewGroupsForNavigation() {

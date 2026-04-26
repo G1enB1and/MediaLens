@@ -1474,9 +1474,9 @@ p {
   align-items: center;
   gap: 8px;
   position: sticky;
-  top: -12px;
+  top: -17px;
   z-index: 26;
-  padding: 4px 0 10px;
+  padding: 10px 0 10px;
   margin-bottom: 10px;
   background: var(--bg);
   border-bottom: 1px solid var(--border);

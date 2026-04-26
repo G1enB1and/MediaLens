@@ -658,15 +658,6 @@ class WindowLayoutPanelsMixin:
         self._preview_movie: QMovie | None = None
         self._preview_aspect_ratio = 1.0
         right_layout.addWidget(self.preview_image_lbl)
-        self.btn_open_ocr_review = QPushButton("Review")
-        self.btn_open_ocr_review.setObjectName("btnOpenOcrReview")
-        self.btn_open_ocr_review.setProperty("baseText", "Review")
-        self.btn_open_ocr_review.setToolTip("Open Text OCR Review")
-        self.btn_open_ocr_review.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_open_ocr_review.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self.btn_open_ocr_review.clicked.connect(lambda checked=False: self._open_ocr_review_for_current_file())
-        self.btn_open_ocr_review.hide()
-        right_layout.addWidget(self.btn_open_ocr_review, 0, Qt.AlignmentFlag.AlignHCenter)
 
         # Sidebar preview overlay is manually positioned to the preview label's rect.
         # Avoid also putting it in a layout, which can produce bad geometry/clipping.
@@ -822,8 +813,18 @@ class WindowLayoutPanelsMixin:
         self.btn_use_ocr_gemma.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_use_ocr_gemma.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.btn_use_ocr_gemma.clicked.connect(lambda: self._run_text_ocr("gemma4"))
+        self.btn_open_ocr_review = QPushButton("Review")
+        self.btn_open_ocr_review.setObjectName("btnOpenOcrReview")
+        self.btn_open_ocr_review.setProperty("baseText", "Review")
+        self.btn_open_ocr_review.setToolTip("Open Text OCR Review")
+        self.btn_open_ocr_review.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_open_ocr_review.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_open_ocr_review.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.btn_open_ocr_review.clicked.connect(lambda checked=False: self._open_ocr_review_for_current_file())
+        self.btn_open_ocr_review.hide()
         ocr_button_layout.addWidget(self.btn_use_ocr)
         ocr_button_layout.addWidget(self.btn_use_ocr_gemma)
+        ocr_button_layout.addWidget(self.btn_open_ocr_review)
         
         self.meta_fields_layout = QVBoxLayout()
         self.meta_fields_layout.setContentsMargins(0, 0, 0, 0)
