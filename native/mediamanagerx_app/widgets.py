@@ -924,7 +924,15 @@ class BulkSelectedFileRow(QWidget):
             icon_path = str(button_cfg.get("icon") or "").strip()
             if icon_path:
                 button.setIcon(QIcon(icon_path))
-                button.setIconSize(QSize(16, 16))
+                icon_size = button_cfg.get("icon_size") or QSize(16, 16)
+                if isinstance(icon_size, QSize):
+                    button.setIconSize(icon_size)
+                else:
+                    try:
+                        width, height = icon_size
+                        button.setIconSize(QSize(int(width), int(height)))
+                    except Exception:
+                        button.setIconSize(QSize(16, 16))
             button.clicked.connect(lambda _checked=False, key=str(button_cfg.get("key") or ""): self._emit_action_requested(key))
             self.action_buttons.append(button)
             action_layout.addWidget(button)

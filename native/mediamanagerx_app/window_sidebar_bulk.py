@@ -242,6 +242,10 @@ class WindowSidebarBulkMixin:
             getattr(self, "bulk_btn_save_meta", None),
             getattr(self, "bulk_btn_save_to_exif", None),
             getattr(self, "bulk_ocr_btn_select_all_gallery", None),
+            getattr(self, "bulk_ocr_btn_run_fast", None),
+            getattr(self, "bulk_ocr_btn_run_ai", None),
+            getattr(self, "bulk_ocr_btn_save", None),
+            getattr(self, "bulk_ocr_btn_clear", None),
         ]
         for button in buttons:
             if button is None:
@@ -252,18 +256,6 @@ class WindowSidebarBulkMixin:
             button.setMaximumWidth(16777215)
             button.setFixedWidth(available_w)
             self._wrap_button_text(button, base_text, available_w)
-            button.updateGeometry()
-        for button in (
-            getattr(self, "bulk_ocr_btn_run_fast", None),
-            getattr(self, "bulk_ocr_btn_run_ai", None),
-        ):
-            if button is None:
-                continue
-            base_text = str(button.property("baseText") or button.text()).replace("\n", " ").strip()
-            button.setProperty("baseText", base_text)
-            button.setMinimumWidth(0)
-            button.setMaximumWidth(16777215)
-            self._wrap_button_text(button, base_text, max(80, int((available_w - 6) / 2)))
             button.updateGeometry()
 
     def _update_sidebar_input_widths(self, available_w: int | None = None) -> None:
@@ -436,6 +428,8 @@ class WindowSidebarBulkMixin:
         self.bulk_ocr_btn_select_all_gallery.setProperty("baseText", "Select All Files in Gallery")
         self.bulk_ocr_btn_run_fast.setProperty("baseText", f"Fast OCR for All ({selection_count} Files)")
         self.bulk_ocr_btn_run_ai.setProperty("baseText", f"AI OCR for All ({selection_count} Files)")
+        self.bulk_ocr_btn_save.setProperty("baseText", f"Save OCR Text to DB for {selection_count} Items")
+        self.bulk_ocr_btn_clear.setProperty("baseText", f"Clear OCR Text for {selection_count} Items")
         self._refresh_bulk_ocr_editor_summary()
         self._sync_sidebar_panel_widths()
 
@@ -939,6 +933,40 @@ class WindowSidebarBulkMixin:
         # do not mark text as user-confirmed.
         return
 
+    def _save_bulk_ocr_text_to_db(self) -> None:
+        paths = self._current_file_paths()
+        if not paths or not hasattr(self, "bulk_ocr_selected_files_list"):
+            return
+        updated = 0
+        for i in range(self.bulk_ocr_selected_files_list.count()):
+            item = self.bulk_ocr_selected_files_list.item(i)
+            row = self.bulk_ocr_selected_files_list.itemWidget(item)
+            if not self._is_valid_bulk_selected_file_row(row):
+                continue
+            clean_path = str(getattr(row, "_path", "") or "").strip()
+            if not clean_path:
+                continue
+            try:
+                self.bridge.update_media_detected_text(clean_path, row.tags_edit.toPlainText())
+                updated += 1
+            except Exception:
+                pass
+        self._bulk_ocr_status(f"OCR text saved for {updated} item{'s' if updated != 1 else ''}")
+
+    def _clear_bulk_ocr_text(self) -> None:
+        paths = self._current_file_paths()
+        if not paths:
+            return
+        updated = 0
+        for path in paths:
+            try:
+                self.bridge.update_media_detected_text(str(path), "")
+                self._set_bulk_ocr_row_text(str(path), "")
+                updated += 1
+            except Exception:
+                pass
+        self._bulk_ocr_status(f"OCR text cleared for {updated} item{'s' if updated != 1 else ''}")
+
     def _bulk_ai_ocr_source(self) -> str:
         return "gemma4"
 
@@ -1227,8 +1255,9 @@ class WindowSidebarBulkMixin:
         return [
             {
                 "key": "no_text",
-                "label": "No Text",
+                "label": "",
                 "icon": str(icons_dir / "text-disabled.svg"),
+                "icon_size": QSize(52, 24),
                 "tooltip": "Mark this file as no text detected",
             },
             {
