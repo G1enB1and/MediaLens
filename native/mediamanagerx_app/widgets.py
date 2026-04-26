@@ -801,7 +801,7 @@ class BulkSelectedFileRow(QWidget):
     _TAG_CONTENT_HEIGHT = 92
     _CAPTION_CONTENT_HEIGHT = 132
     _GENERATE_BUTTON_HEIGHT = 32
-    _GENERATE_BUTTON_GAP = 5
+    _GENERATE_BUTTON_GAP = 10
     _GENERATE_BUTTON_BOTTOM_PADDING = 4
     _RIGHT_GUTTER = 5
     _MIN_EDITOR_WIDTH = 140
@@ -842,7 +842,7 @@ class BulkSelectedFileRow(QWidget):
         self._action_buttons_grid = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 0, 12, 4)
-        layout.setSpacing(4)
+        layout.setSpacing(9)
         self._root_layout = layout
 
         self.name_lbl = QLabel(str(name or ""), self)
