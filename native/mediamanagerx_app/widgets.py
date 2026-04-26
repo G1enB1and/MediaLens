@@ -802,7 +802,7 @@ class BulkSelectedFileRow(QWidget):
     _CAPTION_CONTENT_HEIGHT = 132
     _GENERATE_BUTTON_HEIGHT = 32
     _GENERATE_BUTTON_GAP = 5
-    _GENERATE_BUTTON_BOTTOM_PADDING = 14
+    _GENERATE_BUTTON_BOTTOM_PADDING = 4
     _RIGHT_GUTTER = 5
     _MIN_EDITOR_WIDTH = 140
     _STACKED_EDITOR_THRESHOLD = 190
@@ -841,7 +841,7 @@ class BulkSelectedFileRow(QWidget):
         self._stacked_content = False
         self._action_buttons_grid = False
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 0, 12, 12)
+        layout.setContentsMargins(12, 0, 12, 4)
         layout.setSpacing(4)
         self._root_layout = layout
 
@@ -1299,9 +1299,14 @@ class BulkSelectedFileRow(QWidget):
             pass
 
     def item_height(self) -> int:
+        root_margins = self._root_layout.contentsMargins()
+        name_height = max(0, int(self.name_lbl.sizeHint().height()))
+        root_spacing = max(0, int(self._root_layout.spacing()))
         if bool(getattr(self, "_stacked_content", False)):
-            return int(self.thumb_host.height()) + int(self.tags_edit_host.height()) + int(self._content_row.spacing()) + 42
-        return int(max(self.thumb_host.height(), self.tags_edit_host.height())) + 42
+            content_height = int(self.thumb_host.height()) + int(self.tags_edit_host.height()) + int(self._content_row.spacing())
+        else:
+            content_height = int(max(self.thumb_host.height(), self.tags_edit_host.height()))
+        return int(root_margins.top() + name_height + root_spacing + content_height + root_margins.bottom())
 
     def sizeHint(self) -> QSize:
         return QSize(self._MIN_EDITOR_WIDTH, self.item_height())

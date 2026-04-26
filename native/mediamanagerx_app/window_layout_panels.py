@@ -330,7 +330,7 @@ class WindowLayoutPanelsMixin:
         self.tag_list_panel.setMinimumWidth(220)
         self.tag_list_panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self.tag_list_panel_layout = QVBoxLayout(self.tag_list_panel)
-        self.tag_list_panel_layout.setContentsMargins(12, 12, 12, 12)
+        self.tag_list_panel_layout.setContentsMargins(0, 12, 0, 0)
         self.tag_list_panel_layout.setSpacing(8)
 
         self.tag_list_header_row = QWidget(self.tag_list_panel)
@@ -1239,7 +1239,7 @@ class WindowLayoutPanelsMixin:
         self.bulk_mode_tags_btn.setCheckable(True)
         self.bulk_mode_tags_btn.clicked.connect(lambda checked=False: self._set_active_bulk_editor_mode("tags"))
         bulk_editor_mode_layout.addWidget(self.bulk_mode_tags_btn)
-        self.bulk_mode_captions_btn = QPushButton("Captions")
+        self.bulk_mode_captions_btn = QPushButton("Descriptions")
         self.bulk_mode_captions_btn.setObjectName("bulkEditorModeButton")
         self.bulk_mode_captions_btn.setCheckable(True)
         self.bulk_mode_captions_btn.clicked.connect(lambda checked=False: self._set_active_bulk_editor_mode("captions"))
@@ -1273,7 +1273,7 @@ class WindowLayoutPanelsMixin:
         self.bulk_scroll_container = QWidget(self.bulk_scroll_area)
         self.bulk_scroll_container.setObjectName("bulkTagEditorScrollContainer")
         self.bulk_right_layout = QVBoxLayout(self.bulk_scroll_container)
-        self.bulk_right_layout.setContentsMargins(12, 12, 12, 12)
+        self.bulk_right_layout.setContentsMargins(0, 12, 0, 0)
         self.bulk_right_layout.setSpacing(6)
 
         self.bulk_btn_open_tag_list = QPushButton("Open Tag Lists")
@@ -1423,7 +1423,7 @@ class WindowLayoutPanelsMixin:
         self.bulk_caption_scroll_container = QWidget(self.bulk_caption_scroll_area)
         self.bulk_caption_scroll_container.setObjectName("bulkCaptionEditorScrollContainer")
         self.bulk_caption_right_layout = QVBoxLayout(self.bulk_caption_scroll_container)
-        self.bulk_caption_right_layout.setContentsMargins(12, 12, 12, 12)
+        self.bulk_caption_right_layout.setContentsMargins(0, 12, 0, 0)
         self.bulk_caption_right_layout.setSpacing(6)
 
         self.bulk_caption_selection_lbl = QLabel("")
@@ -1513,7 +1513,7 @@ class WindowLayoutPanelsMixin:
         self.bulk_ocr_scroll_container.setMinimumWidth(0)
         self.bulk_ocr_scroll_container.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.bulk_ocr_right_layout = QVBoxLayout(self.bulk_ocr_scroll_container)
-        self.bulk_ocr_right_layout.setContentsMargins(4, 12, 4, 12)
+        self.bulk_ocr_right_layout.setContentsMargins(0, 12, 0, 0)
         self.bulk_ocr_right_layout.setSpacing(6)
 
         self.bulk_ocr_selection_lbl = QLabel("")
