@@ -1226,6 +1226,12 @@ class BulkSelectedFileRow(QWidget):
             return int(self.thumb_host.height()) + int(self.tags_edit_host.height()) + int(self._content_row.spacing()) + 50
         return int(self._content_height) + 76 + self._generate_button_extra_height()
 
+    def sizeHint(self) -> QSize:
+        return QSize(self._MIN_EDITOR_WIDTH, self.item_height())
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, self.item_height())
+
 
 class BulkSelectedFilesListWidget(QListWidget):
     layoutSyncRequested = Signal()
