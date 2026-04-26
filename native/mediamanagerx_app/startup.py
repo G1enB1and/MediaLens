@@ -84,11 +84,11 @@ def _fetch_latest_version_for_startup(timeout_seconds: float = 6.0) -> str:
     return version
 
 
-def _download_update_installer_with_dialog(app: QApplication, version: str) -> Path | None:
+def _download_update_installer_with_dialog(app: QApplication, version: str, parent: QWidget | None = None) -> Path | None:
     temp_dir = Path(QStandardPaths.writableLocation(QStandardPaths.TempLocation) or tempfile.gettempdir())
     temp_dir.mkdir(parents=True, exist_ok=True)
     setup_path = temp_dir / "MediaLens_Setup_New.exe"
-    progress = QProgressDialog(f"Downloading MediaLens {version}...", "Cancel", 0, 100)
+    progress = QProgressDialog(f"Downloading MediaLens {version}...", "Cancel", 0, 100, parent)
     progress.setWindowTitle("Downloading Update")
     progress.setWindowModality(Qt.WindowModality.ApplicationModal)
     progress.setMinimumDuration(0)
@@ -127,7 +127,7 @@ def _launch_update_installer(setup_path: Path) -> None:
     subprocess.Popen([str(setup_path), "/SILENT", "/SP-", "/NOICONS", "/RELAUNCH"])
 
 
-def _run_startup_update_check(app: QApplication, settings: QSettings) -> bool:
+def _run_startup_update_check(app: QApplication, settings: QSettings, parent: QWidget | None = None) -> bool:
     if not bool(settings.value("updates/check_on_launch", True, type=bool)):
         _startup_log("Update check skipped because updates/check_on_launch is disabled")
         return False
@@ -143,23 +143,23 @@ def _run_startup_update_check(app: QApplication, settings: QSettings) -> bool:
         return False
 
     _startup_log(f"Showing startup update prompt for {remote_version}")
-    answer = QMessageBox.question(
-        None,
+    answer = _run_themed_question_dialog(
+        parent,
         "Update Available",
         (
             f"MediaLens {remote_version} is available.\n\n"
             f"You are currently using {__version__}.\n\n"
             "Download and install the update before opening MediaLens?"
         ),
-        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        QMessageBox.StandardButton.Yes,
+        buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        default_button=QMessageBox.StandardButton.Yes,
     )
     if answer != QMessageBox.StandardButton.Yes:
         _startup_log("Startup update prompt dismissed")
         return False
 
     try:
-        setup_path = _download_update_installer_with_dialog(app, remote_version)
+        setup_path = _download_update_installer_with_dialog(app, remote_version, parent)
         if setup_path is None:
             return False
         _launch_update_installer(setup_path)
@@ -168,7 +168,7 @@ def _run_startup_update_check(app: QApplication, settings: QSettings) -> bool:
     except Exception as exc:
         _startup_log(f"Startup update install failed: {exc}")
         QMessageBox.warning(
-            None,
+            parent,
             "Update Error",
             f"Unable to download or launch the update installer:\n{exc}",
         )
@@ -216,14 +216,17 @@ def main() -> None:
         """
     )
 
-    if _run_startup_update_check(app, startup_settings):
-        sys.exit(0)
-
     _startup_log(f"Splash setting enabled={show_splash}")
     splash = _create_startup_splash(app, startup_bg) if show_splash else None
     if splash is not None:
         _startup_log("Showing splash")
         splash.show()
+        app.processEvents()
+
+    if _run_startup_update_check(app, startup_settings, splash):
+        if splash is not None:
+            splash.close()
+        sys.exit(0)
 
     _startup_log("Constructing main window")
     win = MainWindow()
