@@ -974,7 +974,7 @@ class BulkSelectedFileRow(QWidget):
         if generate_extra:
             self.tags_edit_host.setFixedHeight(self._content_height + generate_extra)
         self._tags_host_layout = tags_host_layout
-        content_row.addWidget(self.tags_edit_host, 1)
+        content_row.addWidget(self.tags_edit_host, 1, Qt.AlignmentFlag.AlignTop)
         content_row.addSpacing(4)
 
         layout.addLayout(content_row, 1)
@@ -1136,6 +1136,12 @@ class BulkSelectedFileRow(QWidget):
                 reduction = min(overflow, max(0, widths[index] - 24))
                 widths[index] -= reduction
                 overflow -= reduction
+        extra = max(0, available - sum(widths))
+        if extra > 0:
+            increment = extra // len(widths)
+            remainder = extra % len(widths)
+            for index in range(len(widths)):
+                widths[index] += increment + (1 if index < remainder else 0)
         for button, width in zip(buttons, widths):
             button.setFixedWidth(max(24, int(width)))
 
