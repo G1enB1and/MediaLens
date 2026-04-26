@@ -11,7 +11,7 @@ from native.mediamanagerx_app.bridge import *
 from native.mediamanagerx_app.gallery import *
 
 class WindowAppLifecycleMixin:
-    def _library_backup_options_dialog(self, *, importing: bool, manifest: dict | None = None) -> tuple[bool, bool, bool, bool, bool]:
+    def _library_backup_options_dialog(self, *, importing: bool, manifest: dict | None = None) -> dict:
         dialog = QDialog(self)
         dialog.setWindowTitle("Import Library Backup" if importing else "Export Library Backup")
         layout = QVBoxLayout(dialog)
@@ -23,12 +23,20 @@ class WindowAppLifecycleMixin:
         layout.addWidget(title)
 
         includes = dict((manifest or {}).get("includes") or {})
+        recycle_available = not importing or bool(includes.get("recycle_bin") or includes.get("recycle_bin_files"))
         settings_available = not importing or bool(includes.get("settings"))
         thumbs_available = not importing or bool(includes.get("thumbs"))
         local_ai_models_available = not importing or bool(includes.get("local_ai_models"))
         ai_runtimes_available = not importing or any(
             bool(includes.get(key)) for key in ("ai_runtimes", "python_runtime", "python_bootstrap")
         )
+
+        recycle_cb = QCheckBox("MediaLens recycle bin retention")
+        recycle_cb.setChecked(True)
+        recycle_cb.setEnabled(recycle_available)
+        if importing and not recycle_available:
+            recycle_cb.setToolTip("This backup does not include MediaLens recycle bin retention data.")
+        layout.addWidget(recycle_cb)
 
         settings_cb = QCheckBox("App settings")
         settings_cb.setChecked(True)
@@ -58,10 +66,16 @@ class WindowAppLifecycleMixin:
             ai_runtimes_cb.setToolTip("This backup does not include local AI runtime environments.")
         layout.addWidget(ai_runtimes_cb)
 
+        merge_cb = QCheckBox("Merge selected optional data with current data")
+        merge_cb.setChecked(True)
+        merge_cb.setVisible(importing)
+        merge_cb.setToolTip("When checked, recycle-bin entries, thumbnails, models, and runtimes are added without deleting current files. App settings and the main database are still restored as replacements.")
+        layout.addWidget(merge_cb)
+
         if importing:
-            note = QLabel("The current database and MediaLens retention system will be overwritten. A local backup of the existing supported files is created first.")
+            note = QLabel("The main database is always restored as a replacement. Optional data can be merged with current files, or replaced by unchecking merge.")
         else:
-            note = QLabel("The database and full MediaLens retention system are always included. Legacy MediaManagerX files and debug logs are excluded. AI models and runtimes can be large.")
+            note = QLabel("The main database is always included. Legacy MediaManagerX files and debug logs are excluded. Recycle-bin retention, thumbnails, AI models, and runtimes are optional; AI data can be large.")
         note.setWordWrap(True)
         layout.addWidget(note)
 
@@ -78,19 +92,21 @@ class WindowAppLifecycleMixin:
         layout.addWidget(buttons)
 
         if dialog.exec() != QDialog.DialogCode.Accepted:
-            return False, False, False, False, False
-        return (
-            True,
-            settings_cb.isChecked() and settings_available,
-            thumbs_cb.isChecked() and thumbs_available,
-            local_ai_models_cb.isChecked() and local_ai_models_available,
-            ai_runtimes_cb.isChecked() and ai_runtimes_available,
-        )
+            return {"accepted": False}
+        return {
+            "accepted": True,
+            "include_recycle_bin": recycle_cb.isChecked() and recycle_available,
+            "include_settings": settings_cb.isChecked() and settings_available,
+            "include_thumbs": thumbs_cb.isChecked() and thumbs_available,
+            "include_local_ai_models": local_ai_models_cb.isChecked() and local_ai_models_available,
+            "include_ai_runtimes": ai_runtimes_cb.isChecked() and ai_runtimes_available,
+            "merge_existing": bool(importing and merge_cb.isChecked()),
+        }
 
     def export_library_backup(self) -> None:
         try:
-            ok, include_settings, include_thumbs, include_local_ai_models, include_ai_runtimes = self._library_backup_options_dialog(importing=False)
-            if not ok:
+            options = self._library_backup_options_dialog(importing=False)
+            if not options.get("accepted"):
                 return
             default_name = f"MediaLens-Library-Backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}.zip"
             target, _selected_filter = QFileDialog.getSaveFileName(
@@ -113,10 +129,11 @@ class WindowAppLifecycleMixin:
             result = create_library_backup(
                 target,
                 options=LibraryBackupOptions(
-                    include_settings=include_settings,
-                    include_thumbs=include_thumbs,
-                    include_local_ai_models=include_local_ai_models,
-                    include_ai_runtimes=include_ai_runtimes,
+                    include_recycle_bin=bool(options.get("include_recycle_bin")),
+                    include_settings=bool(options.get("include_settings")),
+                    include_thumbs=bool(options.get("include_thumbs")),
+                    include_local_ai_models=bool(options.get("include_local_ai_models")),
+                    include_ai_runtimes=bool(options.get("include_ai_runtimes")),
                 ),
             )
             included = [name.replace("_", " ") for name, enabled in result.included.items() if enabled]
@@ -148,13 +165,15 @@ class WindowAppLifecycleMixin:
             )
 
             manifest = read_library_backup_manifest(source)
-            ok, include_settings, include_thumbs, include_local_ai_models, include_ai_runtimes = self._library_backup_options_dialog(importing=True, manifest=manifest)
-            if not ok:
+            options = self._library_backup_options_dialog(importing=True, manifest=manifest)
+            if not options.get("accepted"):
                 return
+            merge_text = "merge selected optional data into current data" if options.get("merge_existing") else "replace selected optional data"
             answer = QMessageBox.question(
                 self,
                 "Import Library Backup",
-                "Importing this backup will overwrite the current MediaLens database and retention data. "
+                "Importing this backup will replace the current MediaLens database and "
+                f"{merge_text}. "
                 "A local backup of the current supported files will be created first.\n\n"
                 "Continue?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -174,10 +193,12 @@ class WindowAppLifecycleMixin:
             result = restore_library_backup(
                 source,
                 options=LibraryRestoreOptions(
-                    include_settings=include_settings,
-                    include_thumbs=include_thumbs,
-                    include_local_ai_models=include_local_ai_models,
-                    include_ai_runtimes=include_ai_runtimes,
+                    include_recycle_bin=bool(options.get("include_recycle_bin")),
+                    include_settings=bool(options.get("include_settings")),
+                    include_thumbs=bool(options.get("include_thumbs")),
+                    include_local_ai_models=bool(options.get("include_local_ai_models")),
+                    include_ai_runtimes=bool(options.get("include_ai_runtimes")),
+                    merge_existing=bool(options.get("merge_existing")),
                     backup_existing=True,
                 ),
             )

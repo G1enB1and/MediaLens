@@ -30,6 +30,33 @@ def _make_sqlite(path: Path, table: str, value: str) -> None:
         conn.close()
 
 
+def _make_recycle_db(path: Path, row_id: str, archived_name: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute(
+            """
+            CREATE TABLE recycle_bin (
+                id TEXT PRIMARY KEY,
+                original_path TEXT,
+                archived_name TEXT,
+                deleted_at DATETIME,
+                expires_at DATETIME
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO recycle_bin (id, original_path, archived_name, deleted_at, expires_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (row_id, f"C:/original/{archived_name}", archived_name, "2026-01-01T00:00:00", "2026-12-31T00:00:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def test_library_backup_exports_supported_runtime_data():
     tmp_path = _workspace_tmp()
     try:
@@ -42,7 +69,7 @@ def _test_library_backup_exports_supported_runtime_data(tmp_path):
     appdata = tmp_path / "appdata"
     appdata.mkdir()
     _make_sqlite(appdata / "medialens.db", "media", "db-ok")
-    _make_sqlite(appdata / "recycle_bin.sqlite", "recycle", "recycle-ok")
+    _make_recycle_db(appdata / "recycle_bin.sqlite", "old-id", "archived.bin")
     (appdata / "RecycleBin").mkdir()
     (appdata / "RecycleBin" / "archived.bin").write_bytes(b"retained")
     (appdata / "thumbs").mkdir()
@@ -64,6 +91,7 @@ def _test_library_backup_exports_supported_runtime_data(tmp_path):
         archive,
         options=LibraryBackupOptions(
             include_settings=True,
+            include_recycle_bin=True,
             include_thumbs=False,
             include_local_ai_models=True,
             include_ai_runtimes=True,
@@ -177,3 +205,99 @@ def _test_library_backup_restore_overwrites_current_supported_data(tmp_path):
     finally:
         conn.close()
     assert value == "imported"
+
+
+def test_library_backup_can_exclude_recycle_bin():
+    tmp_path = _workspace_tmp()
+    try:
+        appdata = tmp_path / "appdata"
+        appdata.mkdir()
+        _make_sqlite(appdata / "medialens.db", "media", "db-ok")
+        _make_recycle_db(appdata / "recycle_bin.sqlite", "old-id", "archived.bin")
+        (appdata / "RecycleBin").mkdir()
+        (appdata / "RecycleBin" / "archived.bin").write_bytes(b"retained")
+
+        archive = tmp_path / "backup.zip"
+        result = create_library_backup(
+            archive,
+            options=LibraryBackupOptions(include_recycle_bin=False),
+            appdata_dir=appdata,
+        )
+
+        assert result.included["database"] is True
+        assert result.included["recycle_bin"] is False
+        assert result.included["recycle_bin_files"] is False
+        with zipfile.ZipFile(archive, "r") as zf:
+            names = set(zf.namelist())
+        assert "database/medialens.db" in names
+        assert "recycle/recycle_bin.sqlite" not in names
+        assert "recycle/RecycleBin/archived.bin" not in names
+    finally:
+        shutil.rmtree(tmp_path, ignore_errors=True)
+
+
+def test_library_backup_restore_merges_optional_data():
+    tmp_path = _workspace_tmp()
+    try:
+        source = tmp_path / "source"
+        source.mkdir()
+        _make_sqlite(source / "medialens.db", "media", "imported")
+        _make_recycle_db(source / "recycle_bin.sqlite", "import-id", "imported.bin")
+        (source / "RecycleBin").mkdir()
+        (source / "RecycleBin" / "imported.bin").write_bytes(b"imported")
+        (source / "local_ai_models" / "new-model").mkdir(parents=True)
+        (source / "local_ai_models" / "new-model" / "weights.bin").write_bytes(b"new-model")
+        (source / "ai-runtimes" / "new-runtime").mkdir(parents=True)
+        (source / "ai-runtimes" / "new-runtime" / "python.exe").write_bytes(b"new-runtime")
+        archive = tmp_path / "backup.zip"
+        create_library_backup(
+            archive,
+            options=LibraryBackupOptions(
+                include_recycle_bin=True,
+                include_local_ai_models=True,
+                include_ai_runtimes=True,
+            ),
+            appdata_dir=source,
+        )
+
+        target = tmp_path / "target"
+        target.mkdir()
+        _make_sqlite(target / "medialens.db", "media", "old")
+        _make_recycle_db(target / "recycle_bin.sqlite", "current-id", "current.bin")
+        (target / "RecycleBin").mkdir()
+        (target / "RecycleBin" / "current.bin").write_bytes(b"current")
+        (target / "local_ai_models" / "current-model").mkdir(parents=True)
+        (target / "local_ai_models" / "current-model" / "weights.bin").write_bytes(b"current-model")
+        (target / "ai-runtimes" / "current-runtime").mkdir(parents=True)
+        (target / "ai-runtimes" / "current-runtime" / "python.exe").write_bytes(b"current-runtime")
+
+        result = restore_library_backup(
+            archive,
+            options=LibraryRestoreOptions(
+                include_recycle_bin=True,
+                include_local_ai_models=True,
+                include_ai_runtimes=True,
+                merge_existing=True,
+                backup_existing=True,
+            ),
+            appdata_dir=target,
+        )
+
+        assert result.restored["database"] is True
+        assert result.restored["recycle_bin"] is True
+        assert result.restored["recycle_bin_files"] is True
+        assert (target / "RecycleBin" / "current.bin").read_bytes() == b"current"
+        assert (target / "RecycleBin" / "imported.bin").read_bytes() == b"imported"
+        assert (target / "local_ai_models" / "current-model" / "weights.bin").read_bytes() == b"current-model"
+        assert (target / "local_ai_models" / "new-model" / "weights.bin").read_bytes() == b"new-model"
+        assert (target / "ai-runtimes" / "current-runtime" / "python.exe").read_bytes() == b"current-runtime"
+        assert (target / "ai-runtimes" / "new-runtime" / "python.exe").read_bytes() == b"new-runtime"
+
+        conn = sqlite3.connect(str(target / "recycle_bin.sqlite"))
+        try:
+            ids = {row[0] for row in conn.execute("SELECT id FROM recycle_bin").fetchall()}
+        finally:
+            conn.close()
+        assert ids == {"current-id", "import-id"}
+    finally:
+        shutil.rmtree(tmp_path, ignore_errors=True)

@@ -20,6 +20,7 @@ MANIFEST_NAME = "manifest.json"
 
 @dataclass
 class LibraryBackupOptions:
+    include_recycle_bin: bool = True
     include_settings: bool = True
     include_thumbs: bool = False
     include_local_ai_models: bool = False
@@ -35,10 +36,12 @@ class LibraryBackupResult:
 
 @dataclass
 class LibraryRestoreOptions:
+    include_recycle_bin: bool = True
     include_settings: bool = True
     include_thumbs: bool = False
     include_local_ai_models: bool = False
     include_ai_runtimes: bool = False
+    merge_existing: bool = False
     backup_existing: bool = True
 
 
@@ -101,6 +104,62 @@ def _replace_dir(source: Path, target: Path) -> bool:
         shutil.rmtree(str(target))
     shutil.copytree(str(source), str(target))
     return True
+
+
+def _merge_dir(source: Path, target: Path) -> bool:
+    if not source.exists() or not source.is_dir():
+        return False
+    target.mkdir(parents=True, exist_ok=True)
+    copied = False
+    for path in source.rglob("*"):
+        rel = path.relative_to(source)
+        out = target / rel
+        if path.is_dir():
+            out.mkdir(parents=True, exist_ok=True)
+            continue
+        out.parent.mkdir(parents=True, exist_ok=True)
+        if out.exists():
+            continue
+        shutil.copy2(str(path), str(out))
+        copied = True
+    return copied or any(source.iterdir())
+
+
+def _merge_recycle_bin_db(source: Path, target: Path) -> bool:
+    if not source.exists() or not source.is_file():
+        return False
+    if not target.exists():
+        return _replace_file(source, target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    src = sqlite3.connect(str(source))
+    dst = sqlite3.connect(str(target))
+    try:
+        dst.execute(
+            """
+            CREATE TABLE IF NOT EXISTS recycle_bin (
+                id TEXT PRIMARY KEY,
+                original_path TEXT,
+                archived_name TEXT,
+                deleted_at DATETIME,
+                expires_at DATETIME
+            )
+            """
+        )
+        rows = src.execute(
+            "SELECT id, original_path, archived_name, deleted_at, expires_at FROM recycle_bin"
+        ).fetchall()
+        dst.executemany(
+            """
+            INSERT OR IGNORE INTO recycle_bin (id, original_path, archived_name, deleted_at, expires_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+        dst.commit()
+        return True
+    finally:
+        dst.close()
+        src.close()
 
 
 def _zip_dir(source_dir: Path, archive_path: Path) -> int:
@@ -166,8 +225,9 @@ def create_library_backup(
         payload.mkdir(parents=True, exist_ok=True)
 
         included["database"] = _sqlite_backup(_runtime_db_path(appdata), payload / "database" / "medialens.db")
-        included["recycle_bin"] = _sqlite_backup(appdata / "recycle_bin.sqlite", payload / "recycle" / "recycle_bin.sqlite")
-        included["recycle_bin_files"] = _copy_dir(appdata / "RecycleBin", payload / "recycle" / "RecycleBin")
+        if opts.include_recycle_bin:
+            included["recycle_bin"] = _sqlite_backup(appdata / "recycle_bin.sqlite", payload / "recycle" / "recycle_bin.sqlite")
+            included["recycle_bin_files"] = _copy_dir(appdata / "RecycleBin", payload / "recycle" / "RecycleBin")
         if opts.include_settings:
             included["settings"] = _copy_file(appdata / "settings.ini", payload / "settings" / "settings.ini")
         if opts.include_thumbs:
@@ -188,7 +248,7 @@ def create_library_backup(
             "notes": [
                 "Legacy MediaManagerX files and debug logs are intentionally excluded.",
                 "Downloaded models and AI runtimes are included only when selected.",
-                "Importing this archive overwrites the current supported MediaLens database and retention data.",
+                "Importing this archive always restores the database; optional data can be merged or replaced.",
             ],
         }
         (payload / MANIFEST_NAME).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -257,22 +317,48 @@ def restore_library_backup(
         existing_backup_dir = _backup_existing_supported_files(appdata) if opts.backup_existing else None
 
         restored["database"] = _replace_file(extracted / "database" / "medialens.db", _runtime_db_path(appdata))
-        if includes.get("recycle_bin"):
-            restored["recycle_bin"] = _replace_file(extracted / "recycle" / "recycle_bin.sqlite", appdata / "recycle_bin.sqlite")
-        if includes.get("recycle_bin_files"):
-            restored["recycle_bin_files"] = _replace_dir(extracted / "recycle" / "RecycleBin", appdata / "RecycleBin")
+        if opts.include_recycle_bin and includes.get("recycle_bin"):
+            if opts.merge_existing:
+                restored["recycle_bin"] = _merge_recycle_bin_db(extracted / "recycle" / "recycle_bin.sqlite", appdata / "recycle_bin.sqlite")
+            else:
+                restored["recycle_bin"] = _replace_file(extracted / "recycle" / "recycle_bin.sqlite", appdata / "recycle_bin.sqlite")
+        if opts.include_recycle_bin and includes.get("recycle_bin_files"):
+            if opts.merge_existing:
+                restored["recycle_bin_files"] = _merge_dir(extracted / "recycle" / "RecycleBin", appdata / "RecycleBin")
+            else:
+                restored["recycle_bin_files"] = _replace_dir(extracted / "recycle" / "RecycleBin", appdata / "RecycleBin")
         if opts.include_settings and includes.get("settings"):
             restored["settings"] = _replace_file(extracted / "settings" / "settings.ini", appdata / "settings.ini")
         if opts.include_thumbs and includes.get("thumbs"):
-            restored["thumbs"] = _replace_dir(extracted / "thumbs", appdata / "thumbs")
+            restored["thumbs"] = (
+                _merge_dir(extracted / "thumbs", appdata / "thumbs")
+                if opts.merge_existing
+                else _replace_dir(extracted / "thumbs", appdata / "thumbs")
+            )
         if opts.include_local_ai_models and includes.get("local_ai_models"):
-            restored["local_ai_models"] = _replace_dir(extracted / "ai" / "local_ai_models", appdata / "local_ai_models")
+            restored["local_ai_models"] = (
+                _merge_dir(extracted / "ai" / "local_ai_models", appdata / "local_ai_models")
+                if opts.merge_existing
+                else _replace_dir(extracted / "ai" / "local_ai_models", appdata / "local_ai_models")
+            )
         if opts.include_ai_runtimes:
             if includes.get("ai_runtimes"):
-                restored["ai_runtimes"] = _replace_dir(extracted / "ai" / "ai-runtimes", appdata / "ai-runtimes")
+                restored["ai_runtimes"] = (
+                    _merge_dir(extracted / "ai" / "ai-runtimes", appdata / "ai-runtimes")
+                    if opts.merge_existing
+                    else _replace_dir(extracted / "ai" / "ai-runtimes", appdata / "ai-runtimes")
+                )
             if includes.get("python_runtime"):
-                restored["python_runtime"] = _replace_dir(extracted / "ai" / "python", appdata / "python")
+                restored["python_runtime"] = (
+                    _merge_dir(extracted / "ai" / "python", appdata / "python")
+                    if opts.merge_existing
+                    else _replace_dir(extracted / "ai" / "python", appdata / "python")
+                )
             if includes.get("python_bootstrap"):
-                restored["python_bootstrap"] = _replace_dir(extracted / "ai" / "python-bootstrap", appdata / "python-bootstrap")
+                restored["python_bootstrap"] = (
+                    _merge_dir(extracted / "ai" / "python-bootstrap", appdata / "python-bootstrap")
+                    if opts.merge_existing
+                    else _replace_dir(extracted / "ai" / "python-bootstrap", appdata / "python-bootstrap")
+                )
 
     return LibraryRestoreResult(restored=restored, existing_backup_dir=existing_backup_dir)
