@@ -1,6 +1,56 @@
 # Change Log
 
-## v1.1.37 (Current)
+## v1.2.1 (Current)
+
+### Summary
+
+This release makes MediaLens' bulk editing tools much more practical for everyday library cleanup. Bulk tags, descriptions, and Text OCR now share a polished workflow with per-file editing, generation, review, saving, and responsive layouts that hold up with larger selections.
+
+### Highlights
+
+- Bulk Editor now includes strong tools for Tags, Descriptions, and Text OCR in one tabbed workspace.
+- Text OCR Review is easier to trust with a large image view, Fast OCR, AI OCR, User Typed text, No Text marking, and visible confirmed-source highlighting.
+- Scanner scheduling is more practical with saved folders, configurable intervals, and clearer schedule status.
+
+### Added
+
+- Added a Text OCR tab to the Bulk Editor with per-file No Text, Fast OCR, AI OCR, and Keep actions.
+- Added bulk Text OCR bottom actions for Fast OCR, AI OCR, saving edited OCR text to the database, and clearing OCR text.
+- Added a dedicated Text OCR Review workspace with a large preview image, side-by-side Fast OCR, AI OCR, and User Typed fields, Keep and Generate controls, Previous and Next navigation, status messaging, and close controls.
+- Added No Text actions to both the Bulk OCR rows and the OCR Review workspace.
+- Added visual confirmed-source indicators for OCR Review text fields and Keep buttons.
+- Added bulk list synchronization for OCR Review so previous and next navigation scrolls to the reviewed file and highlights it with the accent color.
+- Added per-file generate buttons below inputs in bulk tag and description rows.
+- Added source folder lists for scheduled scanner runs instead of relying on the current gallery selection.
+- Added scanner schedule options for hourly, daily, weekly, and monthly runs with time and day controls.
+- Added Next Scheduled Run display when scheduling is enabled.
+- Added an OCR folder action to copy all folders from the list above into the OCR scanner folder list.
+
+### Changed
+
+- Changed the Bulk Editor into a more usable multi-tool workspace with Tags, Descriptions, and Text OCR tabs.
+- Changed bulk selected-file rows to load and resize more reliably across narrow and wide right-panel layouts.
+- Changed bulk tag, description, and OCR rows so thumbnails, inputs, and action buttons align consistently and wrap cleanly at small widths.
+- Changed OCR Review to occupy the main gallery workspace while preserving the existing gallery selection and returning quickly when closed.
+- Changed OCR Keep actions so manually typed edits are saved before the source is confirmed.
+- Changed No Text handling so files leave Text Detected filtered lists after being marked as no text, and OCR Review advances to the next file when appropriate.
+- Changed Select All and bulk editor refresh behavior so large selections with the Tag List and Bulk Editor open no longer trigger the flashing popup-window crash.
+- Changed the scanner page to be scrollable and to keep folder and schedule sections collapsed by default.
+- Changed scanner scheduling so Run in background controls whether the scanner runs, without disabling the schedule and folder controls.
+- Changed scanner status so enabling Run in background reports Scheduled when appropriate.
+- Changed scanner labels and radio options for clearer wording.
+- Changed scanner folder and schedule headers to use SVG disclosure icons and theme-aware styling.
+- Changed Paddle Runtime install and repair access so the install path is kept in the AI Models Status window.
+- Changed Paddle OCR probe failure output so noisy pip/network text is handled more cleanly.
+- Changed several bulk editor and scanner controls to better match MediaLens light/dark theme, accent color, spacing, and SVG icon conventions.
+
+### Removed
+
+- Removed the duplicate Paddle Runtime Install/Repair button from Settings > AI > Text and OCR.
+
+---
+
+## v1.1.37
 
 ### Summary
 
