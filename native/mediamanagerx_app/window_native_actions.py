@@ -17,6 +17,8 @@ class WindowNativeActionsMixin:
         self._save_splitter_state()
         self._sync_sidebar_panel_widths()
         self._update_preview_display()
+        if hasattr(self, "_update_ocr_review_image_display"):
+            self._update_ocr_review_image_display()
         # Re-apply the full gallery selection via JS so resize doesn't visually collapse it to one card.
         selected_paths = [str(p or "") for p in list(getattr(self, "_current_paths", []) or []) if str(p or "").strip()]
         if selected_paths:
@@ -36,17 +38,19 @@ class WindowNativeActionsMixin:
 
     def _on_right_splitter_moved(self) -> None:
         self._save_tag_list_panel_width()
-        if self.tag_list_panel.isVisible():
+        if self._is_companion_panel_visible():
             try:
                 self.bridge.settings.setValue("ui/tag_list_last_details_width", self._details_panel_width_without_tag_list())
             except Exception:
                 pass
         self._sync_sidebar_panel_widths()
         self._update_preview_display()
+        if hasattr(self, "_update_ocr_review_image_display"):
+            self._update_ocr_review_image_display()
         self._schedule_gallery_container_relayout(120)
 
     def _handle_right_splitter_overflow_drag(self, delta_x: int) -> None:
-        if delta_x >= 0 or not self.tag_list_panel.isVisible():
+        if delta_x >= 0 or not self._is_companion_panel_visible():
             return
         try:
             right_sizes = self._current_right_splitter_sizes()
@@ -81,13 +85,13 @@ class WindowNativeActionsMixin:
             self.splitter.setSizes([left_width, center_width, right_width])
             next_details_width = max(240, right_width - min_tag_width)
             self.right_splitter.setSizes([min_tag_width, next_details_width])
-            self.bridge.settings.setValue("ui/tag_list_panel_width", min_tag_width)
+            self.bridge.settings.setValue(self._companion_panel_width_setting_key(), min_tag_width)
             self.bridge.settings.setValue("ui/tag_list_last_details_width", next_details_width)
         except Exception:
             pass
 
     def _maintain_tag_list_width_on_main_resize(self) -> None:
-        if not hasattr(self, "right_splitter") or not self.tag_list_panel.isVisible():
+        if not hasattr(self, "right_splitter") or not self._is_companion_panel_visible():
             return
         try:
             details_width = max(240, int(self.bridge.settings.value("ui/tag_list_last_details_width", self._details_panel_width_without_tag_list(), type=int) or self._details_panel_width_without_tag_list()))
@@ -96,7 +100,7 @@ class WindowNativeActionsMixin:
             next_tag_width = max(min_tag_width, total_right_width - details_width)
             next_details_width = max(240, total_right_width - next_tag_width)
             self.right_splitter.setSizes([next_tag_width, next_details_width])
-            self.bridge.settings.setValue("ui/tag_list_panel_width", int(next_tag_width))
+            self.bridge.settings.setValue(self._companion_panel_width_setting_key(), int(next_tag_width))
         except Exception:
             pass
 
@@ -694,21 +698,57 @@ class WindowNativeActionsMixin:
         if hasattr(self, "right_panel_host"):
             self.right_panel_host.setStyleSheet(f"background-color: {sb_bg_str}; border-left: none;")
         if hasattr(self, "tag_list_panel"):
-            self.tag_list_panel.setStyleSheet(f"""
-                QWidget#tagListPanel {{
+            companion_style = f"""
+                QStackedWidget#rightCompanionStack {{
                     background-color: {sb_bg_str};
                     border-right: 1px solid {Theme.get_border(accent)};
                 }}
-                QLabel#tagListTitleLabel, QLabel#activeTagListNameLabel, QLabel#tagListSortLabel {{
+                QWidget#tagListPanel {{
+                    background-color: {sb_bg_str};
+                    border-right: none;
+                }}
+                QWidget#ocrReviewPanel {{
+                    background-color: {sb_bg_str};
+                    border-right: none;
+                }}
+                QLabel#tagListTitleLabel, QLabel#activeTagListNameLabel, QLabel#tagListSortLabel, QLabel#ocrReviewTitleLabel, QLabel#ocrReviewFieldLabel, QLabel#ocrReviewFilenameLabel {{
                     color: {text};
                     font-weight: 700;
                     background: transparent;
+                }}
+                QLabel#ocrReviewTitleLabel {{
+                    font-size: 16px;
+                    qproperty-alignment: AlignCenter;
+                }}
+                QLabel#ocrReviewImageLabel {{
+                    background-color: {Theme.get_control_bg(accent)};
+                    border: 1px solid {Theme.get_border(accent)};
+                    border-radius: 8px;
+                    color: {text_muted};
+                    padding: 8px;
+                }}
+                QPlainTextEdit#ocrReviewTextEdit {{
+                    background-color: {Theme.get_input_bg(accent)};
+                    color: {text};
+                    border: 1px solid {Theme.get_input_border(accent)};
+                    border-radius: 4px;
+                    padding: 4px;
+                    selection-background-color: {Theme.get_accent_soft(accent)};
+                }}
+                QPlainTextEdit#bulkTagEditorStatusLabel {{
+                    background: transparent;
+                    border: none;
+                    color: {text_muted};
+                    font-weight: 500;
+                    padding: 0px;
+                    margin: 0px;
+                    selection-background-color: {Theme.get_accent_soft(accent)};
                 }}
                 QLabel#tagListEmptyLabel {{
                     color: {text_muted};
                     background: transparent;
                 }}
-                QPushButton#tagListCloseButton {{
+                QPushButton#tagListCloseButton, QPushButton#ocrReviewKeepButton {{
                     background-color: {Theme.get_control_bg(accent)};
                     border: 1px solid {Theme.get_border(accent)};
                     border-radius: 4px;
@@ -716,10 +756,29 @@ class WindowNativeActionsMixin:
                     padding: 0px;
                     margin: 0px;
                 }}
-                QPushButton#tagListCloseButton:hover {{
+                QPushButton#tagListCloseButton:hover, QPushButton#ocrReviewKeepButton:hover {{
                     background-color: {close_hover_bg};
                     color: {text};
                     border-color: {accent_str};
+                }}
+                QPushButton#bulkSelectedFileGenerateButton, QPushButton#bulkBtnRunLocalAI {{
+                    background-color: {Theme.get_btn_save_bg(accent)};
+                    color: {text};
+                    border: 1px solid {Theme.get_border(accent)};
+                    border-radius: 4px;
+                    padding: 4px 8px;
+                    font-size: 11px;
+                    font-weight: 500;
+                }}
+                QPushButton#bulkSelectedFileGenerateButton:hover, QPushButton#bulkBtnRunLocalAI:hover {{
+                    background-color: {Theme.get_btn_save_hover(accent)};
+                    color: {"#000" if is_light else "#fff"};
+                    border-color: {accent_str};
+                }}
+                QPushButton#bulkSelectedFileGenerateButton:disabled, QPushButton#bulkBtnRunLocalAI:disabled {{
+                    background-color: {Theme.get_control_bg(accent)};
+                    color: {text_muted};
+                    border-color: {Theme.get_border(accent)};
                 }}
                 QComboBox#tagListSelect, QComboBox#tagListSortSelect {{
                     background-color: {combo_bg};
@@ -830,7 +889,12 @@ class WindowNativeActionsMixin:
                     background: transparent;
                 }}
                 {scrollbar_style}
-            """)
+            """
+            if hasattr(self, "right_companion_stack"):
+                self.right_companion_stack.setStyleSheet(companion_style)
+            self.tag_list_panel.setStyleSheet(companion_style)
+            if hasattr(self, "ocr_review_panel"):
+                self.ocr_review_panel.setStyleSheet(companion_style)
             self._apply_tag_list_theme()
 
         # Metadata - Mirroring Left Panel Background precisely
@@ -1124,7 +1188,7 @@ class WindowNativeActionsMixin:
             QPushButton#btnPreviewOverlayPlay:pressed {{
                 background-color: {"rgba(255, 255, 255, 115)" if is_light else "rgba(0, 0, 0, 115)"};
             }}
-            QPushButton#btnSaveMeta, QPushButton#btnUseOcr, QPushButton#btnUseOcrGemma, QPushButton#btnGenerateTags, QPushButton#btnGenerateDescription, QPushButton#btnImportExif, QPushButton#btnMergeHiddenMeta, QPushButton#btnSaveToExif, QPushButton#btnOpenTagList, QPushButton#metaEmptySelectAllButton {{
+            QPushButton#btnSaveMeta, QPushButton#btnUseOcr, QPushButton#btnUseOcrGemma, QPushButton#btnGenerateTags, QPushButton#btnGenerateDescription, QPushButton#btnImportExif, QPushButton#btnMergeHiddenMeta, QPushButton#btnSaveToExif, QPushButton#btnOpenTagList, QPushButton#btnOpenOcrReview, QPushButton#metaEmptySelectAllButton {{
                 background-color: {Theme.get_btn_save_bg(accent)};
                 color: {text};
                 border: 1px solid {Theme.get_border(accent)};
@@ -1133,7 +1197,7 @@ class WindowNativeActionsMixin:
                 font-size: 11px;
                 font-weight: 500;
             }}
-            QPushButton#btnSaveMeta:hover, QPushButton#btnUseOcr:hover, QPushButton#btnUseOcrGemma:hover, QPushButton#btnGenerateTags:hover, QPushButton#btnGenerateDescription:hover, QPushButton#btnImportExif:hover, QPushButton#btnMergeHiddenMeta:hover, QPushButton#btnSaveToExif:hover, QPushButton#btnOpenTagList:hover, QPushButton#metaEmptySelectAllButton:hover {{
+            QPushButton#btnSaveMeta:hover, QPushButton#btnUseOcr:hover, QPushButton#btnUseOcrGemma:hover, QPushButton#btnGenerateTags:hover, QPushButton#btnGenerateDescription:hover, QPushButton#btnImportExif:hover, QPushButton#btnMergeHiddenMeta:hover, QPushButton#btnSaveToExif:hover, QPushButton#btnOpenTagList:hover, QPushButton#btnOpenOcrReview:hover, QPushButton#metaEmptySelectAllButton:hover {{
                 background-color: {Theme.get_btn_save_hover(accent)};
                 color: {"#000" if is_light else "#fff"};
                 border-color: {accent_str};

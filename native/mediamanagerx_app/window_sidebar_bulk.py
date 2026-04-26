@@ -708,7 +708,7 @@ class WindowSidebarBulkMixin:
         self._sync_sidebar_panel_widths()
         if (
             hasattr(self, "tag_list_panel")
-            and self.tag_list_panel.isVisible()
+            and self._is_tag_list_panel_visible()
             and not bool(getattr(self, "_bulk_select_all_pending", False))
         ):
             self._refresh_tag_list_rows_state()
@@ -1040,6 +1040,12 @@ class WindowSidebarBulkMixin:
     def _handle_bulk_manual_ocr_finished(self, path: str, text: str, error: str) -> bool:
         pending = getattr(self, "_bulk_ocr_pending", None)
         clean_path = str(path or "").strip()
+        if str(getattr(self, "_ocr_review_path", "") or "").casefold() == clean_path.casefold():
+            if error:
+                self._ocr_review_status(f"OCR failed for {Path(clean_path).name}: {error}")
+            else:
+                self._refresh_ocr_review_for_path(clean_path)
+                self._ocr_review_status(f"OCR text updated for {Path(clean_path).name}" if str(text or "").strip() else f"No OCR text found for {Path(clean_path).name}")
         if not isinstance(pending, dict) or clean_path not in pending:
             return False
         pending.pop(clean_path, None)
@@ -1053,6 +1059,200 @@ class WindowSidebarBulkMixin:
         else:
             self._bulk_ocr_status(f"No OCR text found for {Path(clean_path).name}")
         return True
+
+    def _open_ocr_review_for_current_file(self) -> None:
+        path = str(getattr(self, "_current_path", "") or "").strip()
+        if not path:
+            paths = self._current_file_paths()
+            path = paths[0] if paths else ""
+        self._open_ocr_review_panel_for_path(path)
+
+    def _open_ocr_review_panel_for_path(self, path: str) -> None:
+        clean_path = str(path or "").strip()
+        if not clean_path:
+            return
+        try:
+            if not bool(self.bridge.settings.value("ui/show_right_panel", True, type=bool)):
+                self.bridge.settings.setValue("ui/show_right_panel", True)
+                self.bridge.uiFlagChanged.emit("ui.show_right_panel", True)
+        except Exception:
+            pass
+        if hasattr(self, "right_companion_stack"):
+            self._set_companion_panel_page("ocr_review")
+            self.bridge.settings.setValue("ui/show_tag_list_panel", False)
+            self._update_tag_list_toggle_controls(False)
+            self._resize_window_for_tag_list_visibility(True)
+            self.right_companion_stack.setVisible(True)
+        self._refresh_ocr_review_for_path(clean_path)
+
+    def _close_ocr_review_panel(self) -> None:
+        self._save_tag_list_panel_width()
+        try:
+            details_width = max(240, int(self.bridge.settings.value("ui/tag_list_last_details_width", self._DEFAULT_RIGHT_PANEL_WIDTH, type=int) or self._DEFAULT_RIGHT_PANEL_WIDTH))
+            if hasattr(self, "right_companion_stack"):
+                self.right_companion_stack.setVisible(False)
+            if hasattr(self, "right_splitter"):
+                self.right_splitter.setSizes([0, details_width])
+        except Exception:
+            pass
+
+    def _ocr_review_status(self, text: str) -> None:
+        label = getattr(self, "ocr_review_status_lbl", None)
+        if label is not None:
+            label.setText(str(text or ""))
+
+    def _ocr_review_selected_paths(self) -> list[str]:
+        paths = self._current_file_paths()
+        current = str(getattr(self, "_ocr_review_path", "") or "").strip()
+        if current and current not in paths and Path(current).is_file():
+            paths.insert(0, current)
+        return paths
+
+    def _move_ocr_review_image(self, delta: int) -> None:
+        paths = self._ocr_review_selected_paths()
+        current = str(getattr(self, "_ocr_review_path", "") or "").strip()
+        if not paths:
+            return
+        try:
+            idx = next(i for i, item in enumerate(paths) if str(item).casefold() == current.casefold())
+        except StopIteration:
+            idx = 0
+        next_idx = max(0, min(len(paths) - 1, idx + int(delta or 0)))
+        self._refresh_ocr_review_for_path(paths[next_idx])
+
+    def _ocr_review_media_record(self, path: str) -> dict | None:
+        try:
+            from app.mediamanager.db.media_repo import get_media_by_path
+
+            media = get_media_by_path(self.bridge.conn, str(path or ""))
+            return dict(media) if media else None
+        except Exception:
+            return None
+
+    def _ocr_review_results_for_path(self, path: str) -> tuple[dict | None, list[dict]]:
+        media = self._ocr_review_media_record(path)
+        if not media:
+            return None, []
+        try:
+            from app.mediamanager.db.ocr_repo import get_ocr_results
+
+            return media, list(get_ocr_results(self.bridge.conn, int(media.get("id") or 0)) or [])
+        except Exception:
+            return media, []
+
+    def _ocr_review_source_key(self, source_key: str) -> str:
+        key = str(source_key or "").strip()
+        return self._bulk_ai_ocr_source() if key == "ai" else key
+
+    def _latest_ocr_review_text(self, results: list[dict], source_key: str) -> str:
+        source = self._ocr_review_source_key(source_key)
+        for item in list(results or []):
+            if str(item.get("source") or "") == source:
+                return str(item.get("text") or "")
+        return ""
+
+    def _refresh_ocr_review_for_path(self, path: str) -> None:
+        clean_path = str(path or "").strip()
+        if not clean_path:
+            return
+        self._ocr_review_path = clean_path
+        if hasattr(self, "ocr_review_filename_lbl"):
+            self.ocr_review_filename_lbl.setText(Path(clean_path).name)
+        self._refresh_ocr_review_image(clean_path)
+        media, results = self._ocr_review_results_for_path(clean_path)
+        fields = getattr(self, "ocr_review_fields", {}) or {}
+        for key in ("paddle_fast", "ai", "user"):
+            edit = fields.get(key)
+            if edit is None:
+                continue
+            edit.blockSignals(True)
+            edit.setPlainText(self._latest_ocr_review_text(results, key))
+            edit.blockSignals(False)
+        self._sync_ocr_review_nav_buttons()
+        self._ocr_review_status("")
+
+    def _refresh_ocr_review_image(self, path: str) -> None:
+        label = getattr(self, "ocr_review_image_lbl", None)
+        if label is None:
+            return
+        clean_path = str(path or "").strip()
+        pixmap = QPixmap()
+        try:
+            source = Path(clean_path)
+            if source.suffix.lower() in VIDEO_EXTS and hasattr(self.bridge, "_manual_ocr_source_path"):
+                source = self.bridge._manual_ocr_source_path(source)
+            img = _read_image_with_svg_support(source)
+            if img is not None and not img.isNull():
+                pixmap = QPixmap.fromImage(img)
+        except Exception:
+            pixmap = QPixmap()
+        self._ocr_review_source_pixmap = pixmap
+        self._update_ocr_review_image_display()
+
+    def _update_ocr_review_image_display(self) -> None:
+        label = getattr(self, "ocr_review_image_lbl", None)
+        pixmap = getattr(self, "_ocr_review_source_pixmap", QPixmap())
+        if label is None:
+            return
+        if pixmap is None or pixmap.isNull():
+            label.setPixmap(QPixmap())
+            label.setText("No preview")
+            return
+        target = label.size()
+        if target.width() <= 10 or target.height() <= 10:
+            target = QSize(420, 520)
+        scaled = pixmap.scaled(target, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        label.setText("")
+        label.setPixmap(scaled)
+
+    def _sync_ocr_review_nav_buttons(self) -> None:
+        paths = self._ocr_review_selected_paths()
+        current = str(getattr(self, "_ocr_review_path", "") or "").strip()
+        try:
+            idx = next(i for i, item in enumerate(paths) if str(item).casefold() == current.casefold())
+        except StopIteration:
+            idx = -1
+        for button, enabled in (
+            (getattr(self, "ocr_review_prev_btn", None), idx > 0),
+            (getattr(self, "ocr_review_next_btn", None), idx >= 0 and idx < len(paths) - 1),
+        ):
+            if button is None:
+                continue
+            button.setEnabled(bool(enabled))
+            button.setCursor(Qt.CursorShape.PointingHandCursor if enabled else Qt.CursorShape.ForbiddenCursor)
+
+    def _keep_ocr_review_source(self, source_key: str) -> None:
+        path = str(getattr(self, "_ocr_review_path", "") or "").strip()
+        if not path:
+            return
+        media, _results = self._ocr_review_results_for_path(path)
+        if not media:
+            self._ocr_review_status("No media record found.")
+            return
+        key = str(source_key or "").strip()
+        ok = False
+        if key == "user":
+            edit = (getattr(self, "ocr_review_fields", {}) or {}).get("user")
+            text = edit.toPlainText() if edit is not None else ""
+            ok = bool(self.bridge.keep_user_ocr_text_for_path(path, text))
+        else:
+            ok = bool(self.bridge.keep_latest_ocr_result_source(int(media.get("id") or 0), self._ocr_review_source_key(key)))
+        if ok:
+            self._set_bulk_ocr_row_text(path, self.bridge.get_media_metadata(path).get("detected_text", ""))
+            self._refresh_ocr_review_for_path(path)
+            self._ocr_review_status(f"Kept OCR text for {Path(path).name}")
+        else:
+            self._ocr_review_status("No OCR text available to keep.")
+
+    def _generate_ocr_review_source(self, source_key: str) -> None:
+        path = str(getattr(self, "_ocr_review_path", "") or "").strip()
+        if not path:
+            return
+        key = str(source_key or "").strip()
+        if key == "user":
+            return
+        self._run_bulk_ocr_for_paths(self._ocr_review_source_key(key), [path])
+        self._ocr_review_status(f"Running {'AI OCR' if key == 'ai' else 'Fast OCR'} for {Path(path).name}...")
 
     @staticmethod
     def _bulk_selected_file_tags_text(tags: list[str]) -> str:
@@ -1159,6 +1359,8 @@ class WindowSidebarBulkMixin:
         generate_button_text: str = "",
         action_handler=None,
         action_buttons: list[dict] | None = None,
+        thumbnail_action_handler=None,
+        thumbnail_button_text: str = "",
     ) -> None:
         if list_widget is None:
             return
@@ -1186,6 +1388,7 @@ class WindowSidebarBulkMixin:
                     placeholder_text=placeholder_text,
                     generate_button_text=generate_button_text,
                     action_buttons=action_buttons,
+                    thumbnail_button_text=thumbnail_button_text,
                 )
                 item.setSizeHint(QSize(0, row.item_height()))
                 row.tagsEdited.connect(edit_handler)
@@ -1193,6 +1396,8 @@ class WindowSidebarBulkMixin:
                     row.generateRequested.connect(generate_handler)
                 if action_handler is not None:
                     row.actionRequested.connect(action_handler)
+                if thumbnail_action_handler is not None:
+                    row.thumbnailActionRequested.connect(thumbnail_action_handler)
                 list_widget.addItem(item)
                 list_widget.setItemWidget(item, row)
             list_widget.doItemsLayout()
@@ -1287,6 +1492,8 @@ class WindowSidebarBulkMixin:
             placeholder_text="Detected text for this file",
             action_handler=self._handle_bulk_ocr_row_action,
             action_buttons=self._bulk_ocr_action_buttons(),
+            thumbnail_action_handler=self._open_ocr_review_panel_for_path,
+            thumbnail_button_text="Review",
         )
         self._queue_bulk_ocr_selected_files_layout_sync()
 
@@ -1798,7 +2005,7 @@ class WindowSidebarBulkMixin:
         self._apply_tag_list_theme()
 
     def _refresh_tag_list_scope_counts(self) -> None:
-        if not hasattr(self, "tag_list_panel") or not self.tag_list_panel.isVisible():
+        if not hasattr(self, "tag_list_panel") or not self._is_tag_list_panel_visible():
             return
         if not str(getattr(self.bridge, "_current_gallery_tag_scope_search", "") or "").strip():
             self._active_tag_scope_name = ""
@@ -1806,7 +2013,7 @@ class WindowSidebarBulkMixin:
         self._refresh_tag_list_panel()
 
     def _refresh_tag_list_rows_state(self) -> None:
-        if not hasattr(self, "tag_list_panel") or not self.tag_list_panel.isVisible():
+        if not hasattr(self, "tag_list_panel") or not self._is_tag_list_panel_visible():
             return
         if not hasattr(self, "tag_list_rows") or self.tag_list_rows.count() <= 0:
             self._refresh_tag_list_panel()

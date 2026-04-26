@@ -797,6 +797,7 @@ class BulkSelectedFileRow(QWidget):
     tagsEdited = Signal(str, str)
     generateRequested = Signal(str)
     actionRequested = Signal(str, str)
+    thumbnailActionRequested = Signal(str)
     _TAG_CONTENT_HEIGHT = 92
     _CAPTION_CONTENT_HEIGHT = 132
     _GENERATE_BUTTON_HEIGHT = 32
@@ -825,6 +826,7 @@ class BulkSelectedFileRow(QWidget):
         thumbnail_bg_hint: str = "",
         generate_button_text: str = "",
         action_buttons: list[dict] | None = None,
+        thumbnail_button_text: str = "",
     ) -> None:
         super().__init__(parent)
         self._path = str(path or "")
@@ -853,7 +855,14 @@ class BulkSelectedFileRow(QWidget):
         content_row.setSpacing(12)
         self._content_row = content_row
 
-        self.thumb_lbl = QLabel(self)
+        self.thumb_host = QWidget(self)
+        self.thumb_host.setObjectName("bulkSelectedFileThumbHost")
+        self.thumb_host.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        thumb_host_layout = QVBoxLayout(self.thumb_host)
+        thumb_host_layout.setContentsMargins(0, 0, 0, 0)
+        thumb_host_layout.setSpacing(self._GENERATE_BUTTON_GAP)
+
+        self.thumb_lbl = QLabel(self.thumb_host)
         self.thumb_lbl.setObjectName("bulkSelectedFileThumb")
         self.thumb_lbl.setFixedSize(self._content_height, self._content_height)
         self.thumb_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -874,7 +883,25 @@ class BulkSelectedFileRow(QWidget):
             self.thumb_lbl.setText("")
         if not hasattr(self, "_thumbnail_loaded"):
             self._thumbnail_loaded = False
-        content_row.addWidget(self.thumb_lbl, 0, Qt.AlignmentFlag.AlignTop)
+        thumb_host_layout.addWidget(self.thumb_lbl)
+        self.thumbnail_action_btn = QPushButton(str(thumbnail_button_text or ""), self.thumb_host)
+        self.thumbnail_action_btn.setObjectName("bulkSelectedFileGenerateButton")
+        self.thumbnail_action_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.thumbnail_action_btn.setFixedSize(self._content_height, self._GENERATE_BUTTON_HEIGHT)
+        self.thumbnail_action_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.thumbnail_action_btn.setVisible(bool(str(thumbnail_button_text or "").strip()))
+        self.thumbnail_action_btn.clicked.connect(self._emit_thumbnail_action_requested)
+        thumb_host_layout.addWidget(self.thumbnail_action_btn)
+        if str(thumbnail_button_text or "").strip():
+            self.thumb_host.setFixedHeight(
+                self._content_height
+                + self._GENERATE_BUTTON_GAP
+                + self._GENERATE_BUTTON_HEIGHT
+                + self._GENERATE_BUTTON_BOTTOM_PADDING
+            )
+        else:
+            self.thumb_host.setFixedHeight(self._content_height)
+        content_row.addWidget(self.thumb_host, 0, Qt.AlignmentFlag.AlignTop)
 
         self.tags_edit_host = QWidget(self)
         self.tags_edit_host.setObjectName("bulkSelectedFileTagsHost")
@@ -958,6 +985,12 @@ class BulkSelectedFileRow(QWidget):
     def _emit_generate_requested(self) -> None:
         try:
             self.generateRequested.emit(self._path)
+        except RuntimeError:
+            pass
+
+    def _emit_thumbnail_action_requested(self) -> None:
+        try:
+            self.thumbnailActionRequested.emit(self._path)
         except RuntimeError:
             pass
 

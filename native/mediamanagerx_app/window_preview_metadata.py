@@ -193,6 +193,8 @@ class WindowPreviewMetadataMixin:
             movie_aspect = max(0.2, movie_w / movie_h)
             scaled_h = max(96, min(320, int(available_w / movie_aspect)))
             self.preview_image_lbl.setFixedHeight(scaled_h)
+            if hasattr(self, "btn_open_ocr_review"):
+                self.btn_open_ocr_review.setFixedWidth(max(96, min(available_w, int(scaled_h * movie_aspect))))
             autoplay_gifs = self.bridge._autoplay_preview_animated_gifs_enabled()
             if autoplay_gifs and self._preview_movie.state() != QMovie.MovieState.Running:
                 self._preview_movie.start()
@@ -223,6 +225,8 @@ class WindowPreviewMetadataMixin:
                 )
             self.preview_image_lbl.setFixedHeight(max(96, scaled.height()))
             self.preview_image_lbl.setPixmap(scaled)
+            if hasattr(self, "btn_open_ocr_review"):
+                self.btn_open_ocr_review.setFixedWidth(max(96, int(scaled.width())))
             overlay = getattr(self, "sidebar_video_overlay", None)
             if overlay is not None and overlay.isVisible():
                 overlay.setGeometry(self.preview_image_lbl.rect())
@@ -231,6 +235,8 @@ class WindowPreviewMetadataMixin:
 
         self.preview_image_lbl.setFixedHeight(96)
         self.preview_image_lbl.setText(placeholder)
+        if hasattr(self, "btn_open_ocr_review"):
+            self.btn_open_ocr_review.setFixedWidth(self._right_panel_content_width())
         overlay = getattr(self, "sidebar_video_overlay", None)
         if overlay is not None and overlay.isVisible():
             overlay.setGeometry(self.preview_image_lbl.rect())
@@ -1578,7 +1584,7 @@ class WindowPreviewMetadataMixin:
         self._show_metadata_for_path(paths, request_revision=revision)
 
     def _schedule_tag_list_refresh(self, mode: str = "rows", *, request_revision: int | None = None) -> None:
-        if not hasattr(self, "tag_list_panel") or not self.tag_list_panel.isVisible():
+        if not hasattr(self, "tag_list_panel") or not self._is_tag_list_panel_visible():
             return
         next_mode = "full" if str(mode or "rows") == "full" else "rows"
         current_mode = str(getattr(self, "_pending_tag_list_refresh_mode", "rows") or "rows")
@@ -1664,6 +1670,8 @@ class WindowPreviewMetadataMixin:
 
         self.preview_header_row.setVisible(not is_bulk)
         self.preview_image_lbl.setVisible(not is_bulk and self.bridge._preview_above_details_enabled())
+        if hasattr(self, "btn_open_ocr_review"):
+            self.btn_open_ocr_review.setVisible(not is_bulk and self.bridge._preview_above_details_enabled())
         self.preview_sep.setVisible(not is_bulk and self.bridge._preview_above_details_enabled())
         self.details_header_lbl.setVisible(not is_bulk)
         self.preview_image_lbl.setCursor(Qt.CursorShape.ArrowCursor)
@@ -3170,6 +3178,8 @@ class WindowPreviewMetadataMixin:
         kind = getattr(self, "_current_metadata_kind", "image")
         self._setup_metadata_layout(kind)
         self._refresh_preview_for_path(None)
+        if hasattr(self, "btn_open_ocr_review"):
+            self.btn_open_ocr_review.setVisible(False)
 
         signal_widgets = [
             self.meta_filename_edit,

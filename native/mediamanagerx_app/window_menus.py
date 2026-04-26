@@ -297,6 +297,7 @@ class WindowMenuShortcutMixin:
         icon = QIcon(icon_path)
         for button in (
             getattr(self, "tag_list_close_btn", None),
+            getattr(self, "ocr_review_close_btn", None),
             getattr(self, "btn_close_preview", None),
             getattr(self, "bottom_panel_close_btn", None),
         ):

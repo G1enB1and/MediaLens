@@ -308,7 +308,13 @@ class WindowLayoutPanelsMixin:
         self.right_splitter.setChildrenCollapsible(False)
         right_host_layout.addWidget(self.right_splitter)
 
-        self.tag_list_panel = QWidget(self.right_splitter)
+        self.right_companion_stack = QStackedWidget(self.right_splitter)
+        self.right_companion_stack.setObjectName("rightCompanionStack")
+        self.right_companion_stack.setMinimumWidth(220)
+        self.right_companion_stack.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        self.right_companion_stack.setVisible(False)
+
+        self.tag_list_panel = QWidget(self.right_companion_stack)
         self.tag_list_panel.setObjectName("tagListPanel")
         self.tag_list_panel.setMinimumWidth(220)
         self.tag_list_panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
@@ -412,6 +418,125 @@ class WindowLayoutPanelsMixin:
             QSizePolicy.Policy.Expanding,
         )
         self.tag_list_panel_layout.addItem(self.tag_list_bottom_spacer)
+        self.right_companion_stack.addWidget(self.tag_list_panel)
+
+        self.ocr_review_panel = QWidget(self.right_companion_stack)
+        self.ocr_review_panel.setObjectName("ocrReviewPanel")
+        self.ocr_review_panel.setMinimumWidth(520)
+        self.ocr_review_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        ocr_review_layout = QVBoxLayout(self.ocr_review_panel)
+        ocr_review_layout.setContentsMargins(12, 12, 12, 12)
+        ocr_review_layout.setSpacing(8)
+
+        self.ocr_review_header_row = QWidget(self.ocr_review_panel)
+        ocr_review_header_layout = QHBoxLayout(self.ocr_review_header_row)
+        ocr_review_header_layout.setContentsMargins(0, 0, 0, 0)
+        ocr_review_header_layout.setSpacing(8)
+        ocr_review_header_layout.addStretch(1)
+        self.ocr_review_title_lbl = QLabel("Text OCR Review")
+        self.ocr_review_title_lbl.setObjectName("ocrReviewTitleLabel")
+        self.ocr_review_title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ocr_review_header_layout.addWidget(self.ocr_review_title_lbl, 0, Qt.AlignmentFlag.AlignCenter)
+        ocr_review_header_layout.addStretch(1)
+        self.ocr_review_close_btn = QPushButton("")
+        self.ocr_review_close_btn.setObjectName("tagListCloseButton")
+        self.ocr_review_close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.ocr_review_close_btn.setFixedSize(22, 22)
+        self.ocr_review_close_btn.clicked.connect(self._close_ocr_review_panel)
+        ocr_review_header_layout.addWidget(self.ocr_review_close_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        ocr_review_layout.addWidget(self.ocr_review_header_row)
+
+        self.ocr_review_filename_lbl = QLabel("")
+        self.ocr_review_filename_lbl.setObjectName("ocrReviewFilenameLabel")
+        self.ocr_review_filename_lbl.setTextFormat(Qt.TextFormat.PlainText)
+        self.ocr_review_filename_lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        ocr_review_layout.addWidget(self.ocr_review_filename_lbl)
+
+        self.ocr_review_body = QWidget(self.ocr_review_panel)
+        self.ocr_review_body.setObjectName("ocrReviewBody")
+        ocr_review_body_layout = QHBoxLayout(self.ocr_review_body)
+        ocr_review_body_layout.setContentsMargins(0, 0, 0, 0)
+        ocr_review_body_layout.setSpacing(10)
+        self.ocr_review_image_lbl = QLabel("")
+        self.ocr_review_image_lbl.setObjectName("ocrReviewImageLabel")
+        self.ocr_review_image_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.ocr_review_image_lbl.setMinimumSize(QSize(260, 260))
+        self.ocr_review_image_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        ocr_review_body_layout.addWidget(self.ocr_review_image_lbl, 1)
+
+        self.ocr_review_fields_panel = QWidget(self.ocr_review_body)
+        self.ocr_review_fields_panel.setObjectName("ocrReviewFieldsPanel")
+        self.ocr_review_fields_panel.setMinimumWidth(210)
+        self.ocr_review_fields_panel.setMaximumWidth(320)
+        ocr_review_fields_layout = QVBoxLayout(self.ocr_review_fields_panel)
+        ocr_review_fields_layout.setContentsMargins(0, 0, 0, 0)
+        ocr_review_fields_layout.setSpacing(8)
+        check_icon = QIcon(str(Path(__file__).with_name("web") / "icons" / "check-green.svg"))
+        self.ocr_review_fields: dict[str, QPlainTextEdit] = {}
+        self.ocr_review_keep_buttons: dict[str, QPushButton] = {}
+        self.ocr_review_generate_buttons: dict[str, QPushButton] = {}
+        for source_key, label_text, generate_enabled in (
+            ("paddle_fast", "Fast OCR", True),
+            ("ai", "AI OCR", True),
+            ("user", "User Typed", False),
+        ):
+            label = QLabel(label_text)
+            label.setObjectName("ocrReviewFieldLabel")
+            ocr_review_fields_layout.addWidget(label)
+            edit = QPlainTextEdit()
+            edit.setObjectName("ocrReviewTextEdit")
+            edit.setPlaceholderText(label_text)
+            edit.setMinimumHeight(100)
+            edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            ocr_review_fields_layout.addWidget(edit, 1)
+            button_row = QWidget(self.ocr_review_fields_panel)
+            button_row_layout = QHBoxLayout(button_row)
+            button_row_layout.setContentsMargins(0, 0, 0, 0)
+            button_row_layout.setSpacing(6)
+            keep_btn = QPushButton("")
+            keep_btn.setObjectName("ocrReviewKeepButton")
+            keep_btn.setToolTip(f"Keep {label_text}")
+            keep_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            keep_btn.setIcon(check_icon)
+            keep_btn.setIconSize(QSize(16, 16))
+            keep_btn.setFixedHeight(28)
+            keep_btn.clicked.connect(lambda checked=False, key=source_key: self._keep_ocr_review_source(key))
+            button_row_layout.addWidget(keep_btn)
+            generate_btn = QPushButton("Generate")
+            generate_btn.setObjectName("bulkSelectedFileGenerateButton")
+            generate_btn.setCursor(Qt.CursorShape.PointingHandCursor if generate_enabled else Qt.CursorShape.ForbiddenCursor)
+            generate_btn.setEnabled(generate_enabled)
+            generate_btn.setFixedHeight(28)
+            generate_btn.clicked.connect(lambda checked=False, key=source_key: self._generate_ocr_review_source(key))
+            button_row_layout.addWidget(generate_btn, 1)
+            ocr_review_fields_layout.addWidget(button_row)
+            self.ocr_review_fields[source_key] = edit
+            self.ocr_review_keep_buttons[source_key] = keep_btn
+            self.ocr_review_generate_buttons[source_key] = generate_btn
+        ocr_review_body_layout.addWidget(self.ocr_review_fields_panel, 0)
+        ocr_review_layout.addWidget(self.ocr_review_body, 1)
+
+        self.ocr_review_status_lbl = StatusTextEdit("")
+        self.ocr_review_status_lbl.setObjectName("bulkTagEditorStatusLabel")
+        self._configure_status_text_widget(self.ocr_review_status_lbl)
+        ocr_review_layout.addWidget(self.ocr_review_status_lbl)
+
+        self.ocr_review_nav_row = QWidget(self.ocr_review_panel)
+        ocr_review_nav_layout = QHBoxLayout(self.ocr_review_nav_row)
+        ocr_review_nav_layout.setContentsMargins(0, 0, 0, 0)
+        ocr_review_nav_layout.addStretch(1)
+        self.ocr_review_prev_btn = QPushButton("Previous Image")
+        self.ocr_review_prev_btn.setObjectName("bulkBtnRunLocalAI")
+        self.ocr_review_prev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.ocr_review_prev_btn.clicked.connect(lambda checked=False: self._move_ocr_review_image(-1))
+        ocr_review_nav_layout.addWidget(self.ocr_review_prev_btn)
+        self.ocr_review_next_btn = QPushButton("Next Image")
+        self.ocr_review_next_btn.setObjectName("bulkBtnRunLocalAI")
+        self.ocr_review_next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.ocr_review_next_btn.clicked.connect(lambda checked=False: self._move_ocr_review_image(1))
+        ocr_review_nav_layout.addWidget(self.ocr_review_next_btn)
+        ocr_review_layout.addWidget(self.ocr_review_nav_row)
+        self.right_companion_stack.addWidget(self.ocr_review_panel)
 
         self.right_panel = QWidget(self.right_splitter)
         self.right_panel.setObjectName("rightPanel")
@@ -497,6 +622,15 @@ class WindowLayoutPanelsMixin:
         self._preview_movie: QMovie | None = None
         self._preview_aspect_ratio = 1.0
         right_layout.addWidget(self.preview_image_lbl)
+        self.btn_open_ocr_review = QPushButton("Review")
+        self.btn_open_ocr_review.setObjectName("btnOpenOcrReview")
+        self.btn_open_ocr_review.setProperty("baseText", "Review")
+        self.btn_open_ocr_review.setToolTip("Open Text OCR Review")
+        self.btn_open_ocr_review.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_open_ocr_review.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.btn_open_ocr_review.clicked.connect(lambda checked=False: self._open_ocr_review_for_current_file())
+        self.btn_open_ocr_review.hide()
+        right_layout.addWidget(self.btn_open_ocr_review, 0, Qt.AlignmentFlag.AlignHCenter)
 
         # Sidebar preview overlay is manually positioned to the preview label's rect.
         # Avoid also putting it in a layout, which can produce bad geometry/clipping.
@@ -1612,7 +1746,7 @@ class WindowLayoutPanelsMixin:
         splitter.addWidget(self.left_panel)
         splitter.addWidget(center_container)
 
-        self.right_splitter.addWidget(self.tag_list_panel)
+        self.right_splitter.addWidget(self.right_companion_stack)
         self.right_splitter.addWidget(self.right_panel)
         self.right_splitter.setStretchFactor(0, 0)
         self.right_splitter.setStretchFactor(1, 1)
@@ -1779,11 +1913,56 @@ class WindowLayoutPanelsMixin:
             return [0, self._DEFAULT_RIGHT_PANEL_WIDTH]
         return sizes[:2]
 
+    def _active_companion_page(self) -> str:
+        stack = getattr(self, "right_companion_stack", None)
+        if stack is not None and stack.currentWidget() is getattr(self, "ocr_review_panel", None):
+            return "ocr_review"
+        return "tag_list"
+
+    def _is_companion_panel_visible(self) -> bool:
+        stack = getattr(self, "right_companion_stack", None)
+        return bool(stack is not None and stack.isVisible())
+
+    def _is_tag_list_panel_visible(self) -> bool:
+        stack = getattr(self, "right_companion_stack", None)
+        return bool(
+            stack is not None
+            and stack.isVisible()
+            and stack.currentWidget() is getattr(self, "tag_list_panel", None)
+        )
+
+    def _is_ocr_review_panel_visible(self) -> bool:
+        stack = getattr(self, "right_companion_stack", None)
+        return bool(
+            stack is not None
+            and stack.isVisible()
+            and stack.currentWidget() is getattr(self, "ocr_review_panel", None)
+        )
+
+    def _companion_panel_width_setting_key(self, page: str | None = None) -> str:
+        return "ui/ocr_review_panel_width" if (page or self._active_companion_page()) == "ocr_review" else "ui/tag_list_panel_width"
+
+    def _companion_panel_default_width(self, page: str | None = None) -> int:
+        return 720 if (page or self._active_companion_page()) == "ocr_review" else 280
+
+    def _set_companion_panel_page(self, page: str) -> None:
+        stack = getattr(self, "right_companion_stack", None)
+        if stack is None:
+            return
+        if stack.isVisible() and page != self._active_companion_page():
+            self._save_tag_list_panel_width()
+        if page == "ocr_review" and hasattr(self, "ocr_review_panel"):
+            stack.setCurrentWidget(self.ocr_review_panel)
+            stack.setMinimumWidth(520)
+        elif hasattr(self, "tag_list_panel"):
+            stack.setCurrentWidget(self.tag_list_panel)
+            stack.setMinimumWidth(220)
+
     def _save_tag_list_panel_width(self) -> None:
         try:
             sizes = self._current_right_splitter_sizes()
-            if self.tag_list_panel.isVisible() and sizes[0] > 0:
-                self.bridge.settings.setValue("ui/tag_list_panel_width", int(sizes[0]))
+            if self._is_companion_panel_visible() and sizes[0] > 0:
+                self.bridge.settings.setValue(self._companion_panel_width_setting_key(), int(sizes[0]))
         except Exception:
             pass
 
@@ -1791,9 +1970,11 @@ class WindowLayoutPanelsMixin:
         try:
             saved_details_width = max(240, int(self.bridge.settings.value("ui/tag_list_last_details_width", self._get_saved_panel_width("ui/right_panel_width", self._DEFAULT_RIGHT_PANEL_WIDTH), type=int) or self._get_saved_panel_width("ui/right_panel_width", self._DEFAULT_RIGHT_PANEL_WIDTH)))
             details_width = saved_details_width
-            tag_width = self._get_saved_panel_width("ui/tag_list_panel_width", 280)
+            page = self._active_companion_page()
+            tag_width = self._get_saved_panel_width(self._companion_panel_width_setting_key(page), self._companion_panel_default_width(page))
             show_tag_list = bool(self.bridge.settings.value("ui/show_tag_list_panel", False, type=bool)) and self._can_show_tag_list_panel()
-            self.tag_list_panel.setVisible(show_tag_list)
+            if hasattr(self, "right_companion_stack"):
+                self.right_companion_stack.setVisible(show_tag_list)
             if show_tag_list:
                 self.right_splitter.setSizes([tag_width, details_width])
             else:
@@ -1805,7 +1986,7 @@ class WindowLayoutPanelsMixin:
         try:
             if hasattr(self, "right_panel") and self.right_panel.width() > 0:
                 return max(240, int(self.right_panel.width()))
-            if hasattr(self, "right_splitter") and self.tag_list_panel.isVisible():
+            if hasattr(self, "right_splitter") and self._is_companion_panel_visible():
                 sizes = self._current_right_splitter_sizes()
                 if len(sizes) >= 2 and sizes[1] > 0:
                     return max(240, int(sizes[1]))
@@ -1819,7 +2000,8 @@ class WindowLayoutPanelsMixin:
         sizes = self._current_splitter_sizes()
         if len(sizes) < 3:
             return
-        tag_width = self._get_saved_panel_width("ui/tag_list_panel_width", 280)
+        page = self._active_companion_page()
+        tag_width = self._get_saved_panel_width(self._companion_panel_width_setting_key(page), self._companion_panel_default_width(page))
         if show:
             if not hasattr(self, "_tag_list_prev_main_sizes") or not isinstance(getattr(self, "_tag_list_prev_main_sizes", None), list):
                 self._tag_list_prev_main_sizes = [int(v) for v in sizes[:3]]
@@ -1827,7 +2009,7 @@ class WindowLayoutPanelsMixin:
             saved_hidden_details_width = self._get_saved_panel_width("ui/right_panel_width", self._DEFAULT_RIGHT_PANEL_WIDTH)
             saved_tag_details_width = max(240, int(self.bridge.settings.value("ui/tag_list_last_details_width", saved_hidden_details_width, type=int) or saved_hidden_details_width))
             current_details_width = max(240, self._details_panel_width_without_tag_list())
-            baseline_details_width = saved_tag_details_width if self.tag_list_panel.isVisible() else saved_hidden_details_width
+            baseline_details_width = saved_tag_details_width if self._is_companion_panel_visible() else saved_hidden_details_width
             details_width = max(baseline_details_width, current_details_width)
             self.bridge.settings.setValue("ui/tag_list_last_details_width", details_width)
             desired_right_width = details_width + tag_width
@@ -1849,7 +2031,8 @@ class WindowLayoutPanelsMixin:
                 right_width -= remaining_extra
 
             self.splitter.setSizes([left_width, center_width, right_width])
-            self.tag_list_panel.setVisible(True)
+            if hasattr(self, "right_companion_stack"):
+                self.right_companion_stack.setVisible(True)
             self.right_splitter.setSizes([tag_width, details_width])
             return
 
@@ -1869,7 +2052,8 @@ class WindowLayoutPanelsMixin:
                     center_width += released_width
                 right_width = target_right_width
                 self.splitter.setSizes([left_width, center_width, right_width])
-        self.tag_list_panel.setVisible(False)
+        if hasattr(self, "right_companion_stack"):
+            self.right_companion_stack.setVisible(False)
         self.right_splitter.setSizes([0, details_width])
         self._tag_list_prev_main_sizes = None
 
@@ -1880,7 +2064,7 @@ class WindowLayoutPanelsMixin:
             return False
 
     def _update_tag_list_toggle_controls(self, visible: bool | None = None) -> None:
-        is_visible = self.tag_list_panel.isVisible() if visible is None else bool(visible)
+        is_visible = self._is_tag_list_panel_visible() if visible is None else bool(visible)
         if hasattr(self, "btn_open_tag_list"):
             self.btn_open_tag_list.setText("Close Tag List" if is_visible else "Open Tag List")
             self.btn_open_tag_list.setEnabled(bool(hasattr(self, "tag_list_open_btn_row") and self.tag_list_open_btn_row.isVisible()))
@@ -1898,7 +2082,7 @@ class WindowLayoutPanelsMixin:
         self._sync_tag_list_panel_visibility()
 
     def _toggle_tag_list_panel(self) -> None:
-        self._set_tag_list_panel_requested_visible(not self.tag_list_panel.isVisible())
+        self._set_tag_list_panel_requested_visible(not self._is_tag_list_panel_visible())
 
     def _toggle_tag_list_panel_from_menu(self, checked: bool) -> None:
         if checked and not bool(self.bridge.settings.value("ui/show_right_panel", True, type=bool)):
@@ -1913,9 +2097,10 @@ class WindowLayoutPanelsMixin:
         if not hasattr(self, "tag_list_panel"):
             return
         should_show = self._is_tag_list_panel_requested_visible() and self._can_show_tag_list_panel()
+        ocr_review_visible = self._is_ocr_review_panel_visible()
         if not should_show:
             self._save_tag_list_panel_width()
-        was_visible = self.tag_list_panel.isVisible()
+        was_visible = self._is_tag_list_panel_visible()
         saved_hidden_details_width = self._get_saved_panel_width("ui/right_panel_width", self._DEFAULT_RIGHT_PANEL_WIDTH)
         saved_tag_details_width = max(240, int(self.bridge.settings.value("ui/tag_list_last_details_width", saved_hidden_details_width, type=int) or saved_hidden_details_width))
         tag_width = self._get_saved_panel_width("ui/tag_list_panel_width", 280)
@@ -1923,12 +2108,16 @@ class WindowLayoutPanelsMixin:
         current_right_width = max(0, int(self._current_splitter_sizes()[2] if hasattr(self, "splitter") else 0))
         needs_outer_resize = should_show and current_right_width < max(240, desired_right_width - 2)
         if should_show and (not was_visible or needs_outer_resize):
+            self._set_companion_panel_page("tag_list")
             if not was_visible:
                 self.bridge.settings.setValue("ui/tag_list_last_details_width", max(saved_hidden_details_width, self._details_panel_width_without_tag_list()))
             self._resize_window_for_tag_list_visibility(True)
         elif not should_show and was_visible:
             self._resize_window_for_tag_list_visibility(False)
-        self.tag_list_panel.setVisible(should_show)
+        if should_show:
+            self._set_companion_panel_page("tag_list")
+        if hasattr(self, "right_companion_stack") and not ocr_review_visible:
+            self.right_companion_stack.setVisible(should_show)
         if should_show:
             self._restore_right_splitter_sizes()
             if refresh_contents:
@@ -1936,7 +2125,7 @@ class WindowLayoutPanelsMixin:
                     self._refresh_tag_list_rows_state()
                 else:
                     self._refresh_tag_list_panel()
-        elif hasattr(self, "right_splitter"):
+        elif hasattr(self, "right_splitter") and not ocr_review_visible:
             details_width = max(240, int(self.bridge.settings.value("ui/tag_list_last_details_width", self._DEFAULT_RIGHT_PANEL_WIDTH, type=int) or self._DEFAULT_RIGHT_PANEL_WIDTH))
             self.right_splitter.setSizes([0, details_width])
         self._update_tag_list_toggle_controls(should_show)
