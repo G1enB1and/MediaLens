@@ -250,10 +250,21 @@ class WindowLayoutPanelsMixin:
         center_layout = QVBoxLayout(center)
         center_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.web = GalleryView(center)
+        self.center_workspace_stack = QStackedWidget(center)
+        self.center_workspace_stack.setObjectName("centerWorkspaceStack")
+        center_layout.addWidget(self.center_workspace_stack)
+
+        self.gallery_workspace = QWidget(self.center_workspace_stack)
+        self.gallery_workspace.setObjectName("galleryWorkspace")
+        gallery_workspace_layout = QVBoxLayout(self.gallery_workspace)
+        gallery_workspace_layout.setContentsMargins(0, 0, 0, 0)
+        gallery_workspace_layout.setSpacing(0)
+
+        self.web = GalleryView(self.gallery_workspace)
         if bool(_WINDOWS_WEBENGINE_RUNTIME.get("use_custom_page", True)):
             self.web.setPage(GalleryWebPage(self.web))
-        center_layout.addWidget(self.web)
+        gallery_workspace_layout.addWidget(self.web)
+        self.center_workspace_stack.addWidget(self.gallery_workspace)
 
         # Native loading overlay shown while the WebEngine page itself is loading.
         self.web_loading = QWidget(self.web)
@@ -420,7 +431,7 @@ class WindowLayoutPanelsMixin:
         self.tag_list_panel_layout.addItem(self.tag_list_bottom_spacer)
         self.right_companion_stack.addWidget(self.tag_list_panel)
 
-        self.ocr_review_panel = QWidget(self.right_companion_stack)
+        self.ocr_review_panel = QWidget(self.center_workspace_stack)
         self.ocr_review_panel.setObjectName("ocrReviewPanel")
         self.ocr_review_panel.setMinimumWidth(520)
         self.ocr_review_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -536,7 +547,8 @@ class WindowLayoutPanelsMixin:
         self.ocr_review_next_btn.clicked.connect(lambda checked=False: self._move_ocr_review_image(1))
         ocr_review_nav_layout.addWidget(self.ocr_review_next_btn)
         ocr_review_layout.addWidget(self.ocr_review_nav_row)
-        self.right_companion_stack.addWidget(self.ocr_review_panel)
+        self.center_workspace_stack.addWidget(self.ocr_review_panel)
+        self.center_workspace_stack.setCurrentWidget(self.gallery_workspace)
 
         self.right_panel = QWidget(self.right_splitter)
         self.right_panel.setObjectName("rightPanel")
@@ -1914,9 +1926,6 @@ class WindowLayoutPanelsMixin:
         return sizes[:2]
 
     def _active_companion_page(self) -> str:
-        stack = getattr(self, "right_companion_stack", None)
-        if stack is not None and stack.currentWidget() is getattr(self, "ocr_review_panel", None):
-            return "ocr_review"
         return "tag_list"
 
     def _is_companion_panel_visible(self) -> bool:
@@ -1932,18 +1941,23 @@ class WindowLayoutPanelsMixin:
         )
 
     def _is_ocr_review_panel_visible(self) -> bool:
-        stack = getattr(self, "right_companion_stack", None)
+        stack = getattr(self, "center_workspace_stack", None)
         return bool(
             stack is not None
-            and stack.isVisible()
             and stack.currentWidget() is getattr(self, "ocr_review_panel", None)
         )
 
+    def _set_center_gallery_visible(self) -> None:
+        stack = getattr(self, "center_workspace_stack", None)
+        gallery = getattr(self, "gallery_workspace", None)
+        if stack is not None and gallery is not None:
+            stack.setCurrentWidget(gallery)
+
     def _companion_panel_width_setting_key(self, page: str | None = None) -> str:
-        return "ui/ocr_review_panel_width" if (page or self._active_companion_page()) == "ocr_review" else "ui/tag_list_panel_width"
+        return "ui/tag_list_panel_width"
 
     def _companion_panel_default_width(self, page: str | None = None) -> int:
-        return 720 if (page or self._active_companion_page()) == "ocr_review" else 280
+        return 280
 
     def _set_companion_panel_page(self, page: str) -> None:
         stack = getattr(self, "right_companion_stack", None)
@@ -1951,10 +1965,7 @@ class WindowLayoutPanelsMixin:
             return
         if stack.isVisible() and page != self._active_companion_page():
             self._save_tag_list_panel_width()
-        if page == "ocr_review" and hasattr(self, "ocr_review_panel"):
-            stack.setCurrentWidget(self.ocr_review_panel)
-            stack.setMinimumWidth(520)
-        elif hasattr(self, "tag_list_panel"):
+        if hasattr(self, "tag_list_panel"):
             stack.setCurrentWidget(self.tag_list_panel)
             stack.setMinimumWidth(220)
 
@@ -1970,8 +1981,7 @@ class WindowLayoutPanelsMixin:
         try:
             saved_details_width = max(240, int(self.bridge.settings.value("ui/tag_list_last_details_width", self._get_saved_panel_width("ui/right_panel_width", self._DEFAULT_RIGHT_PANEL_WIDTH), type=int) or self._get_saved_panel_width("ui/right_panel_width", self._DEFAULT_RIGHT_PANEL_WIDTH)))
             details_width = saved_details_width
-            page = self._active_companion_page()
-            tag_width = self._get_saved_panel_width(self._companion_panel_width_setting_key(page), self._companion_panel_default_width(page))
+            tag_width = self._get_saved_panel_width("ui/tag_list_panel_width", 280)
             show_tag_list = bool(self.bridge.settings.value("ui/show_tag_list_panel", False, type=bool)) and self._can_show_tag_list_panel()
             if hasattr(self, "right_companion_stack"):
                 self.right_companion_stack.setVisible(show_tag_list)
@@ -2000,8 +2010,7 @@ class WindowLayoutPanelsMixin:
         sizes = self._current_splitter_sizes()
         if len(sizes) < 3:
             return
-        page = self._active_companion_page()
-        tag_width = self._get_saved_panel_width(self._companion_panel_width_setting_key(page), self._companion_panel_default_width(page))
+        tag_width = self._get_saved_panel_width("ui/tag_list_panel_width", 280)
         if show:
             if not hasattr(self, "_tag_list_prev_main_sizes") or not isinstance(getattr(self, "_tag_list_prev_main_sizes", None), list):
                 self._tag_list_prev_main_sizes = [int(v) for v in sizes[:3]]

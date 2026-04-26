@@ -1077,22 +1077,17 @@ class WindowSidebarBulkMixin:
                 self.bridge.uiFlagChanged.emit("ui.show_right_panel", True)
         except Exception:
             pass
-        if hasattr(self, "right_companion_stack"):
-            self._set_companion_panel_page("ocr_review")
-            self.bridge.settings.setValue("ui/show_tag_list_panel", False)
-            self._update_tag_list_toggle_controls(False)
-            self._resize_window_for_tag_list_visibility(True)
-            self.right_companion_stack.setVisible(True)
+        if hasattr(self, "center_workspace_stack") and hasattr(self, "ocr_review_panel"):
+            self.center_workspace_stack.setCurrentWidget(self.ocr_review_panel)
+            self._schedule_gallery_container_relayout(120)
+            QTimer.singleShot(0, self._update_ocr_review_image_display)
         self._refresh_ocr_review_for_path(clean_path)
 
     def _close_ocr_review_panel(self) -> None:
-        self._save_tag_list_panel_width()
         try:
-            details_width = max(240, int(self.bridge.settings.value("ui/tag_list_last_details_width", self._DEFAULT_RIGHT_PANEL_WIDTH, type=int) or self._DEFAULT_RIGHT_PANEL_WIDTH))
-            if hasattr(self, "right_companion_stack"):
-                self.right_companion_stack.setVisible(False)
-            if hasattr(self, "right_splitter"):
-                self.right_splitter.setSizes([0, details_width])
+            if hasattr(self, "center_workspace_stack") and hasattr(self, "gallery_workspace"):
+                self._set_center_gallery_visible()
+            self._schedule_gallery_container_relayout(0)
         except Exception:
             pass
 
@@ -1542,6 +1537,31 @@ class WindowSidebarBulkMixin:
         if pending_more:
             QTimer.singleShot(16, lambda: self._load_visible_bulk_selected_file_thumbnails(list_widget, content_height, max_per_pass=max_per_pass))
 
+    def _bulk_selected_row_editor_width(self, list_widget: QListWidget, row: BulkSelectedFileRow) -> int:
+        viewport = list_widget.viewport()
+        viewport_width = max(0, viewport.width() if viewport is not None else 0)
+        try:
+            root_margins = row._root_layout.contentsMargins()
+            row_margins = row._content_row.contentsMargins()
+            thumb_widget = getattr(row, "thumb_host", None) or getattr(row, "thumb_lbl", None)
+            thumb_width = int(thumb_widget.width() if thumb_widget is not None and thumb_widget.width() > 0 else row.thumb_lbl.width())
+            spacing = max(0, int(row._content_row.spacing()))
+        except RuntimeError:
+            return BulkSelectedFileRow._MIN_EDITOR_WIDTH
+        return max(
+            BulkSelectedFileRow._MIN_EDITOR_WIDTH,
+            viewport_width
+            - root_margins.left()
+            - root_margins.right()
+            - row_margins.left()
+            - row_margins.right()
+            - thumb_width
+            - spacing
+            - 4
+            - BulkSelectedFileRow._RIGHT_GUTTER
+            - 14,
+        )
+
     def _sync_bulk_selected_files_layout(self) -> None:
         if not hasattr(self, "bulk_selected_files_list"):
             return
@@ -1555,24 +1575,7 @@ class WindowSidebarBulkMixin:
         first_row = list_widget.itemWidget(list_widget.item(0))
         if not self._is_valid_bulk_selected_file_row(first_row):
             return
-        try:
-            root_margins = first_row._root_layout.contentsMargins()
-            row_margins = first_row._content_row.contentsMargins()
-            thumb_width = first_row.thumb_lbl.width()
-            spacing = first_row._content_row.spacing()
-        except RuntimeError:
-            return
-        host_width = max(
-            BulkSelectedFileRow._MIN_EDITOR_WIDTH,
-            viewport_width
-            - root_margins.left()
-            - root_margins.right()
-            - row_margins.left()
-            - row_margins.right()
-            - thumb_width
-            - spacing
-            - BulkSelectedFileRow._RIGHT_GUTTER,
-        )
+        host_width = self._bulk_selected_row_editor_width(list_widget, first_row)
         list_widget.doItemsLayout()
         for i in range(list_widget.count()):
             row = list_widget.itemWidget(list_widget.item(i))
@@ -1610,24 +1613,7 @@ class WindowSidebarBulkMixin:
         first_row = list_widget.itemWidget(list_widget.item(0))
         if not self._is_valid_bulk_selected_file_row(first_row):
             return
-        try:
-            root_margins = first_row._root_layout.contentsMargins()
-            row_margins = first_row._content_row.contentsMargins()
-            thumb_width = first_row.thumb_lbl.width()
-            spacing = first_row._content_row.spacing()
-        except RuntimeError:
-            return
-        host_width = max(
-            BulkSelectedFileRow._MIN_EDITOR_WIDTH,
-            viewport_width
-            - root_margins.left()
-            - root_margins.right()
-            - row_margins.left()
-            - row_margins.right()
-            - thumb_width
-            - spacing
-            - BulkSelectedFileRow._RIGHT_GUTTER,
-        )
+        host_width = self._bulk_selected_row_editor_width(list_widget, first_row)
         list_widget.doItemsLayout()
         for i in range(list_widget.count()):
             row = list_widget.itemWidget(list_widget.item(i))
@@ -1665,24 +1651,7 @@ class WindowSidebarBulkMixin:
         first_row = list_widget.itemWidget(list_widget.item(0))
         if not self._is_valid_bulk_selected_file_row(first_row):
             return
-        try:
-            root_margins = first_row._root_layout.contentsMargins()
-            row_margins = first_row._content_row.contentsMargins()
-            thumb_width = first_row.thumb_lbl.width()
-            spacing = first_row._content_row.spacing()
-        except RuntimeError:
-            return
-        host_width = max(
-            BulkSelectedFileRow._MIN_EDITOR_WIDTH,
-            viewport_width
-            - root_margins.left()
-            - root_margins.right()
-            - row_margins.left()
-            - row_margins.right()
-            - thumb_width
-            - spacing
-            - BulkSelectedFileRow._RIGHT_GUTTER,
-        )
+        host_width = self._bulk_selected_row_editor_width(list_widget, first_row)
         list_widget.doItemsLayout()
         for i in range(list_widget.count()):
             row = list_widget.itemWidget(list_widget.item(i))

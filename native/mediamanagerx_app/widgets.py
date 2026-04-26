@@ -1107,7 +1107,8 @@ class BulkSelectedFileRow(QWidget):
                 return
             root_margins = self._root_layout.contentsMargins()
             row_margins = self._content_row.contentsMargins()
-            thumb_width = self.thumb_lbl.width()
+            thumb_widget = getattr(self, "thumb_host", None) or self.thumb_lbl
+            thumb_width = int(thumb_widget.width() if thumb_widget.width() > 0 else self.thumb_lbl.width())
             spacing = self._content_row.spacing()
             host_width = max(
                 self._MIN_EDITOR_WIDTH,
@@ -1118,7 +1119,9 @@ class BulkSelectedFileRow(QWidget):
                 - row_margins.right()
                 - thumb_width
                 - spacing
-                - self._RIGHT_GUTTER,
+                - 4
+                - self._RIGHT_GUTTER
+                - 14,
             )
             self.tags_edit_host.setFixedWidth(host_width)
             self.tags_edit.setFixedWidth(host_width)
