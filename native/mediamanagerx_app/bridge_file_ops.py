@@ -55,6 +55,8 @@ class BridgeFileOpsMixin:
                 self.settings.sync()
                 scanner_key = "ocr_text" if "ocr_text" in key else "text_detection"
                 self.scannerStatusChanged.emit(scanner_key, self._scanner_status_payload(scanner_key))
+            elif key.startswith("updates."):
+                self.settings.sync()
             if key == "ui.show_bottom_panel":
                 self._emit_compare_state_changed()
             return True

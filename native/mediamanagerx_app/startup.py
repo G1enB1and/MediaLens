@@ -5,6 +5,18 @@ from native.mediamanagerx_app.runtime_paths import *
 from native.mediamanagerx_app.theme_dialogs import *
 from native.mediamanagerx_app.window import *
 
+
+def _startup_log(message: str) -> None:
+    try:
+        appdata = _appdata_runtime_dir()
+        log_path = _debugging_logs_dir(appdata) / "app.log"
+        text = _sanitize_diagnostic_text(f"Startup: {message}")
+        with open(log_path, "a", encoding="utf-8") as handle:
+            handle.write(f"[{time.ctime()}] {text}\n")
+    except Exception:
+        pass
+
+
 def _create_startup_splash(app: QApplication, startup_bg: QColor) -> QSplashScreen | None:
     try:
         splash_path = Path(__file__).with_name("web") / "MediaLens-Logo-1024.png"
@@ -50,12 +62,26 @@ def _remote_version_is_newer(remote_version: str) -> bool:
 
 
 def _fetch_latest_version_for_startup(timeout_seconds: float = 6.0) -> str:
+    headers = {"User-Agent": f"MediaLens/{__version__}"}
+    request = urllib.request.Request(UPDATE_VERSION_URL, headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            version = response.read(128).decode("utf-8", errors="replace").strip()
+            if version:
+                return version
+    except Exception as exc:
+        _startup_log(f"Raw version check failed: {exc}")
+
     request = urllib.request.Request(
-        UPDATE_VERSION_URL,
-        headers={"User-Agent": f"MediaLens/{__version__}"},
+        UPDATE_RELEASE_API_URL,
+        headers={**headers, "Accept": "application/vnd.github+json"},
     )
     with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
-        return response.read(128).decode("utf-8", errors="replace").strip()
+        payload = json.loads(response.read(1024 * 32).decode("utf-8", errors="replace"))
+    version = str(payload.get("tag_name") or payload.get("name") or "").strip()
+    if not version:
+        raise RuntimeError("GitHub latest release response did not include a version")
+    return version
 
 
 def _download_update_installer_with_dialog(app: QApplication, version: str) -> Path | None:
@@ -103,14 +129,20 @@ def _launch_update_installer(setup_path: Path) -> None:
 
 def _run_startup_update_check(app: QApplication, settings: QSettings) -> bool:
     if not bool(settings.value("updates/check_on_launch", True, type=bool)):
+        _startup_log("Update check skipped because updates/check_on_launch is disabled")
         return False
+    _startup_log(f"Checking for updates from {__version__}")
     try:
         remote_version = _fetch_latest_version_for_startup()
-    except Exception:
+    except Exception as exc:
+        _startup_log(f"Update check failed: {exc}")
         return False
+    _startup_log(f"Update check returned {remote_version}")
     if not _remote_version_is_newer(remote_version):
+        _startup_log("No startup update prompt needed")
         return False
 
+    _startup_log(f"Showing startup update prompt for {remote_version}")
     answer = QMessageBox.question(
         None,
         "Update Available",
@@ -123,6 +155,7 @@ def _run_startup_update_check(app: QApplication, settings: QSettings) -> bool:
         QMessageBox.StandardButton.Yes,
     )
     if answer != QMessageBox.StandardButton.Yes:
+        _startup_log("Startup update prompt dismissed")
         return False
 
     try:
@@ -130,8 +163,10 @@ def _run_startup_update_check(app: QApplication, settings: QSettings) -> bool:
         if setup_path is None:
             return False
         _launch_update_installer(setup_path)
+        _startup_log(f"Launched startup update installer for {remote_version}")
         return True
     except Exception as exc:
+        _startup_log(f"Startup update install failed: {exc}")
         QMessageBox.warning(
             None,
             "Update Error",
@@ -143,6 +178,7 @@ def _run_startup_update_check(app: QApplication, settings: QSettings) -> bool:
 def main() -> None:
     if os.name == "nt" and bool(_WINDOWS_WEBENGINE_RUNTIME.get("enabled")):
         QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseSoftwareOpenGL, True)
+    _startup_log("Creating QApplication")
     app = QApplication(sys.argv)
     app.setStyle(ToolTipProxyStyle(app.style()))
 
@@ -183,11 +219,15 @@ def main() -> None:
     if _run_startup_update_check(app, startup_settings):
         sys.exit(0)
 
+    _startup_log(f"Splash setting enabled={show_splash}")
     splash = _create_startup_splash(app, startup_bg) if show_splash else None
     if splash is not None:
+        _startup_log("Showing splash")
         splash.show()
 
+    _startup_log("Constructing main window")
     win = MainWindow()
+    _startup_log("Main window constructed")
     try:
         _log_dpi_state(app, win.bridge._log)
     except Exception:
@@ -222,6 +262,7 @@ def main() -> None:
         QTimer.singleShot(4000, _finish_splash)
 
     win.show()
+    _startup_log("Main window shown")
     QTimer.singleShot(900, win.maybe_show_local_ai_setup_onboarding)
 
     if splash is None:
@@ -229,6 +270,7 @@ def main() -> None:
     elif win.web is None:
         _finish_splash()
 
+    _startup_log("Entering Qt event loop")
     sys.exit(app.exec())
 
 
