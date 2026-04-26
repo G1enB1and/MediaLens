@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 104 48" shape-rendering="geometricPrecision" text-rendering="geometricPrecision">
-  <circle cx="52" cy="24" r="19" fill="none" stroke="#d45a5a" stroke-width="6"/>
-  <path d="M38 38 66 10" stroke="#d45a5a" stroke-width="6" stroke-linecap="round"/>
-  <text x="52" y="30" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="800" fill="#ffffff">No Text</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="52" height="24" viewBox="0 0 52 24" shape-rendering="geometricPrecision" text-rendering="optimizeLegibility">
+  <circle cx="26" cy="12" r="8.5" fill="none" stroke="#d45a5a" stroke-width="3"/>
+  <path d="M20 18 32 6" stroke="#d45a5a" stroke-width="3" stroke-linecap="round"/>
+  <text x="26" y="16" text-anchor="middle" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#ffffff">No Text</text>
 </svg>
