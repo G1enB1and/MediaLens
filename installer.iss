@@ -52,6 +52,19 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 Filename: "{app}\{#MyAppExeName}"; Description: "Open MediaLens After Installing Setup"; Flags: nowait postinstall skipifsilent
 
 [Code]
+var
+  CleanupUninstallData: Boolean;
+  KeepUninstallDatabase: Boolean;
+  KeepUninstallSettings: Boolean;
+  KeepUninstallRecycleBin: Boolean;
+  KeepUninstallThumbnails: Boolean;
+  KeepUninstallLocalAiModels: Boolean;
+  KeepUninstallAiRuntimes: Boolean;
+  KeepUninstallDebugLogs: Boolean;
+  KeepUninstallImportBackups: Boolean;
+  KeepUninstallLegacyData: Boolean;
+  KeepUninstallOtherData: Boolean;
+
 function SamePath(Left, Right: String): Boolean;
 begin
   Result := CompareText(RemoveBackslash(Left), RemoveBackslash(Right)) = 0;
@@ -236,9 +249,210 @@ begin
   RemoveStaleTaskbarShortcuts();
 end;
 
+function PromptKeepUninstallCategory(Title, Description: String): Boolean;
+begin
+  Result := MsgBox(
+    Title + #13#10#13#10 +
+    Description + #13#10#13#10 +
+    'Choose Yes to keep this data after uninstalling MediaLens.' + #13#10 +
+    'Choose No to delete it now.',
+    mbConfirmation,
+    MB_YESNO
+  ) = IDYES;
+end;
+
+function StartsWithText(Value, Prefix: String): Boolean;
+begin
+  Result := Copy(Value, 1, Length(Prefix)) = Prefix;
+end;
+
+function ContainsText(Value, Token: String): Boolean;
+begin
+  Result := Pos(Token, Value) > 0;
+end;
+
+function IsLegacyAppDataEntry(Name: String): Boolean;
+var
+  LowerName: String;
+begin
+  LowerName := LowerCase(Name);
+  Result :=
+    StartsWithText(LowerName, 'mediamanagerx') or
+    ContainsText(LowerName, '.legacy-') or
+    ContainsText(LowerName, '.legacy');
+end;
+
+function ShouldKeepAppDataEntry(Name: String): Boolean;
+var
+  LowerName: String;
+begin
+  LowerName := LowerCase(Name);
+
+  if (LowerName = 'medialens.db') then
+  begin
+    Result := KeepUninstallDatabase;
+    Exit;
+  end;
+
+  if (LowerName = 'settings.ini') or (LowerName = 'settings') then
+  begin
+    Result := KeepUninstallSettings;
+    Exit;
+  end;
+
+  if (LowerName = 'recyclebin') or (LowerName = 'recycle_bin.sqlite') then
+  begin
+    Result := KeepUninstallRecycleBin;
+    Exit;
+  end;
+
+  if (LowerName = 'thumbs') then
+  begin
+    Result := KeepUninstallThumbnails;
+    Exit;
+  end;
+
+  if (LowerName = 'local_ai_models') then
+  begin
+    Result := KeepUninstallLocalAiModels;
+    Exit;
+  end;
+
+  if (LowerName = 'ai-runtimes') or (LowerName = 'python') or (LowerName = 'python-bootstrap') then
+  begin
+    Result := KeepUninstallAiRuntimes;
+    Exit;
+  end;
+
+  if (LowerName = 'debugging-logs') or (LowerName = 'app.log') or (LowerName = 'faulthandler.log') or (LowerName = 'crash-reports') then
+  begin
+    Result := KeepUninstallDebugLogs;
+    Exit;
+  end;
+
+  if (LowerName = 'import-backups') then
+  begin
+    Result := KeepUninstallImportBackups;
+    Exit;
+  end;
+
+  if IsLegacyAppDataEntry(Name) then
+  begin
+    Result := KeepUninstallLegacyData;
+    Exit;
+  end;
+
+  Result := KeepUninstallOtherData;
+end;
+
+procedure DeletePath(Path: String);
+begin
+  if DirExists(Path) then
+    DelTree(Path, True, True, True)
+  else if FileExists(Path) then
+    DeleteFile(Path);
+end;
+
+procedure CleanupUnselectedMediaLensAppData;
+var
+  Root, EntryPath, LegacyRoot: String;
+  FindRec: TFindRec;
+begin
+  Root := ExpandConstant('{userappdata}\{#MyAppName}');
+  if DirExists(Root) then
+  begin
+    if FindFirst(AddBackslash(Root) + '*', FindRec) then
+    begin
+      try
+        repeat
+          if (FindRec.Name <> '.') and (FindRec.Name <> '..') then
+          begin
+            EntryPath := AddBackslash(Root) + FindRec.Name;
+            if not ShouldKeepAppDataEntry(FindRec.Name) then
+              DeletePath(EntryPath);
+          end;
+        until not FindNext(FindRec);
+      finally
+        FindClose(FindRec);
+      end;
+    end;
+    RemoveDir(Root);
+  end;
+
+  if not KeepUninstallLegacyData then
+  begin
+    LegacyRoot := ExpandConstant('{userappdata}\{#MyLegacyPublisher}');
+    DeletePath(LegacyRoot);
+  end;
+end;
+
+function InitializeUninstall(): Boolean;
+begin
+  Result := True;
+  CleanupUninstallData := False;
+
+  if UninstallSilent then
+    Exit;
+
+  MsgBox(
+    'MediaLens can remove its app data during uninstall.' + #13#10#13#10 +
+    'You will be asked which categories to keep. Anything not selected to keep will be deleted, including legacy leftovers.',
+    mbInformation,
+    MB_OK
+  );
+
+  CleanupUninstallData := True;
+  KeepUninstallDatabase := PromptKeepUninstallCategory(
+    'Keep MediaLens database?',
+    'This includes your library database, metadata, tags, collections, scan state, and review decisions.'
+  );
+  KeepUninstallSettings := PromptKeepUninstallCategory(
+    'Keep app settings?',
+    'This includes UI preferences, folder settings, scanner settings, duplicate rules, and local AI settings.'
+  );
+  KeepUninstallRecycleBin := PromptKeepUninstallCategory(
+    'Keep MediaLens recycle bin retention?',
+    'This includes recycle_bin.sqlite and retained files in the MediaLens RecycleBin folder.'
+  );
+  KeepUninstallThumbnails := PromptKeepUninstallCategory(
+    'Keep thumbnails?',
+    'This includes cached gallery thumbnails. They can be regenerated, but keeping them speeds up browsing after reinstall.'
+  );
+  KeepUninstallLocalAiModels := PromptKeepUninstallCategory(
+    'Keep downloaded local AI models?',
+    'This includes downloaded model files and model caches under local_ai_models.'
+  );
+  KeepUninstallAiRuntimes := PromptKeepUninstallCategory(
+    'Keep local AI runtime environments?',
+    'This includes ai-runtimes, the managed Python runtime, and Python bootstrap files.'
+  );
+  KeepUninstallDebugLogs := PromptKeepUninstallCategory(
+    'Keep debugging logs and crash reports?',
+    'This includes sanitized app logs, faulthandler logs, and crash reports under debugging-logs.'
+  );
+  KeepUninstallImportBackups := PromptKeepUninstallCategory(
+    'Keep import backups?',
+    'This includes local backups created before restoring a MediaLens library backup.'
+  );
+  KeepUninstallLegacyData := PromptKeepUninstallCategory(
+    'Keep legacy MediaManagerX leftovers?',
+    'This includes legacy mediamanagerx files, .legacy files, and the old G1enB1and\MediaManagerX app-data tree.'
+  );
+  KeepUninstallOtherData := PromptKeepUninstallCategory(
+    'Keep any other MediaLens app-data files?',
+    'This preserves any unrecognized files in the MediaLens app-data folder. Choose No for the cleanest uninstall.'
+  );
+end;
+
 function ShouldAutoRelaunchAfterSilentInstall(): Boolean;
 begin
   Result := WizardSilent and (Pos('/RELAUNCH', UpperCase(GetCmdTail)) > 0);
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if (CurUninstallStep = usPostUninstall) and CleanupUninstallData then
+    CleanupUnselectedMediaLensAppData();
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
