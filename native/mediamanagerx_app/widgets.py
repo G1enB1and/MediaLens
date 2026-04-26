@@ -1121,21 +1121,34 @@ class BulkSelectedFileRow(QWidget):
         clamped_width = max(self._MIN_EDITOR_WIDTH, int(host_width or 0))
         self.tags_edit_host.setFixedWidth(clamped_width)
         self.tags_edit.setFixedWidth(clamped_width)
-        self._sync_thumbnail_column_size(clamped_width, bool(stacked))
         if hasattr(self, "generate_btn"):
             self.generate_btn.setFixedWidth(clamped_width)
         if getattr(self, "action_buttons", None):
             self._apply_action_button_widths(clamped_width, stacked)
         self._refresh_tags_host_height()
+        self._sync_thumbnail_column_size(clamped_width, bool(stacked))
 
     def _sync_thumbnail_column_size(self, host_width: int, stacked: bool) -> None:
         width = max(self._content_height, int(host_width or 0)) if stacked else self._content_height
-        height = int(self._content_height)
+        label_height = int(self._content_height)
+        host_height = label_height
+        has_thumbnail_action = bool(str(self.thumbnail_action_btn.text() or "").strip())
+        if has_thumbnail_action:
+            host_height = (
+                label_height
+                + self._GENERATE_BUTTON_GAP
+                + self._GENERATE_BUTTON_HEIGHT
+                + self._GENERATE_BUTTON_BOTTOM_PADDING
+            )
         if bool(getattr(self, "_stretch_preview_to_actions", False)) and not stacked:
-            height = max(height, int(self.tags_edit_host.height() or 0))
+            label_height = max(
+                label_height,
+                int(self.tags_edit_host.height() or 0) - self._GENERATE_BUTTON_BOTTOM_PADDING,
+            )
+            host_height = label_height
         self.thumb_host.setFixedWidth(width)
-        self.thumb_host.setFixedHeight(height)
-        self.thumb_lbl.setFixedSize(width, height)
+        self.thumb_host.setFixedHeight(host_height)
+        self.thumb_lbl.setFixedSize(width, label_height)
         self.thumbnail_action_btn.setFixedWidth(width)
         self._apply_thumbnail_pixmap()
 
@@ -1299,11 +1312,12 @@ class BulkSelectedFileRow(QWidget):
                 )
             self.tags_edit_host.setFixedWidth(host_width)
             self.tags_edit.setFixedWidth(host_width)
-            self._sync_thumbnail_column_size(host_width, bool(getattr(self, "_stacked_content", False)))
             if hasattr(self, "generate_btn"):
                 self.generate_btn.setFixedWidth(host_width)
             if getattr(self, "action_buttons", None):
                 self._apply_action_button_widths(host_width, bool(getattr(self, "_stacked_content", False)))
+            self._refresh_tags_host_height()
+            self._sync_thumbnail_column_size(host_width, bool(getattr(self, "_stacked_content", False)))
         except RuntimeError:
             pass
 
