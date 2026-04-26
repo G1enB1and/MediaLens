@@ -41,7 +41,10 @@ class LibraryRestoreOptions:
     include_thumbs: bool = False
     include_local_ai_models: bool = False
     include_ai_runtimes: bool = False
-    merge_existing: bool = False
+    merge_recycle_bin: bool = False
+    merge_thumbs: bool = False
+    merge_local_ai_models: bool = False
+    merge_ai_runtimes: bool = False
     backup_existing: bool = True
 
 
@@ -318,12 +321,12 @@ def restore_library_backup(
 
         restored["database"] = _replace_file(extracted / "database" / "medialens.db", _runtime_db_path(appdata))
         if opts.include_recycle_bin and includes.get("recycle_bin"):
-            if opts.merge_existing:
+            if opts.merge_recycle_bin:
                 restored["recycle_bin"] = _merge_recycle_bin_db(extracted / "recycle" / "recycle_bin.sqlite", appdata / "recycle_bin.sqlite")
             else:
                 restored["recycle_bin"] = _replace_file(extracted / "recycle" / "recycle_bin.sqlite", appdata / "recycle_bin.sqlite")
         if opts.include_recycle_bin and includes.get("recycle_bin_files"):
-            if opts.merge_existing:
+            if opts.merge_recycle_bin:
                 restored["recycle_bin_files"] = _merge_dir(extracted / "recycle" / "RecycleBin", appdata / "RecycleBin")
             else:
                 restored["recycle_bin_files"] = _replace_dir(extracted / "recycle" / "RecycleBin", appdata / "RecycleBin")
@@ -332,32 +335,32 @@ def restore_library_backup(
         if opts.include_thumbs and includes.get("thumbs"):
             restored["thumbs"] = (
                 _merge_dir(extracted / "thumbs", appdata / "thumbs")
-                if opts.merge_existing
+                if opts.merge_thumbs
                 else _replace_dir(extracted / "thumbs", appdata / "thumbs")
             )
         if opts.include_local_ai_models and includes.get("local_ai_models"):
             restored["local_ai_models"] = (
                 _merge_dir(extracted / "ai" / "local_ai_models", appdata / "local_ai_models")
-                if opts.merge_existing
+                if opts.merge_local_ai_models
                 else _replace_dir(extracted / "ai" / "local_ai_models", appdata / "local_ai_models")
             )
         if opts.include_ai_runtimes:
             if includes.get("ai_runtimes"):
                 restored["ai_runtimes"] = (
                     _merge_dir(extracted / "ai" / "ai-runtimes", appdata / "ai-runtimes")
-                    if opts.merge_existing
+                    if opts.merge_ai_runtimes
                     else _replace_dir(extracted / "ai" / "ai-runtimes", appdata / "ai-runtimes")
                 )
             if includes.get("python_runtime"):
                 restored["python_runtime"] = (
                     _merge_dir(extracted / "ai" / "python", appdata / "python")
-                    if opts.merge_existing
+                    if opts.merge_ai_runtimes
                     else _replace_dir(extracted / "ai" / "python", appdata / "python")
                 )
             if includes.get("python_bootstrap"):
                 restored["python_bootstrap"] = (
                     _merge_dir(extracted / "ai" / "python-bootstrap", appdata / "python-bootstrap")
-                    if opts.merge_existing
+                    if opts.merge_ai_runtimes
                     else _replace_dir(extracted / "ai" / "python-bootstrap", appdata / "python-bootstrap")
                 )
 

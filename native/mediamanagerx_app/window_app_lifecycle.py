@@ -37,6 +37,13 @@ class WindowAppLifecycleMixin:
         if importing and not recycle_available:
             recycle_cb.setToolTip("This backup does not include MediaLens recycle bin retention data.")
         layout.addWidget(recycle_cb)
+        merge_recycle_cb = QCheckBox("Merge recycle bin retention")
+        merge_recycle_cb.setChecked(True)
+        merge_recycle_cb.setVisible(importing)
+        merge_recycle_cb.setEnabled(recycle_available)
+        merge_recycle_cb.setToolTip("When checked, backed-up recycle-bin entries and retained files are added without deleting current retained files. Uncheck to replace the current MediaLens recycle bin retention data.")
+        layout.addWidget(merge_recycle_cb)
+        recycle_cb.toggled.connect(lambda checked: merge_recycle_cb.setEnabled(bool(checked and recycle_available)))
 
         settings_cb = QCheckBox("App settings")
         settings_cb.setChecked(True)
@@ -51,6 +58,13 @@ class WindowAppLifecycleMixin:
         if importing and not thumbs_available:
             thumbs_cb.setToolTip("This backup does not include thumbnails.")
         layout.addWidget(thumbs_cb)
+        merge_thumbs_cb = QCheckBox("Merge thumbnails")
+        merge_thumbs_cb.setChecked(True)
+        merge_thumbs_cb.setVisible(importing)
+        merge_thumbs_cb.setEnabled(thumbs_available)
+        merge_thumbs_cb.setToolTip("When checked, backed-up thumbnails are added without deleting current thumbnails. Uncheck to replace the current thumbnails folder.")
+        layout.addWidget(merge_thumbs_cb)
+        thumbs_cb.toggled.connect(lambda checked: merge_thumbs_cb.setEnabled(bool(checked and thumbs_available)))
 
         local_ai_models_cb = QCheckBox("Downloaded local AI models")
         local_ai_models_cb.setChecked(False)
@@ -58,6 +72,13 @@ class WindowAppLifecycleMixin:
         if importing and not local_ai_models_available:
             local_ai_models_cb.setToolTip("This backup does not include downloaded local AI models.")
         layout.addWidget(local_ai_models_cb)
+        merge_local_ai_models_cb = QCheckBox("Merge downloaded local AI models")
+        merge_local_ai_models_cb.setChecked(True)
+        merge_local_ai_models_cb.setVisible(importing)
+        merge_local_ai_models_cb.setEnabled(local_ai_models_available)
+        merge_local_ai_models_cb.setToolTip("When checked, backed-up models are added without deleting current model folders. Uncheck to replace the current downloaded local AI models.")
+        layout.addWidget(merge_local_ai_models_cb)
+        local_ai_models_cb.toggled.connect(lambda checked: merge_local_ai_models_cb.setEnabled(bool(checked and local_ai_models_available)))
 
         ai_runtimes_cb = QCheckBox("Local AI runtime environments")
         ai_runtimes_cb.setChecked(False)
@@ -65,12 +86,13 @@ class WindowAppLifecycleMixin:
         if importing and not ai_runtimes_available:
             ai_runtimes_cb.setToolTip("This backup does not include local AI runtime environments.")
         layout.addWidget(ai_runtimes_cb)
-
-        merge_cb = QCheckBox("Merge selected optional data with current data")
-        merge_cb.setChecked(True)
-        merge_cb.setVisible(importing)
-        merge_cb.setToolTip("When checked, recycle-bin entries, thumbnails, models, and runtimes are added without deleting current files. App settings and the main database are still restored as replacements.")
-        layout.addWidget(merge_cb)
+        merge_ai_runtimes_cb = QCheckBox("Merge local AI runtime environments")
+        merge_ai_runtimes_cb.setChecked(True)
+        merge_ai_runtimes_cb.setVisible(importing)
+        merge_ai_runtimes_cb.setEnabled(ai_runtimes_available)
+        merge_ai_runtimes_cb.setToolTip("When checked, backed-up runtime environments are added without deleting current runtime folders. Uncheck to replace the current local AI runtime environments.")
+        layout.addWidget(merge_ai_runtimes_cb)
+        ai_runtimes_cb.toggled.connect(lambda checked: merge_ai_runtimes_cb.setEnabled(bool(checked and ai_runtimes_available)))
 
         if importing:
             note = QLabel("The main database is always restored as a replacement. Optional data can be merged with current files, or replaced by unchecking merge.")
@@ -100,7 +122,10 @@ class WindowAppLifecycleMixin:
             "include_thumbs": thumbs_cb.isChecked() and thumbs_available,
             "include_local_ai_models": local_ai_models_cb.isChecked() and local_ai_models_available,
             "include_ai_runtimes": ai_runtimes_cb.isChecked() and ai_runtimes_available,
-            "merge_existing": bool(importing and merge_cb.isChecked()),
+            "merge_recycle_bin": bool(importing and merge_recycle_cb.isChecked()),
+            "merge_thumbs": bool(importing and merge_thumbs_cb.isChecked()),
+            "merge_local_ai_models": bool(importing and merge_local_ai_models_cb.isChecked()),
+            "merge_ai_runtimes": bool(importing and merge_ai_runtimes_cb.isChecked()),
         }
 
     def export_library_backup(self) -> None:
@@ -168,12 +193,11 @@ class WindowAppLifecycleMixin:
             options = self._library_backup_options_dialog(importing=True, manifest=manifest)
             if not options.get("accepted"):
                 return
-            merge_text = "merge selected optional data into current data" if options.get("merge_existing") else "replace selected optional data"
             answer = QMessageBox.question(
                 self,
                 "Import Library Backup",
-                "Importing this backup will replace the current MediaLens database and "
-                f"{merge_text}. "
+                "Importing this backup will replace the current MediaLens database. "
+                "Each selected optional category will use its own merge or replace choice. "
                 "A local backup of the current supported files will be created first.\n\n"
                 "Continue?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -198,7 +222,10 @@ class WindowAppLifecycleMixin:
                     include_thumbs=bool(options.get("include_thumbs")),
                     include_local_ai_models=bool(options.get("include_local_ai_models")),
                     include_ai_runtimes=bool(options.get("include_ai_runtimes")),
-                    merge_existing=bool(options.get("merge_existing")),
+                    merge_recycle_bin=bool(options.get("merge_recycle_bin")),
+                    merge_thumbs=bool(options.get("merge_thumbs")),
+                    merge_local_ai_models=bool(options.get("merge_local_ai_models")),
+                    merge_ai_runtimes=bool(options.get("merge_ai_runtimes")),
                     backup_existing=True,
                 ),
             )

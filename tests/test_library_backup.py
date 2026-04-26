@@ -273,13 +273,15 @@ def test_library_backup_restore_merges_optional_data():
 
         result = restore_library_backup(
             archive,
-            options=LibraryRestoreOptions(
-                include_recycle_bin=True,
-                include_local_ai_models=True,
-                include_ai_runtimes=True,
-                merge_existing=True,
-                backup_existing=True,
-            ),
+        options=LibraryRestoreOptions(
+            include_recycle_bin=True,
+            include_local_ai_models=True,
+            include_ai_runtimes=True,
+            merge_recycle_bin=True,
+            merge_local_ai_models=True,
+            merge_ai_runtimes=True,
+            backup_existing=True,
+        ),
             appdata_dir=target,
         )
 
@@ -299,5 +301,65 @@ def test_library_backup_restore_merges_optional_data():
         finally:
             conn.close()
         assert ids == {"current-id", "import-id"}
+    finally:
+        shutil.rmtree(tmp_path, ignore_errors=True)
+
+
+def test_library_backup_restore_uses_merge_per_category():
+    tmp_path = _workspace_tmp()
+    try:
+        source = tmp_path / "source"
+        source.mkdir()
+        _make_sqlite(source / "medialens.db", "media", "imported")
+        _make_recycle_db(source / "recycle_bin.sqlite", "import-id", "imported.bin")
+        (source / "RecycleBin").mkdir()
+        (source / "RecycleBin" / "imported.bin").write_bytes(b"imported")
+        (source / "local_ai_models" / "new-model").mkdir(parents=True)
+        (source / "local_ai_models" / "new-model" / "weights.bin").write_bytes(b"new-model")
+        (source / "ai-runtimes" / "new-runtime").mkdir(parents=True)
+        (source / "ai-runtimes" / "new-runtime" / "python.exe").write_bytes(b"new-runtime")
+
+        archive = tmp_path / "backup.zip"
+        create_library_backup(
+            archive,
+            options=LibraryBackupOptions(
+                include_recycle_bin=True,
+                include_local_ai_models=True,
+                include_ai_runtimes=True,
+            ),
+            appdata_dir=source,
+        )
+
+        target = tmp_path / "target"
+        target.mkdir()
+        _make_sqlite(target / "medialens.db", "media", "old")
+        _make_recycle_db(target / "recycle_bin.sqlite", "current-id", "current.bin")
+        (target / "RecycleBin").mkdir()
+        (target / "RecycleBin" / "current.bin").write_bytes(b"current")
+        (target / "local_ai_models" / "current-model").mkdir(parents=True)
+        (target / "local_ai_models" / "current-model" / "weights.bin").write_bytes(b"current-model")
+        (target / "ai-runtimes" / "current-runtime").mkdir(parents=True)
+        (target / "ai-runtimes" / "current-runtime" / "python.exe").write_bytes(b"current-runtime")
+
+        restore_library_backup(
+            archive,
+            options=LibraryRestoreOptions(
+                include_recycle_bin=True,
+                include_local_ai_models=True,
+                include_ai_runtimes=True,
+                merge_recycle_bin=True,
+                merge_local_ai_models=False,
+                merge_ai_runtimes=True,
+                backup_existing=False,
+            ),
+            appdata_dir=target,
+        )
+
+        assert (target / "RecycleBin" / "current.bin").exists()
+        assert (target / "RecycleBin" / "imported.bin").exists()
+        assert not (target / "local_ai_models" / "current-model").exists()
+        assert (target / "local_ai_models" / "new-model" / "weights.bin").read_bytes() == b"new-model"
+        assert (target / "ai-runtimes" / "current-runtime" / "python.exe").read_bytes() == b"current-runtime"
+        assert (target / "ai-runtimes" / "new-runtime" / "python.exe").read_bytes() == b"new-runtime"
     finally:
         shutil.rmtree(tmp_path, ignore_errors=True)
