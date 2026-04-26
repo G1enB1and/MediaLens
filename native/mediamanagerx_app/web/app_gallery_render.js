@@ -826,6 +826,189 @@ function createMasonryCard(item, idx) {
   return card;
 }
 
+function createReviewSingleGroupCard(item, idx) {
+  const mediaIdx = getItemIndex(item, idx);
+  const card = document.createElement('div');
+  const duplicateGroupKey = String(item.duplicate_group_key || '');
+  const normalizedItemPath = normalizeMediaPath(item.path || '');
+  const duplicateKeepPathSet = new Set(getDuplicateKeepPaths(duplicateGroupKey).map(normalizeMediaPath).filter(Boolean));
+  const duplicateDeletePathSet = new Set(getDuplicateDeletePaths(duplicateGroupKey).map(normalizeMediaPath).filter(Boolean));
+  const normalizedDuplicateBestPath = normalizeMediaPath(getDuplicateBestPath(duplicateGroupKey));
+  const duplicateKeepChecked = !!(normalizedItemPath && duplicateKeepPathSet.has(normalizedItemPath));
+  const duplicateDeleteChecked = !!(normalizedItemPath && duplicateDeletePathSet.has(normalizedItemPath));
+  const duplicateBestChecked = !!(normalizedDuplicateBestPath && normalizedItemPath && normalizedDuplicateBestPath === normalizedItemPath);
+
+  card.className = 'review-single-card loading';
+  card.tabIndex = 0;
+  card.setAttribute('data-path', item.path || '');
+  card.setAttribute('data-is-folder', 'false');
+  card.setAttribute('data-duplicate-group-key', duplicateGroupKey);
+  card.setAttribute('data-duplicate-keep', duplicateKeepChecked ? 'true' : 'false');
+  card.setAttribute('data-duplicate-delete', duplicateDeleteChecked ? 'true' : 'false');
+
+  const thumbWrap = document.createElement('div');
+  thumbWrap.className = 'review-single-thumb';
+  if (item.thumb_bg_hint) thumbWrap.setAttribute('data-thumb-bg-hint', item.thumb_bg_hint);
+  if (item.media_type === 'image') {
+    const img = document.createElement('img');
+    img.className = 'review-single-thumb-img';
+    img.alt = '';
+    if (item.is_animated && !gAutoplayGalleryAnimatedGifs) {
+      img.classList.add('poster');
+      img.setAttribute('data-poster-path', item.path || '');
+    } else {
+      img.setAttribute('data-src', item.url);
+    }
+    if (item.is_animated) {
+      img.setAttribute('data-animated', 'true');
+      img.setAttribute('data-path', item.path || '');
+    }
+    thumbWrap.appendChild(img);
+    gPosterObserver.observe(img);
+  } else if (item.media_type === 'video') {
+    const img = document.createElement('img');
+    img.className = 'review-single-thumb-img poster';
+    img.alt = '';
+    img.setAttribute('data-video-path', item.path || '');
+    thumbWrap.appendChild(img);
+    gPosterObserver.observe(img);
+  } else {
+    const icon = document.createElement('div');
+    icon.className = 'media-icon image-icon';
+    thumbWrap.appendChild(icon);
+    markCardMediaReady(card);
+  }
+  card.appendChild(thumbWrap);
+
+  const content = document.createElement('div');
+  content.className = 'review-single-content';
+
+  const header = document.createElement('div');
+  header.className = 'review-single-header';
+  const headerText = document.createElement('div');
+  headerText.className = 'review-single-header-text';
+  const title = document.createElement('div');
+  title.className = 'review-single-name';
+  title.textContent = getItemName(item);
+  title.title = item.path || getItemName(item);
+  headerText.appendChild(title);
+  const folder = document.createElement('div');
+  folder.className = 'review-single-folder';
+  folder.textContent = getItemFolder(item) || item.path || '';
+  folder.title = getItemFolder(item) || item.path || '';
+  headerText.appendChild(folder);
+  header.appendChild(headerText);
+
+  const dismissBtn = document.createElement('button');
+  dismissBtn.type = 'button';
+  dismissBtn.className = 'review-single-icon-btn review-single-dismiss-btn';
+  dismissBtn.title = 'Exclude from this review group in future scans';
+  dismissBtn.setAttribute('aria-label', 'Exclude from this review group in future scans');
+  dismissBtn.innerHTML = '<span class="review-single-close-icon" aria-hidden="true"></span>';
+  dismissBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    dismissReviewPath(item.path || '');
+  });
+  header.appendChild(dismissBtn);
+  content.appendChild(header);
+
+  const stats = document.createElement('div');
+  stats.className = 'review-single-stats';
+  const dims = item.width && item.height ? `${item.width} x ${item.height}` : '';
+  stats.textContent = [dims, formatFileSize(item.file_size), formatModifiedTime(item.modified_time)].filter(Boolean).join(' • ');
+  content.appendChild(stats);
+
+  const controls = document.createElement('div');
+  controls.className = 'review-single-controls';
+  const appendCheckbox = (labelText, className, checked, onChange) => {
+    const label = document.createElement('label');
+    label.className = 'review-single-check-label';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.className = className;
+    input.checked = checked;
+    input.addEventListener('click', (e) => e.stopPropagation());
+    input.addEventListener('change', (e) => {
+      e.stopPropagation();
+      onChange(input);
+    });
+    label.appendChild(input);
+    const span = document.createElement('span');
+    span.textContent = labelText;
+    label.appendChild(span);
+    controls.appendChild(label);
+    return input;
+  };
+  appendCheckbox('Keep', 'review-single-check review-single-keep-toggle', duplicateKeepChecked, (input) => {
+    toggleDuplicateKeepPath(item.duplicate_group_key || '', item.path || '', !!input.checked);
+  });
+  appendCheckbox('Delete', 'review-single-check review-single-delete-toggle', duplicateDeleteChecked, (input) => {
+    toggleDuplicateDeletePath(item.duplicate_group_key || '', item.path || '', !!input.checked);
+  });
+  if (isExactDuplicateReviewItem(item)) {
+    const identical = document.createElement('span');
+    identical.className = 'review-single-identical';
+    identical.textContent = 'Identical';
+    controls.appendChild(identical);
+  } else {
+    appendCheckbox('Best Overall', 'review-single-check review-single-best-toggle', duplicateBestChecked, (input) => {
+      if (input.checked) {
+        setDuplicateBestPath(item.duplicate_group_key || '', item.path || '');
+      } else {
+        input.checked = true;
+      }
+    });
+  }
+
+  const reasons = getDisplayDuplicateReasons(item);
+  let reasonList = null;
+  if (reasons.length) {
+    reasonList = document.createElement('div');
+    reasonList.className = 'review-single-reasons';
+    reasonList.textContent = reasons.join(' • ');
+  }
+
+  const bottom = document.createElement('div');
+  bottom.className = 'review-single-bottom';
+  const bottomDetails = document.createElement('div');
+  bottomDetails.className = 'review-single-bottom-details';
+  bottomDetails.appendChild(controls);
+  if (reasonList) bottomDetails.appendChild(reasonList);
+  const best = document.createElement('div');
+  best.className = 'review-single-best';
+  best.textContent = item.duplicate_is_overall_best ? 'Best overall' : '';
+  bottomDetails.appendChild(best);
+  bottom.appendChild(bottomDetails);
+  const trashBtn = document.createElement('button');
+  trashBtn.type = 'button';
+  trashBtn.className = 'review-single-icon-btn review-single-trash-btn';
+  trashBtn.title = 'Delete this file';
+  trashBtn.setAttribute('aria-label', 'Delete this file');
+  trashBtn.innerHTML = '<span class="review-single-trash-icon" aria-hidden="true"></span>';
+  trashBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    deleteDuplicateCard(item.path || '');
+  });
+  bottom.appendChild(trashBtn);
+  content.appendChild(bottom);
+
+  card.appendChild(content);
+  card.addEventListener('click', (e) => handleCardSelection(card, item, mediaIdx, e));
+  card.addEventListener('dblclick', () => openLightboxByIndex(mediaIdx));
+  card.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      openLightboxByIndex(mediaIdx);
+    }
+  });
+  card.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    showCtx(e.clientX, e.clientY, item, mediaIdx, false);
+  });
+
+  return card;
+}
+
 function renderStructuredMediaList(el, items, options = {}) {
   const { renderHeader = true } = options;
   if (gGalleryViewMode === 'details' && renderHeader) {
@@ -949,7 +1132,9 @@ function finalizeDuplicateMediaList(el, groups) {
   }
   gLastRenderedReviewSignature = computeReviewRenderSignature(gMedia);
   renderTimelineRail([]);
-  restoreGroupScrollAnchor();
+  if (!isComparePanelReviewSingleMode()) {
+    restoreGroupScrollAnchor();
+  }
   groups.forEach((group) => {
     setDuplicateKeepPaths(group.key, getDuplicateKeepPaths(group.key));
     setDuplicateDeletePaths(group.key, getDuplicateDeletePaths(group.key));
@@ -1013,6 +1198,11 @@ function seedDuplicateGroupState(group) {
 function renderDuplicateMediaList(el, items, options = {}) {
   const { deferFinalize = false } = options;
   const groups = buildDuplicateGroups(items);
+  const singleGroupMode = isComparePanelReviewSingleMode();
+  const singleGroupKey = singleGroupMode ? resolveReviewSingleGroupKey(groups) : '';
+  const visibleGroups = singleGroupMode && singleGroupKey
+    ? groups.filter(group => String(group.key || '') === singleGroupKey)
+    : groups;
   const reviewMode = getReviewMode();
   const isSimilarReview = reviewMode === 'similar' || reviewMode === 'similar_only';
   const groupLabel = isSimilarReview ? 'Similar Group' : 'Duplicate Group';
@@ -1029,6 +1219,8 @@ function renderDuplicateMediaList(el, items, options = {}) {
     return;
   }
   el.classList.add('gallery-grouped', 'gallery-duplicates-root');
+  el.classList.toggle('gallery-review-single-group', singleGroupMode);
+  document.body.classList.toggle('compare-review-single-mode', singleGroupMode);
 
   const reviewNotice = document.createElement('div');
   reviewNotice.className = 'duplicate-review-note';
@@ -1079,7 +1271,7 @@ function renderDuplicateMediaList(el, items, options = {}) {
   summary.appendChild(summaryActions);
   el.appendChild(summary);
 
-  groups.forEach((group) => {
+  visibleGroups.forEach((group) => {
     seedDuplicateGroupState(group);
     const section = document.createElement('section');
     section.className = 'gallery-group duplicate-group';
@@ -1102,9 +1294,16 @@ function renderDuplicateMediaList(el, items, options = {}) {
     header.appendChild(meta);
 
     const body = document.createElement('div');
-    applyGalleryClasses(body, 'duplicates');
-    body.classList.add('gallery-group-body');
-    renderStructuredMediaList(body, group.items, { renderHeader: false });
+    if (singleGroupMode) {
+      body.className = 'review-single-group-body';
+      group.items.forEach((item, idx) => {
+        body.appendChild(createReviewSingleGroupCard(item, idx));
+      });
+    } else {
+      applyGalleryClasses(body, 'duplicates');
+      body.classList.add('gallery-group-body');
+      renderStructuredMediaList(body, group.items, { renderHeader: false });
+    }
 
     const actions = document.createElement('div');
     actions.className = 'duplicate-group-actions';
@@ -1149,9 +1348,9 @@ function renderDuplicateMediaList(el, items, options = {}) {
   applyDuplicateReviewSummaryToRoot(el);
 
   if (!deferFinalize) {
-    requestAnimationFrame(() => finalizeDuplicateMediaList(el, groups));
+    requestAnimationFrame(() => finalizeDuplicateMediaList(el, visibleGroups));
   }
-  return groups;
+  return visibleGroups;
 }
 
 function showCtx(x, y, item, idx, fromLightbox = false) {
@@ -1526,7 +1725,7 @@ function wireCtxMenu() {
       case 'ctxAddToCollection':
         if (gBridge && gBridge.add_paths_to_collection_interactive) {
           const paths = getTargetPaths().filter(path => {
-            const card = document.querySelector(`.card[data-path="${CSS.escape(path)}"]`);
+            const card = queryGalleryCardByPath(path);
             return !(card && card.getAttribute('data-is-folder') === 'true');
           });
           if (paths.length > 0) {
@@ -1543,8 +1742,8 @@ function wireCtxMenu() {
             gBridge.set_setting_bool('ui.show_right_panel', true);
           }
           // Select the card in the gallery
-          document.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected'));
-          const metaCard = document.querySelector(`.card[data-path="${CSS.escape(pathForMeta)}"]`);
+          queryGalleryCards('.selected').forEach(c => c.classList.remove('selected'));
+          const metaCard = queryGalleryCardByPath(pathForMeta);
           if (metaCard) { metaCard.classList.add('selected'); gLockedCard = metaCard; }
           // Small delay lets any click-triggered deselects process first before we request metadata
           setTimeout(() => {
@@ -1693,6 +1892,7 @@ function renderMediaList(items, scrollToTop = true) {
       el.dataset.internalDropCancelBound = 'true';
     }
     applyGalleryViewMode(gGalleryViewMode);
+    document.body.classList.toggle('compare-review-single-mode', false);
 
     el.innerHTML = '';
     gLastGalleryRenderSignature = nextRenderSignature;
@@ -1953,7 +2153,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // If we clicked something that is NOT a card or a descendant of a card,
     // and not a menu item or other interactive element that should keep selection,
     // and not within the right side panels (metadata/bulk tag editor).
-    if (!e.target.closest('.card') &&
+    if (!closestGalleryCard(e.target) &&
       !e.target.closest('.ctx') &&
       !e.target.closest('.select-trigger') &&
       !e.target.closest('.select-options') &&

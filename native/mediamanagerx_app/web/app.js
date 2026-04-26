@@ -901,7 +901,7 @@ function wireGalleryBackground() {
 
   main.addEventListener('click', (e) => {
     // If we click the background (anything not a card or inside a card)
-    if (!e.target.closest('.card')) {
+    if (!closestGalleryCard(e.target)) {
       deselectAll();
       syncMetadataToBridge();
     }
@@ -909,7 +909,7 @@ function wireGalleryBackground() {
 
   main.addEventListener('contextmenu', (e) => {
     // If we right-click the background
-    if (!e.target.closest('.card')) {
+    if (!closestGalleryCard(e.target)) {
       e.preventDefault();
       showCtx(e.clientX, e.clientY, null, -1, false);
     }
@@ -1014,12 +1014,20 @@ async function main() {
     }
     if (bridge.compareStateChanged) {
       bridge.compareStateChanged.connect(function (state) {
+        const previousSingleMode = isComparePanelReviewSingleMode();
+        const previousGroupKey = compareReviewGroupKeyFromState() || String(gReviewSingleGroupKey || '');
         gCompareState = state || { visible: false, left: {}, right: {}, best_path: '', keep_paths: [], delete_paths: [] };
         const selectionRevision = Number(gCompareState && gCompareState.selection_revision);
         if (Number.isFinite(selectionRevision) && selectionRevision !== gLastCompareSelectionRevision) {
           gLastCompareSelectionRevision = selectionRevision;
         }
         maybeSeedCompareStateFromReview();
+        const nextSingleMode = isComparePanelReviewSingleMode();
+        const nextGroupKey = compareReviewGroupKeyFromState() || String(gReviewSingleGroupKey || '');
+        if (isDuplicateModeActive() && (previousSingleMode !== nextSingleMode || (nextSingleMode && previousGroupKey !== nextGroupKey))) {
+          gLastGalleryRenderSignature = '';
+          renderMediaList(gMedia, false);
+        }
       });
     }
     if (bridge.compareKeepPathChanged) {
@@ -1116,7 +1124,7 @@ async function main() {
 
         if (op === 'rename' && oldPath && newPath) {
           // ── In-place patch: update the card's data-path without reordering the gallery ──
-          const oldCard = document.querySelector(`.card[data-path="${CSS.escape(oldPath)}"]`);
+          const oldCard = queryGalleryCardByPath(oldPath);
           if (oldCard) {
             oldCard.setAttribute('data-path', newPath);
             // Keep gLockedCard reference valid
@@ -1497,8 +1505,15 @@ async function main() {
           return;
         }
         if (key === 'ui.show_bottom_panel') {
+          const previousSingleMode = isComparePanelReviewSingleMode();
+          gCompareState = Object.assign({}, gCompareState || {}, { visible: !!value });
           updateSidebarButtonIcons('bottom', !!value);
-          scheduleGalleryRelayout('ui.show_bottom_panel');
+          if (isDuplicateModeActive() && previousSingleMode !== isComparePanelReviewSingleMode()) {
+            gLastGalleryRenderSignature = '';
+            renderMediaList(gMedia, false);
+          } else {
+            scheduleGalleryRelayout('ui.show_bottom_panel');
+          }
           return;
         }
         if (key === 'ui.show_right_panel') {

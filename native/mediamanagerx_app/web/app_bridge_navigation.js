@@ -677,13 +677,13 @@ function loadImage(el, imgSrc) {
   el.onload = () => {
     gLoadedOnPage++;
     el.style.opacity = '1';
-    const card = el.closest('.card');
+    const card = closestGalleryCard(el);
     if (card) markCardMediaReady(card);
   };
   el.onerror = () => {
     gLoadedOnPage++;
     el.style.opacity = '1';
-    const card = el.closest('.card');
+    const card = closestGalleryCard(el);
     if (card) markCardMediaReady(card);
   };
   el.style.opacity = '0';
@@ -697,7 +697,7 @@ function loadVideoPoster(el, path) {
   el.style.opacity = '0';
   if (gBridge && gBridge.get_video_poster) {
     gBridge.get_video_poster(path, function (posterUrl) {
-      const card = el.closest('.card');
+      const card = closestGalleryCard(el);
       if (posterUrl) {
         // Preload via tempImg so the browser caches it — then show instantly
         const tempImg = new Image();
@@ -1070,7 +1070,7 @@ function loadStillPoster(el, path) {
   el.style.opacity = '0';
   if (gBridge && gBridge.get_video_poster) {
     gBridge.get_video_poster(path, function (posterUrl) {
-      const card = el.closest('.card');
+      const card = closestGalleryCard(el);
       if (posterUrl) {
         const tempImg = new Image();
         tempImg.onload = () => {

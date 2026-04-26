@@ -64,6 +64,7 @@ let gDuplicateDeleteOverrides = new Map();
 let gDuplicateBestOverrides = new Map();
 let gLastCompareSeedKey = '';
 let gLastCompareSelectionRevision = -1;
+let gReviewSingleGroupKey = '';
 let gDuplicateGroupOrder = new Map();
 let gCachedSettings = {};
 let gMuteVideoByDefault = true;
@@ -89,6 +90,28 @@ let gRenderScanToast = null;
 let gScanToastGeneration = 0;
 let gGalleryFilterMetadataRefreshTimer = 0;
 let gCompareState = { visible: false, left: {}, right: {}, best_path: '', keep_paths: [], delete_paths: [] };
+
+function getGalleryCardSelector(suffix = '') {
+  return `.card${suffix}, .review-single-card${suffix}`;
+}
+
+function queryGalleryCards(suffix = '', root = document) {
+  const target = root || document;
+  return Array.from(target.querySelectorAll(getGalleryCardSelector(suffix)));
+}
+
+function queryGalleryCardByPath(path, root = document) {
+  const normalizedPath = String(path || '');
+  if (!normalizedPath || typeof CSS === 'undefined' || !CSS.escape) return null;
+  const target = root || document;
+  return target.querySelector(getGalleryCardSelector(`[data-path="${CSS.escape(normalizedPath)}"]`));
+}
+
+function closestGalleryCard(target) {
+  if (!target || !target.closest) return null;
+  return target.closest(getGalleryCardSelector());
+}
+
 const TIMELINE_INSET_PX = 20;
 const TIMELINE_THUMB_SIZE_PX = 14;
 const TIMELINE_TOP_YEAR_TOP_PX = 20;
@@ -627,6 +650,28 @@ function getReviewMode() {
 
 function isDuplicateModeActive() {
   return !!getReviewMode();
+}
+
+function isComparePanelReviewSingleMode() {
+  return isDuplicateModeActive() && !!(gCompareState && gCompareState.visible);
+}
+
+function compareReviewGroupKeyFromState() {
+  const groupKeys = Array.from(new Set(getCompareActivePaths().map(getDuplicateGroupKeyForPath).filter(Boolean)));
+  return groupKeys.length === 1 ? groupKeys[0] : '';
+}
+
+function resolveReviewSingleGroupKey(groups) {
+  const list = Array.isArray(groups) ? groups : [];
+  if (!list.length) {
+    gReviewSingleGroupKey = '';
+    return '';
+  }
+  const stateKey = compareReviewGroupKeyFromState();
+  const currentKey = stateKey || String(gReviewSingleGroupKey || '').trim();
+  const match = list.find(group => String(group && group.key || '') === currentKey) || list[0];
+  gReviewSingleGroupKey = String(match && match.key || '');
+  return gReviewSingleGroupKey;
 }
 
 function shouldShowScanWaitingEmptyState() {

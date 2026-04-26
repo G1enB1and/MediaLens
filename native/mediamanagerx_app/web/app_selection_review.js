@@ -66,7 +66,7 @@ function deselectAll(force = false) {
     return;
   }
   gIsCtxMenuClick = false;
-  document.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected'));
+  queryGalleryCards('.selected').forEach(c => c.classList.remove('selected'));
   gSelectedPaths.clear();
   gLockedCard = null;
   gLastSelectionIdx = -1;
@@ -84,7 +84,7 @@ window.deselectAll = deselectAll;
 
 function selectAll() {
   gSelectedPaths.clear();
-  document.querySelectorAll('.card').forEach(c => {
+  queryGalleryCards().forEach(c => {
     const selectCard = !isFolderCardElement(c) || shouldSelectFoldersOnSelectAll();
     c.classList.toggle('selected', selectCard);
     const path = c.getAttribute('data-path');
@@ -169,7 +169,7 @@ function reconcileSelectionWithVisibleItems(items) {
 
 function selectDuplicateGroupForKeep(groupKey) {
   deselectAll();
-  const cards = Array.from(document.querySelectorAll(`.card[data-duplicate-group-key="${CSS.escape(groupKey)}"]`));
+  const cards = queryGalleryCards(`[data-duplicate-group-key="${CSS.escape(groupKey)}"]`);
   cards.forEach((card) => {
     if (card.getAttribute('data-duplicate-keep') === 'true') return;
     card.classList.add('selected');
@@ -852,11 +852,11 @@ function renderDetailsHeader(container) {
 }
 
 function hasSelectedMediaCards() {
-  return Array.from(document.querySelectorAll('.card.selected')).some(card => card.getAttribute('data-is-folder') !== 'true');
+  return queryGalleryCards('.selected').some(card => card.getAttribute('data-is-folder') !== 'true');
 }
 
 function syncSelectedCardClasses() {
-  document.querySelectorAll('.card').forEach((card) => {
+  queryGalleryCards().forEach((card) => {
     const path = card.getAttribute('data-path') || '';
     card.classList.toggle('selected', !!path && gSelectedPaths.has(path));
   });
@@ -871,9 +871,7 @@ function updateLockedCardAfterSelection(preferredCard = null) {
     }
   }
   const firstSelectedPath = Array.from(gSelectedPaths)[0] || '';
-  gLockedCard = firstSelectedPath
-    ? document.querySelector(`.card[data-path="${CSS.escape(firstSelectedPath)}"]`)
-    : null;
+  gLockedCard = firstSelectedPath ? queryGalleryCardByPath(firstSelectedPath) : null;
 }
 
 function updateCtxViewState() {
@@ -899,7 +897,7 @@ function handleCardSelection(card, item, idx, e) {
   } else if (e.shiftKey && gLastSelectionIdx !== -1) {
     const start = Math.min(gLastSelectionIdx, idx);
     const end = Math.max(gLastSelectionIdx, idx);
-    const cards = document.querySelectorAll('.card');
+    const cards = queryGalleryCards();
     for (let i = start; i <= end; i++) {
       const current = cards[i];
       const currentPath = current.getAttribute('data-path');
@@ -1181,6 +1179,10 @@ function getReviewGroupsForNavigation() {
 }
 
 function getCurrentReviewGroupKeyForNavigation() {
+  if (isComparePanelReviewSingleMode()) {
+    return compareReviewGroupKeyFromState() || String(gReviewSingleGroupKey || '').trim();
+  }
+
   const comparePaths = getCompareActivePaths();
   const compareGroupKeys = Array.from(new Set(comparePaths.map(getDuplicateGroupKeyForPath).filter(Boolean)));
   if (compareGroupKeys.length === 1) return compareGroupKeys[0];
@@ -1204,6 +1206,7 @@ function getCurrentReviewGroupKeyForNavigation() {
 function focusReviewGroup(groupKey) {
   const targetKey = String(groupKey || '').trim();
   if (!targetKey || !gBridge) return false;
+  const previousKey = getCurrentReviewGroupKeyForNavigation();
   const group = getReviewGroupsForNavigation().find(entry => String(entry.key || '') === targetKey);
   if (!group || !Array.isArray(group.items) || group.items.length < 2) return false;
 
@@ -1212,6 +1215,11 @@ function focusReviewGroup(groupKey) {
     .map(item => String(item && item.path || ''))
     .filter(Boolean);
   if (comparePaths.length < 2) return false;
+
+  if (previousKey && previousKey !== targetKey) {
+    deselectAll(true);
+    syncMetadataToBridge();
+  }
 
   toggleGroupCollapsed(targetKey, false);
   if (gBridge.compare_paths) {
@@ -1225,8 +1233,14 @@ function focusReviewGroup(groupKey) {
   const deletePaths = getDuplicateDeletePaths(targetKey).slice().sort();
   const bestPath = getDuplicateBestPath(targetKey);
   window.setTimeout(() => {
+    gReviewSingleGroupKey = targetKey;
     syncCompareStateFromReviewGroup(targetKey, keepPaths, deletePaths, bestPath);
-    scrollToGroup(targetKey);
+    if (isComparePanelReviewSingleMode()) {
+      gLastGalleryRenderSignature = '';
+      renderMediaList(gMedia, false);
+    } else {
+      scrollToGroup(targetKey);
+    }
   }, 0);
   return true;
 }
@@ -1445,7 +1459,7 @@ function prepareGalleryScrollPreservationForRefresh(resetPage = false) {
 function captureCurrentCardScrollAnchor(mainOverride = null, excludedPaths = null) {
   const main = mainOverride || document.querySelector('main');
   if (!main) return null;
-  const cards = Array.from(document.querySelectorAll('.card[data-path]'));
+  const cards = queryGalleryCards('[data-path]');
   if (!cards.length) return null;
   const mainRect = main.getBoundingClientRect();
   let best = null;
@@ -1479,7 +1493,7 @@ function restoreGroupScrollAnchor() {
   if (anchor.type === 'card') {
     const path = String(anchor.path || '');
     if (path) {
-      const card = document.querySelector(`.card[data-path="${CSS.escape(path)}"]`);
+      const card = queryGalleryCardByPath(path);
       if (card) {
         const mainRect = main.getBoundingClientRect();
         const cardRect = card.getBoundingClientRect();
@@ -1562,6 +1576,8 @@ function computeGalleryRenderSignature(items) {
     gGalleryViewMode,
     gGroupBy,
     getReviewMode(),
+    isComparePanelReviewSingleMode() ? 'compare-single' : 'full-review',
+    isComparePanelReviewSingleMode() ? (compareReviewGroupKeyFromState() || String(gReviewSingleGroupKey || '')) : '',
     shouldShowScanWaitingEmptyState() ? 'waiting' : 'ready',
   ];
   for (const item of rows) {
