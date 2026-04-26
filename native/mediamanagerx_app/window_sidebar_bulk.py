@@ -992,33 +992,39 @@ class WindowSidebarBulkMixin:
     ) -> None:
         if list_widget is None:
             return
-        self._detach_bulk_selected_file_rows(list_widget)
-        list_widget.clear()
-        paths = self._current_file_paths()
-        payloads = self._bulk_selected_file_payloads(paths)
+        list_widget.setUpdatesEnabled(False)
         try:
-            from app.mediamanager.utils.pathing import normalize_windows_path
-        except Exception:
-            normalize_windows_path = lambda value: str(value or "")
-        for path in paths:
-            tags, metadata = payloads.get(str(normalize_windows_path(path)).lower(), ([], {}))
-            item = QListWidgetItem()
-            row = BulkSelectedFileRow(
-                path,
-                None,
-                Path(path).name,
-                str(value_getter(tags, metadata) or ""),
-                content_height=content_height,
-                placeholder_text=placeholder_text,
-                generate_button_text=generate_button_text,
-            )
-            item.setSizeHint(QSize(0, row.item_height()))
-            row.tagsEdited.connect(edit_handler)
-            if generate_handler is not None:
-                row.generateRequested.connect(generate_handler)
-            list_widget.addItem(item)
-            list_widget.setItemWidget(item, row)
-        list_widget.doItemsLayout()
+            self._detach_bulk_selected_file_rows(list_widget)
+            list_widget.clear()
+            paths = self._current_file_paths()
+            payloads = self._bulk_selected_file_payloads(paths)
+            try:
+                from app.mediamanager.utils.pathing import normalize_windows_path
+            except Exception:
+                normalize_windows_path = lambda value: str(value or "")
+            row_parent = list_widget.viewport() or list_widget
+            for path in paths:
+                tags, metadata = payloads.get(str(normalize_windows_path(path)).lower(), ([], {}))
+                item = QListWidgetItem()
+                row = BulkSelectedFileRow(
+                    path,
+                    None,
+                    Path(path).name,
+                    str(value_getter(tags, metadata) or ""),
+                    row_parent,
+                    content_height=content_height,
+                    placeholder_text=placeholder_text,
+                    generate_button_text=generate_button_text,
+                )
+                item.setSizeHint(QSize(0, row.item_height()))
+                row.tagsEdited.connect(edit_handler)
+                if generate_handler is not None:
+                    row.generateRequested.connect(generate_handler)
+                list_widget.addItem(item)
+                list_widget.setItemWidget(item, row)
+            list_widget.doItemsLayout()
+        finally:
+            list_widget.setUpdatesEnabled(True)
         QTimer.singleShot(0, lambda: self._load_visible_bulk_selected_file_thumbnails(list_widget, content_height))
 
     @staticmethod
@@ -1506,7 +1512,7 @@ class WindowSidebarBulkMixin:
             item.setData(Qt.ItemDataRole.UserRole, int(entry.get("tag_id") or 0))
             item.setSizeHint(QSize(0, 36))
             self.tag_list_rows.addItem(item)
-            row = TagListTagRow(self.tag_list_rows, item, entry)
+            row = TagListTagRow(self.tag_list_rows, item, entry, self.tag_list_rows.viewport() or self.tag_list_rows)
             row.addToSelectionRequested.connect(self._add_tag_to_current_editor)
             row.removeFromSelectionRequested.connect(self._remove_tag_from_current_editor)
             row.removeFromListRequested.connect(self._remove_tag_from_active_list)
