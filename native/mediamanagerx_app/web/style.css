@@ -3006,6 +3006,7 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   z-index: 1;
   /* Let clicks fall through to the backdrop so click-outside closes */
   pointer-events: none;
+  overflow: hidden;
 }
 
 #lightboxImg,
@@ -3018,6 +3019,20 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   /* Ensure parent doesn't grow based on intrinsic size */
   min-width: 0;
   min-height: 0;
+}
+
+#lightboxImg {
+  cursor: zoom-in;
+  transform-origin: center center;
+  will-change: transform;
+}
+
+#lightboxImg.is-zoomed {
+  cursor: grab;
+}
+
+#lightboxImg.is-panning {
+  cursor: grabbing;
 }
 
 #lightboxVideo {
