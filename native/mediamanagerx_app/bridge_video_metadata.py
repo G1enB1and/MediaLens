@@ -609,11 +609,22 @@ class BridgeVideoMetadataMixin:
                 bootstrap_python = self._ensure_local_ai_python_bootstrap(lambda msg: emit_status(msg))
                 if not bootstrap_python:
                     raise RuntimeError("MediaLens could not prepare the Python bootstrap needed to create the OCR runtime.")
+                gpu_target = self._paddle_ocr_gpu_install_target()
+                initial_status = dict(self._get_paddle_ocr_status(probe_timeout=30) or {}) if python_path.is_file() else {}
+                had_gpu_active = bool(initial_status.get("gpu_active"))
+                should_recreate_runtime = False
+                if runtime_dir.exists() and not python_path.is_file():
+                    should_recreate_runtime = True
+                elif python_path.is_file() and not had_gpu_active:
+                    installed = bool(initial_status.get("installed"))
+                    prefer_gpu = bool(initial_status.get("prefer_gpu", True))
+                    should_recreate_runtime = not installed or (prefer_gpu and bool(gpu_target.get("available")))
+                if should_recreate_runtime:
+                    emit_status("Removing stale Paddle OCR runtime...")
+                    shutil.rmtree(runtime_dir)
                 if not python_path.is_file():
                     self._paddle_ocr_run_command([bootstrap_python, "-m", "venv", str(runtime_dir)], "Creating Paddle OCR runtime...", emit_status)
                 self._ensure_paddle_ocr_packaging_tools(python_path, emit_status)
-                initial_status = dict(self._get_paddle_ocr_status(probe_timeout=30) or {}) if python_path.is_file() else {}
-                had_gpu_active = bool(initial_status.get("gpu_active"))
                 if not had_gpu_active:
                     self._paddle_ocr_run_command([str(python_path), "-m", "pip", "uninstall", "-y", "paddlepaddle", "paddlepaddle-gpu"], "Removing existing Paddle package...", emit_status)
 
@@ -650,17 +661,41 @@ class BridgeVideoMetadataMixin:
                                 self._log(f"{message_prefix} {version} from {source_label} failed: {cleaned}")
                     raise RuntimeError(errors[-1] if errors else f"{message_prefix} failed.")
 
-                gpu_target = self._paddle_ocr_gpu_install_target()
                 gpu_error = ""
                 installed_package = ""
+                gpu_probe_failed_after_package_install = False
                 if bool(gpu_target.get("available")):
                     try:
+                        def clean_activate_gpu_runtime(reason: str) -> tuple[str, dict]:
+                            self._log(f"Paddle OCR clean GPU activation starting: {reason}")
+                            self._paddle_ocr_run_command(
+                                [str(python_path), "-m", "pip", "uninstall", "-y", "paddlepaddle", "paddlepaddle-gpu"],
+                                "Removing stale Paddle package before GPU activation...",
+                                emit_status,
+                            )
+                            activated_package = install_paddle_package(
+                                "paddlepaddle-gpu",
+                                [str(gpu_target["index_url"])],
+                                f"Activating Paddle GPU runtime ({gpu_target.get('label')})",
+                            )
+                            activated_status = self._get_paddle_ocr_status(probe_timeout=90)
+                            return activated_package, dict(activated_status or {})
+
                         installed_package = install_paddle_package(
                             "paddlepaddle-gpu",
                             [str(gpu_target["index_url"])],
                             f"Installing Paddle GPU runtime ({gpu_target.get('label')})",
                         )
                         status = self._get_paddle_ocr_status(probe_timeout=90)
+                        if not status.get("gpu_active"):
+                            probe = dict(status.get("runtime_probe") or {})
+                            retry_reason = str(
+                                probe.get("gpu_error")
+                                or probe.get("error")
+                                or status.get("gpu_issue")
+                                or "Initial GPU probe did not activate."
+                            )
+                            installed_package, status = clean_activate_gpu_runtime(retry_reason)
                         if status.get("gpu_active"):
                             payload = dict(status)
                             payload.update({"state": "installed", "running": False, "message": f"Paddle OCR runtime is installed. GPU is active ({installed_package})."})
@@ -670,6 +705,7 @@ class BridgeVideoMetadataMixin:
                         gpu_error = str(probe.get("gpu_error") or probe.get("error") or "GPU package installed, but Paddle did not activate the GPU.")
                         if str(probe.get("paddlepaddle_gpu_dist") or "").strip() or installed_package:
                             self._log(f"Paddle OCR GPU runtime probe failed after install; CPU fallback skipped: {gpu_error}")
+                            gpu_probe_failed_after_package_install = True
                             raise RuntimeError(f"Paddle GPU package installed, but the runtime probe failed. {gpu_error}")
                         if had_gpu_active:
                             self._log(f"Paddle OCR GPU repair inactive; CPU fallback skipped to preserve existing GPU runtime: {gpu_error}")
@@ -691,6 +727,8 @@ class BridgeVideoMetadataMixin:
                                 self.paddleOcrRuntimeInstallStatus.emit(payload)
                                 return
                             raise RuntimeError(f"Paddle GPU repair failed and CPU fallback was skipped to avoid downgrading an existing GPU runtime. {gpu_error}")
+                        if gpu_probe_failed_after_package_install:
+                            raise RuntimeError(gpu_error)
                         self._log(f"Paddle OCR GPU runtime install failed; falling back to CPU: {exc}")
                 else:
                     gpu_error = str(gpu_target.get("reason") or "No compatible NVIDIA GPU was detected.")
