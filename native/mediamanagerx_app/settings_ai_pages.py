@@ -1278,12 +1278,24 @@ class LocalAiSetupDialog(QDialog):
                 ).start()
 
     def _resolve_status_async(self, status_key: str, spec, generation: int) -> None:
-        status = self._status_for_spec(spec)
-        self.statusResolved.emit(str(status_key or ""), dict(status or {}), int(generation))
+        try:
+            status = self._status_for_spec(spec)
+            self.statusResolved.emit(str(status_key or ""), dict(status or {}), int(generation))
+        except RuntimeError as exc:
+            if "already deleted" not in str(exc):
+                raise
+        except Exception:
+            pass
 
     def _resolve_paddle_status_async(self, generation: int) -> None:
-        status = self._paddle_status_payload()
-        self.paddleStatusResolved.emit(dict(status or {}), int(generation))
+        try:
+            status = self._paddle_status_payload()
+            self.paddleStatusResolved.emit(dict(status or {}), int(generation))
+        except RuntimeError as exc:
+            if "already deleted" not in str(exc):
+                raise
+        except Exception:
+            pass
 
     def _paddle_status_payload(self, payload: dict | None = None) -> dict:
         status = dict(payload or {})

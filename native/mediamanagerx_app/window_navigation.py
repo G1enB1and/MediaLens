@@ -551,6 +551,18 @@ class WindowNavigationMixin:
             self.smart_collections_list.blockSignals(False)
         self._navigate_to_folder(folder_path, record_history=True, re_root_tree=True)
 
+    def _on_pinned_folders_order_changed(self) -> None:
+        if not hasattr(self, "pinned_folders_list"):
+            return
+        ordered: list[str] = []
+        for row in range(self.pinned_folders_list.count()):
+            item = self.pinned_folders_list.item(row)
+            folder_path = str(item.data(Qt.ItemDataRole.UserRole) or "").strip() if item is not None else ""
+            if folder_path:
+                ordered.append(folder_path)
+        if ordered:
+            self.bridge.reorder_pinned_folders(ordered)
+
     def _on_pinned_folders_context_menu(self, pos: QPoint) -> None:
         item = self.pinned_folders_list.itemAt(pos)
         if not item:

@@ -461,11 +461,16 @@ class CollectionListWidget(QListWidget):
 class PinnedFolderListWidget(QListWidget):
     """Flat pinned-folder list with drag-and-drop support for folders only."""
 
+    orderChanged = Signal()
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
-        self.setDragEnabled(False)
+        self.setDragEnabled(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setDragDropOverwriteMode(False)
         self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.setMouseTracking(True)
 
@@ -473,6 +478,45 @@ class PinnedFolderListWidget(QListWidget):
         item = self.itemAt(event.position().toPoint())
         self.setCursor(Qt.CursorShape.PointingHandCursor if item else Qt.CursorShape.ArrowCursor)
         super().mouseMoveEvent(event)
+
+    def startDrag(self, supportedActions) -> None:
+        item = self.currentItem()
+        row = self.itemWidget(item) if item is not None else None
+        if item is None or row is None:
+            super().startDrag(supportedActions)
+            return
+
+        drag = QDrag(self)
+        mime = self.mimeData(self.selectedItems())
+        if mime is None:
+            super().startDrag(supportedActions)
+            return
+        drag.setMimeData(mime)
+        item_rect = self.visualItemRect(item)
+        size = item_rect.size() if item_rect.isValid() else row.size()
+        if size.isEmpty():
+            size = row.sizeHint()
+        pixmap = QPixmap(size)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        try:
+            accent = QColor(str(getattr(self.window(), "bridge", None).settings.value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT))
+        except Exception:
+            accent = QColor(Theme.ACCENT_DEFAULT)
+        selected = bool(item.isSelected())
+        bg = QColor(Theme.get_accent_soft(accent) if selected else Theme.get_control_bg(accent))
+        border = QColor(accent.name() if selected else Theme.get_border(accent))
+        rect = QRectF(0.5, 0.5, max(1, size.width() - 1), max(1, size.height() - 1))
+        painter.setPen(QPen(border, 1))
+        painter.setBrush(bg)
+        painter.drawRoundedRect(rect, 6, 6)
+        row.render(painter, QPoint(0, 0))
+        painter.end()
+        if not pixmap.isNull():
+            drag.setPixmap(pixmap)
+            drag.setHotSpot(QPoint(max(0, pixmap.width() // 2), max(0, pixmap.height() // 2)))
+        drag.exec(Qt.DropAction.MoveAction)
 
     @staticmethod
     def _extract_folder_paths(mime: QMimeData, bridge: "Bridge | None") -> list[str]:
@@ -503,6 +547,10 @@ class PinnedFolderListWidget(QListWidget):
         return folders
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if event.source() is self:
+            event.setDropAction(Qt.DropAction.MoveAction)
+            event.accept()
+            return
         bridge = getattr(self.window(), "bridge", None)
         folders = self._extract_folder_paths(event.mimeData(), bridge)
         if folders:
@@ -512,6 +560,10 @@ class PinnedFolderListWidget(QListWidget):
         super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        if event.source() is self:
+            event.setDropAction(Qt.DropAction.MoveAction)
+            event.accept()
+            return
         bridge = getattr(self.window(), "bridge", None)
         folders = self._extract_folder_paths(event.mimeData(), bridge)
         if folders:
@@ -534,6 +586,11 @@ class PinnedFolderListWidget(QListWidget):
         bridge = getattr(self.window(), "bridge", None)
         if bridge:
             bridge.hide_drag_tooltip()
+
+        if event.source() is self:
+            super().dropEvent(event)
+            self.orderChanged.emit()
+            return
 
         folders = self._extract_folder_paths(event.mimeData(), bridge)
         if not folders or not bridge:

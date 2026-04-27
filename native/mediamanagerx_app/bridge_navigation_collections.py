@@ -77,6 +77,34 @@ class BridgeNavigationCollectionsMixin:
     def list_pinned_folders(self) -> list:
         return self._read_pinned_folders()
 
+    @Slot(list, result=bool)
+    def reorder_pinned_folders(self, ordered_folders: list[str]) -> bool:
+        existing = self._read_pinned_folders()
+        existing_by_key = {path.replace("\\", "/").lower(): path for path in existing}
+        reordered: list[str] = []
+        seen: set[str] = set()
+        for raw_path in ordered_folders or []:
+            path_str = str(raw_path or "").strip()
+            if not path_str:
+                continue
+            try:
+                key = str(Path(path_str).absolute()).replace("\\", "/").lower()
+            except Exception:
+                key = path_str.replace("\\", "/").lower()
+            existing_path = existing_by_key.get(key)
+            if not existing_path or key in seen:
+                continue
+            reordered.append(existing_path)
+            seen.add(key)
+        for path in existing:
+            key = path.replace("\\", "/").lower()
+            if key not in seen:
+                reordered.append(path)
+        if reordered == existing:
+            return False
+        self._write_pinned_folders(reordered)
+        return True
+
     @Slot(str, result=bool)
     def is_folder_pinned(self, folder_path: str) -> bool:
         target = str(folder_path or "").strip()
@@ -244,7 +272,7 @@ class BridgeNavigationCollectionsMixin:
 
         def work() -> None:
             items = self._list_child_folders_impl(path)
-            self.childFoldersListed.emit(req, items)
+            self._safe_emit(self.childFoldersListed, req, items)
 
         threading.Thread(target=work, daemon=True).start()
 

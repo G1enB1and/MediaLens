@@ -166,7 +166,7 @@ class BridgeMediaListingScanMixin:
 
         def work() -> None:
             items = self.list_media(folder_list, lim, off, sort, ftype, query)
-            self.mediaListed.emit(req, items or [])
+            self._safe_emit(self.mediaListed, req, items or [])
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -200,7 +200,7 @@ class BridgeMediaListingScanMixin:
 
         def work() -> None:
             count = self.count_media(folder_list, ftype, query)
-            self.mediaCounted.emit(req, int(count or 0))
+            self._safe_emit(self.mediaCounted, req, int(count or 0))
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -213,7 +213,7 @@ class BridgeMediaListingScanMixin:
 
         def work() -> None:
             count = self.count_media_files(folder_list, ftype, query)
-            self.mediaFileCounted.emit(req, int(count or 0))
+            self._safe_emit(self.mediaFileCounted, req, int(count or 0))
 
         threading.Thread(target=work, daemon=True).start()
 

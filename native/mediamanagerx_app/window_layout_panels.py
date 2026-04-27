@@ -141,6 +141,7 @@ class WindowLayoutPanelsMixin:
         self.pinned_folders_list.setObjectName("pinnedFoldersList")
         self.pinned_folders_list.setMinimumHeight(0)
         self.pinned_folders_list.itemSelectionChanged.connect(self._on_pinned_folder_selection_changed)
+        self.pinned_folders_list.orderChanged.connect(self._on_pinned_folders_order_changed)
         self.pinned_folders_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.pinned_folders_list.customContextMenuRequested.connect(self._on_pinned_folders_context_menu)
         pinned_layout.addWidget(self.pinned_folders_list, 1)
