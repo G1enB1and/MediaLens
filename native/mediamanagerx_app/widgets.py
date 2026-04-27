@@ -78,6 +78,159 @@ class CustomSplitter(QSplitter):
         return CustomSplitterHandle(self.orientation(), self)
 
 
+class OcrReviewImageLabel(QLabel):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._source_pixmap = QPixmap()
+        self._zoom = 1.0
+        self._pan = QPoint(0, 0)
+        self._drag_start_pos = QPoint(0, 0)
+        self._pan_start = QPoint(0, 0)
+        self._dragging = False
+        self.setMouseTracking(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+
+    def set_source_pixmap(self, pixmap: QPixmap | None) -> None:
+        self._source_pixmap = QPixmap(pixmap) if pixmap is not None else QPixmap()
+        self.reset_view()
+        if self._source_pixmap.isNull():
+            self.setText("No preview")
+        else:
+            self.setText("")
+        self.update()
+
+    def reset_view(self) -> None:
+        self._zoom = 1.0
+        self._pan = QPoint(0, 0)
+        self._dragging = False
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def _image_rect(self, scale: float | None = None, pan: QPoint | None = None) -> QRectF:
+        pixmap = self._source_pixmap
+        content = self.contentsRect().adjusted(8, 8, -8, -8)
+        if pixmap.isNull() or content.width() <= 0 or content.height() <= 0:
+            return QRectF()
+        scale_value = self._fit_scale() * (self._zoom if scale is None else float(scale))
+        image_size = QSize(
+            max(1, round(pixmap.width() * scale_value)),
+            max(1, round(pixmap.height() * scale_value)),
+        )
+        pan_value = self._pan if pan is None else pan
+        left = content.x() + (content.width() - image_size.width()) / 2 + pan_value.x()
+        top = content.y() + (content.height() - image_size.height()) / 2 + pan_value.y()
+        return QRectF(left, top, image_size.width(), image_size.height())
+
+    def _fit_scale(self) -> float:
+        pixmap = self._source_pixmap
+        content = self.contentsRect().adjusted(8, 8, -8, -8)
+        if pixmap.isNull() or pixmap.width() <= 0 or pixmap.height() <= 0 or content.width() <= 0 or content.height() <= 0:
+            return 1.0
+        return min(content.width() / pixmap.width(), content.height() / pixmap.height())
+
+    def _clamp_pan(self) -> None:
+        if self._zoom <= 1.001:
+            self._zoom = 1.0
+            self._pan = QPoint(0, 0)
+            return
+        content = self.contentsRect().adjusted(8, 8, -8, -8)
+        image_rect = self._image_rect()
+        max_x = max(0, round((image_rect.width() - content.width()) / 2))
+        max_y = max(0, round((image_rect.height() - content.height()) / 2))
+        self._pan = QPoint(
+            max(-max_x, min(max_x, self._pan.x())),
+            max(-max_y, min(max_y, self._pan.y())),
+        )
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        pixmap = self._source_pixmap
+        if pixmap.isNull():
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        content = self.contentsRect().adjusted(8, 8, -8, -8)
+        painter.setClipRect(content)
+        painter.drawPixmap(self._image_rect(), pixmap, QRectF(pixmap.rect()))
+
+    def wheelEvent(self, event) -> None:
+        if self._source_pixmap.isNull():
+            super().wheelEvent(event)
+            return
+        delta = event.angleDelta().y()
+        if delta == 0:
+            event.ignore()
+            return
+        old_zoom = self._zoom
+        old_rect = self._image_rect()
+        if old_rect.width() <= 0 or old_rect.height() <= 0:
+            event.ignore()
+            return
+        cursor = event.position()
+        scene_x = (cursor.x() - old_rect.left()) / max(old_rect.width(), 0.0001)
+        scene_y = (cursor.y() - old_rect.top()) / max(old_rect.height(), 0.0001)
+        step = 1.15 if delta > 0 else (1 / 1.15)
+        self._zoom = max(1.0, min(12.0, self._zoom * step))
+        if self._zoom <= 1.001:
+            self._zoom = 1.0
+            self._pan = QPoint(0, 0)
+        else:
+            content = self.contentsRect().adjusted(8, 8, -8, -8)
+            new_scale = self._fit_scale() * self._zoom
+            image_width = self._source_pixmap.width() * new_scale
+            image_height = self._source_pixmap.height() * new_scale
+            base_left = content.x() + (content.width() - image_width) / 2
+            base_top = content.y() + (content.height() - image_height) / 2
+            self._pan = QPoint(
+                round(cursor.x() - base_left - scene_x * image_width),
+                round(cursor.y() - base_top - scene_y * image_height),
+            )
+            self._clamp_pan()
+        if self._zoom != old_zoom:
+            self.update()
+        event.accept()
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self._zoom > 1.0 and not self._source_pixmap.isNull():
+            self._dragging = True
+            self._drag_start_pos = event.position().toPoint()
+            self._pan_start = QPoint(self._pan)
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._dragging:
+            self._pan = self._pan_start + (event.position().toPoint() - self._drag_start_pos)
+            self._clamp_pan()
+            self.update()
+            event.accept()
+            return
+        if self._zoom > 1.0 and self._image_rect().contains(event.position()):
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+        else:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if self._dragging and event.button() == Qt.MouseButton.LeftButton:
+            self._dragging = False
+            self.setCursor(Qt.CursorShape.OpenHandCursor if self._zoom > 1.0 else Qt.CursorShape.ArrowCursor)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def leaveEvent(self, event: QEvent) -> None:
+        if not self._dragging:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        super().leaveEvent(event)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._clamp_pan()
+        self.update()
+
+
 class FolderTreeView(QTreeView):
     """Tree view that does NOT change selection on right-click.
 

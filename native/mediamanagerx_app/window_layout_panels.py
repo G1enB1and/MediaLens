@@ -474,7 +474,7 @@ class WindowLayoutPanelsMixin:
         ocr_review_body_layout = QHBoxLayout(self.ocr_review_body)
         ocr_review_body_layout.setContentsMargins(0, 0, 0, 0)
         ocr_review_body_layout.setSpacing(10)
-        self.ocr_review_image_lbl = QLabel("")
+        self.ocr_review_image_lbl = OcrReviewImageLabel(self.ocr_review_body)
         self.ocr_review_image_lbl.setObjectName("ocrReviewImageLabel")
         self.ocr_review_image_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.ocr_review_image_lbl.setMinimumSize(QSize(260, 260))

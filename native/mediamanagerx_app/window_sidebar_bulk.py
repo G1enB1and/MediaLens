@@ -1212,6 +1212,9 @@ class WindowSidebarBulkMixin:
         if label is not None:
             label.setText(str(text or ""))
 
+    def _ocr_review_pan_zoom_hint(self) -> str:
+        return "Pan and Zoom with mouse scrollwheel to cursor position"
+
     def _ocr_review_selected_paths(self) -> list[str]:
         paths = self._current_file_paths()
         current = str(getattr(self, "_ocr_review_path", "") or "").strip()
@@ -1307,7 +1310,7 @@ class WindowSidebarBulkMixin:
         self._set_ocr_review_winner_state(media)
         self._sync_ocr_review_nav_buttons()
         self._sync_bulk_ocr_review_row_highlight(clean_path)
-        self._ocr_review_status("")
+        self._ocr_review_status(self._ocr_review_pan_zoom_hint())
 
     def _refresh_ocr_review_image(self, path: str) -> None:
         label = getattr(self, "ocr_review_image_lbl", None)
@@ -1331,6 +1334,9 @@ class WindowSidebarBulkMixin:
         label = getattr(self, "ocr_review_image_lbl", None)
         pixmap = getattr(self, "_ocr_review_source_pixmap", QPixmap())
         if label is None:
+            return
+        if hasattr(label, "set_source_pixmap"):
+            label.set_source_pixmap(pixmap)
             return
         if pixmap is None or pixmap.isNull():
             label.setPixmap(QPixmap())
