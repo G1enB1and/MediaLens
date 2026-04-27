@@ -1,18 +1,18 @@
-## MediaLens v1.2.3
+## MediaLens v1.2.4
 
 ### Summary
 
-This release protects Fast OCR setups that are already using the GPU. Paddle OCR repair now avoids downgrading a working GPU runtime to CPU fallback and reports repair problems more accurately.
+This release makes detailed image review easier in MediaLens. OCR Review and the main image lightbox now support pan and zoom, while comparison workflows keep context, actions, and layout more stable as you move through groups.
 
 ### Highlights
 
-- Fast OCR repair keeps an active Paddle GPU runtime in place instead of removing it before repair is proven safe.
-- Failed Paddle OCR repairs now re-check the runtime so MediaLens does not incorrectly show a working install as missing.
-- CPU fallback setup now tries the package source that works for current Paddle CPU wheels first.
+- OCR Review images now support cursor-centered zoom and drag panning for precise text inspection.
+- Use the same pan and zoom behavior in the image and GIF lightbox.
+- Move through comparison review groups with steadier action controls, preserved panel sizing, and more reliable group positioning.
 
 ### Notes
 
-- No bundled local AI runtime packages were added to the installer; Paddle OCR still uses the managed per-user runtime under AppData.
+- Native video lightbox playback is unchanged; pan and zoom applies to image and GIF viewing.
 
 Full Changelog:
-https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md
+<https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md>

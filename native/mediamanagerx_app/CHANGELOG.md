@@ -1,6 +1,36 @@
 # Change Log
 
-## v1.2.3 (Current)
+## v1.2.4 (Current)
+
+### Summary
+
+This release makes detailed image review easier in MediaLens. OCR Review and the main image lightbox now support pan and zoom, while comparison workflows keep context, actions, and layout more stable as you move through groups.
+
+### Highlights
+
+- OCR Review images now support cursor-centered zoom and drag panning for precise text inspection.
+- Image lightbox viewing now supports the same scrollwheel zoom and drag panning workflow.
+- Comparison review navigation keeps group context, action controls, and panel sizing more predictable.
+
+### Added
+
+- Added cursor-centered zoom and drag panning to OCR Review images.
+- Added pan and zoom to image and GIF lightbox.
+- Added dedicated single-group review cards for the comparison review flow.
+- Added a Details panel entry point for opening Text OCR Review from the Text OCR group.
+
+### Changed
+
+- Changed OCR Review to show the pan and zoom guidance message when a review image is loaded, while still replacing it with OCR status after generate actions.
+- Changed zoom-out behavior in OCR Review and the image lightbox to recenter the image when returning to fit.
+- Changed single-group comparison review actions to stay on a bottom action row and remain clipped cleanly during resize.
+- Changed comparison review navigation to preserve the comparison panel height and restore group scroll position after closing comparison.
+- Changed comparison group navigation to account for the sticky stats header so selected groups land more consistently.
+- Changed comparison panel image loading and browse text sizing to be more stable.
+
+---
+
+## v1.2.3
 
 ### Summary
 
