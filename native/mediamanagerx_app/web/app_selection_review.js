@@ -1157,6 +1157,10 @@ function scrollToGroup(groupKey) {
   });
 }
 
+function queueReviewGroupReturnScroll(groupKey) {
+  gPendingReviewGroupReturnKey = String(groupKey || '').trim();
+}
+
 const REVIEW_GROUP_SCROLL_CLEARANCE_PX = 12;
 
 function getReviewStickyHeaderOffset(main) {
@@ -1178,29 +1182,52 @@ function getReviewGroupsForNavigation() {
   return buildDuplicateGroups(gMedia);
 }
 
-function getCurrentReviewGroupKeyForNavigation() {
-  if (isComparePanelReviewSingleMode()) {
-    return compareReviewGroupKeyFromState() || String(gReviewSingleGroupKey || '').trim();
-  }
-
-  const comparePaths = getCompareActivePaths();
-  const compareGroupKeys = Array.from(new Set(comparePaths.map(getDuplicateGroupKeyForPath).filter(Boolean)));
-  if (compareGroupKeys.length === 1) return compareGroupKeys[0];
-
+function getVisibleReviewGroupKeyFromDom() {
   const main = document.querySelector('main');
   const sections = Array.from(document.querySelectorAll('.gallery-group[data-group-key]'));
   if (!main || !sections.length) return '';
 
   const mainRect = main.getBoundingClientRect();
+  const topClearance = getReviewStickyHeaderOffset(main);
+  const targetTop = mainRect.top + topClearance;
+  const visible = sections.find((section) => {
+    const rect = section.getBoundingClientRect();
+    return rect.top >= targetTop && rect.top < mainRect.bottom;
+  });
+  if (visible) return String(visible.dataset.groupKey || '');
+
   let closest = null;
   sections.forEach((section) => {
     const rect = section.getBoundingClientRect();
-    const distance = Math.abs(rect.top - mainRect.top);
+    const distance = Math.abs(rect.top - targetTop);
     if (!closest || distance < closest.distance) {
       closest = { key: String(section.dataset.groupKey || ''), distance };
     }
   });
   return closest ? closest.key : '';
+}
+
+function captureReviewGroupForComparisonOpen() {
+  const key = getVisibleReviewGroupKeyFromDom();
+  if (!key) return '';
+  gReviewSingleGroupKey = key;
+  gPendingReviewGroupOpenKey = key;
+  return key;
+}
+
+function getCurrentReviewGroupKeyForNavigation() {
+  if (isComparePanelReviewSingleMode()) {
+    return String(gPendingReviewGroupOpenKey || '').trim() || compareReviewGroupKeyFromState() || String(gReviewSingleGroupKey || '').trim();
+  }
+
+  const domKey = getVisibleReviewGroupKeyFromDom();
+  if (domKey) return domKey;
+
+  {
+    const comparePaths = getCompareActivePaths();
+    const compareGroupKeys = Array.from(new Set(comparePaths.map(getDuplicateGroupKeyForPath).filter(Boolean)));
+    return compareGroupKeys.length === 1 ? compareGroupKeys[0] : '';
+  }
 }
 
 function focusReviewGroup(groupKey) {
@@ -1221,6 +1248,8 @@ function focusReviewGroup(groupKey) {
     syncMetadataToBridge();
   }
 
+  gReviewSingleGroupKey = targetKey;
+  gPendingReviewGroupOpenKey = targetKey;
   toggleGroupCollapsed(targetKey, false);
   if (gBridge.compare_paths) {
     gBridge.compare_paths(comparePaths);
@@ -1233,7 +1262,6 @@ function focusReviewGroup(groupKey) {
   const deletePaths = getDuplicateDeletePaths(targetKey).slice().sort();
   const bestPath = getDuplicateBestPath(targetKey);
   window.setTimeout(() => {
-    gReviewSingleGroupKey = targetKey;
     syncCompareStateFromReviewGroup(targetKey, keepPaths, deletePaths, bestPath);
     if (isComparePanelReviewSingleMode()) {
       gLastGalleryRenderSignature = '';
@@ -1359,6 +1387,10 @@ window.__mmx_seedCompareFromFirstReviewGroup = function () {
 
 window.__mmx_seedCompareFromCurrentReviewGroup = function () {
   return seedCompareFromCurrentReviewGroup();
+};
+
+window.__mmx_captureReviewGroupForComparisonOpen = function () {
+  return captureReviewGroupForComparisonOpen();
 };
 
 window.__mmx_jumpReviewGroup = function (direction) {

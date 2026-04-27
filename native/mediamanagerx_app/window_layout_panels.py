@@ -1817,7 +1817,7 @@ class WindowLayoutPanelsMixin:
         self._restore_right_splitter_sizes()
 
         splitter.splitterMoved.connect(lambda *args: self._on_splitter_moved())
-        center_splitter.splitterMoved.connect(lambda *args: self._on_splitter_moved())
+        center_splitter.splitterMoved.connect(lambda *args: self._on_center_splitter_moved())
         self.right_splitter.splitterMoved.connect(lambda *args: self._on_right_splitter_moved())
 
         self.setCentralWidget(splitter)
@@ -1932,6 +1932,33 @@ class WindowLayoutPanelsMixin:
         except Exception:
             pass
 
+    def _mark_bottom_panel_height_user_set(self) -> None:
+        try:
+            self.bridge.settings.setValue("ui/bottom_panel_height_user_set", True)
+        except Exception:
+            pass
+
+    def _default_bottom_panel_height(self) -> int:
+        try:
+            screen = self.screen()
+            if screen is not None:
+                height = int(screen.availableGeometry().height())
+                if height > 0:
+                    return max(self._DEFAULT_BOTTOM_PANEL_HEIGHT, int(height * 0.60))
+        except Exception:
+            pass
+        return self._DEFAULT_BOTTOM_PANEL_HEIGHT
+
+    def _saved_bottom_panel_height(self) -> int:
+        default = self._default_bottom_panel_height()
+        try:
+            user_set = bool(self.bridge.settings.value("ui/bottom_panel_height_user_set", False, type=bool))
+        except Exception:
+            user_set = False
+        if not user_set:
+            return default
+        return self._get_saved_panel_height("ui/bottom_panel_height", default)
+
     def _restore_main_splitter_sizes(self) -> None:
         try:
             show_left = bool(self.bridge.settings.value("ui/show_left_panel", True, type=bool))
@@ -1948,9 +1975,10 @@ class WindowLayoutPanelsMixin:
             pass
 
     def _restore_center_splitter_sizes(self) -> None:
+        self._restoring_center_splitter = True
         try:
             show_bottom = bool(self.bridge.settings.value("ui/show_bottom_panel", True, type=bool))
-            bottom_height = self._get_saved_panel_height("ui/bottom_panel_height", self._DEFAULT_BOTTOM_PANEL_HEIGHT)
+            bottom_height = self._saved_bottom_panel_height()
             sizes = [
                 self._DEFAULT_CENTER_WIDTH,
                 bottom_height if show_bottom else 0,
@@ -1958,6 +1986,8 @@ class WindowLayoutPanelsMixin:
             self.center_splitter.setSizes(sizes)
         except Exception:
             pass
+        finally:
+            self._restoring_center_splitter = False
 
     def _current_right_splitter_sizes(self) -> list[int]:
         try:

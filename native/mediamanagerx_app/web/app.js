@@ -1016,15 +1016,23 @@ async function main() {
       bridge.compareStateChanged.connect(function (state) {
         const previousSingleMode = isComparePanelReviewSingleMode();
         const previousGroupKey = compareReviewGroupKeyFromState() || String(gReviewSingleGroupKey || '');
+        const previousFullViewGroupKey = !previousSingleMode ? (String(gPendingReviewGroupOpenKey || '').trim() || getVisibleReviewGroupKeyFromDom()) : '';
         gCompareState = state || { visible: false, left: {}, right: {}, best_path: '', keep_paths: [], delete_paths: [] };
         const selectionRevision = Number(gCompareState && gCompareState.selection_revision);
         if (Number.isFinite(selectionRevision) && selectionRevision !== gLastCompareSelectionRevision) {
           gLastCompareSelectionRevision = selectionRevision;
         }
-        maybeSeedCompareStateFromReview();
         const nextSingleMode = isComparePanelReviewSingleMode();
+        if (!previousSingleMode && nextSingleMode && previousFullViewGroupKey) {
+          focusReviewGroup(previousFullViewGroupKey);
+        } else {
+          maybeSeedCompareStateFromReview();
+        }
         const nextGroupKey = compareReviewGroupKeyFromState() || String(gReviewSingleGroupKey || '');
         if (isDuplicateModeActive() && (previousSingleMode !== nextSingleMode || (nextSingleMode && previousGroupKey !== nextGroupKey))) {
+          if (previousSingleMode && !nextSingleMode) {
+            queueReviewGroupReturnScroll(previousGroupKey);
+          }
           gLastGalleryRenderSignature = '';
           renderMediaList(gMedia, false);
         }
@@ -1506,9 +1514,16 @@ async function main() {
         }
         if (key === 'ui.show_bottom_panel') {
           const previousSingleMode = isComparePanelReviewSingleMode();
+          const previousGroupKey = compareReviewGroupKeyFromState() || String(gReviewSingleGroupKey || '');
+          const previousFullViewGroupKey = !previousSingleMode ? (String(gPendingReviewGroupOpenKey || '').trim() || getVisibleReviewGroupKeyFromDom()) : '';
           gCompareState = Object.assign({}, gCompareState || {}, { visible: !!value });
           updateSidebarButtonIcons('bottom', !!value);
           if (isDuplicateModeActive() && previousSingleMode !== isComparePanelReviewSingleMode()) {
+            if (previousSingleMode && !isComparePanelReviewSingleMode()) {
+              queueReviewGroupReturnScroll(previousGroupKey);
+            } else if (!previousSingleMode && isComparePanelReviewSingleMode() && previousFullViewGroupKey) {
+              focusReviewGroup(previousFullViewGroupKey);
+            }
             gLastGalleryRenderSignature = '';
             renderMediaList(gMedia, false);
           } else {

@@ -36,6 +36,11 @@ class WindowNativeActionsMixin:
             )
         self._schedule_gallery_container_relayout(120)
 
+    def _on_center_splitter_moved(self) -> None:
+        if not bool(getattr(self, "_restoring_center_splitter", False)):
+            self._mark_bottom_panel_height_user_set()
+        self._on_splitter_moved()
+
     def _on_right_splitter_moved(self) -> None:
         self._save_tag_list_panel_width()
         if self._is_companion_panel_visible():

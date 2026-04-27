@@ -53,6 +53,13 @@ class WindowSidebarBulkMixin:
                 next_visible = bool(value)
                 if was_visible and not next_visible:
                     self._save_bottom_panel_height()
+                if next_visible and not was_visible:
+                    try:
+                        self.web.page().runJavaScript(
+                            "try{ window.__mmx_captureReviewGroupForComparisonOpen && window.__mmx_captureReviewGroupForComparisonOpen(); }catch(e){}"
+                        )
+                    except Exception:
+                        pass
                 self.bottom_panel.setVisible(next_visible)
                 if was_visible != next_visible:
                     QTimer.singleShot(0, self._restore_center_splitter_sizes)

@@ -65,6 +65,8 @@ let gDuplicateBestOverrides = new Map();
 let gLastCompareSeedKey = '';
 let gLastCompareSelectionRevision = -1;
 let gReviewSingleGroupKey = '';
+let gPendingReviewGroupOpenKey = '';
+let gPendingReviewGroupReturnKey = '';
 let gDuplicateGroupOrder = new Map();
 let gCachedSettings = {};
 let gMuteVideoByDefault = true;
@@ -665,12 +667,19 @@ function resolveReviewSingleGroupKey(groups) {
   const list = Array.isArray(groups) ? groups : [];
   if (!list.length) {
     gReviewSingleGroupKey = '';
+    gPendingReviewGroupOpenKey = '';
     return '';
   }
+  const pendingKey = String(gPendingReviewGroupOpenKey || '').trim();
   const stateKey = compareReviewGroupKeyFromState();
-  const currentKey = stateKey || String(gReviewSingleGroupKey || '').trim();
+  const currentKey = pendingKey || stateKey || String(gReviewSingleGroupKey || '').trim();
   const match = list.find(group => String(group && group.key || '') === currentKey) || list[0];
   gReviewSingleGroupKey = String(match && match.key || '');
+  if (pendingKey && gReviewSingleGroupKey !== pendingKey) {
+    gPendingReviewGroupOpenKey = '';
+  } else if (pendingKey && stateKey === pendingKey) {
+    gPendingReviewGroupOpenKey = '';
+  }
   return gReviewSingleGroupKey;
 }
 

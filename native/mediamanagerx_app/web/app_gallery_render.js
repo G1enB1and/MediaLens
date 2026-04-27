@@ -972,13 +972,14 @@ function createReviewSingleGroupCard(item, idx) {
   bottom.className = 'review-single-bottom';
   const bottomDetails = document.createElement('div');
   bottomDetails.className = 'review-single-bottom-details';
-  bottomDetails.appendChild(controls);
   if (reasonList) bottomDetails.appendChild(reasonList);
   const best = document.createElement('div');
   best.className = 'review-single-best';
   best.textContent = item.duplicate_is_overall_best ? 'Best overall' : '';
   bottomDetails.appendChild(best);
-  bottom.appendChild(bottomDetails);
+  const bottomActions = document.createElement('div');
+  bottomActions.className = 'review-single-bottom-actions';
+  bottomActions.appendChild(controls);
   const trashBtn = document.createElement('button');
   trashBtn.type = 'button';
   trashBtn.className = 'review-single-icon-btn review-single-trash-btn';
@@ -989,7 +990,9 @@ function createReviewSingleGroupCard(item, idx) {
     e.stopPropagation();
     deleteDuplicateCard(item.path || '');
   });
-  bottom.appendChild(trashBtn);
+  bottomActions.appendChild(trashBtn);
+  bottom.appendChild(bottomDetails);
+  bottom.appendChild(bottomActions);
   content.appendChild(bottom);
 
   card.appendChild(content);
@@ -1132,7 +1135,12 @@ function finalizeDuplicateMediaList(el, groups) {
   }
   gLastRenderedReviewSignature = computeReviewRenderSignature(gMedia);
   renderTimelineRail([]);
-  if (!isComparePanelReviewSingleMode()) {
+  if (!isComparePanelReviewSingleMode() && gPendingReviewGroupReturnKey) {
+    const groupKey = gPendingReviewGroupReturnKey;
+    gPendingReviewGroupReturnKey = '';
+    gPendingScrollAnchor = null;
+    requestAnimationFrame(() => scrollToGroup(groupKey));
+  } else if (!isComparePanelReviewSingleMode()) {
     restoreGroupScrollAnchor();
   }
   groups.forEach((group) => {
