@@ -301,6 +301,13 @@ if os.name == "nt":
         _WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS["creationflags"] = subprocess.CREATE_NO_WINDOW
     except AttributeError:
         pass
+    try:
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0
+        _WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS["startupinfo"] = startupinfo
+    except AttributeError:
+        pass
 
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif", ".svg"}

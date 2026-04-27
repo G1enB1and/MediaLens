@@ -9,6 +9,24 @@ import sys
 from importlib import metadata
 
 
+def _windows_hidden_subprocess_kwargs() -> dict[str, object]:
+    if os.name != "nt":
+        return {}
+    kwargs: dict[str, object] = {}
+    try:
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    except AttributeError:
+        pass
+    try:
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0
+        kwargs["startupinfo"] = startupinfo
+    except AttributeError:
+        pass
+    return kwargs
+
+
 def _package_version(name: str) -> str:
     try:
         return str(metadata.version(name))
@@ -21,19 +39,22 @@ def _nvidia_smi_info() -> dict[str, object]:
     if os.name != "nt":
         return result
     try:
-        completed = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=name,driver_version",
-                "--format=csv,noheader",
-            ],
+        popen_kwargs = dict(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
             timeout=5,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        popen_kwargs.update(_windows_hidden_subprocess_kwargs())
+        completed = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=name,driver_version",
+                "--format=csv,noheader",
+            ],
+            **popen_kwargs,
         )
     except Exception:
         return result

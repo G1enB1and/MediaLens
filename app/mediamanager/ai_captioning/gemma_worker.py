@@ -17,6 +17,24 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
+
+def _windows_hidden_subprocess_kwargs() -> dict[str, object]:
+    if os.name != "nt":
+        return {}
+    kwargs: dict[str, object] = {}
+    try:
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    except AttributeError:
+        pass
+    try:
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0
+        kwargs["startupinfo"] = startupinfo
+    except AttributeError:
+        pass
+    return kwargs
+
 DEFAULT_CAPTION_PROMPT = (
     "Please provide a description of this image in natural language paragraph style. "
     "Describe this woman's body type, proportions, and posture in emotionally rich, artistic language. "
@@ -379,8 +397,7 @@ def _start_gguf_server(settings: dict[str, Any]):
         "0",
     ]
     env, runtime_cwd = _gguf_runtime_launch_context(settings)
-    process = subprocess.Popen(
-        command,
+    popen_kwargs = dict(
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -389,8 +406,9 @@ def _start_gguf_server(settings: dict[str, Any]):
         errors="replace",
         cwd=runtime_cwd,
         env=env,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
+    popen_kwargs.update(_windows_hidden_subprocess_kwargs())
+    process = subprocess.Popen(command, **popen_kwargs)
     _wait_for_server_ready(process, port)
     return process, port
 
@@ -450,8 +468,7 @@ def _gguf_cli_completion(source_path: str, prompt: str, settings: dict[str, Any]
         str(float(settings.get("top_p") or 1.0)),
     ]
     env, runtime_cwd = _gguf_runtime_launch_context(settings)
-    completed = subprocess.run(
-        command,
+    popen_kwargs = dict(
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -461,8 +478,9 @@ def _gguf_cli_completion(source_path: str, prompt: str, settings: dict[str, Any]
         timeout=max(120, max_new_tokens * 2),
         cwd=runtime_cwd,
         env=env,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
+    popen_kwargs.update(_windows_hidden_subprocess_kwargs())
+    completed = subprocess.run(command, **popen_kwargs)
     combined = "\n".join(part for part in (completed.stdout, completed.stderr) if str(part or "").strip())
     if completed.returncode != 0:
         tail = "\n".join(line for line in combined.splitlines()[-12:] if line.strip())

@@ -297,15 +297,19 @@ class BridgeLocalAiMixin:
 
     @staticmethod
     def _verify_python_can_create_venvs(command: list[str]) -> str:
-        result = subprocess.run(
-            [*command, "-c", "import venv, sys; print(sys.executable)"],
+        popen_kwargs = dict(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
             timeout=15,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
+        )
+        if _WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS:
+            popen_kwargs.update(_WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS)
+        result = subprocess.run(
+            [*command, "-c", "import venv, sys; print(sys.executable)"],
+            **popen_kwargs,
         )
         if result.returncode != 0:
             raise RuntimeError(str(result.stderr or result.stdout or "Python cannot create virtual environments.").strip())
@@ -456,19 +460,23 @@ class BridgeLocalAiMixin:
             result["reason"] = "NVIDIA VRAM detection is implemented for Windows only."
             return result
         try:
-            completed = subprocess.run(
-                [
-                    "nvidia-smi",
-                    "--query-gpu=name,driver_version,memory.total,memory.free",
-                    "--format=csv,noheader,nounits",
-                ],
+            popen_kwargs = dict(
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
                 timeout=8,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if _WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS:
+                popen_kwargs.update(_WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS)
+            completed = subprocess.run(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=name,driver_version,memory.total,memory.free",
+                    "--format=csv,noheader,nounits",
+                ],
+                **popen_kwargs,
             )
         except Exception as exc:
             result["reason"] = str(exc) or exc.__class__.__name__
@@ -873,8 +881,7 @@ class BridgeLocalAiMixin:
 
     def _local_ai_run_command_stream(self, command: list[str], cwd: Path, message: str, emit_status, env: dict[str, str] | None = None) -> tuple[int, str]:
         payload_message = str(message or "").strip()
-        process = subprocess.Popen(
-            command,
+        popen_kwargs = dict(
             cwd=str(cwd),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -882,8 +889,10 @@ class BridgeLocalAiMixin:
             encoding="utf-8",
             errors="replace",
             env=env,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
         )
+        if _WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS:
+            popen_kwargs.update(_WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS)
+        process = subprocess.Popen(command, **popen_kwargs)
         assert process.stdout is not None
         last_emit = 0.0
         last_line = payload_message
@@ -897,8 +906,7 @@ class BridgeLocalAiMixin:
         return process.wait(), last_line
 
     def _local_ai_run_command_capture(self, command: list[str], cwd: Path, env: dict[str, str] | None = None, timeout: int = 25) -> tuple[int, str, str]:
-        completed = subprocess.run(
-            command,
+        popen_kwargs = dict(
             cwd=str(cwd),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -907,8 +915,10 @@ class BridgeLocalAiMixin:
             errors="replace",
             env=env,
             timeout=timeout,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
         )
+        if _WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS:
+            popen_kwargs.update(_WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS)
+        completed = subprocess.run(command, **popen_kwargs)
         return completed.returncode, str(completed.stdout or ""), str(completed.stderr or "")
 
     def _local_ai_probe_runtime(self, spec, force: bool = False) -> dict:
@@ -1106,8 +1116,7 @@ class BridgeLocalAiMixin:
             json.dumps(settings_payload, ensure_ascii=False),
         ]
         child_env = self._local_ai_subprocess_env(worker_pythonpath)
-        process = subprocess.Popen(
-            command,
+        popen_kwargs = dict(
             cwd=str(worker_cwd),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -1115,8 +1124,10 @@ class BridgeLocalAiMixin:
             encoding="utf-8",
             errors="replace",
             env=child_env,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
         )
+        if _WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS:
+            popen_kwargs.update(_WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS)
+        process = subprocess.Popen(command, **popen_kwargs)
         assert process.stdout is not None
         last_emit = 0.0
         last_line = message
