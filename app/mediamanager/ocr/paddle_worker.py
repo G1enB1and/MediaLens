@@ -113,6 +113,24 @@ def _prepare_source_image(source: Path, profile: str, temp_dir: Path) -> Path:
         return source
 
 
+def _prepend_nvidia_package_bins() -> None:
+    try:
+        candidates: list[str] = []
+        for entry in sys.path:
+            root = Path(str(entry or "")) / "nvidia"
+            if not root.is_dir():
+                continue
+            for bin_dir in root.glob("**/bin"):
+                if bin_dir.is_dir():
+                    candidates.append(str(bin_dir))
+        if not candidates:
+            return
+        existing = str(os.environ.get("PATH") or "")
+        os.environ["PATH"] = os.pathsep.join([*candidates, existing] if existing else candidates)
+    except Exception:
+        return
+
+
 def _run_paddle(source: Path, profile: str, settings: dict[str, Any]) -> dict[str, Any]:
     cache_dir = str(settings.get("cache_dir") or "").strip()
     if not cache_dir:
@@ -133,6 +151,7 @@ def _run_paddle(source: Path, profile: str, settings: dict[str, Any]) -> dict[st
     os.environ["TMP"] = str(temp_dir)
     os.environ.setdefault("FLAGS_use_mkldnn", "0")
     os.environ.setdefault("FLAGS_enable_pir_api", "0")
+    _prepend_nvidia_package_bins()
     if os.name == "nt":
         os.environ["HOMEDRIVE"] = str(home_dir.drive or "C:")
         os.environ["HOMEPATH"] = str(home_dir)[len(str(home_dir.drive or "")) :] or "\\"

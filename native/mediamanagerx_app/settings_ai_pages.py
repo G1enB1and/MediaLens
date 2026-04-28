@@ -1055,6 +1055,14 @@ class LocalAiSetupDialog(QDialog):
                 f"<b>Device:</b> {html.escape(current_device or 'cpu')}",
                 f"<b>Compiled CUDA:</b> {html.escape(str(bool(runtime_probe.get('compiled_with_cuda'))))}",
             ]
+            if runtime_probe.get("paddlepaddle_dist"):
+                technical_lines.append(f"<b>Paddle CPU package:</b> {html.escape(str(runtime_probe.get('paddlepaddle_dist') or ''))}")
+            if runtime_probe.get("paddlepaddle_gpu_dist"):
+                technical_lines.append(f"<b>Paddle GPU package:</b> {html.escape(str(runtime_probe.get('paddlepaddle_gpu_dist') or ''))}")
+            if runtime_probe.get("paddleocr_dist"):
+                technical_lines.append(f"<b>PaddleOCR package:</b> {html.escape(str(runtime_probe.get('paddleocr_dist') or ''))}")
+            if runtime_probe.get("gpu_device_count") is not None:
+                technical_lines.append(f"<b>GPU devices:</b> {html.escape(str(runtime_probe.get('gpu_device_count') or 0))}")
             if runtime_probe.get("gpu_error"):
                 technical_lines.append(f"<b>GPU error:</b> {html.escape(str(runtime_probe.get('gpu_error') or ''))}")
             if status.get("gpu_issue"):
