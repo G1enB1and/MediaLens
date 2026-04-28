@@ -331,6 +331,24 @@ class BridgeScannersSettingsMixin:
             folders.append(folder)
         return folders
 
+    def _scanner_cpu_limit_percent(self) -> int:
+        try:
+            value = int(self.settings.value("scanners/cpu_limit_percent", 70, type=int) or 70)
+        except Exception:
+            value = 70
+        return max(40, min(95, value))
+
+    def _scanner_throttle_pause(self, work_started_at: float) -> None:
+        limit = self._scanner_cpu_limit_percent()
+        if limit >= 95:
+            return
+        elapsed = max(0.0, time.monotonic() - float(work_started_at or time.monotonic()))
+        if elapsed <= 0.0:
+            return
+        sleep_for = elapsed * ((100.0 - float(limit)) / float(limit))
+        if sleep_for > 0.0:
+            time.sleep(min(0.08, sleep_for))
+
     def _scanner_last_run_utc(self, scanner_key: str) -> str:
         return str(self.settings.value(self._scanner_setting_key(scanner_key, "last_run_utc"), "", type=str) or "")
 
@@ -693,6 +711,7 @@ class BridgeScannersSettingsMixin:
             path = str(entry.get("path") or "").strip()
             if not path:
                 continue
+            work_started_at = time.monotonic()
             try:
                 p = Path(path)
                 if not p.exists() or not p.is_file():
@@ -714,6 +733,8 @@ class BridgeScannersSettingsMixin:
                 text_likely, text_score = detect_text_presence(analysis_path, source_path=path)
             except Exception:
                 text_likely, text_score = False, 0.0
+            finally:
+                self._scanner_throttle_pause(work_started_at)
             existing_positive = (not rescan_existing) and self._has_existing_positive_text_signal(entry)
             if existing_positive and not text_likely:
                 text_likely = True

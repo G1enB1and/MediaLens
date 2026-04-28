@@ -955,6 +955,7 @@ class BridgeMediaListingScanMixin:
         for i, p in enumerate(paths):
             self._wait_while_scan_performance_paused()
             if self._scan_abort: break
+            work_started_at = time.monotonic()
             # Every 25 files, check if the priority set changed (e.g. user paged
             # the gallery) and reorder the remaining tail accordingly.
             if i and i % 25 == 0:
@@ -1041,6 +1042,8 @@ class BridgeMediaListingScanMixin:
                     self._log(f"Background scan item failed for {p}: {exc}")
                 except Exception:
                     pass
+            finally:
+                self._scanner_throttle_pause(work_started_at)
         if scope_key:
             self._save_scan_checkpoint()
         return count
