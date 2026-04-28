@@ -74,9 +74,12 @@ class WindowNavigationMixin:
         self._tree_root_path = path_str
         self.proxy_model.setRootPath(path_str)
 
-        root_parent = p.parent
-        parent_idx = self.fs_model.setRootPath(str(root_parent))
-        self.tree.setRootIndex(self.proxy_model.mapFromSource(parent_idx))
+        if os.name == "nt":
+            self.tree.setRootIndex(QModelIndex())
+        else:
+            root_parent = p.parent
+            parent_idx = self.fs_model.setRootPath(str(root_parent))
+            self.tree.setRootIndex(self.proxy_model.mapFromSource(parent_idx))
 
         root_idx = self.proxy_model.mapFromSource(self.fs_model.index(path_str))
         if root_idx.isValid():

@@ -29,6 +29,16 @@ class BridgeScannersSettingsMixin:
     def _restore_last_enabled(self) -> bool:
         return bool(self.settings.value("gallery/restore_last", False, type=bool))
 
+    def _startup_folder_mode(self) -> str:
+        value = str(self.settings.value("gallery/startup_mode", "", type=str) or "").strip().lower()
+        if value in {"none", "last", "specific"}:
+            return value
+        if self._restore_last_enabled():
+            return "last"
+        if self._start_folder_setting().strip():
+            return "specific"
+        return "none"
+
     def _show_hidden_enabled(self) -> bool:
         return bool(self.settings.value("gallery/show_hidden", False, type=bool))
 
@@ -1154,6 +1164,7 @@ class BridgeScannersSettingsMixin:
         try:
             data = {
                 "gallery.randomize": self._randomize_enabled(),
+                "gallery.startup_mode": self._startup_folder_mode(),
                 "gallery.restore_last": self._restore_last_enabled(),
                 "gallery.show_hidden": self._show_hidden_enabled(),
                 "gallery.include_nested_files": self._gallery_include_nested_files_enabled(),
@@ -1253,6 +1264,7 @@ class BridgeScannersSettingsMixin:
         except Exception:
             return {
                 "gallery.randomize": False,
+                "gallery.startup_mode": "none",
                 "gallery.restore_last": False,
                 "gallery.show_hidden": False,
                 "gallery.include_nested_files": True,

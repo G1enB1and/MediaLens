@@ -496,6 +496,7 @@ function refreshFromBridge(bridge, resetPage = false) {
       setSelectedFolder(gSelectedFolders, gActiveCollection);
 
       if (gSelectedFolders.length === 0 && !gActiveCollection) {
+        gNoFolderSelected = true;
         gTotal = 0;
         gLastRequestedFullScanKey = '';
         gLastGalleryRenderSignature = '';
@@ -507,6 +508,7 @@ function refreshFromBridge(bridge, resetPage = false) {
         renderPager();
         return;
       }
+      gNoFolderSelected = false;
 
       if (resetPage) {
         gPage = 0;

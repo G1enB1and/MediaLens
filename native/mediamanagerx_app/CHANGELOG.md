@@ -1,6 +1,31 @@
 # Change Log
 
-## v1.2.4 (Current)
+## v1.2.5 (Current)
+
+### Summary
+
+This release makes everyday navigation and setup feel cleaner in MediaLens. Pinned folders can now be reordered directly, settings opens without flashing helper windows, and OCR runtime repair is more resilient when a previous install is stale.
+
+### Highlights
+
+- Reorder Pinned Folders by dragging them into the order you prefer.
+- Open Settings with fewer distracting helper-window flashes from AI runtime checks.
+- Repair Paddle OCR runtimes more reliably when an old or broken install is in the way.
+
+### Added
+
+- Added drag-and-drop sorting for Pinned Folders in the left sidebar.
+
+### Changed
+
+- Changed the Pinned Folders drag preview to show the styled row background, border, folder icon, folder name, and pin icon.
+- Changed AI runtime and GPU probe subprocesses so they start hidden on Windows when status checks run from Settings.
+- Changed shutdown handling for async AI status, media listing, media count, and child-folder callbacks so late results do not touch a deleted Bridge object.
+- Changed Paddle OCR reinstall behavior to recreate stale runtimes before reinstalling and retry GPU activation after a failed runtime probe.
+
+---
+
+## v1.2.4
 
 ### Summary
 

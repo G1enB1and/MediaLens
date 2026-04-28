@@ -80,9 +80,13 @@ class BridgeFileOpsMixin:
                 "scanners.text_detection.schedule_month_day",
                 "scanners.ocr_text.schedule_month_day",
             }
-            if key not in ("gallery.start_folder", "gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "gallery.similarity_threshold", "ui.accent_color", "ui.theme_mode", "ui.advanced_search_saved_queries", "metadata.display.order", "duplicate.settings.active_tab", "player.video_loop_mode", "player.video_loop_cutoff_seconds") and key not in scanner_schedule_keys and not key.startswith("metadata.layout.") and not key.startswith("duplicate.rules.") and key != "duplicate.priorities.order":
+            if key not in ("gallery.startup_mode", "gallery.start_folder", "gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "gallery.similarity_threshold", "ui.accent_color", "ui.theme_mode", "ui.advanced_search_saved_queries", "metadata.display.order", "duplicate.settings.active_tab", "player.video_loop_mode", "player.video_loop_cutoff_seconds") and key not in scanner_schedule_keys and not key.startswith("metadata.layout.") and not key.startswith("duplicate.rules.") and key != "duplicate.priorities.order":
                 return False
-            if key == "gallery.view_mode":
+            if key == "gallery.startup_mode":
+                value = str(value or "none").strip().lower()
+                if value not in {"none", "last", "specific"}:
+                    return False
+            elif key == "gallery.view_mode":
                 allowed = {"masonry", "grid_small", "grid_medium", "grid_large", "grid_xlarge", "list", "content", "details", "duplicates", "similar", "similar_only"}
                 if value not in allowed:
                     return False
@@ -171,7 +175,7 @@ class BridgeFileOpsMixin:
                 self.uiFlagChanged.emit(key, value == "light")
                 current_accent = str(self.settings.value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT)
                 self.accentColorChanged.emit(current_accent)
-            elif key in ("gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "gallery.similarity_threshold"):
+            elif key in ("gallery.startup_mode", "gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "gallery.similarity_threshold"):
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, True)
             elif key.startswith("duplicate.rules.") or key == "duplicate.priorities.order":

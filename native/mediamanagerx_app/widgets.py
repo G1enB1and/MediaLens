@@ -1676,6 +1676,8 @@ class RootFilterProxyModel(QSortFilterProxyModel):
         # Special case: show Windows drives if they are ancestors
         if len(norm_path) == 2 and norm_path[1] == ":" and root.startswith(norm_path):
             return True
+        if os.name == "nt" and re.match(r"^[a-z]:($|/)", norm_path + "/"):
+            return True
 
         return False
 

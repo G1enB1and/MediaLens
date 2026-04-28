@@ -1,18 +1,18 @@
-## MediaLens v1.2.4
+## MediaLens v1.2.5
 
 ### Summary
 
-This release makes detailed image review easier in MediaLens. OCR Review and the main image lightbox now support pan and zoom, while comparison workflows keep context, actions, and layout more stable as you move through groups.
+This release makes everyday navigation and setup feel cleaner in MediaLens. Pinned folders can now be reordered directly, settings opens without flashing helper windows, and OCR runtime repair is more resilient when a previous install is stale.
 
 ### Highlights
 
-- OCR Review images now support cursor-centered zoom and drag panning for precise text inspection.
-- Use the same pan and zoom behavior in the image and GIF lightbox.
-- Move through comparison review groups with steadier action controls, preserved panel sizing, and more reliable group positioning.
+- Drag Pinned Folders into the order that matches your workflow.
+- Open Settings without brief helper-window flashes from AI runtime checks.
+- Repair Paddle OCR runtimes more reliably when an older install needs to be replaced.
 
 ### Notes
 
-- Native video lightbox playback is unchanged; pan and zoom applies to image and GIF viewing.
+- This update focuses on navigation polish, Settings cleanup, shutdown stability, and OCR runtime repair behavior.
 
 Full Changelog:
 <https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md>

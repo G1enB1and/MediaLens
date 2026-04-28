@@ -736,6 +736,8 @@ def gemma_profile_options() -> tuple[GemmaGgufProfile, ...]:
 def choose_best_gemma_profile(total_vram_gb: float | None, free_vram_gb: float | None = None) -> GemmaGgufProfile:
     total = max(0.0, float(total_vram_gb or 0.0))
     free = max(0.0, float(free_vram_gb or 0.0))
+    if total <= 0.0:
+        return GEMMA_GGUF_PROFILES[0]
     usable = max(0.0, total - GEMMA_GGUF_HEADROOM_GB)
     if free > 0.0:
         usable = min(usable or free, free + 0.5)
@@ -749,7 +751,7 @@ def choose_best_gemma_profile(total_vram_gb: float | None, free_vram_gb: float |
     for profile in reversed(GEMMA_GGUF_PROFILES):
         if usable >= profile.approx_total_gb:
             return profile
-    return GEMMA_GGUF_PROFILES[-1]
+    return GEMMA_GGUF_PROFILES[0]
 
 
 def gemma_profile_install_dir(models_dir: Path, profile: GemmaGgufProfile) -> Path:

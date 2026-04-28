@@ -50,19 +50,24 @@ class WindowLayoutPanelsMixin:
 
         # Choose initial root based on settings.
         default_root = None
-        if self.bridge._restore_last_enabled():
+        initial_folder_to_open: Path | None = None
+        startup_mode = self.bridge._startup_folder_mode() if hasattr(self.bridge, "_startup_folder_mode") else "none"
+        if startup_mode == "last":
             lf = self.bridge._last_folder()
             if lf:
                 p = Path(lf)
                 if p.exists() and p.is_dir():
-                    default_root = p
+                    initial_folder_to_open = p
 
-        if default_root is None:
+        if initial_folder_to_open is None and startup_mode == "specific":
             sf = self.bridge._start_folder_setting()
             if sf:
                 p = Path(sf)
                 if p.exists() and p.is_dir():
-                    default_root = p
+                    initial_folder_to_open = p
+
+        if initial_folder_to_open is not None:
+            default_root = initial_folder_to_open
 
         if default_root is None:
             p = Path("C:/Pictures")
@@ -87,15 +92,20 @@ class WindowLayoutPanelsMixin:
         self.tree.setProperty("showDecorationSelected", False)
         self.tree.setItemDelegate(AccentSelectionTreeDelegate(self.bridge, self.tree))
         
-        # Set the tree root to the PARENT of our desired root folder
-        # root_parent needs to be loaded by fs_model for visibility.
-        root_parent = default_root.parent
-        self.bridge._log(f"Tree: Setting root index to parent={root_parent}")
-        parent_idx = self.fs_model.setRootPath(str(root_parent))
-        
-        proxy_parent_idx = self.proxy_model.mapFromSource(parent_idx)
-        self.bridge._log(f"Tree: Proxy parent index valid={proxy_parent_idx.isValid()}")
-        self.tree.setRootIndex(proxy_parent_idx)
+        # Show Windows drive roots so users can switch to media drives outside C:.
+        if os.name == "nt":
+            self.bridge._log("Tree: Setting root index to Windows drive list")
+            self.tree.setRootIndex(QModelIndex())
+        else:
+            # Set the tree root to the PARENT of our desired root folder
+            # root_parent needs to be loaded by fs_model for visibility.
+            root_parent = default_root.parent
+            self.bridge._log(f"Tree: Setting root index to parent={root_parent}")
+            parent_idx = self.fs_model.setRootPath(str(root_parent))
+            
+            proxy_parent_idx = self.proxy_model.mapFromSource(parent_idx)
+            self.bridge._log(f"Tree: Proxy parent index valid={proxy_parent_idx.isValid()}")
+            self.tree.setRootIndex(proxy_parent_idx)
 
         # Expand the root folder by default
         root_idx = self.proxy_model.mapFromSource(self.fs_model.index(str(default_root)))
@@ -226,7 +236,8 @@ class WindowLayoutPanelsMixin:
         self._reload_collections()
         self._reload_smart_collections()
 
-        self._navigate_to_folder(str(default_root), record_history=True, re_root_tree=True)
+        if initial_folder_to_open is not None:
+            self._navigate_to_folder(str(initial_folder_to_open), record_history=True, re_root_tree=True)
 
         # Apply UI flags from settings
         try:

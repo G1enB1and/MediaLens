@@ -1935,7 +1935,9 @@ function renderMediaList(items, scrollToTop = true) {
         ? (shouldShowScanWaitingEmptyState()
           ? 'Scanning current folder. Wait for results to finish loading.'
           : ((getReviewMode() === 'similar' || getReviewMode() === 'similar_only') ? 'No similar images found in the current scope.' : 'No duplicates found in the current scope.'))
-        : 'No media discovered yet.';
+        : (gNoFolderSelected
+          ? 'Go to File > Open to pick a folder to show files. You can change this in Settings > General.'
+          : 'No media discovered yet.');
       el.appendChild(div);
       renderTimelineRail([]);
       finalizeRender();

@@ -636,7 +636,7 @@ class LocalAiSetupDialog(QDialog):
         intro.setWordWrap(True)
         root.addWidget(intro)
 
-        self.use_recommended_btn = QPushButton("Use Recommended models")
+        self.use_recommended_btn = QPushButton("Use Recommended Settings")
         self.use_recommended_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.use_recommended_btn.clicked.connect(self._use_recommended_models)
         root.addWidget(self.use_recommended_btn)
@@ -1010,9 +1010,15 @@ class LocalAiSetupDialog(QDialog):
         if hasattr(self.bridge, "_sync_selected_gemma_profile_settings"):
             self.bridge._sync_selected_gemma_profile_settings(sync_qsettings=False)
         self.bridge.settings.sync()
-        self._set_simple_status(f"Starting {recommended.label}...", active=True)
-        if hasattr(self.bridge, "install_local_ai_model"):
-            self.bridge.install_local_ai_model("google/gemma-4-E2B-it", "captioner")
+        self._set_simple_status(
+            f"Selected {recommended.label}. Click Install or Download Model when you are ready to download files.",
+            active=False,
+        )
+        for row in self._rows.values():
+            spec = row.get("spec")
+            if getattr(spec, "settings_key", "") == "gemma4":
+                self._sync_gemma_profile_controls(row)
+                break
 
     def _row_details_html(self, spec, kinds: set[str], status: dict) -> tuple[str, str, str]:
         if getattr(spec, "settings_key", "") == "paddle_ocr":

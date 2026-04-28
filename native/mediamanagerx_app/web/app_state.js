@@ -9,6 +9,7 @@ const MAX_GALLERY_FETCH_LIMIT = 2147483647;
 let gTotal = 0;
 let gMedia = []; // Current page items
 let gSelectedFolders = [];
+let gNoFolderSelected = false;
 let gActiveCollection = null;
 let gActiveSmartCollection = null;
 let gPinnedFolders = new Set();

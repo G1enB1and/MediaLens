@@ -15,12 +15,20 @@ class GeneralSettingsPage(SettingsPage):
         startup_layout = QVBoxLayout(startup_group)
         startup_layout.setSpacing(10)
         self.randomize_toggle = QCheckBox("Randomize gallery order")
-        self.restore_last_toggle = QCheckBox("Restore previous folder on launch")
+        self.startup_none_radio = QRadioButton("Do not open a folder on launch")
+        self.restore_last_toggle = QRadioButton("Restore previous folder on launch")
+        self.startup_specific_radio = QRadioButton("Open a specific folder on launch")
+        self.startup_mode_buttons = QButtonGroup(self)
+        self.startup_mode_buttons.addButton(self.startup_none_radio)
+        self.startup_mode_buttons.addButton(self.restore_last_toggle)
+        self.startup_mode_buttons.addButton(self.startup_specific_radio)
         self.show_hidden_toggle = QCheckBox("Show hidden files and folders")
         self.include_nested_files_toggle = QCheckBox("Include nested files in gallery")
         self.show_folders_in_gallery_toggle = QCheckBox("Show folders in gallery")
         startup_layout.addWidget(self.randomize_toggle)
+        startup_layout.addWidget(self.startup_none_radio)
         startup_layout.addWidget(self.restore_last_toggle)
+        startup_layout.addWidget(self.startup_specific_radio)
         startup_layout.addWidget(self.show_hidden_toggle)
         startup_layout.addWidget(self.include_nested_files_toggle)
         startup_layout.addWidget(self.show_folders_in_gallery_toggle)
@@ -92,7 +100,9 @@ class GeneralSettingsPage(SettingsPage):
         layout.addStretch(1)
 
         self.randomize_toggle.toggled.connect(self._on_randomize_changed)
+        self.startup_none_radio.toggled.connect(self._on_startup_none_changed)
         self.restore_last_toggle.toggled.connect(self._on_restore_last_changed)
+        self.startup_specific_radio.toggled.connect(self._on_startup_specific_changed)
         self.show_hidden_toggle.toggled.connect(self._on_show_hidden_changed)
         self.include_nested_files_toggle.toggled.connect(self._on_include_nested_files_changed)
         self.show_folders_in_gallery_toggle.toggled.connect(self._on_show_folders_in_gallery_changed)
@@ -111,7 +121,7 @@ class GeneralSettingsPage(SettingsPage):
         self.bridge.updateError.connect(self._on_update_error)
 
     def _sync_start_folder_enabled(self) -> None:
-        enabled = not self.restore_last_toggle.isChecked()
+        enabled = self.startup_specific_radio.isChecked()
         self.start_folder_edit.setEnabled(enabled)
         self.start_folder_browse_btn.setEnabled(enabled)
 
@@ -161,7 +171,24 @@ class GeneralSettingsPage(SettingsPage):
         self.main_window._refresh_current_folder()
 
     def _on_restore_last_changed(self, checked: bool) -> None:
-        self.dialog.set_setting_bool("gallery.restore_last", checked)
+        if not checked:
+            return
+        self.dialog.set_setting_str("gallery.startup_mode", "last")
+        self.dialog.set_setting_bool("gallery.restore_last", True)
+        self._sync_start_folder_enabled()
+
+    def _on_startup_none_changed(self, checked: bool) -> None:
+        if not checked:
+            return
+        self.dialog.set_setting_str("gallery.startup_mode", "none")
+        self.dialog.set_setting_bool("gallery.restore_last", False)
+        self._sync_start_folder_enabled()
+
+    def _on_startup_specific_changed(self, checked: bool) -> None:
+        if not checked:
+            return
+        self.dialog.set_setting_str("gallery.startup_mode", "specific")
+        self.dialog.set_setting_bool("gallery.restore_last", False)
         self._sync_start_folder_enabled()
 
     def _on_show_hidden_changed(self, checked: bool) -> None:
@@ -207,8 +234,15 @@ class GeneralSettingsPage(SettingsPage):
         state = self.bridge.get_settings()
         with QSignalBlocker(self.randomize_toggle):
             self.randomize_toggle.setChecked(bool(state.get("gallery.randomize", False)))
+        startup_mode = str(state.get("gallery.startup_mode", "none") or "none")
+        if startup_mode not in {"none", "last", "specific"}:
+            startup_mode = "last" if bool(state.get("gallery.restore_last", False)) else "none"
+        with QSignalBlocker(self.startup_none_radio):
+            self.startup_none_radio.setChecked(startup_mode == "none")
         with QSignalBlocker(self.restore_last_toggle):
-            self.restore_last_toggle.setChecked(bool(state.get("gallery.restore_last", False)))
+            self.restore_last_toggle.setChecked(startup_mode == "last")
+        with QSignalBlocker(self.startup_specific_radio):
+            self.startup_specific_radio.setChecked(startup_mode == "specific")
         with QSignalBlocker(self.show_hidden_toggle):
             self.show_hidden_toggle.setChecked(bool(state.get("gallery.show_hidden", False)))
         with QSignalBlocker(self.include_nested_files_toggle):
