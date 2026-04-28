@@ -1,5 +1,5 @@
 #define MyAppName "MediaLens"
-#define MyAppVersion "v1.2.5" ; Source of Truth: \VERSION
+#define MyAppVersion "v1.2.6" ; Source of Truth: \VERSION
 #define MyAppPublisher "MediaLens"
 #define MyLegacyAppName "MediaManagerX"
 #define MyLegacyPublisher "G1enB1and"
@@ -148,7 +148,7 @@ begin
             if FileExists(CopyPath) or DirExists(CopyPath) then
               CopyPath := UniqueLegacyTarget(CopyPath);
             EnsureDir(ExtractFilePath(CopyPath));
-            if not FileCopy(SourcePath, CopyPath, True) then
+            if not CopyFile(SourcePath, CopyPath, True) then
               Result := False;
           end;
         end;

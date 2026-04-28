@@ -1,18 +1,19 @@
-## MediaLens v1.2.5
+## MediaLens v1.2.6
 
 ### Summary
 
-This release makes everyday navigation and setup feel cleaner in MediaLens. Pinned folders can now be reordered directly, settings opens without flashing helper windows, and OCR runtime repair is more resilient when a previous install is stale.
+This release makes MediaLens safer to open on a wider range of Windows PCs. It avoids surprise full-drive scanning on startup, keeps large scans more responsive, improves drive browsing, and strengthens Local AI setup behavior.
 
 ### Highlights
 
-- Drag Pinned Folders into the order that matches your workflow.
-- Open Settings without brief helper-window flashes from AI runtime checks.
-- Repair Paddle OCR runtimes more reliably when an older install needs to be replaced.
+- MediaLens now starts with no folder open by default, so users can adjust settings before choosing what to scan.
+- The folder tree can browse other Windows drives, making photo libraries on secondary or external drives easier to open.
+- Paddle OCR repair now performs clearer GPU package checks and avoids quietly falling back to CPU on compatible NVIDIA systems.
 
 ### Notes
 
-- This update focuses on navigation polish, Settings cleanup, shutdown stability, and OCR runtime repair behavior.
+- Existing startup options are still available in Settings > General if you prefer reopening the last folder or always opening a specific folder.
+- Local AI recommended settings choose a profile but wait for an explicit install or download click before downloading files.
 
 Full Changelog:
 <https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md>

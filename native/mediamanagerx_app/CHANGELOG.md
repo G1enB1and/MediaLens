@@ -1,6 +1,38 @@
 # Change Log
 
-## v1.2.5 (Current)
+## v1.2.6 (Current)
+
+### Summary
+
+This release makes MediaLens easier to start on more Windows PCs without overwhelming the system. Startup now waits for the user to choose a folder, background scanning is less aggressive, other drives are easier to browse, and local AI setup is more deliberate about downloads and GPU OCR repair.
+
+### Highlights
+
+- Start MediaLens without automatically scanning the whole C drive on first launch.
+- Browse other Windows drives from the folder tree, including external or secondary photo drives.
+- Install and repair Paddle OCR with clearer GPU package checks on compatible NVIDIA systems.
+
+### Added
+
+- Added a Settings > General startup option to open no folder on startup, now used as the default.
+- Added empty-gallery guidance telling users to use File > Open and where to change the startup behavior.
+- Added support for browsing other Windows drives from the folder tree.
+- Added Paddle OCR status details for CPU Paddle, GPU Paddle, PaddleOCR, and detected GPU device count.
+
+### Changed
+
+- Changed startup folder handling so new installs do not automatically open and scan a folder until the user chooses one.
+- Changed Local AI recommended settings so they select the recommended Gemma profile without starting a model download.
+- Changed Gemma recommendation logic so systems without detected NVIDIA VRAM choose the smallest profile instead of the largest profile.
+- Changed background scanning to back off CPU usage so Windows and other apps remain more responsive during large scans.
+- Changed Paddle OCR runtime repair to clear stale Paddle package files before GPU activation.
+- Changed Paddle OCR GPU validation to use a focused Paddle core probe instead of a broader PaddleOCR import during install checks.
+- Changed Paddle OCR repair so compatible NVIDIA systems with GPU preference do not silently settle on CPU fallback after a GPU install failure.
+- Changed Paddle OCR worker startup so bundled NVIDIA package DLL folders are added to the runtime path before OCR starts.
+
+---
+
+## v1.2.5
 
 ### Summary
 
