@@ -1,19 +1,18 @@
-## MediaLens v1.2.6
+## MediaLens v1.2.7
 
 ### Summary
 
-This release makes MediaLens safer to open on a wider range of Windows PCs. It avoids surprise full-drive scanning on startup, keeps large scans more responsive, improves drive browsing, and strengthens Local AI setup behavior.
+This release makes Paddle OCR repair safer and easier to diagnose. MediaLens now prepares a clean OCR runtime first, verifies it, and only replaces the active runtime after the new one is working.
 
 ### Highlights
 
-- MediaLens now starts with no folder open by default, so users can adjust settings before choosing what to scan.
-- The folder tree can browse other Windows drives, making photo libraries on secondary or external drives easier to open.
-- Paddle OCR repair now performs clearer GPU package checks and avoids quietly falling back to CPU on compatible NVIDIA systems.
+- Paddle OCR repair is less likely to leave behind a broken partial runtime after a failed install.
+- Local AI setup keeps showing active Paddle install progress instead of switching back to old probe errors mid-install.
+- A dedicated Paddle install log now gives clearer details if OCR setup still fails on a specific PC.
 
 ### Notes
 
-- Existing startup options are still available in Settings > General if you prefer reopening the last folder or always opening a specific folder.
-- Local AI recommended settings choose a profile but wait for an explicit install or download click before downloading files.
+- This update is focused on Paddle OCR setup reliability, especially for Windows systems using GPU OCR support.
 
 Full Changelog:
 <https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md>

@@ -1,6 +1,31 @@
 # Change Log
 
-## v1.2.6 (Current)
+## v1.2.7 (Current)
+
+### Summary
+
+This release focuses on making Paddle OCR setup recover cleanly when a previous install attempt failed. MediaLens now builds and verifies OCR runtimes in a clean staging folder before replacing the active runtime, giving GPU systems a more reliable repair path and better diagnostics if something still goes wrong.
+
+### Highlights
+
+- Repair Paddle OCR without leaving the live OCR runtime half-created after a failed install.
+- Keep the Local AI setup page focused on active Paddle install progress instead of stale probe errors.
+- Capture a dedicated Paddle install log so future setup failures are easier to diagnose.
+
+### Added
+
+- Added a dedicated Paddle OCR install log in the existing debugging logs folder.
+
+### Changed
+
+- Changed Paddle OCR install and repair to build a clean staging runtime, probe it, and only activate it after success.
+- Changed Paddle OCR package installs and probes to run from the isolated OCR runtime folder without MediaLens bundle paths ahead of the runtime packages.
+- Changed Paddle OCR GPU install targeting to prefer the current Paddle GPU package version.
+- Changed Local AI setup status handling so background status refreshes do not overwrite active Paddle install progress with stale probe results.
+
+---
+
+## v1.2.6
 
 ### Summary
 
