@@ -312,6 +312,77 @@ class BridgeVideoMetadataMixin:
                 return candidate
         return default_path
 
+    def _paddle_ocr_default_python_path(self) -> Path:
+        scripts_dir = "Scripts" if os.name == "nt" else "bin"
+        exe_name = "python.exe" if os.name == "nt" else "python"
+        return self._local_ai_runtime_root() / ".venv-paddleocr" / scripts_dir / exe_name
+
+    def _paddle_ocr_runtime_dir_for_python(self, python_path: Path) -> Path:
+        return Path(python_path).parent.parent
+
+    def _paddle_ocr_staging_dir_for_runtime(self, runtime_dir: Path) -> Path:
+        runtime_dir = Path(runtime_dir)
+        return runtime_dir.with_name(f"{runtime_dir.name}-installing")
+
+    def _paddle_ocr_managed_runtime_dir(self, runtime_dir: Path) -> bool:
+        try:
+            runtime_root = self._local_ai_runtime_root().resolve()
+            resolved = Path(runtime_dir).resolve()
+            allowed = {
+                (runtime_root / ".venv-paddleocr").resolve(),
+                (runtime_root / ".venv-paddleocr-installing").resolve(),
+                (runtime_root / ".venv-paddleocr-previous").resolve(),
+            }
+            return resolved in allowed
+        except Exception:
+            return False
+
+    def _remove_paddle_ocr_runtime_dir(self, runtime_dir: Path) -> None:
+        runtime_dir = Path(runtime_dir)
+        if not runtime_dir.exists():
+            return
+        if not self._paddle_ocr_managed_runtime_dir(runtime_dir):
+            raise RuntimeError(f"Refusing to remove unmanaged Paddle OCR runtime folder: {runtime_dir}")
+        shutil.rmtree(runtime_dir)
+
+    def _activate_paddle_ocr_staged_runtime(self, staging_dir: Path, runtime_dir: Path) -> None:
+        staging_dir = Path(staging_dir)
+        runtime_dir = Path(runtime_dir)
+        previous_dir = runtime_dir.with_name(f"{runtime_dir.name}-previous")
+        if not self._paddle_ocr_managed_runtime_dir(staging_dir) or not self._paddle_ocr_managed_runtime_dir(runtime_dir):
+            raise RuntimeError("Refusing to activate unmanaged Paddle OCR runtime folder.")
+        self._remove_paddle_ocr_runtime_dir(previous_dir)
+        try:
+            if runtime_dir.exists():
+                runtime_dir.replace(previous_dir)
+            staging_dir.replace(runtime_dir)
+            self._remove_paddle_ocr_runtime_dir(previous_dir)
+        except Exception:
+            if not runtime_dir.exists() and previous_dir.exists():
+                try:
+                    previous_dir.replace(runtime_dir)
+                except Exception:
+                    pass
+            raise
+
+    def _paddle_ocr_install_log_path(self) -> Path:
+        return _debugging_logs_dir(_appdata_runtime_dir()) / "paddle-ocr-install.log"
+
+    def _paddle_ocr_install_log_hint(self) -> str:
+        try:
+            return f"Install log: {self._paddle_ocr_install_log_path()}"
+        except Exception:
+            return "Install log: unavailable"
+
+    def _paddle_ocr_install_log(self, message: object) -> None:
+        try:
+            path = self._paddle_ocr_install_log_path()
+            text = _sanitize_diagnostic_text(message)
+            with open(path, "a", encoding="utf-8") as handle:
+                handle.write(f"[{time.ctime()}] {text}\n")
+        except Exception:
+            pass
+
     @Slot(result="QVariantMap")
     def get_paddle_ocr_status(self) -> dict:
         return self._get_paddle_ocr_status(probe_timeout=12)
@@ -352,12 +423,37 @@ class BridgeVideoMetadataMixin:
             "print(json.dumps(payload), flush=True)\n"
         )
 
-    def _get_paddle_ocr_status(self, probe_timeout: int = 12) -> dict:
+    def _get_paddle_ocr_status(
+        self,
+        probe_timeout: int = 12,
+        *,
+        python_path_override: Path | None = None,
+        include_installing_state: bool = True,
+    ) -> dict:
         try:
-            python_path = self._ocr_runtime_python_path()
+            python_path = Path(python_path_override) if python_path_override is not None else self._ocr_runtime_python_path()
             device = str(self.settings.value("ocr/paddle_device", "auto", type=str) or "auto")
             prefer_gpu = bool(self.settings.value("ocr/paddle_prefer_gpu", True, type=bool))
             gpu_target = self._paddle_ocr_gpu_install_target()
+            if include_installing_state and bool(getattr(self, "_paddle_ocr_runtime_installing", False)):
+                return {
+                    "installed": False,
+                    "state": "installing",
+                    "running": True,
+                    "message": "Paddle OCR runtime is installing.",
+                    "python_path": str(python_path),
+                    "device": device,
+                    "prefer_gpu": prefer_gpu,
+                    "runtime_probe": {},
+                    "gpu_active": False,
+                    "gpu_available": False,
+                    "gpu_detected": bool(gpu_target.get("available")),
+                    "gpu_target": gpu_target,
+                    "gpu_issue": "",
+                    "current_device": "",
+                    "fast_enabled": True,
+                    "accurate_enabled": False,
+                }
             probe: dict = {}
             if python_path.is_file():
                 try:
@@ -534,7 +630,7 @@ class BridgeVideoMetadataMixin:
                 return {
                     "available": True,
                     "driver": driver_text,
-                    "package": "paddlepaddle-gpu==3.2.0",
+                    "package": "paddlepaddle-gpu==3.2.2",
                     "index_url": "https://www.paddlepaddle.org.cn/packages/stable/cu126/",
                     "label": "CUDA 12.6",
                 }
@@ -542,7 +638,7 @@ class BridgeVideoMetadataMixin:
                 return {
                     "available": True,
                     "driver": driver_text,
-                    "package": "paddlepaddle-gpu==3.2.0",
+                    "package": "paddlepaddle-gpu==3.2.2",
                     "index_url": "https://www.paddlepaddle.org.cn/packages/stable/cu118/",
                     "label": "CUDA 11.8",
                 }
@@ -570,7 +666,7 @@ class BridgeVideoMetadataMixin:
         cache_root = Path(str(self.settings.value("ai_caption/models_dir", self._local_ai_models_dir_default(), type=str) or self._local_ai_models_dir_default())) / "paddleocr_cache"
         home_dir = cache_root / "home"
         temp_dir = cache_root / "tmp"
-        child_env = self._local_ai_subprocess_env(str(self._local_ai_worker_source_root()))
+        child_env = self._local_ai_subprocess_env("")
         for directory in (cache_root, home_dir, temp_dir, cache_root / "paddle", cache_root / "ppocr", cache_root / "xdg", cache_root / "hf_home", cache_root / "paddlex"):
             try:
                 directory.mkdir(parents=True, exist_ok=True)
@@ -602,13 +698,22 @@ class BridgeVideoMetadataMixin:
 
     def _paddle_ocr_run_command(self, command: list[str], message: str, emit_status, *, runtime_env: bool = False, python_path: str | Path | None = None) -> None:
         emit_status(message)
-        returncode, last_line = self._local_ai_run_command_stream(
-            command,
-            self._local_ai_worker_source_root(),
-            message,
-            emit_status,
-            env=self._paddle_ocr_runtime_env(python_path) if runtime_env else None,
-        )
+        command_text = " ".join(shlex.quote(str(part)) for part in command)
+        command_cwd = Path(python_path).parent.parent if python_path else self._local_ai_runtime_root()
+        command_cwd.mkdir(parents=True, exist_ok=True)
+        self._paddle_ocr_install_log(f"START {message} :: {command_text}")
+        try:
+            returncode, last_line = self._local_ai_run_command_stream(
+                command,
+                command_cwd,
+                message,
+                emit_status,
+                env=self._paddle_ocr_runtime_env(python_path) if runtime_env else None,
+            )
+        except Exception as exc:
+            self._paddle_ocr_install_log(f"ERROR {message} :: {exc}")
+            raise
+        self._paddle_ocr_install_log(f"END {message} :: exit={returncode} last={last_line}")
         if returncode != 0:
             raise RuntimeError(f"{message} failed ({self._local_ai_exit_code_text(returncode)}). {last_line}")
 
@@ -664,46 +769,88 @@ class BridgeVideoMetadataMixin:
                 payload.update(extra)
                 self.paddleOcrRuntimeInstallStatus.emit(payload)
 
+            staging_dir: Path | None = None
             try:
-                python_path = self._ocr_runtime_python_path()
-                runtime_dir = Path(python_path).parent.parent
+                active_python_path = self._ocr_runtime_python_path()
+                configured_python = str(self.settings.value("ocr/paddle_python", "", type=str) or "").strip()
+                default_python_path = self._paddle_ocr_default_python_path()
+                target_python_path = Path(configured_python) if configured_python else default_python_path
+                target_runtime_dir = self._paddle_ocr_runtime_dir_for_python(target_python_path)
+                if configured_python and not self._paddle_ocr_managed_runtime_dir(target_runtime_dir):
+                    initial_custom_status = (
+                        dict(
+                            self._get_paddle_ocr_status(
+                                probe_timeout=30,
+                                python_path_override=active_python_path,
+                                include_installing_state=False,
+                            )
+                            or {}
+                        )
+                        if active_python_path.is_file()
+                        else {}
+                    )
+                    if initial_custom_status.get("installed") and not str(initial_custom_status.get("gpu_issue") or "").strip():
+                        payload = dict(initial_custom_status)
+                        payload.update({"state": "installed", "running": False, "message": "Paddle OCR runtime is already installed."})
+                        self.paddleOcrRuntimeInstallStatus.emit(payload)
+                        return
+                    self._paddle_ocr_install_log(
+                        f"Configured Paddle Python is outside the managed runtime; installing into managed runtime instead: {configured_python}"
+                    )
+                    target_python_path = default_python_path
+                    target_runtime_dir = self._paddle_ocr_runtime_dir_for_python(target_python_path)
+
+                runtime_dir = target_runtime_dir
                 runtime_dir.parent.mkdir(parents=True, exist_ok=True)
                 bootstrap_python = self._ensure_local_ai_python_bootstrap(lambda msg: emit_status(msg))
                 if not bootstrap_python:
                     raise RuntimeError("MediaLens could not prepare the Python bootstrap needed to create the OCR runtime.")
                 gpu_target = self._paddle_ocr_gpu_install_target()
                 prefer_gpu = bool(self.settings.value("ocr/paddle_prefer_gpu", True, type=bool))
-                initial_status = dict(self._get_paddle_ocr_status(probe_timeout=30) or {}) if python_path.is_file() else {}
-                had_gpu_active = bool(initial_status.get("gpu_active"))
-                should_recreate_runtime = False
-                if runtime_dir.exists() and not python_path.is_file():
-                    should_recreate_runtime = True
-                elif python_path.is_file() and not had_gpu_active:
-                    installed = bool(initial_status.get("installed"))
-                    prefer_gpu = bool(initial_status.get("prefer_gpu", True))
-                    should_recreate_runtime = not installed or (prefer_gpu and bool(gpu_target.get("available")))
-                if should_recreate_runtime:
-                    emit_status("Removing stale Paddle OCR runtime...")
-                    shutil.rmtree(runtime_dir)
+                initial_status = (
+                    dict(
+                        self._get_paddle_ocr_status(
+                            probe_timeout=30,
+                            python_path_override=target_python_path,
+                            include_installing_state=False,
+                        )
+                        or {}
+                    )
+                    if target_python_path.is_file()
+                    else {}
+                )
+                if initial_status.get("installed") and not str(initial_status.get("gpu_issue") or "").strip():
+                    payload = dict(initial_status)
+                    message = "Paddle OCR runtime is already installed."
+                    if initial_status.get("gpu_active"):
+                        message = f"{message} GPU is active."
+                    payload.update({"state": "installed", "running": False, "message": message})
+                    self.paddleOcrRuntimeInstallStatus.emit(payload)
+                    return
+
+                use_staging = self._paddle_ocr_managed_runtime_dir(runtime_dir)
+                if use_staging:
+                    staging_dir = self._paddle_ocr_staging_dir_for_runtime(runtime_dir)
+                    python_path = staging_dir / target_python_path.relative_to(runtime_dir)
+                    emit_status("Preparing clean Paddle OCR runtime...")
+                    self._remove_paddle_ocr_runtime_dir(staging_dir)
+                    self._paddle_ocr_run_command([bootstrap_python, "-m", "venv", str(staging_dir)], "Creating clean Paddle OCR runtime...", emit_status)
+                else:
+                    python_path = target_python_path
+                    if runtime_dir.exists() and not python_path.is_file():
+                        raise RuntimeError(f"Configured Paddle OCR runtime is not a valid Python venv: {runtime_dir}")
+                    if not python_path.is_file():
+                        self._paddle_ocr_run_command([bootstrap_python, "-m", "venv", str(runtime_dir)], "Creating Paddle OCR runtime...", emit_status)
+
                 if not python_path.is_file():
-                    self._paddle_ocr_run_command([bootstrap_python, "-m", "venv", str(runtime_dir)], "Creating Paddle OCR runtime...", emit_status)
+                    raise RuntimeError("Paddle OCR runtime was created, but python.exe was not found.")
+                self._paddle_ocr_install_log(f"Installing Paddle OCR runtime into staging={bool(staging_dir)} python={python_path}")
                 self._ensure_paddle_ocr_packaging_tools(python_path, emit_status)
-                initial_probe = dict(initial_status.get("runtime_probe") or {})
-                has_paddleocr_support = bool(str(initial_probe.get("paddleocr_dist") or "").strip())
-                if not had_gpu_active:
-                    self._paddle_ocr_run_command([str(python_path), "-m", "pip", "uninstall", "-y", "paddlepaddle", "paddlepaddle-gpu"], "Removing existing Paddle package...", emit_status, runtime_env=True, python_path=python_path)
-                    self._remove_stale_paddle_package_files(python_path, emit_status)
 
                 requirements_path = self._local_ai_requirements_path(type("Spec", (), {"requirements_file": "requirements-local-ocr-paddle.txt"})())
-                if had_gpu_active and has_paddleocr_support:
-                    emit_status("PaddleOCR support is already installed.")
-                else:
-                    self._paddle_ocr_run_command([str(python_path), "-m", "pip", "install", "-r", str(requirements_path)], "Installing PaddleOCR support...", emit_status, runtime_env=True, python_path=python_path)
-                    if not had_gpu_active:
-                        self._paddle_ocr_run_command([str(python_path), "-m", "pip", "uninstall", "-y", "paddlepaddle", "paddlepaddle-gpu"], "Removing Paddle package selected by dependency resolver...", emit_status, runtime_env=True, python_path=python_path)
-                        self._remove_stale_paddle_package_files(python_path, emit_status)
-                    elif prefer_gpu and bool(gpu_target.get("available")):
-                        self._paddle_ocr_run_command([str(python_path), "-m", "pip", "uninstall", "-y", "paddlepaddle"], "Removing CPU Paddle package selected by dependency resolver...", emit_status, runtime_env=True, python_path=python_path)
+                self._paddle_ocr_run_command([str(python_path), "-m", "pip", "install", "-r", str(requirements_path)], "Installing PaddleOCR support...", emit_status, runtime_env=True, python_path=python_path)
+                self._paddle_ocr_run_command([str(python_path), "-m", "pip", "uninstall", "-y", "paddlepaddle", "paddlepaddle-gpu"], "Removing Paddle package selected by dependency resolver...", emit_status, runtime_env=True, python_path=python_path)
+                self._remove_stale_paddle_package_files(python_path, emit_status)
 
                 def clean_install_error(value: object) -> str:
                     text = " ".join(str(value or "").split()).strip()
@@ -737,33 +884,18 @@ class BridgeVideoMetadataMixin:
 
                 gpu_error = ""
                 installed_package = ""
-                gpu_probe_failed_after_package_install = False
                 if prefer_gpu and bool(gpu_target.get("available")):
                     try:
-                        def clean_activate_gpu_runtime(reason: str) -> tuple[str, dict]:
-                            self._log(f"Paddle OCR clean GPU activation starting: {reason}")
-                            self._paddle_ocr_run_command(
-                                [str(python_path), "-m", "pip", "uninstall", "-y", "paddlepaddle", "paddlepaddle-gpu"],
-                                "Removing stale Paddle package before GPU activation...",
-                                emit_status,
-                                runtime_env=True,
-                                python_path=python_path,
-                            )
-                            self._remove_stale_paddle_package_files(python_path, emit_status)
-                            activated_package = install_paddle_package(
-                                "paddlepaddle-gpu",
-                                [str(gpu_target["index_url"])],
-                                f"Activating Paddle GPU runtime ({gpu_target.get('label')})",
-                            )
-                            activated_status = self._get_paddle_ocr_status(probe_timeout=90)
-                            return activated_package, dict(activated_status or {})
-
                         installed_package = install_paddle_package(
                             "paddlepaddle-gpu",
                             [str(gpu_target["index_url"])],
                             f"Installing Paddle GPU runtime ({gpu_target.get('label')})",
                         )
-                        status = self._get_paddle_ocr_status(probe_timeout=90)
+                        status = self._get_paddle_ocr_status(
+                            probe_timeout=90,
+                            python_path_override=python_path,
+                            include_installing_state=False,
+                        )
                         if not status.get("gpu_active"):
                             probe = dict(status.get("runtime_probe") or {})
                             retry_reason = str(
@@ -772,75 +904,99 @@ class BridgeVideoMetadataMixin:
                                 or status.get("gpu_issue")
                                 or "Initial GPU probe did not activate."
                             )
-                            installed_package, status = clean_activate_gpu_runtime(retry_reason)
+                            self._log(f"Paddle OCR clean GPU activation starting: {retry_reason}")
+                            self._paddle_ocr_run_command(
+                                [str(python_path), "-m", "pip", "uninstall", "-y", "paddlepaddle", "paddlepaddle-gpu"],
+                                "Removing stale Paddle package before GPU activation...",
+                                emit_status,
+                                runtime_env=True,
+                                python_path=python_path,
+                            )
+                            self._remove_stale_paddle_package_files(python_path, emit_status)
+                            installed_package = install_paddle_package(
+                                "paddlepaddle-gpu",
+                                [str(gpu_target["index_url"])],
+                                f"Activating Paddle GPU runtime ({gpu_target.get('label')})",
+                            )
+                            status = self._get_paddle_ocr_status(
+                                probe_timeout=90,
+                                python_path_override=python_path,
+                                include_installing_state=False,
+                            )
                         if status.get("gpu_active"):
-                            payload = dict(status)
-                            payload.update({"state": "installed", "running": False, "message": f"Paddle OCR runtime is installed. GPU is active ({installed_package})."})
-                            self.paddleOcrRuntimeInstallStatus.emit(payload)
-                            return
+                            final_status = status
                         probe = dict(status.get("runtime_probe") or {})
-                        gpu_error = str(probe.get("gpu_error") or probe.get("error") or "GPU package installed, but Paddle did not activate the GPU.")
-                        if str(probe.get("paddlepaddle_gpu_dist") or "").strip() or installed_package:
+                        if not status.get("gpu_active"):
+                            gpu_error = str(probe.get("gpu_error") or probe.get("error") or "GPU package installed, but Paddle did not activate the GPU.")
                             self._log(f"Paddle OCR GPU runtime probe failed after install; CPU fallback skipped: {gpu_error}")
-                            gpu_probe_failed_after_package_install = True
                             raise RuntimeError(f"Paddle GPU package installed, but the runtime probe failed. {gpu_error}")
-                        if had_gpu_active:
-                            self._log(f"Paddle OCR GPU repair inactive; CPU fallback skipped to preserve existing GPU runtime: {gpu_error}")
-                            raise RuntimeError(f"Paddle GPU repair did not activate the GPU. {gpu_error}")
-                        self._log(f"Paddle OCR GPU runtime inactive; falling back to CPU: {gpu_error}")
                     except Exception as exc:
                         gpu_error = str(exc)
-                        if had_gpu_active:
-                            status = dict(self._get_paddle_ocr_status(probe_timeout=90) or {})
-                            if status.get("gpu_active"):
-                                payload = dict(status)
-                                payload.update(
-                                    {
-                                        "state": "installed",
-                                        "running": False,
-                                        "message": f"Existing Paddle OCR GPU runtime is still active. Repair failed: {gpu_error}",
-                                    }
-                                )
-                                self.paddleOcrRuntimeInstallStatus.emit(payload)
-                                return
-                            raise RuntimeError(f"Paddle GPU repair failed and CPU fallback was skipped to avoid downgrading an existing GPU runtime. {gpu_error}")
-                        if gpu_probe_failed_after_package_install:
-                            raise RuntimeError(gpu_error)
                         if prefer_gpu:
                             raise RuntimeError(f"Paddle GPU runtime install failed on a compatible NVIDIA GPU. CPU fallback was skipped because GPU is preferred. {gpu_error}")
                         self._log(f"Paddle OCR GPU runtime install failed; falling back to CPU: {exc}")
                 else:
                     gpu_error = str(gpu_target.get("reason") or "No compatible NVIDIA GPU was detected.")
 
-                emit_status(f"Installing Paddle CPU runtime... GPU fallback reason: {gpu_error}")
-                try:
-                    self._paddle_ocr_run_command([str(python_path), "-m", "pip", "uninstall", "-y", "paddlepaddle", "paddlepaddle-gpu"], "Removing inactive Paddle GPU package...", emit_status, runtime_env=True, python_path=python_path)
-                    self._remove_stale_paddle_package_files(python_path, emit_status)
-                except Exception as exc:
-                    self._log(f"Paddle OCR cleanup before CPU fallback failed: {exc}")
-                installed_package = install_paddle_package(
-                    "paddlepaddle",
-                    ["", "https://www.paddlepaddle.org.cn/packages/stable/cpu/"],
-                    "Installing Paddle CPU runtime",
-                )
-                status = self._get_paddle_ocr_status(probe_timeout=90)
-                if not status.get("installed"):
-                    probe = dict(status.get("runtime_probe") or {})
-                    detail = str(probe.get("error") or probe.get("gpu_error") or probe.get("traceback") or "Paddle OCR runtime probe failed after install.")
-                    raise RuntimeError(detail)
+                if not (prefer_gpu and bool(gpu_target.get("available"))):
+                    emit_status(f"Installing Paddle CPU runtime... GPU fallback reason: {gpu_error}")
+                    try:
+                        self._paddle_ocr_run_command([str(python_path), "-m", "pip", "uninstall", "-y", "paddlepaddle", "paddlepaddle-gpu"], "Removing inactive Paddle GPU package...", emit_status, runtime_env=True, python_path=python_path)
+                        self._remove_stale_paddle_package_files(python_path, emit_status)
+                    except Exception as exc:
+                        self._log(f"Paddle OCR cleanup before CPU fallback failed: {exc}")
+                    installed_package = install_paddle_package(
+                        "paddlepaddle",
+                        ["", "https://www.paddlepaddle.org.cn/packages/stable/cpu/"],
+                        "Installing Paddle CPU runtime",
+                    )
+                    final_status = self._get_paddle_ocr_status(
+                        probe_timeout=90,
+                        python_path_override=python_path,
+                        include_installing_state=False,
+                    )
+                    if not final_status.get("installed"):
+                        probe = dict(final_status.get("runtime_probe") or {})
+                        detail = str(probe.get("error") or probe.get("gpu_error") or probe.get("traceback") or "Paddle OCR runtime probe failed after install.")
+                        raise RuntimeError(detail)
+
+                if staging_dir is not None:
+                    emit_status("Activating Paddle OCR runtime...")
+                    self._activate_paddle_ocr_staged_runtime(staging_dir, runtime_dir)
+                    staging_dir = None
+                    if configured_python and Path(configured_python) != target_python_path:
+                        self.settings.remove("ocr/paddle_python")
+                        self.settings.sync()
+                    final_status = self._get_paddle_ocr_status(
+                        probe_timeout=90,
+                        python_path_override=target_python_path,
+                        include_installing_state=False,
+                    )
+                    if not final_status.get("installed"):
+                        probe = dict(final_status.get("runtime_probe") or {})
+                        detail = str(probe.get("error") or probe.get("gpu_error") or probe.get("traceback") or "Paddle OCR runtime probe failed after activation.")
+                        raise RuntimeError(detail)
+
                 message = "Paddle OCR runtime is installed."
-                if status.get("gpu_active"):
+                if final_status.get("gpu_active"):
                     message = f"{message} GPU is active."
                 else:
                     message = f"{message} CPU fallback is active. GPU fallback reason: {gpu_error}"
-                payload = dict(status)
+                payload = dict(final_status)
                 payload.update({"state": "installed", "running": False, "message": f"{message} ({installed_package})."})
                 self.paddleOcrRuntimeInstallStatus.emit(payload)
             except Exception as exc:
                 message = str(exc) or "Paddle OCR runtime installation failed."
-                payload = {"state": "error", "running": False, "installed": False, "message": message}
+                self._paddle_ocr_install_log(f"FAILED Paddle OCR runtime install :: {message}")
+                if staging_dir is not None:
+                    try:
+                        self._remove_paddle_ocr_runtime_dir(staging_dir)
+                    except Exception as cleanup_exc:
+                        self._paddle_ocr_install_log(f"FAILED cleanup staging runtime :: {cleanup_exc}")
+                log_hint = self._paddle_ocr_install_log_hint()
+                payload = {"state": "error", "running": False, "installed": False, "message": f"{message}\n{log_hint}"}
                 try:
-                    status = dict(self._get_paddle_ocr_status(probe_timeout=30) or {})
+                    status = dict(self._get_paddle_ocr_status(probe_timeout=30, include_installing_state=False) or {})
                 except Exception:
                     status = {}
                 if status.get("installed"):
@@ -849,7 +1005,7 @@ class BridgeVideoMetadataMixin:
                         {
                             "state": "error" if str(status.get("gpu_issue") or "").strip() else "installed",
                             "running": False,
-                            "message": f"Paddle OCR runtime is still installed, but repair failed: {message}",
+                            "message": f"Paddle OCR runtime is still installed, but repair failed: {message}\n{log_hint}",
                         }
                     )
                 self.paddleOcrRuntimeInstallStatus.emit(payload)

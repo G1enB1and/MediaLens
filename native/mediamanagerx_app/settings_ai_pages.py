@@ -471,6 +471,9 @@ class AISettingsPage(SettingsPage):
             status = dict(self.bridge.get_paddle_ocr_status() or {}) if hasattr(self.bridge, "get_paddle_ocr_status") else {}
         except Exception as exc:
             status = {"installed": False, "error": str(exc)}
+        if str(status.get("state") or "").strip() == "installing":
+            self.paddle_fast_status_label.setText(html.escape(str(status.get("message") or "Paddle OCR runtime is installing.")))
+            return
         installed = bool(status.get("installed"))
         if installed:
             current_device = str(status.get("current_device") or "").strip()
@@ -1529,6 +1532,9 @@ class LocalAiSetupDialog(QDialog):
 
     def _on_paddle_status_resolved(self, payload: dict, generation: int) -> None:
         if int(generation) != int(self._refresh_generation):
+            return
+        current = dict(self._rows.get("paddle_ocr", {}).get("latest_status") or {})
+        if str(current.get("state") or "").strip() == "installing" and not bool(payload.get("running")):
             return
         self._apply_status("paddle_ocr", self._paddle_status_payload(dict(payload or {})))
 
