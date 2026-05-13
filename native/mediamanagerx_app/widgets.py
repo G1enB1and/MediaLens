@@ -1008,6 +1008,7 @@ class BulkSelectedFileRow(QWidget):
     generateRequested = Signal(str)
     actionRequested = Signal(str, str)
     thumbnailActionRequested = Signal(str)
+    thumbnailLightboxRequested = Signal(str)
     _TAG_CONTENT_HEIGHT = 92
     _CAPTION_CONTENT_HEIGHT = 132
     _GENERATE_BUTTON_HEIGHT = 32
@@ -1088,6 +1089,8 @@ class BulkSelectedFileRow(QWidget):
         self.thumb_lbl.setObjectName("bulkSelectedFileThumb")
         self.thumb_lbl.setFixedSize(self._content_height, self._content_height)
         self.thumb_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.thumb_lbl.installEventFilter(self)
+        self._thumbnail_lightbox_enabled = False
         thumb_hint = str(thumbnail_bg_hint or "").strip().lower()
         if thumb_hint == "light":
             thumb_bg = "#ffffff" if Theme.get_is_light() else "#f7f8fa"
@@ -1220,6 +1223,12 @@ class BulkSelectedFileRow(QWidget):
         except RuntimeError:
             pass
 
+    def _emit_thumbnail_lightbox_requested(self) -> None:
+        try:
+            self.thumbnailLightboxRequested.emit(self._path)
+        except RuntimeError:
+            pass
+
     def _emit_action_requested(self, action_key: str) -> None:
         try:
             self.actionRequested.emit(self._path, str(action_key or ""))
@@ -1269,6 +1278,14 @@ class BulkSelectedFileRow(QWidget):
                 self._thumbnail_pixmap = QPixmap(thumbnail)
                 self._apply_thumbnail_pixmap()
             self._thumbnail_loaded = True
+            self._sync_thumbnail_cursor()
+        except RuntimeError:
+            pass
+
+    def set_thumbnail_lightbox_enabled(self, enabled: bool) -> None:
+        try:
+            self._thumbnail_lightbox_enabled = bool(enabled)
+            self._sync_thumbnail_cursor()
         except RuntimeError:
             pass
 
@@ -1333,6 +1350,26 @@ class BulkSelectedFileRow(QWidget):
             self.thumb_lbl.setPixmap(scaled)
         except RuntimeError:
             pass
+
+    def _sync_thumbnail_cursor(self) -> None:
+        try:
+            has_thumb = not getattr(self, "_thumbnail_pixmap", QPixmap()).isNull()
+            cursor = Qt.CursorShape.PointingHandCursor if bool(getattr(self, "_thumbnail_lightbox_enabled", False)) and has_thumb else Qt.CursorShape.ArrowCursor
+            self.thumb_lbl.setCursor(cursor)
+        except RuntimeError:
+            pass
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is getattr(self, "thumb_lbl", None) and bool(getattr(self, "_thumbnail_lightbox_enabled", False)):
+            if event.type() == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
+                try:
+                    if not getattr(self, "_thumbnail_pixmap", QPixmap()).isNull() and self.thumb_lbl.rect().contains(event.position().toPoint()):
+                        self._emit_thumbnail_lightbox_requested()
+                        event.accept()
+                        return True
+                except RuntimeError:
+                    return False
+        return super().eventFilter(watched, event)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

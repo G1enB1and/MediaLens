@@ -897,6 +897,16 @@ class WindowSidebarBulkMixin:
         except Exception:
             return ""
 
+    def _open_bulk_selected_file_lightbox(self, path: str) -> None:
+        clean_path = str(path or "").strip()
+        if not clean_path:
+            return
+        try:
+            script = f"try{{ window.__mmx_openLightboxByPath && window.__mmx_openLightboxByPath({json.dumps(clean_path)}); }}catch(e){{}}"
+            self.web.page().runJavaScript(script)
+        except Exception:
+            pass
+
     def _toggle_bulk_tag_section(self, toggle: QToolButton, widget: QWidget, checked: bool) -> None:
         if toggle is not None:
             label = str(toggle.property("sectionLabel") or toggle.text() or "")
@@ -1528,6 +1538,7 @@ class WindowSidebarBulkMixin:
         action_buttons: list[dict] | None = None,
         thumbnail_action_handler=None,
         thumbnail_button_text: str = "",
+        thumbnail_lightbox_handler=None,
     ) -> None:
         if list_widget is None:
             return
@@ -1565,6 +1576,9 @@ class WindowSidebarBulkMixin:
                     row.actionRequested.connect(action_handler)
                 if thumbnail_action_handler is not None:
                     row.thumbnailActionRequested.connect(thumbnail_action_handler)
+                if thumbnail_lightbox_handler is not None:
+                    row.thumbnailLightboxRequested.connect(thumbnail_lightbox_handler)
+                    row.set_thumbnail_lightbox_enabled(True)
                 list_widget.addItem(item)
                 list_widget.setItemWidget(item, row)
             list_widget.doItemsLayout()
@@ -1607,6 +1621,7 @@ class WindowSidebarBulkMixin:
             placeholder_text="Tags for this file",
             generate_handler=self._run_local_ai_tags_for_path,
             generate_button_text="Generate Tags",
+            thumbnail_lightbox_handler=self._open_bulk_selected_file_lightbox,
         )
         self._queue_bulk_selected_files_layout_sync()
 
@@ -1619,6 +1634,7 @@ class WindowSidebarBulkMixin:
             placeholder_text="Description for this file",
             generate_handler=self._run_local_ai_description_for_path,
             generate_button_text="Generate Description",
+            thumbnail_lightbox_handler=self._open_bulk_selected_file_lightbox,
         )
         self._queue_bulk_caption_selected_files_layout_sync()
 

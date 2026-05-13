@@ -195,6 +195,20 @@ function openLightboxByIndex(idx) {
   document.body.style.overflow = 'hidden';
 }
 
+window.__mmx_openLightboxByPath = function (path) {
+  const target = String(path || '').trim();
+  if (!target || !Array.isArray(gMedia) || gMedia.length === 0) return false;
+  const normalizePath = (value) => String(value || '').replace(/\\/g, '/').toLowerCase();
+  const targetKey = normalizePath(target);
+  const index = gMedia.findIndex((item) => {
+    if (!item || item.is_folder) return false;
+    return normalizePath(item.path) === targetKey;
+  });
+  if (index < 0) return false;
+  openLightboxByIndex(index);
+  return true;
+};
+
 
 
 let gClosingFromNative = false;
