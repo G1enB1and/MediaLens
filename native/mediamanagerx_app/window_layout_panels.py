@@ -1900,6 +1900,12 @@ class WindowLayoutPanelsMixin:
 
     def _notify_gallery_container_resized(self) -> None:
         try:
+            if self.isMinimized() or time.monotonic() < float(getattr(self, "_restore_resize_cooldown_until", 0.0) or 0.0):
+                self._schedule_post_restore_layout()
+                return
+        except Exception:
+            pass
+        try:
             self.web.page().runJavaScript(
                 "try{ window.__mmx_scheduleGalleryRelayout && window.__mmx_scheduleGalleryRelayout('qt'); }catch(e){}"
             )

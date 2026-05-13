@@ -898,6 +898,9 @@ class WindowAppLifecycleMixin:
         super().resizeEvent(event)
         if self.isMinimized():
             return
+        if time.monotonic() < float(getattr(self, "_restore_resize_cooldown_until", 0.0) or 0.0):
+            self._schedule_post_restore_layout()
+            return
         self._sync_sidebar_panel_widths()
         # Keep overlays pinned to the web view.
         if self.web is not None and self.web_loading is not None:
@@ -919,8 +922,59 @@ class WindowAppLifecycleMixin:
     def changeEvent(self, event) -> None:  # type: ignore[override]
         super().changeEvent(event)
         try:
-            if event.type() == QEvent.Type.WindowStateChange and not self.isMinimized():
-                QTimer.singleShot(250, lambda: self._schedule_gallery_container_relayout(0))
+            if event.type() == QEvent.Type.WindowStateChange:
+                if self.isMinimized():
+                    self._on_window_minimized()
+                else:
+                    self._on_window_restored()
+        except Exception:
+            pass
+
+    def _set_web_minimized_state(self, minimized: bool) -> None:
+        try:
+            self.web.page().runJavaScript(
+                f"try{{ window.__mmx_setAppMinimized && window.__mmx_setAppMinimized({str(bool(minimized)).lower()}); }}catch(e){{}}"
+            )
+        except Exception:
+            pass
+
+    def _on_window_minimized(self) -> None:
+        self._restore_resize_cooldown_until = time.monotonic() + 1.0
+        timer = getattr(self, "_gallery_relayout_timer", None)
+        if timer is not None:
+            timer.stop()
+        post_timer = getattr(self, "_post_restore_layout_timer", None)
+        if post_timer is not None:
+            post_timer.stop()
+        self._set_web_minimized_state(True)
+
+    def _on_window_restored(self) -> None:
+        self._restore_resize_cooldown_until = time.monotonic() + 0.9
+        self._set_web_minimized_state(False)
+        self._schedule_post_restore_layout()
+
+    def _schedule_post_restore_layout(self) -> None:
+        timer = getattr(self, "_post_restore_layout_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._run_post_restore_layout)
+            self._post_restore_layout_timer = timer
+        timer.start(950)
+
+    def _run_post_restore_layout(self) -> None:
+        try:
+            self._sync_sidebar_panel_widths()
+            if self.web is not None and self.web_loading is not None:
+                self.web_loading.setGeometry(self.web.rect())
+            if self.web is not None and self.video_overlay is not None and self.video_overlay.isVisible():
+                if not self.video_overlay.is_inplace_mode():
+                    self.video_overlay.setGeometry(self.web.rect())
+                self.video_overlay.raise_()
+            if hasattr(self, "preview_image_lbl"):
+                self._update_preview_display()
+            self._position_sidebar_preview_play_button()
+            self._schedule_gallery_container_relayout(120)
         except Exception:
             pass
 

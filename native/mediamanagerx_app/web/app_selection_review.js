@@ -1674,6 +1674,19 @@ function runGalleryRelayout(reason = '') {
 
 function scheduleGalleryRelayout(reason = '') {
   if (gIsRenderingGallery) return;
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  if (gAppMinimized || now < gAppRestoringUntil) {
+    if (gGalleryRelayoutTimer) {
+      clearTimeout(gGalleryRelayoutTimer);
+      gGalleryRelayoutTimer = 0;
+    }
+    const delay = gAppMinimized ? 750 : Math.max(60, Math.ceil(gAppRestoringUntil - now));
+    gGalleryRelayoutTimer = window.setTimeout(() => {
+      gGalleryRelayoutTimer = 0;
+      scheduleGalleryRelayout(reason || 'restore');
+    }, delay);
+    return;
+  }
 
   const metrics = getGalleryLayoutMetrics();
   if (!metrics.mediaList) return;

@@ -638,6 +638,11 @@ let gBackgroundIdleId = null;
 
 function flushBackgroundQueue() {
   gBackgroundIdleId = null;
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  if (gAppMinimized || now < gAppRestoringUntil) {
+    scheduleBackgroundDrain();
+    return;
+  }
   if (gBackgroundQueue.length === 0) return;
 
   // Process in idle time: drain up to 5 items per idle slot
@@ -664,12 +669,44 @@ function flushBackgroundQueue() {
 
 function scheduleBackgroundDrain() {
   if (gBackgroundIdleId) return;
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  const delay = gAppMinimized ? 750 : Math.max(16, Math.ceil(gAppRestoringUntil - now));
+  if (gAppMinimized || now < gAppRestoringUntil) {
+    gBackgroundIdleId = setTimeout(flushBackgroundQueue, delay);
+    return;
+  }
   if (typeof requestIdleCallback !== 'undefined') {
     gBackgroundIdleId = requestIdleCallback(flushBackgroundQueue, { timeout: 500 });
   } else {
     gBackgroundIdleId = setTimeout(flushBackgroundQueue, 16);
   }
 }
+
+window.__mmx_setAppMinimized = function (minimized) {
+  gAppRestoreGeneration += 1;
+  const restoreGeneration = gAppRestoreGeneration;
+  gAppMinimized = !!minimized;
+  if (gBackgroundIdleId) {
+    if (typeof cancelIdleCallback !== 'undefined') {
+      try { cancelIdleCallback(gBackgroundIdleId); } catch (_) {}
+    }
+    clearTimeout(gBackgroundIdleId);
+    gBackgroundIdleId = null;
+  }
+  if (gAppMinimized) {
+    gAppRestoringUntil = 0;
+    return;
+  }
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  gAppRestoringUntil = now + 900;
+  scheduleBackgroundDrain();
+  window.setTimeout(() => {
+    if (restoreGeneration !== gAppRestoreGeneration || gAppMinimized) return;
+    gAppRestoringUntil = 0;
+    scheduleGalleryRelayout('restore');
+    scheduleBackgroundDrain();
+  }, 950);
+};
 
 function loadImage(el, imgSrc) {
   if (gPosterRequested.has(el)) return;
