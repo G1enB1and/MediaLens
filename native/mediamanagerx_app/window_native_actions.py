@@ -595,6 +595,8 @@ class WindowNativeActionsMixin:
             if toggle is not None:
                 label = str(toggle.property("sectionLabel") or toggle.text() or "")
                 self._set_bulk_tag_section_toggle(toggle, label, toggle.isChecked())
+        if hasattr(self, "_sync_left_section_toggle_icons"):
+            self._sync_left_section_toggle_icons()
         
         # Loading Screen
         load_fg = "rgba(0,0,0,200)" if is_light else "rgba(255,255,255,200)"
@@ -704,6 +706,17 @@ class WindowNativeActionsMixin:
             QPushButton#foldersMenuButton:hover {{
                 background-color: {Theme.get_btn_save_hover(accent)};
                 border-color: {accent_str};
+            }}
+            QToolButton#leftSectionHeaderToggle {{
+                background: transparent;
+                border: none;
+                color: {text};
+                font-weight: 700;
+                padding: 0px;
+                text-align: left;
+            }}
+            QToolButton#leftSectionHeaderToggle:hover {{
+                color: {combo_selected_text};
             }}
             QLabel {{ color: {text}; font-weight: bold; background: transparent; }}
             {scrollbar_style}

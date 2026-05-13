@@ -30,6 +30,173 @@ class WindowLayoutPanelsMixin:
         toggle.setIconSize(QSize(12, 12))
         toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
 
+    def _create_left_section_toggle(self, key: str, label: str) -> QToolButton:
+        toggle = QToolButton()
+        toggle.setObjectName("leftSectionHeaderToggle")
+        toggle.setText(label)
+        toggle.setProperty("sectionKey", key)
+        toggle.setCheckable(True)
+        toggle.setChecked(True)
+        toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        toggle.setIconSize(QSize(12, 12))
+        toggle.clicked.connect(lambda checked, section_key=key: self._set_left_section_expanded(section_key, bool(checked), persist=True))
+        self._set_left_section_toggle_icon(toggle, True)
+        return toggle
+
+    def _set_left_section_toggle_icon(self, toggle: QToolButton, expanded: bool) -> None:
+        toggle.setIcon(self._native_arrow_icon("down" if expanded else "right"))
+        toggle.setToolTip("Collapse section" if expanded else "Expand section")
+
+    def _sync_left_section_toggle_icons(self) -> None:
+        for section in getattr(self, "_left_sidebar_sections", {}).values():
+            toggle = section.get("toggle")
+            body = section.get("body")
+            if toggle is not None and body is not None:
+                self._set_left_section_toggle_icon(toggle, body.isVisible())
+
+    def _left_section_collapsed_height(self, section: QWidget, layout: QVBoxLayout) -> int:
+        margins = layout.contentsMargins()
+        header = section.findChild(QToolButton, "leftSectionHeaderToggle")
+        header_height = header.sizeHint().height() if header is not None else 24
+        return margins.top() + header_height + margins.bottom() + 5
+
+    def _left_section_default_expanded_height(self, key: str) -> int:
+        return {
+            "pinned": 140,
+            "folders": 260,
+            "collections": 150,
+            "smart_collections": 150,
+        }.get(key, 150)
+
+    def _left_section_saved_expanded_height(self, key: str, fallback: int) -> int:
+        try:
+            return int(self.bridge.settings.value(f"ui/left_section_{key}_height", fallback, type=int))
+        except Exception:
+            return fallback
+
+    def _remember_left_section_expanded_height(self, key: str, index: int, collapsed_height: int) -> None:
+        try:
+            sizes = self.left_sections_splitter.sizes()
+            if index < 0 or index >= len(sizes):
+                return
+            current = int(sizes[index])
+            if current > collapsed_height + 12:
+                self.bridge.settings.setValue(f"ui/left_section_{key}_height", current)
+        except Exception:
+            pass
+
+    def _resize_left_section_slot(self, key: str, expanded: bool, collapsed_height: int) -> None:
+        try:
+            splitter = self.left_sections_splitter
+            section_info = self._left_sidebar_sections[key]
+            section = section_info["section"]
+            index = splitter.indexOf(section)
+            sizes = [int(size) for size in splitter.sizes()]
+            if index < 0 or index >= len(sizes):
+                return
+
+            if expanded:
+                fallback = max(self._left_section_default_expanded_height(key), collapsed_height + 80)
+                target = max(self._left_section_saved_expanded_height(key, fallback), collapsed_height + 40)
+            else:
+                target = collapsed_height
+
+            previous = sizes[index]
+            if previous == target:
+                return
+            sizes[index] = target
+            delta = target - previous
+
+            donor_indices = []
+            for donor_key, donor_info in self._left_sidebar_sections.items():
+                donor_index = splitter.indexOf(donor_info["section"])
+                if donor_index == index or donor_index < 0 or donor_index >= len(sizes):
+                    continue
+                donor_body = donor_info["body"]
+                if donor_body.isVisible():
+                    donor_indices.append(donor_index)
+            if not donor_indices:
+                donor_indices = [i for i in range(len(sizes)) if i != index]
+            donor_indices.sort(key=lambda i: sizes[i], reverse=True)
+
+            if delta < 0 and donor_indices:
+                sizes[donor_indices[0]] += abs(delta)
+            elif delta > 0:
+                remaining = delta
+                for donor_index in donor_indices:
+                    donor_info = next(
+                        (
+                            info for info in self._left_sidebar_sections.values()
+                            if splitter.indexOf(info["section"]) == donor_index
+                        ),
+                        None,
+                    )
+                    if donor_info is None:
+                        continue
+                    donor_min = self._left_section_collapsed_height(donor_info["section"], donor_info["layout"])
+                    available = max(0, sizes[donor_index] - donor_min)
+                    take = min(available, remaining)
+                    sizes[donor_index] -= take
+                    remaining -= take
+                    if remaining <= 0:
+                        break
+
+            splitter.setSizes([max(1, int(size)) for size in sizes])
+        except Exception:
+            pass
+
+    def _set_left_section_expanded(self, key: str, expanded: bool, *, persist: bool = False) -> None:
+        section_info = getattr(self, "_left_sidebar_sections", {}).get(key)
+        if not section_info:
+            return
+        section = section_info["section"]
+        body = section_info["body"]
+        layout = section_info["layout"]
+        toggle = section_info["toggle"]
+        expanded = bool(expanded)
+        if toggle.isChecked() != expanded:
+            toggle.blockSignals(True)
+            toggle.setChecked(expanded)
+            toggle.blockSignals(False)
+        self._set_left_section_toggle_icon(toggle, expanded)
+        collapsed_height = self._left_section_collapsed_height(section, layout)
+        try:
+            index = self.left_sections_splitter.indexOf(section)
+            if not expanded:
+                self._remember_left_section_expanded_height(key, index, collapsed_height)
+        except Exception:
+            pass
+        body.setVisible(expanded)
+        if expanded:
+            section.setMinimumHeight(collapsed_height)
+            section.setMaximumHeight(16777215)
+        else:
+            section.setMinimumHeight(collapsed_height)
+            section.setMaximumHeight(collapsed_height)
+        self._resize_left_section_slot(key, expanded, collapsed_height)
+        if persist:
+            try:
+                self.bridge.settings.setValue(f"ui/left_section_{key}_expanded", expanded)
+            except Exception:
+                pass
+            try:
+                self._save_splitter_state()
+            except Exception:
+                pass
+        try:
+            self.left_sections_splitter.updateGeometry()
+        except Exception:
+            pass
+
+    def _restore_left_section_expanded_states(self) -> None:
+        for key in ("pinned", "folders", "collections", "smart_collections"):
+            try:
+                expanded = bool(self.bridge.settings.value(f"ui/left_section_{key}_expanded", True, type=bool))
+            except Exception:
+                expanded = True
+            self._set_left_section_expanded(key, expanded, persist=False)
+
     def _build_layout(self) -> None:
         try:
             accent_val = str(self.bridge.settings.value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT)
@@ -140,11 +307,13 @@ class WindowLayoutPanelsMixin:
         self.left_sections_splitter.setChildrenCollapsible(False)
         self.left_sections_splitter.setHandleWidth(5)
 
+        self._left_sidebar_sections = {}
+
         pinned_section = QWidget(self.left_sections_splitter)
         pinned_layout = QVBoxLayout(pinned_section)
         pinned_layout.setContentsMargins(0, 0, 0, 0)
         pinned_layout.setSpacing(6)
-        self.pinned_header = QLabel("Pinned Folders")
+        self.pinned_header = self._create_left_section_toggle("pinned", "Pinned Folders")
         pinned_layout.addWidget(self.pinned_header)
 
         self.pinned_folders_list = PinnedFolderListWidget()
@@ -156,6 +325,12 @@ class WindowLayoutPanelsMixin:
         self.pinned_folders_list.customContextMenuRequested.connect(self._on_pinned_folders_context_menu)
         pinned_layout.addWidget(self.pinned_folders_list, 1)
         pinned_section.setMinimumHeight(self.pinned_header.sizeHint().height() + pinned_layout.contentsMargins().top())
+        self._left_sidebar_sections["pinned"] = {
+            "section": pinned_section,
+            "body": self.pinned_folders_list,
+            "layout": pinned_layout,
+            "toggle": self.pinned_header,
+        }
 
         folders_section = QWidget(self.left_sections_splitter)
         folders_layout = QVBoxLayout(folders_section)
@@ -166,7 +341,7 @@ class WindowLayoutPanelsMixin:
         folders_header_layout = QHBoxLayout(folders_header_row)
         folders_header_layout.setContentsMargins(0, 0, 0, 0)
         folders_header_layout.setSpacing(6)
-        self.folders_header = QLabel("Folders")
+        self.folders_header = self._create_left_section_toggle("folders", "Folders")
         folders_header_layout.addWidget(self.folders_header)
         folders_header_layout.addStretch(1)
 
@@ -179,12 +354,19 @@ class WindowLayoutPanelsMixin:
 
         folders_layout.addWidget(folders_header_row)
         folders_layout.addWidget(self.tree, 1)
+        folders_section.setMinimumHeight(self.folders_header.sizeHint().height() + folders_layout.contentsMargins().top())
+        self._left_sidebar_sections["folders"] = {
+            "section": folders_section,
+            "body": self.tree,
+            "layout": folders_layout,
+            "toggle": self.folders_header,
+        }
 
         collections_section = QWidget(self.left_sections_splitter)
         collections_layout = QVBoxLayout(collections_section)
         collections_layout.setContentsMargins(0, 8, 0, 0)
         collections_layout.setSpacing(6)
-        self.collections_header = QLabel("Collections")
+        self.collections_header = self._create_left_section_toggle("collections", "Collections")
         collections_layout.addWidget(self.collections_header)
 
         self.collections_list = CollectionListWidget()
@@ -195,12 +377,18 @@ class WindowLayoutPanelsMixin:
         self.collections_list.customContextMenuRequested.connect(self._on_collections_context_menu)
         collections_layout.addWidget(self.collections_list, 1)
         collections_section.setMinimumHeight(self.collections_header.sizeHint().height() + collections_layout.contentsMargins().top())
+        self._left_sidebar_sections["collections"] = {
+            "section": collections_section,
+            "body": self.collections_list,
+            "layout": collections_layout,
+            "toggle": self.collections_header,
+        }
 
         smart_collections_section = QWidget(self.left_sections_splitter)
         smart_collections_layout = QVBoxLayout(smart_collections_section)
         smart_collections_layout.setContentsMargins(0, 8, 0, 0)
         smart_collections_layout.setSpacing(6)
-        self.smart_collections_header = QLabel("Smart Collections")
+        self.smart_collections_header = self._create_left_section_toggle("smart_collections", "Smart Collections")
         smart_collections_layout.addWidget(self.smart_collections_header)
 
         self.smart_collections_list = CollectionListWidget()
@@ -211,6 +399,12 @@ class WindowLayoutPanelsMixin:
         self.smart_collections_list.itemSelectionChanged.connect(self._on_smart_collection_selection_changed)
         smart_collections_layout.addWidget(self.smart_collections_list, 1)
         smart_collections_section.setMinimumHeight(self.smart_collections_header.sizeHint().height() + smart_collections_layout.contentsMargins().top())
+        self._left_sidebar_sections["smart_collections"] = {
+            "section": smart_collections_section,
+            "body": self.smart_collections_list,
+            "layout": smart_collections_layout,
+            "toggle": self.smart_collections_header,
+        }
 
         self.left_sections_splitter.addWidget(pinned_section)
         self.left_sections_splitter.addWidget(folders_section)
@@ -225,6 +419,7 @@ class WindowLayoutPanelsMixin:
             self.left_sections_splitter.restoreState(left_sections_state)
         else:
             self.left_sections_splitter.setSizes([140, 260, 150, 150])
+        self._restore_left_section_expanded_states()
         self.left_sections_splitter.splitterMoved.connect(lambda *args: self._save_splitter_state())
 
         left_layout.addWidget(self.left_sections_splitter, 1)
