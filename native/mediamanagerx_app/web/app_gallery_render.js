@@ -249,21 +249,27 @@ function createStructuredCard(item, idx) {
     thumbWrap.appendChild(icon);
     markCardMediaReady(card);
   } else if (item.media_type === 'image') {
-    const img = document.createElement('img');
-    img.className = 'thumb';
-    img.alt = '';
-    if (item.is_animated && !gAutoplayGalleryAnimatedGifs) {
-      img.classList.add('poster');
-      img.setAttribute('data-poster-path', item.path || '');
+    if (item.media_error) {
+      const errorThumb = createMediaErrorThumb(item.media_error);
+      thumbWrap.appendChild(errorThumb);
+      markCardMediaReady(card);
     } else {
-      img.setAttribute('data-src', item.url);
+      const img = document.createElement('img');
+      img.className = 'thumb';
+      img.alt = '';
+      if (item.is_animated && !gAutoplayGalleryAnimatedGifs) {
+        img.classList.add('poster');
+        img.setAttribute('data-poster-path', item.path || '');
+      } else {
+        img.setAttribute('data-src', item.url);
+      }
+      if (item.is_animated) {
+        img.setAttribute('data-animated', 'true');
+        img.setAttribute('data-path', item.path || '');
+      }
+      thumbWrap.appendChild(img);
+      gPosterObserver.observe(img);
     }
-    if (item.is_animated) {
-      img.setAttribute('data-animated', 'true');
-      img.setAttribute('data-path', item.path || '');
-    }
-    thumbWrap.appendChild(img);
-    gPosterObserver.observe(img);
   } else {
     const img = document.createElement('img');
     img.className = 'thumb poster';
@@ -638,6 +644,20 @@ function createStructuredCard(item, idx) {
   return card;
 }
 
+function createMediaErrorThumb(message) {
+  const errorThumb = document.createElement('div');
+  errorThumb.className = 'media-error-thumb';
+  const title = document.createElement('div');
+  title.className = 'media-error-title';
+  title.textContent = 'No preview';
+  const detail = document.createElement('div');
+  detail.className = 'media-error-detail';
+  detail.textContent = String(message || 'Unsupported or corrupt image');
+  errorThumb.appendChild(title);
+  errorThumb.appendChild(detail);
+  return errorThumb;
+}
+
 function createMasonryCard(item, idx) {
   const mediaIdx = getItemIndex(item, idx);
   const card = document.createElement('div');
@@ -649,21 +669,26 @@ function createMasonryCard(item, idx) {
   }
 
   if (item.media_type === 'image') {
-    const img = document.createElement('img');
-    img.className = 'thumb';
-    img.alt = '';
-    if (item.is_animated && !gAutoplayGalleryAnimatedGifs) {
-      img.classList.add('poster');
-      img.setAttribute('data-poster-path', item.path || '');
+    if (item.media_error) {
+      card.appendChild(createMediaErrorThumb(item.media_error));
+      markCardMediaReady(card);
     } else {
-      img.setAttribute('data-src', item.url);
+      const img = document.createElement('img');
+      img.className = 'thumb';
+      img.alt = '';
+      if (item.is_animated && !gAutoplayGalleryAnimatedGifs) {
+        img.classList.add('poster');
+        img.setAttribute('data-poster-path', item.path || '');
+      } else {
+        img.setAttribute('data-src', item.url);
+      }
+      if (item.is_animated) {
+        img.setAttribute('data-animated', 'true');
+        img.setAttribute('data-path', item.path || '');
+      }
+      card.appendChild(img);
+      gPosterObserver.observe(img);
     }
-    if (item.is_animated) {
-      img.setAttribute('data-animated', 'true');
-      img.setAttribute('data-path', item.path || '');
-    }
-    card.appendChild(img);
-    gPosterObserver.observe(img);
 
     card.setAttribute('data-path', item.path || '');
 

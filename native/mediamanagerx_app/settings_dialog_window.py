@@ -27,12 +27,15 @@ class SettingsDialog(QDialog):
         root.addLayout(body, 1)
 
         self.category_container = QWidget()
+        self.category_container.setObjectName("settingsCategoryContainer")
+        self.category_container.setAutoFillBackground(True)
         category_shell_layout = QVBoxLayout(self.category_container)
         category_shell_layout.setContentsMargins(3, 0, 0, 0)
         category_shell_layout.setSpacing(0)
 
         self.category_frame = QWidget()
         self.category_frame.setObjectName("settingsCategoryFrame")
+        self.category_frame.setAutoFillBackground(True)
         self.category_frame.setFixedWidth(240)
         category_frame_layout = QVBoxLayout(self.category_frame)
         category_frame_layout.setContentsMargins(6, 6, 6, 6)
@@ -50,21 +53,25 @@ class SettingsDialog(QDialog):
         self.pages = QStackedWidget()
         body.addWidget(self.pages, 1)
 
-        self._page_defs = [
-            ("General", GeneralSettingsPage(self)),
-            ("Appearance", AppearanceSettingsPage(self)),
-            ("Player", PlayerSettingsPage(self)),
-            ("Scanners", ScannersSettingsPage(self)),
-            ("Metadata", MetadataSettingsPage(self)),
-            ("Similar File Rules", DuplicateSettingsPage(self)),
-            ("AI", AISettingsPage(self)),
+        self._page_factories = [
+            ("General", GeneralSettingsPage),
+            ("Appearance", AppearanceSettingsPage),
+            ("Player", PlayerSettingsPage),
+            ("Scanners", ScannersSettingsPage),
+            ("Metadata", MetadataSettingsPage),
+            ("Similar File Rules", DuplicateSettingsPage),
+            ("AI", AISettingsPage),
         ]
-        for title, page in self._page_defs:
+        self._page_widgets: list[QWidget | None] = []
+        for title, _factory in self._page_factories:
             self.category_list.addItem(title)
-            self.pages.addWidget(page)
+            placeholder = QWidget()
+            self._page_widgets.append(None)
+            self.pages.addWidget(placeholder)
 
         self.category_list.currentRowChanged.connect(self._on_category_changed)
         self.category_list.setCurrentRow(0)
+        self._ensure_page(0)
         self.bridge.accentColorChanged.connect(lambda _value: self.refresh_from_settings())
         self.bridge.uiFlagChanged.connect(self._on_ui_flag_changed)
         self._apply_theme()
@@ -85,24 +92,40 @@ class SettingsDialog(QDialog):
         self.activateWindow()
 
     def open_ai_page(self) -> None:
-        for index, (title, _page) in enumerate(self._page_defs):
+        for index, (title, _factory) in enumerate(self._page_factories):
             if str(title) == "AI":
                 self.category_list.setCurrentRow(index)
                 break
         self.open_dialog()
+
+    def _ensure_page(self, index: int) -> QWidget | None:
+        if index < 0 or index >= len(self._page_factories):
+            return None
+        page = self._page_widgets[index]
+        if page is not None:
+            return page
+        _title, factory = self._page_factories[index]
+        page = factory(self)
+        old = self.pages.widget(index)
+        self.pages.removeWidget(old)
+        old.deleteLater()
+        self.pages.insertWidget(index, page)
+        self._page_widgets[index] = page
+        return page
 
     def refresh_from_settings(self) -> None:
         current_row = max(self.category_list.currentRow(), 0)
         self._apply_theme()
         if self.category_list.count():
             self.category_list.setCurrentRow(current_row)
-            page = self.pages.widget(current_row)
+            page = self._ensure_page(current_row)
             if page is not None:
                 page.refresh()
 
     def _on_category_changed(self, index: int) -> None:
+        self._ensure_page(index)
         self.pages.setCurrentIndex(index)
-        page = self.pages.widget(int(index))
+        page = self._ensure_page(index)
         if page is not None:
             page.refresh()
 
@@ -170,7 +193,28 @@ class SettingsDialog(QDialog):
         installing_bg = Theme.mix(control_bg, accent, 0.22 if Theme.get_is_light() else 0.26)
         error_bg = Theme.mix(control_bg, QColor("#d33f49"), 0.24 if Theme.get_is_light() else 0.28)
         error_fg = "#8a111a" if Theme.get_is_light() else "#ffd0d4"
-        radio_dot = "#000000" if Theme.get_is_light() else "#ffffff"
+        radio_dot = selection_text
+
+        dialog_palette = self.palette()
+        dialog_palette.setColor(QPalette.ColorRole.Window, QColor(bg))
+        dialog_palette.setColor(QPalette.ColorRole.Base, QColor(bg))
+        dialog_palette.setColor(QPalette.ColorRole.AlternateBase, QColor(control_bg))
+        dialog_palette.setColor(QPalette.ColorRole.WindowText, QColor(text))
+        dialog_palette.setColor(QPalette.ColorRole.Text, QColor(text))
+        dialog_palette.setColor(QPalette.ColorRole.Button, QColor(close_bg))
+        dialog_palette.setColor(QPalette.ColorRole.ButtonText, QColor(text))
+        self.setPalette(dialog_palette)
+        self.setAutoFillBackground(True)
+        self.pages.setAutoFillBackground(True)
+        self.pages.setPalette(dialog_palette)
+        self.category_container.setAutoFillBackground(True)
+        self.category_container.setPalette(dialog_palette)
+        self.category_frame.setAutoFillBackground(True)
+        self.category_frame.setPalette(dialog_palette)
+        for page in self._page_widgets:
+            if page is not None:
+                page.setAutoFillBackground(True)
+                page.setPalette(dialog_palette)
         
         for btn in self.findChildren(QPushButton):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -178,6 +222,18 @@ class SettingsDialog(QDialog):
         self.setStyleSheet(
             f"""
             QDialog {{
+                background-color: {bg};
+                color: {text};
+            }}
+            QStackedWidget, QWidget#settingsPage {{
+                background-color: {bg};
+                color: {text};
+            }}
+            QWidget#settingsCategoryContainer {{
+                background-color: {bg};
+                color: {text};
+            }}
+            QWidget#settingsPage QWidget {{
                 background-color: {bg};
                 color: {text};
             }}

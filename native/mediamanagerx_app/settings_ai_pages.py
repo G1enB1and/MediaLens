@@ -676,6 +676,8 @@ class LocalAiSetupDialog(QDialog):
             self.bridge.paddleOcrRuntimeInstallStatus.connect(self._on_paddle_install_status)
         if hasattr(self.bridge, "accentColorChanged"):
             self.bridge.accentColorChanged.connect(lambda _value: self._apply_theme())
+        if hasattr(self.bridge, "uiFlagChanged"):
+            self.bridge.uiFlagChanged.connect(self._on_ui_flag_changed)
         self.statusResolved.connect(self._on_status_resolved)
         self.paddleStatusResolved.connect(self._on_paddle_status_resolved)
 
@@ -683,6 +685,10 @@ class LocalAiSetupDialog(QDialog):
         self._set_advanced_visible(False)
         self.refresh_statuses()
         self._apply_theme()
+
+    def _on_ui_flag_changed(self, key: str, _value: bool) -> None:
+        if key == "ui.theme_mode":
+            self._apply_theme()
 
     def _unique_model_specs(self):
         from app.mediamanager.ai_captioning.model_registry import MODEL_SPECS

@@ -964,7 +964,11 @@ class ComparePanel(QWidget):
         self.left_scroll = QScrollArea()
         self.right_scroll = QScrollArea()
         self.viewer_wrap = QWidget()
+        self.viewer_wrap.setObjectName("compareViewerWrap")
+        self.viewer_wrap.setAutoFillBackground(True)
         self.viewer_footer = QWidget()
+        self.viewer_footer.setObjectName("compareViewerFooter")
+        self.viewer_footer.setAutoFillBackground(True)
         self.viewer_footer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.viewer_footer.setFixedHeight(54)
         footer_layout = QVBoxLayout(self.viewer_footer)
@@ -1060,6 +1064,24 @@ class ComparePanel(QWidget):
         )
         self.left_scroll.setStyleSheet(scrollbar_style)
         self.right_scroll.setStyleSheet(scrollbar_style)
+        self.setStyleSheet(
+            f"""
+            QWidget#comparePanel {{
+                background: transparent;
+                border: none;
+            }}
+            QWidget#compareViewerWrap, QWidget#compareViewerFooter {{
+                background-color: {thumb_bg};
+                border: none;
+            }}
+            """
+        )
+        for widget in (self.viewer_wrap, self.viewer_footer):
+            palette = widget.palette()
+            palette.setColor(QPalette.ColorRole.Window, QColor(thumb_bg))
+            palette.setColor(QPalette.ColorRole.Base, QColor(thumb_bg))
+            widget.setAutoFillBackground(True)
+            widget.setPalette(palette)
         self.viewer.set_frame_style(thumb_bg, border)
         self.viewer.setStyleSheet("background: transparent; border: none;")
         self.viewer_hint.setStyleSheet(

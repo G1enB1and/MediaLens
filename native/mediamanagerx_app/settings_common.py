@@ -867,6 +867,8 @@ class ToolTipWrapper(QWidget):
 class SettingsPage(QWidget):
     def __init__(self, dialog: "SettingsDialog") -> None:
         super().__init__(dialog)
+        self.setObjectName("settingsPage")
+        self.setAutoFillBackground(True)
         self.dialog = dialog
         self.main_window = dialog.main_window
         self.bridge = dialog.bridge

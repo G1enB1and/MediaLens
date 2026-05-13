@@ -451,6 +451,7 @@ class WindowLayoutPanelsMixin:
 
         self.ocr_review_panel = QWidget(self.center_workspace_stack)
         self.ocr_review_panel.setObjectName("ocrReviewPanel")
+        self.ocr_review_panel.setAutoFillBackground(True)
         self.ocr_review_panel.setMinimumWidth(520)
         self.ocr_review_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         ocr_review_layout = QVBoxLayout(self.ocr_review_panel)
@@ -458,6 +459,8 @@ class WindowLayoutPanelsMixin:
         ocr_review_layout.setSpacing(8)
 
         self.ocr_review_header_row = QWidget(self.ocr_review_panel)
+        self.ocr_review_header_row.setObjectName("ocrReviewHeaderRow")
+        self.ocr_review_header_row.setAutoFillBackground(True)
         ocr_review_header_layout = QHBoxLayout(self.ocr_review_header_row)
         ocr_review_header_layout.setContentsMargins(0, 0, 0, 0)
         ocr_review_header_layout.setSpacing(8)
@@ -483,6 +486,7 @@ class WindowLayoutPanelsMixin:
 
         self.ocr_review_body = QWidget(self.ocr_review_panel)
         self.ocr_review_body.setObjectName("ocrReviewBody")
+        self.ocr_review_body.setAutoFillBackground(True)
         ocr_review_body_layout = QHBoxLayout(self.ocr_review_body)
         ocr_review_body_layout.setContentsMargins(0, 0, 0, 0)
         ocr_review_body_layout.setSpacing(10)
@@ -495,6 +499,7 @@ class WindowLayoutPanelsMixin:
 
         self.ocr_review_fields_panel = QWidget(self.ocr_review_body)
         self.ocr_review_fields_panel.setObjectName("ocrReviewFieldsPanel")
+        self.ocr_review_fields_panel.setAutoFillBackground(True)
         self.ocr_review_fields_panel.setMinimumWidth(210)
         self.ocr_review_fields_panel.setMaximumWidth(320)
         ocr_review_fields_layout = QVBoxLayout(self.ocr_review_fields_panel)
@@ -506,7 +511,8 @@ class WindowLayoutPanelsMixin:
         self.ocr_review_no_text_btn.setObjectName("bulkSelectedFileGenerateButton")
         self.ocr_review_no_text_btn.setToolTip("Mark this file as no text detected")
         self.ocr_review_no_text_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.ocr_review_no_text_btn.setIcon(QIcon(str(icons_dir / "text-disabled.svg")))
+        no_text_icon = "text-disabled-light.svg" if Theme.get_is_light() else "text-disabled.svg"
+        self.ocr_review_no_text_btn.setIcon(QIcon(str(icons_dir / no_text_icon)))
         self.ocr_review_no_text_btn.setIconSize(QSize(52, 24))
         self.ocr_review_no_text_btn.setFixedHeight(32)
         self.ocr_review_no_text_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -530,6 +536,8 @@ class WindowLayoutPanelsMixin:
             edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             ocr_review_fields_layout.addWidget(edit, 1)
             button_row = QWidget(self.ocr_review_fields_panel)
+            button_row.setObjectName("ocrReviewButtonRow")
+            button_row.setAutoFillBackground(True)
             button_row_layout = QHBoxLayout(button_row)
             button_row_layout.setContentsMargins(0, 0, 0, 0)
             button_row_layout.setSpacing(6)
@@ -557,6 +565,8 @@ class WindowLayoutPanelsMixin:
         ocr_review_layout.addWidget(self.ocr_review_body, 1)
 
         self.ocr_review_nav_row = QWidget(self.ocr_review_panel)
+        self.ocr_review_nav_row.setObjectName("ocrReviewNavRow")
+        self.ocr_review_nav_row.setAutoFillBackground(True)
         ocr_review_nav_layout = QHBoxLayout(self.ocr_review_nav_row)
         ocr_review_nav_layout.setContentsMargins(0, 0, 0, 0)
         ocr_review_nav_layout.setSpacing(8)
@@ -1703,6 +1713,8 @@ class WindowLayoutPanelsMixin:
         bottom_layout.setSpacing(10)
 
         self.bottom_panel_header_row = QWidget(self.bottom_panel)
+        self.bottom_panel_header_row.setObjectName("bottomPanelHeaderRow")
+        self.bottom_panel_header_row.setAutoFillBackground(True)
         bottom_panel_header_layout = QHBoxLayout(self.bottom_panel_header_row)
         bottom_panel_header_layout.setContentsMargins(0, 0, 0, 0)
         bottom_panel_header_layout.setSpacing(8)

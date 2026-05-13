@@ -1482,6 +1482,16 @@ async function main() {
       });
     }
 
+    if (bridge.webThemeReady) {
+      bridge.webThemeReady.connect(function (theme) {
+        const nextTheme = String(theme || '').toLowerCase() === 'light' ? 'light' : 'dark';
+        document.documentElement.classList.toggle('light-mode', nextTheme === 'light');
+        updateThemeAwareIcons(nextTheme);
+        const themeRadio = document.getElementById(nextTheme === 'light' ? 'themeLight' : 'themeDark');
+        if (themeRadio) themeRadio.checked = true;
+      });
+    }
+
     if (bridge.videoPlaybackStarted) {
       bridge.videoPlaybackStarted.connect(function () {
         if (gPlayingInplaceCard) {
@@ -1537,9 +1547,8 @@ async function main() {
           return;
         }
         if (key === 'ui.theme_mode') {
-          const theme = value ? 'light' : 'dark';
-          document.documentElement.classList.toggle('light-mode', theme === 'light');
-          updateThemeAwareIcons(theme);
+          const themeRadio = document.getElementById(value ? 'themeLight' : 'themeDark');
+          if (themeRadio) themeRadio.checked = true;
           return;
         }
         if (key === 'gallery.show_hidden' || key === 'gallery.include_nested_files' || key === 'gallery.show_folders' || key === 'gallery.view_mode' || key === 'gallery.group_by' || key === 'gallery.group_date_granularity' || key === 'gallery.similarity_threshold') {

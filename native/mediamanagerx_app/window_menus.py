@@ -65,7 +65,7 @@ class WindowMenuShortcutMixin:
         settings_action.triggered.connect(self.open_settings)
         edit_menu.addAction(settings_action)
 
-        pick_action = QAction("Choose &Folderâ€¦", self)
+        pick_action = QAction("Choose &Folder...", self)
         pick_action.triggered.connect(self.choose_folder)
         file_menu.addAction(pick_action)
 

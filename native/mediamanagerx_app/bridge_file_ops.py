@@ -173,8 +173,6 @@ class BridgeFileOpsMixin:
                 Theme.set_theme_mode(value)
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, value == "light")
-                current_accent = str(self.settings.value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT)
-                self.accentColorChanged.emit(current_accent)
             elif key in ("gallery.startup_mode", "gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "gallery.similarity_threshold"):
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, True)

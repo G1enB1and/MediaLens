@@ -321,7 +321,6 @@ class WindowAppLifecycleMixin:
                 padding: 4px 6px;
             }}
         """
-        QApplication.instance().setStyleSheet(menu_qss)
         tooltip_palette = QApplication.instance().palette()
         tooltip_palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(tooltip_bg))
         tooltip_palette.setColor(QPalette.ColorRole.ToolTipText, QColor(text))
@@ -336,10 +335,7 @@ class WindowAppLifecycleMixin:
                 menu_bar_palette.setColor(QPalette.ColorRole.WindowText, QColor(text))
                 menu_bar.setAutoFillBackground(True)
                 menu_bar.setPalette(menu_bar_palette)
-                menu_bar.style().unpolish(menu_bar)
-                menu_bar.style().polish(menu_bar)
                 menu_bar.update()
-                menu_bar.repaint()
                 corner = menu_bar.cornerWidget(Qt.Corner.TopRightCorner)
                 if corner is not None:
                     corner.setStyleSheet(menu_qss)
@@ -352,15 +348,55 @@ class WindowAppLifecycleMixin:
                 menu_palette.setColor(QPalette.ColorRole.ButtonText, QColor(text))
                 menu_palette.setColor(QPalette.ColorRole.WindowText, QColor(text))
                 menu.setPalette(menu_palette)
-                menu.style().unpolish(menu)
-                menu.style().polish(menu)
                 menu.update()
-                menu.repaint()
         except Exception:
             pass
         self._sync_close_button_icons()
         self._apply_preview_image_label_style()
         self._sync_menu_bar_controls()
+
+    def _apply_context_menu_theme(self, menu: QMenu) -> None:
+        try:
+            accent = QColor(getattr(self, "_current_accent", Theme.ACCENT_DEFAULT) or Theme.ACCENT_DEFAULT)
+            sb_bg = Theme.get_sidebar_bg(accent)
+            border = Theme.get_border(accent)
+            text = Theme.get_text_color()
+            highlight_bg = Theme.get_accent_soft(accent)
+            menu.setStyleSheet(f"""
+                QMenu {{
+                    background-color: {sb_bg};
+                    color: {text};
+                    border: 1px solid {border};
+                    padding: 4px 0;
+                }}
+                QMenu::item {{
+                    padding: 4px 24px 4px 14px;
+                }}
+                QMenu::item:selected {{
+                    background-color: {highlight_bg};
+                }}
+                QMenu::item:disabled {{
+                    color: {Theme.get_text_muted()};
+                }}
+                QMenu::separator {{
+                    height: 1px;
+                    background: {border};
+                    margin: 4px 0;
+                }}
+            """)
+            palette = menu.palette()
+            palette.setColor(QPalette.ColorRole.Window, QColor(sb_bg))
+            palette.setColor(QPalette.ColorRole.Base, QColor(sb_bg))
+            palette.setColor(QPalette.ColorRole.WindowText, QColor(text))
+            palette.setColor(QPalette.ColorRole.Text, QColor(text))
+            menu.setPalette(palette)
+        except Exception:
+            pass
+
+    def _create_themed_context_menu(self, parent: QWidget | None = None) -> QMenu:
+        menu = QMenu(parent or self)
+        self._apply_context_menu_theme(menu)
+        return menu
 
     def _web_header_height(self) -> int:
         return 112 if bool(self.bridge.settings.value("ui/show_top_panel", True, type=bool)) else 0
@@ -860,6 +896,8 @@ class WindowAppLifecycleMixin:
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         super().resizeEvent(event)
+        if self.isMinimized():
+            return
         self._sync_sidebar_panel_widths()
         # Keep overlays pinned to the web view.
         if self.web is not None and self.web_loading is not None:
@@ -877,6 +915,14 @@ class WindowAppLifecycleMixin:
             self._update_preview_display()
         self._position_sidebar_preview_play_button()
         self._schedule_gallery_container_relayout(120)
+
+    def changeEvent(self, event) -> None:  # type: ignore[override]
+        super().changeEvent(event)
+        try:
+            if event.type() == QEvent.Type.WindowStateChange and not self.isMinimized():
+                QTimer.singleShot(250, lambda: self._schedule_gallery_container_relayout(0))
+        except Exception:
+            pass
 
     def about(self) -> None:
         st = self.bridge.get_tools_status()

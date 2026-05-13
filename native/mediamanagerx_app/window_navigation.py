@@ -576,7 +576,7 @@ class WindowNavigationMixin:
             return
         is_hidden = bool(item.data(Qt.ItemDataRole.UserRole + 1))
 
-        menu = QMenu(self)
+        menu = self._create_themed_context_menu(self) if hasattr(self, "_create_themed_context_menu") else QMenu(self)
         act_open = menu.addAction("Open Folder")
         act_hide = None
         act_unhide = None
@@ -605,7 +605,7 @@ class WindowNavigationMixin:
             self.bridge.open_in_explorer(folder_path)
 
     def _show_folders_header_menu(self) -> None:
-        menu = QMenu(self)
+        menu = self._create_themed_context_menu(self) if hasattr(self, "_create_themed_context_menu") else QMenu(self)
         act_expand_all = menu.addAction("Expand All")
         act_collapse_all = menu.addAction("Collapse All")
         chosen = menu.exec(self.folders_menu_btn.mapToGlobal(QPoint(0, self.folders_menu_btn.height())))
@@ -757,7 +757,7 @@ class WindowNavigationMixin:
 
     def _on_collections_context_menu(self, pos: QPoint) -> None:
         item = self.collections_list.itemAt(pos)
-        menu = QMenu(self)
+        menu = self._create_themed_context_menu(self) if hasattr(self, "_create_themed_context_menu") else QMenu(self)
         act_new = menu.addAction("New Collection...")
         act_rename = None
         act_delete = None

@@ -88,6 +88,7 @@ class BridgeMediaListingScanMixin:
                 auto_date = int(r.get("preferred_date") or self._preferred_date_ns(r))
                 display_width = r.get("width")
                 display_height = r.get("height")
+                media_error = ""
                 if r.get("media_type") == "image" and p.suffix.lower() != ".svg":
                     display_size = _image_size_with_svg_support(p)
                     if display_size.isValid():
@@ -102,6 +103,8 @@ class BridgeMediaListingScanMixin:
                                 self.conn.commit()
                             except Exception:
                                 pass
+                    elif p.suffix.lower() in {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif"}:
+                        media_error = "Unsupported or corrupt image"
                     
                 out.append({
                     "path": str(p), 
@@ -110,6 +113,7 @@ class BridgeMediaListingScanMixin:
                     "is_folder": False,
                     "thumb_bg_hint": _thumbnail_bg_hint(p),
                     "is_hidden": bool(r.get("is_hidden")),
+                    "media_error": media_error,
                     "is_animated": self._is_animated(p),
                     "width": display_width,
                     "height": display_height,

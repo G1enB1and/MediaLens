@@ -393,7 +393,7 @@ class WindowPreviewMetadataMixin:
         svg_path = str(preview_path) if Path(preview_path).suffix.lower() == ".svg" else ""
         img = _read_image_with_svg_support(preview_path)
         if img is None or img.isNull():
-            self._set_preview_pixmap(None)
+            self._set_preview_pixmap(None, "Unsupported or corrupt image")
             return
         self._set_preview_pixmap(QPixmap.fromImage(img), bg_hint=_thumbnail_bg_hint(preview_path), svg_path=svg_path)
         if suffix in VIDEO_EXTS:

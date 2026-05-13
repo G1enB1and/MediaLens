@@ -682,8 +682,15 @@ function loadImage(el, imgSrc) {
   };
   el.onerror = () => {
     gLoadedOnPage++;
-    el.style.opacity = '1';
     const card = closestGalleryCard(el);
+    const fallback = typeof createMediaErrorThumb === 'function'
+      ? createMediaErrorThumb('Unsupported or corrupt image')
+      : null;
+    if (fallback && el.parentNode) {
+      el.replaceWith(fallback);
+    } else {
+      el.style.opacity = '1';
+    }
     if (card) markCardMediaReady(card);
   };
   el.style.opacity = '0';

@@ -112,16 +112,9 @@ class WindowSidebarBulkMixin:
                         self._render_preview_movie_frame()
                         self._sync_sidebar_video_preview_controls()
             elif key == "ui.theme_mode":
-                self._update_native_styles(self._current_accent)
-                self._update_splitter_style(self._current_accent)
-                self._apply_compare_panel_theme(self._current_accent)
-                if hasattr(self, "compare_panel"):
-                    self.compare_panel.update()
-                    self.compare_panel.repaint()
                 if hasattr(self, "native_tooltip"):
                     self.native_tooltip.update_style(QColor(self._current_accent), Theme.get_is_light())
-                self._update_app_style(QColor(self._current_accent))
-                QTimer.singleShot(0, lambda: self._apply_compare_panel_theme(self._current_accent))
+                self._schedule_deferred_theme_refresh(self._current_accent)
             elif key == "metadata.display.order" or key.startswith("metadata.layout."):
                 self._setup_metadata_layout()
                 if hasattr(self, "_current_paths") and self._current_paths:
@@ -138,11 +131,11 @@ class WindowSidebarBulkMixin:
                 if hasattr(self, "proxy_model"):
                     self.proxy_model.invalidateFilter()
                 if hasattr(self, "pinned_folders_list"):
-                    self._reload_pinned_folders()
+                    QTimer.singleShot(0, self._reload_pinned_folders)
                 if hasattr(self, "collections_list"):
-                    self._reload_collections()
+                    QTimer.singleShot(40, self._reload_collections)
                 if hasattr(self, "tag_list_select"):
-                    self._reload_tag_lists()
+                    QTimer.singleShot(300, self._reload_tag_lists)
             if key == "ui.show_left_panel" and hasattr(self, "act_toggle_left_panel"):
                 self.act_toggle_left_panel.setChecked(bool(value))
             if schedule_gallery_relayout:
@@ -1631,11 +1624,12 @@ class WindowSidebarBulkMixin:
 
     def _bulk_ocr_action_buttons(self) -> list[dict]:
         icons_dir = Path(__file__).with_name("web") / "icons"
+        no_text_icon = "text-disabled-light.svg" if Theme.get_is_light() else "text-disabled.svg"
         return [
             {
                 "key": "no_text",
                 "label": "",
-                "icon": str(icons_dir / "text-disabled.svg"),
+                "icon": str(icons_dir / no_text_icon),
                 "icon_size": QSize(52, 24),
                 "tooltip": "Mark this file as no text detected",
             },
@@ -2178,6 +2172,15 @@ class WindowSidebarBulkMixin:
             self._active_tag_scope_name = ""
         self._invalidate_tag_list_scope_counts_cache()
         self._refresh_tag_list_panel()
+
+    def _schedule_tag_list_scope_counts_refresh(self, delay_ms: int = 450) -> None:
+        timer = getattr(self, "_tag_list_scope_counts_refresh_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._refresh_tag_list_scope_counts)
+            self._tag_list_scope_counts_refresh_timer = timer
+        timer.start(max(0, int(delay_ms or 0)))
 
     def _refresh_tag_list_rows_state(self) -> None:
         if not hasattr(self, "tag_list_panel") or not self._is_tag_list_panel_visible():

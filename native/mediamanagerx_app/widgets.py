@@ -1293,10 +1293,27 @@ class BulkSelectedFileRow(QWidget):
             bg = str(getattr(self, "_thumb_bg", "transparent") or "transparent")
             border = str(getattr(self, "_thumb_active_border", "") or "").strip()
             frame_accent = QColor(str(getattr(self, "_thumb_frame_accent", "") or "#8ab4f8"))
-            border_color = border if border else Theme.get_input_border(frame_accent)
+            border_color = border if border else Theme.get_border(frame_accent)
             self.thumb_lbl.setStyleSheet(
                 f"QLabel#bulkSelectedFileThumb {{ background-color: {bg}; border: 1px solid {border_color}; border-radius: 6px; }}"
             )
+        except RuntimeError:
+            pass
+
+    def refresh_theme(self, accent_color: str = "") -> None:
+        try:
+            if str(accent_color or "").strip():
+                self._thumb_frame_accent = str(accent_color or "").strip()
+            self._apply_thumbnail_frame_style()
+            icon_path = Path(__file__).with_name("web") / "icons" / (
+                "text-disabled-light.svg" if Theme.get_is_light() else "text-disabled.svg"
+            )
+            for button in getattr(self, "action_buttons", []) or []:
+                if str(button.property("bulkActionKey") or "") == "no_text":
+                    button.setIcon(QIcon(str(icon_path)))
+                    button.setIconSize(QSize(52, 24))
+                    button.update()
+            self.update()
         except RuntimeError:
             pass
 
@@ -2017,7 +2034,8 @@ class TagListComboPopupView(QListView):
         is_hidden = bool(index.data(Qt.ItemDataRole.UserRole + 1))
 
         self.combo.setCurrentIndex(index.row())
-        menu = QMenu(self)
+        window = self.window()
+        menu = window._create_themed_context_menu(self) if hasattr(window, "_create_themed_context_menu") else QMenu(self)
         act_toggle_hidden = menu.addAction("Unhide Tag List" if is_hidden else "Hide Tag List")
         act_rename = menu.addAction("Rename Tag List...")
         act_delete = menu.addAction("Delete Tag List")

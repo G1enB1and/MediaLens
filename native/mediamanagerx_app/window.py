@@ -91,7 +91,7 @@ class MainWindow(WindowAppLifecycleMixin, WindowNativeActionsMixin, WindowPrevie
         self.bridge.refreshFolderRequested.connect(self._refresh_current_folder)
         self.bridge.openSettingsDialogRequested.connect(self.open_settings)
         self.bridge.accentColorChanged.connect(self._on_accent_changed)
-        self.bridge.galleryScopeChanged.connect(self._refresh_tag_list_scope_counts)
+        self.bridge.galleryScopeChanged.connect(self._schedule_tag_list_scope_counts_refresh)
         self.bridge.manualOcrFinished.connect(self._on_manual_ocr_finished)
         self.bridge.localAiCaptioningStarted.connect(self._on_local_ai_captioning_started)
         self.bridge.localAiCaptioningProgress.connect(self._on_local_ai_captioning_progress)

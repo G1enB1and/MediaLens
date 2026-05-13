@@ -47,6 +47,7 @@ class Bridge(BridgeMediaListingScanMixin, BridgeTagsMetadataMixin, BridgeLocalAi
     openSettingsDialogRequested = Signal()
 
     accentColorChanged = Signal(str)
+    webThemeReady = Signal(str)
     # Async file ops (so WebEngine UI doesn't freeze during rename)
     fileOpFinished = Signal(str, bool, str, str)  # op, ok, old_path, new_path
 

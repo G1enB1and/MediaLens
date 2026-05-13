@@ -108,6 +108,27 @@ class Theme:
     def get_input_border(accent: QColor) -> str:
         return Theme.get_border(accent)
 
+    @staticmethod
+    def get_contrast_text(color: QColor | str) -> str:
+        q = QColor(color)
+        if not q.isValid():
+            return "#ffffff"
+
+        def _to_linear(channel: int) -> float:
+            value = max(0.0, min(1.0, channel / 255.0))
+            if value <= 0.04045:
+                return value / 12.92
+            return ((value + 0.055) / 1.055) ** 2.4
+
+        luminance = (
+            0.2126 * _to_linear(q.red())
+            + 0.7152 * _to_linear(q.green())
+            + 0.0722 * _to_linear(q.blue())
+        )
+        contrast_black = (luminance + 0.05) / 0.05
+        contrast_white = 1.05 / (luminance + 0.05)
+        return "#000000" if contrast_black >= contrast_white else "#ffffff"
+
     ACCENT_DEFAULT = "#8ab4f8"
 
 
@@ -119,24 +140,7 @@ class ToolTipProxyStyle(QProxyStyle):
 
 
 def _selection_text_for_color(color: QColor | str) -> str:
-    q = QColor(color)
-    if not q.isValid():
-        return "#ffffff"
-
-    def _to_linear(channel: int) -> float:
-        value = max(0.0, min(1.0, channel / 255.0))
-        if value <= 0.04045:
-            return value / 12.92
-        return ((value + 0.055) / 1.055) ** 2.4
-
-    luminance = (
-        0.2126 * _to_linear(q.red())
-        + 0.7152 * _to_linear(q.green())
-        + 0.0722 * _to_linear(q.blue())
-    )
-    contrast_black = (luminance + 0.05) / 0.05
-    contrast_white = 1.05 / (luminance + 0.05)
-    return "#000000" if contrast_black >= contrast_white else "#ffffff"
+    return Theme.get_contrast_text(color)
 
 
 def _dialog_accent() -> QColor:
@@ -146,6 +150,25 @@ def _dialog_accent() -> QColor:
         accent = Theme.ACCENT_DEFAULT
     resolved = QColor(accent)
     return resolved if resolved.isValid() else QColor(Theme.ACCENT_DEFAULT)
+
+
+def _apply_themed_dialog_title_bar(dialog: QWidget, accent_q: QColor) -> None:
+    if os.name != "nt":
+        return
+    try:
+        hwnd = int(dialog.winId())
+        bg = QColor(Theme.get_bg(accent_q))
+        bg_ref = int(bg.red()) | (int(bg.green()) << 8) | (int(bg.blue()) << 16)
+        text_color = QColor(Theme.get_text_color())
+        text_ref = int(text_color.red()) | (int(text_color.green()) << 8) | (int(text_color.blue()) << 16)
+        dark_value = ctypes.c_int(0 if Theme.get_is_light() else 1)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(dark_value), ctypes.sizeof(dark_value))
+        bg_value = ctypes.c_int(bg_ref)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 35, ctypes.byref(bg_value), ctypes.sizeof(bg_value))
+        text_value = ctypes.c_int(text_ref)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 36, ctypes.byref(text_value), ctypes.sizeof(text_value))
+    except Exception:
+        pass
 
 
 def _themed_input_dialog_stylesheet(accent_q: QColor) -> str:
@@ -317,6 +340,7 @@ def _run_themed_question_dialog(
     dialog.setStandardButtons(buttons)
     dialog.setDefaultButton(default_button)
     dialog.setStyleSheet(_themed_message_box_stylesheet(accent_q))
+    QTimer.singleShot(0, lambda: _apply_themed_dialog_title_bar(dialog, accent_q))
     return QMessageBox.StandardButton(dialog.exec())
 
 
@@ -335,8 +359,10 @@ def _run_themed_text_input_dialog(
     dialog.setTextValue(str(text or ""))
     dialog.setTextEchoMode(echo)
     dialog.setOption(QInputDialog.InputDialogOption.UsePlainTextEditForTextInput, False)
-    dialog.setStyleSheet(_themed_input_dialog_stylesheet(_dialog_accent()))
+    accent_q = _dialog_accent()
+    dialog.setStyleSheet(_themed_input_dialog_stylesheet(accent_q))
     dialog.resize(420, dialog.sizeHint().height())
+    QTimer.singleShot(0, lambda: _apply_themed_dialog_title_bar(dialog, accent_q))
     ok = dialog.exec() == int(QDialog.DialogCode.Accepted)
     return dialog.textValue(), ok
 
@@ -359,8 +385,10 @@ def _run_themed_item_input_dialog(
     if items:
         safe_index = max(0, min(int(current), len(items) - 1))
         dialog.setTextValue(str(items[safe_index]))
-    dialog.setStyleSheet(_themed_input_dialog_stylesheet(_dialog_accent()))
+    accent_q = _dialog_accent()
+    dialog.setStyleSheet(_themed_input_dialog_stylesheet(accent_q))
     dialog.resize(440, dialog.sizeHint().height())
+    QTimer.singleShot(0, lambda: _apply_themed_dialog_title_bar(dialog, accent_q))
     ok = dialog.exec() == int(QDialog.DialogCode.Accepted)
     return dialog.textValue(), ok
 

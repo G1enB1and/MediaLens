@@ -119,7 +119,7 @@ class WindowNativeActionsMixin:
         if not folder_path:
             return
 
-        menu = QMenu(self)
+        menu = self._create_themed_context_menu(self) if hasattr(self, "_create_themed_context_menu") else QMenu(self)
 
         name = Path(folder_path).name
         is_hidden = self.bridge.repo.is_path_hidden(folder_path)
@@ -139,10 +139,10 @@ class WindowNativeActionsMixin:
         else:
             act_pin = menu.addAction("Pin Folder")
 
-        act_rename = menu.addAction("Renameâ€¦")
+        act_rename = menu.addAction("Rename...")
         
         menu.addSeparator()
-        act_new_folder = menu.addAction("New Folderâ€¦")
+        act_new_folder = menu.addAction("New Folder...")
         act_delete = menu.addAction("Delete")
         
         menu.addSeparator()
@@ -401,30 +401,38 @@ class WindowNativeActionsMixin:
             h = self.splitter.handle(i)
             if h:
                 h.update()
-                h.repaint()
         if hasattr(self, "center_splitter"):
             for i in range(self.center_splitter.count()):
                 h = self.center_splitter.handle(i)
                 if h:
                     h.update()
-                    h.repaint()
         if hasattr(self, "right_splitter"):
             for i in range(self.right_splitter.count()):
                 h = self.right_splitter.handle(i)
                 if h:
                     h.update()
-                    h.repaint()
 
     def _on_accent_changed(self, accent_color: str) -> None:
         """Called when the bridge emits accentColorChanged."""
         self._current_accent = accent_color
+        self._schedule_deferred_theme_refresh(accent_color)
+
+    def _schedule_deferred_theme_refresh(self, accent_color: str, delay_ms: int = 40) -> None:
+        self._current_accent = accent_color
+        self._pending_theme_refresh_accent = accent_color
+        timer = getattr(self, "_theme_refresh_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._run_deferred_theme_refresh)
+            self._theme_refresh_timer = timer
+        timer.start(max(0, int(delay_ms or 0)))
+
+    def _run_deferred_theme_refresh(self) -> None:
+        accent_color = str(getattr(self, "_pending_theme_refresh_accent", self._current_accent) or self._current_accent)
+        self._current_accent = accent_color
         self._update_native_styles(accent_color)
         self._update_splitter_style(accent_color)
-        self._apply_compare_panel_theme(accent_color)
-        if hasattr(self, "compare_panel"):
-            self.compare_panel.update()
-            self.compare_panel.repaint()
-        QTimer.singleShot(0, lambda: self._apply_compare_panel_theme(accent_color))
         
         # Update tooltip theme
         if hasattr(self, "native_tooltip"):
@@ -446,17 +454,20 @@ class WindowNativeActionsMixin:
             for widget in refresh_widgets:
                 if widget is None:
                     continue
-                widget.style().unpolish(widget)
-                widget.style().polish(widget)
                 widget.update()
-                widget.repaint()
             for sep in self.findChildren(NativeSeparator):
                 sep.update()
-                sep.repaint()
             if hasattr(self, "splitter"):
                 self.splitter.update()
             if hasattr(self, "center_splitter"):
                 self.center_splitter.update()
+        except Exception:
+            pass
+        try:
+            QTimer.singleShot(
+                150,
+                lambda: self.bridge.webThemeReady.emit("light" if Theme.get_is_light() else "dark"),
+            )
         except Exception:
             pass
 
@@ -530,6 +541,7 @@ class WindowNativeActionsMixin:
         scrollbar_style = self._get_native_scrollbar_style(accent)
         text = Theme.get_text_color()
         text_muted = Theme.get_text_muted()
+        selection_text = Theme.get_contrast_text(accent)
         is_light = Theme.get_is_light()
         combo_arrow_svg = (
             (Path(__file__).with_name("web") / "icons" / "chevron-down-light.svg")
@@ -697,7 +709,7 @@ class WindowNativeActionsMixin:
             {scrollbar_style}
         """)
         if hasattr(self, "pinned_folders_list"):
-            self._reload_pinned_folders()
+            self._refresh_pinned_folder_rows_theme()
         
         # Right Panel (Tag List + Metadata)
         if hasattr(self, "right_panel_host"):
@@ -899,6 +911,44 @@ class WindowNativeActionsMixin:
                 QWidget#tagListTagRow {{
                     background: transparent;
                 }}
+                QWidget#ocrReviewPanel,
+                QWidget#ocrReviewHeaderRow,
+                QWidget#ocrReviewBody,
+                QWidget#ocrReviewFieldsPanel,
+                QWidget#ocrReviewButtonRow,
+                QWidget#ocrReviewNavRow {{
+                    background-color: {sb_bg_str};
+                    color: {text};
+                }}
+                QLabel#ocrReviewTitleLabel,
+                QLabel#ocrReviewFilenameLabel {{
+                    background-color: {sb_bg_str};
+                    color: {text};
+                    font-weight: 700;
+                }}
+                QLabel#ocrReviewFieldLabel {{
+                    background-color: {sb_bg_str};
+                    color: {text_muted};
+                }}
+                QLabel#bulkTagEditorStatusLabel {{
+                    background-color: {sb_bg_str};
+                    color: {text_muted};
+                }}
+                QLabel#ocrReviewImageLabel {{
+                    background-color: {Theme.get_control_bg(accent)};
+                    border: 1px solid {Theme.get_border(accent)};
+                    border-radius: 8px;
+                    color: {text_muted};
+                }}
+                QPlainTextEdit#ocrReviewTextEdit {{
+                    background-color: {Theme.get_control_bg(accent)};
+                    color: {text};
+                    border: 1px solid {Theme.get_border(accent)};
+                    border-radius: 6px;
+                    padding: 6px;
+                    selection-background-color: {accent_str};
+                    selection-color: {"#000" if is_light else "#fff"};
+                }}
                 {scrollbar_style}
             """
             if hasattr(self, "right_companion_stack"):
@@ -906,7 +956,7 @@ class WindowNativeActionsMixin:
             self.tag_list_panel.setStyleSheet(companion_style)
             if hasattr(self, "ocr_review_panel"):
                 self.ocr_review_panel.setStyleSheet(companion_style)
-            self._apply_tag_list_theme()
+                self._apply_ocr_review_palette(sb_bg_str)
 
         # Metadata - Mirroring Left Panel Background precisely
         self.right_panel.setStyleSheet(f"background-color: {sb_bg_str}; border-left: none;")
@@ -924,6 +974,10 @@ class WindowNativeActionsMixin:
                 QWidget#bottomPanel {{
                     background-color: {sb_bg_str};
                     border-top: 1px solid {Theme.get_border(accent)};
+                }}
+                QWidget#bottomPanelHeaderRow {{
+                    background-color: {sb_bg_str};
+                    border: none;
                 }}
                 QLabel#bottomPanelHeader {{
                     color: {text};
@@ -1013,8 +1067,15 @@ class WindowNativeActionsMixin:
                 self.bottom_panel_header.setStyleSheet(
                     f"color: {text}; font-weight: 700; font-size: 14px; background: transparent;"
                 )
+            if hasattr(self, "bottom_panel_header_row"):
+                header_palette = self.bottom_panel_header_row.palette()
+                header_palette.setColor(QPalette.ColorRole.Window, QColor(sb_bg_str))
+                header_palette.setColor(QPalette.ColorRole.Base, QColor(sb_bg_str))
+                self.bottom_panel_header_row.setAutoFillBackground(True)
+                self.bottom_panel_header_row.setPalette(header_palette)
+                self.bottom_panel_header_row.update()
             if hasattr(self, "compare_panel"):
-                self._apply_compare_panel_theme(accent_str)
+                QTimer.singleShot(120, lambda accent_value=accent_str: self._apply_compare_panel_theme(accent_value))
         
         self.scroll_area.setStyleSheet(f"""
             QScrollArea {{ background-color: {sb_bg_str}; border: none; }}
@@ -1036,7 +1097,6 @@ class WindowNativeActionsMixin:
             viewport.setAutoFillBackground(True)
             viewport.setPalette(viewport_palette)
             viewport.update()
-            viewport.repaint()
         except Exception:
             pass
         try:
@@ -1049,7 +1109,6 @@ class WindowNativeActionsMixin:
                 bulk_viewport.setAutoFillBackground(True)
                 bulk_viewport.setPalette(bulk_viewport_palette)
                 bulk_viewport.update()
-                bulk_viewport.repaint()
         except Exception:
             pass
 
@@ -1131,6 +1190,8 @@ class WindowNativeActionsMixin:
                 border-radius: 4px;
                 padding: 4px;
                 color: {text};
+                selection-background-color: {accent_str};
+                selection-color: {selection_text};
             }}
             QPlainTextEdit#metaStatusLabel {{
                 background: transparent;
@@ -1376,10 +1437,76 @@ class WindowNativeActionsMixin:
                 self.bulk_caption_scroll_container.setStyleSheet(bulk_editor_style)
             if hasattr(self, "bulk_ocr_scroll_container"):
                 self.bulk_ocr_scroll_container.setStyleSheet(bulk_editor_style)
+            self._refresh_bulk_editor_row_theme(accent_str)
         self._update_preview_play_button_icon()
         self._apply_tag_list_theme()
         
         self._update_app_style(accent)
+
+    def _refresh_pinned_folder_rows_theme(self) -> None:
+        if not hasattr(self, "pinned_folders_list"):
+            return
+        try:
+            for row in range(self.pinned_folders_list.count()):
+                item = self.pinned_folders_list.item(row)
+                if item is None:
+                    continue
+                row_widget = self.pinned_folders_list.itemWidget(item)
+                if not isinstance(row_widget, QWidget):
+                    continue
+                pin_label = row_widget.property("pinLabel")
+                if isinstance(pin_label, QLabel):
+                    pin_label.setPixmap(self._create_pinned_icon_pixmap())
+                self._set_pinned_folder_row_selected(row_widget, item.isSelected())
+        except Exception:
+            pass
+
+    def _apply_ocr_review_palette(self, background_color: str) -> None:
+        widgets = [
+            getattr(self, "ocr_review_panel", None),
+            getattr(self, "ocr_review_header_row", None),
+            getattr(self, "ocr_review_body", None),
+            getattr(self, "ocr_review_fields_panel", None),
+            getattr(self, "ocr_review_nav_row", None),
+        ]
+        try:
+            if hasattr(self, "ocr_review_fields_panel"):
+                widgets.extend(self.ocr_review_fields_panel.findChildren(QWidget, "ocrReviewButtonRow"))
+            color = QColor(background_color)
+            for widget in widgets:
+                if not isinstance(widget, QWidget):
+                    continue
+                palette = widget.palette()
+                palette.setColor(QPalette.ColorRole.Window, color)
+                palette.setColor(QPalette.ColorRole.Base, color)
+                widget.setAutoFillBackground(True)
+                widget.setPalette(palette)
+                widget.update()
+        except Exception:
+            pass
+
+    def _refresh_bulk_editor_row_theme(self, accent_color: str) -> None:
+        try:
+            icons_dir = Path(__file__).with_name("web") / "icons"
+            no_text_icon = icons_dir / ("text-disabled-light.svg" if Theme.get_is_light() else "text-disabled.svg")
+            if hasattr(self, "ocr_review_no_text_btn"):
+                self.ocr_review_no_text_btn.setIcon(QIcon(str(no_text_icon)))
+                self.ocr_review_no_text_btn.setIconSize(QSize(52, 24))
+                self.ocr_review_no_text_btn.update()
+            for list_widget in (
+                getattr(self, "bulk_selected_files_list", None),
+                getattr(self, "bulk_caption_selected_files_list", None),
+                getattr(self, "bulk_ocr_selected_files_list", None),
+            ):
+                if not isinstance(list_widget, QListWidget):
+                    continue
+                for row_idx in range(list_widget.count()):
+                    item = list_widget.item(row_idx)
+                    row = list_widget.itemWidget(item) if item is not None else None
+                    if hasattr(row, "refresh_theme"):
+                        row.refresh_theme(accent_color)
+        except Exception:
+            pass
 
 
 

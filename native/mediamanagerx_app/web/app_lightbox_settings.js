@@ -472,10 +472,21 @@ function navigateToGalleryPage(pageIndex) {
   const nextPageIndex = Math.max(0, Math.min(tp - 1, Number(pageIndex) || 0));
   if (nextPageIndex === gPage) return;
   gPage = nextPageIndex;
-  gPendingScrollAnchor = null;
+  clearGalleryForPendingRefresh('Loading page...');
   const main = document.querySelector('main');
   if (main) main.scrollTop = 0;
-  refreshFromBridge(gBridge);
+  renderPager();
+  refreshFromBridge(gBridge, false);
+}
+
+function clearGalleryForPendingRefresh(message) {
+  gPendingScrollAnchor = null;
+  gLastGalleryRenderSignature = '';
+  const mediaList = document.getElementById('mediaList');
+  if (mediaList) mediaList.replaceChildren();
+  gMedia = [];
+  renderTimelineRail([]);
+  setGlobalLoading(true, message || 'Loading gallery...', 10);
 }
 
 function refreshFromBridge(bridge, resetPage = false) {
@@ -848,10 +859,9 @@ function wireSettings() {
   if (toggleShowHidden) {
     toggleShowHidden.addEventListener('change', () => {
       if (!gBridge || !gBridge.set_setting_bool) return;
-      gBridge.set_setting_bool('gallery.show_hidden', !!toggleShowHidden.checked, function () {
-        gPage = 0;
-        refreshFromBridge(gBridge);
-      });
+      gPage = 0;
+      clearGalleryForPendingRefresh('Loading gallery...');
+      gBridge.set_setting_bool('gallery.show_hidden', !!toggleShowHidden.checked, function () {});
     });
   }
 
@@ -859,10 +869,9 @@ function wireSettings() {
     if (!gBridge || !gBridge.set_setting_bool) return;
     gIncludeNestedFiles = !!checked;
     syncGalleryScopeToggles();
-    gBridge.set_setting_bool('gallery.include_nested_files', gIncludeNestedFiles, function () {
-      gPage = 0;
-      refreshFromBridge(gBridge);
-    });
+    gPage = 0;
+    clearGalleryForPendingRefresh('Loading gallery...');
+    gBridge.set_setting_bool('gallery.include_nested_files', gIncludeNestedFiles, function () {});
   };
 
   if (toggleIncludeNestedFiles) {
@@ -882,10 +891,9 @@ function wireSettings() {
       if (!gBridge || !gBridge.set_setting_bool) return;
       gShowFoldersInGallery = !!toggleShowFoldersInGallery.checked;
       syncGalleryScopeToggles();
-      gBridge.set_setting_bool('gallery.show_folders', gShowFoldersInGallery, function () {
-        gPage = 0;
-        refreshFromBridge(gBridge);
-      });
+      gPage = 0;
+      clearGalleryForPendingRefresh('Loading gallery...');
+      gBridge.set_setting_bool('gallery.show_folders', gShowFoldersInGallery, function () {});
     });
   }
 
@@ -990,8 +998,6 @@ function wireSettings() {
     radio.addEventListener('change', () => {
       if (!radio.checked || !gBridge || !gBridge.set_setting_str) return;
       const theme = radio.value;
-      document.documentElement.classList.toggle('light-mode', theme === 'light');
-      updateThemeAwareIcons(theme);
       gBridge.set_setting_str('ui.theme_mode', theme, function () { });
     });
   });
