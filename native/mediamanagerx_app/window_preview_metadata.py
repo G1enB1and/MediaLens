@@ -1563,9 +1563,63 @@ class WindowPreviewMetadataMixin:
         self._refresh_tag_list_scope_counts()
 
     def _save_native_tags(self) -> None:
-        # We delegate to the main metadata saver to avoid logic duplication
-        # (Editing tags triggers a soft save).
-        self._save_native_metadata()
+        self._save_tags_metadata()
+
+    def _metadata_save_paths(self) -> tuple[list[str], bool]:
+        paths = self._current_file_paths()
+        if not paths and hasattr(self, "_current_path") and self._current_path:
+            paths = [self._current_path]
+        return paths, len(paths) > 1
+
+    def _set_metadata_save_status(self, message: str) -> None:
+        try:
+            status_label = self._active_status_label()
+            status_label.setText(message)
+            QTimer.singleShot(3000, lambda: status_label.setText(""))
+        except Exception:
+            pass
+
+    def _save_tags_metadata(self) -> None:
+        paths, is_bulk = self._metadata_save_paths()
+        if not paths:
+            return
+        tags = self._normalize_tag_list(self._tag_editor_text())
+        try:
+            if is_bulk:
+                for path in paths:
+                    existing = self.bridge.get_media_metadata(path).get("tags", [])
+                    self.bridge.set_media_tags(path, self._merge_tag_lists(existing, tags))
+            else:
+                self.bridge.set_media_tags(paths[0], tags)
+            self._invalidate_tag_list_scope_counts_cache()
+            self._refresh_tag_list_scope_counts()
+            self._set_metadata_save_status("Tags saved")
+        except Exception as exc:
+            self._set_metadata_save_status(f"Tags save failed: {exc}")
+
+    def _save_description_metadata(self) -> None:
+        paths, is_bulk = self._metadata_save_paths()
+        if not paths or is_bulk:
+            return
+        path = paths[0]
+        desc = self.meta_desc.toPlainText()
+        try:
+            self.bridge.update_media_metadata(path, "", desc, self.meta_notes.toPlainText(), "", "", self.meta_ai_prompt_edit.toPlainText(), self.meta_ai_negative_prompt_edit.toPlainText(), self.meta_ai_params_edit.toPlainText())
+            self._set_metadata_save_status("Description saved")
+        except Exception as exc:
+            self._set_metadata_save_status(f"Description save failed: {exc}")
+
+    def _save_text_ocr_metadata(self) -> None:
+        paths, is_bulk = self._metadata_save_paths()
+        if not paths or is_bulk:
+            return
+        path = paths[0]
+        detected_text = self.meta_detected_text_edit.toPlainText()
+        try:
+            self.bridge.update_media_detected_text(path, detected_text)
+            self._set_metadata_save_status("Text OCR saved")
+        except Exception as exc:
+            self._set_metadata_save_status(f"Text OCR save failed: {exc}")
 
     def _schedule_show_metadata_for_path(self, paths: list[str]) -> None:
         self._pending_metadata_paths = [str(path or "") for path in list(paths or [])]
@@ -1678,6 +1732,8 @@ class WindowPreviewMetadataMixin:
             self._sync_sidebar_panel_widths()
         self._sync_sidebar_video_preview_controls()
         self.btn_save_meta.setVisible(True)
+        if hasattr(self, "meta_bottom_actions_sep"):
+            self.meta_bottom_actions_sep.setVisible(True)
         self.btn_clear_bulk_tags.setVisible(False)
         self.btn_import_exif.setVisible(not is_bulk)
         self.btn_merge_hidden_meta.setVisible(not is_bulk)
@@ -1770,6 +1826,8 @@ class WindowPreviewMetadataMixin:
         self.lbl_text_detected_note.setVisible(not is_bulk and show_text_detected)
         self.lbl_detected_text_cap.setVisible(not is_bulk and show_text_detected)
         self.meta_detected_text_edit.setVisible(not is_bulk and show_text_detected)
+        if hasattr(self, "btn_save_text_ocr"):
+            self.btn_save_text_ocr.setVisible(not is_bulk and show_text_detected)
         self.ocr_progress_lbl.setVisible(
             not is_bulk and show_text_detected and bool(self.ocr_progress_lbl.text().strip())
         )
@@ -1783,6 +1841,8 @@ class WindowPreviewMetadataMixin:
         self.meta_fps_lbl.setVisible(not is_bulk and show_fps)
         self.meta_codec_lbl.setVisible(not is_bulk and show_codec)
         self.meta_audio_lbl.setVisible(not is_bulk and show_audio)
+        if hasattr(self, "btn_save_description"):
+            self.btn_save_description.setVisible(not is_bulk and show_description)
         self.meta_camera_lbl.setVisible(not is_bulk and show_camera)
         self.meta_location_lbl.setVisible(not is_bulk and show_location)
         self.meta_iso_lbl.setVisible(not is_bulk and show_iso)
@@ -1917,6 +1977,8 @@ class WindowPreviewMetadataMixin:
         tags_visible = not is_bulk and ("tags" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "tags", True))
         self.lbl_tags_cap.setVisible(tags_visible)
         self.meta_tags.setVisible(tags_visible)
+        if hasattr(self, "btn_save_tags"):
+            self.btn_save_tags.setVisible(tags_visible)
         self.generate_tags_btn_row.setVisible(tags_visible)
         self.generate_tags_progress_lbl.setVisible(tags_visible and bool(self.generate_tags_progress_lbl.text().strip()))
         self.generate_tags_error_edit.setVisible(tags_visible and bool(self.generate_tags_error_edit.toPlainText().strip()))
@@ -3074,6 +3136,7 @@ class WindowPreviewMetadataMixin:
                 self.lbl_text_detected_note,
                 self.lbl_detected_text_cap,
                 self.meta_detected_text_edit,
+                self.btn_save_text_ocr,
                 self.ocr_progress_lbl,
                 self.ocr_error_edit,
                 self.ocr_button_row,
@@ -3085,6 +3148,7 @@ class WindowPreviewMetadataMixin:
             "description": [
                 self.lbl_desc_cap,
                 self.meta_desc,
+                self.btn_save_description,
                 self.generate_description_btn_row,
                 self.generate_description_progress_lbl,
                 self.generate_description_error_edit,
@@ -3092,6 +3156,7 @@ class WindowPreviewMetadataMixin:
             "tags": [
                 self.lbl_tags_cap,
                 self.meta_tags,
+                self.btn_save_tags,
                 self.generate_tags_btn_row,
                 self.generate_tags_progress_lbl,
                 self.generate_tags_error_edit,

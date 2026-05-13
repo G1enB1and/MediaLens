@@ -633,6 +633,8 @@ class WindowAppLifecycleMixin:
             self._save_bottom_panel_height()
             self._save_tag_list_panel_width()
             if hasattr(self, "left_sections_splitter"):
+                if hasattr(self, "_save_left_section_expanded_heights"):
+                    self._save_left_section_expanded_heights()
                 self.bridge.settings.setValue("ui/left_sections_splitter_state_v3", self.left_sections_splitter.saveState())
         except Exception:
             pass

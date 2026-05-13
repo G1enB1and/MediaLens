@@ -75,14 +75,44 @@ class WindowLayoutPanelsMixin:
         except Exception:
             return fallback
 
+    def _left_section_min_expanded_height(self, key: str, collapsed_height: int) -> int:
+        if key == "pinned":
+            return max(collapsed_height + 52, 88)
+        return max(collapsed_height + 40, 72)
+
+    def _left_section_target_height(self, key: str, collapsed_height: int) -> int:
+        fallback = max(self._left_section_default_expanded_height(key), self._left_section_min_expanded_height(key, collapsed_height))
+        return max(
+            self._left_section_saved_expanded_height(key, fallback),
+            self._left_section_min_expanded_height(key, collapsed_height),
+        )
+
     def _remember_left_section_expanded_height(self, key: str, index: int, collapsed_height: int) -> None:
         try:
             sizes = self.left_sections_splitter.sizes()
             if index < 0 or index >= len(sizes):
                 return
             current = int(sizes[index])
-            if current > collapsed_height + 12:
+            if current >= self._left_section_min_expanded_height(key, collapsed_height):
                 self.bridge.settings.setValue(f"ui/left_section_{key}_height", current)
+        except Exception:
+            pass
+
+    def _save_left_section_expanded_heights(self) -> None:
+        try:
+            splitter = self.left_sections_splitter
+            sizes = [int(size) for size in splitter.sizes()]
+            for key, section_info in getattr(self, "_left_sidebar_sections", {}).items():
+                body = section_info.get("body")
+                if body is None or not body.isVisible():
+                    continue
+                section = section_info["section"]
+                layout = section_info["layout"]
+                index = splitter.indexOf(section)
+                if index < 0 or index >= len(sizes):
+                    continue
+                collapsed_height = self._left_section_collapsed_height(section, layout)
+                self._remember_left_section_expanded_height(key, index, collapsed_height)
         except Exception:
             pass
 
@@ -97,8 +127,7 @@ class WindowLayoutPanelsMixin:
                 return
 
             if expanded:
-                fallback = max(self._left_section_default_expanded_height(key), collapsed_height + 80)
-                target = max(self._left_section_saved_expanded_height(key, fallback), collapsed_height + 40)
+                target = self._left_section_target_height(key, collapsed_height)
             else:
                 target = collapsed_height
 
@@ -118,7 +147,12 @@ class WindowLayoutPanelsMixin:
                     donor_indices.append(donor_index)
             if not donor_indices:
                 donor_indices = [i for i in range(len(sizes)) if i != index]
-            donor_indices.sort(key=lambda i: sizes[i], reverse=True)
+            donor_indices.sort(
+                key=lambda i: (
+                    1 if self.left_sections_splitter.widget(i) is self._left_sidebar_sections.get("pinned", {}).get("section") else 0,
+                    -sizes[i],
+                )
+            )
 
             if delta < 0 and donor_indices:
                 sizes[donor_indices[0]] += abs(delta)
@@ -134,7 +168,13 @@ class WindowLayoutPanelsMixin:
                     )
                     if donor_info is None:
                         continue
-                    donor_min = self._left_section_collapsed_height(donor_info["section"], donor_info["layout"])
+                    donor_key = str(donor_info["toggle"].property("sectionKey") or "")
+                    donor_collapsed = self._left_section_collapsed_height(donor_info["section"], donor_info["layout"])
+                    donor_min = (
+                        self._left_section_min_expanded_height(donor_key, donor_collapsed)
+                        if donor_info["body"].isVisible()
+                        else donor_collapsed
+                    )
                     available = max(0, sizes[donor_index] - donor_min)
                     take = min(available, remaining)
                     sizes[donor_index] -= take
@@ -169,7 +209,7 @@ class WindowLayoutPanelsMixin:
             pass
         body.setVisible(expanded)
         if expanded:
-            section.setMinimumHeight(collapsed_height)
+            section.setMinimumHeight(self._left_section_min_expanded_height(key, collapsed_height))
             section.setMaximumHeight(16777215)
         else:
             section.setMinimumHeight(collapsed_height)
@@ -195,7 +235,66 @@ class WindowLayoutPanelsMixin:
                 expanded = bool(self.bridge.settings.value(f"ui/left_section_{key}_expanded", True, type=bool))
             except Exception:
                 expanded = True
-            self._set_left_section_expanded(key, expanded, persist=False)
+            section_info = getattr(self, "_left_sidebar_sections", {}).get(key)
+            if not section_info:
+                continue
+            section = section_info["section"]
+            body = section_info["body"]
+            layout = section_info["layout"]
+            toggle = section_info["toggle"]
+            toggle.blockSignals(True)
+            toggle.setChecked(expanded)
+            toggle.blockSignals(False)
+            self._set_left_section_toggle_icon(toggle, expanded)
+            body.setVisible(expanded)
+            collapsed_height = self._left_section_collapsed_height(section, layout)
+            section.setMinimumHeight(self._left_section_min_expanded_height(key, collapsed_height) if expanded else collapsed_height)
+            section.setMaximumHeight(16777215 if expanded else collapsed_height)
+        QTimer.singleShot(0, self._apply_left_section_saved_sizes)
+
+    def _apply_left_section_saved_sizes(self) -> None:
+        try:
+            splitter = self.left_sections_splitter
+            ordered_keys = ["pinned", "folders", "collections", "smart_collections"]
+            targets: list[int] = []
+            minimums: list[int] = []
+            for key in ordered_keys:
+                section_info = self._left_sidebar_sections[key]
+                collapsed_height = self._left_section_collapsed_height(section_info["section"], section_info["layout"])
+                if section_info["body"].isVisible():
+                    targets.append(self._left_section_target_height(key, collapsed_height))
+                    minimums.append(self._left_section_min_expanded_height(key, collapsed_height))
+                else:
+                    targets.append(collapsed_height)
+                    minimums.append(collapsed_height)
+
+            available = int(splitter.height() or 0)
+            if available <= 0:
+                available = sum(targets)
+
+            sizes = list(targets)
+            overflow = max(0, sum(sizes) - available)
+            shrink_order = ["folders", "smart_collections", "collections", "pinned"]
+            for key in shrink_order:
+                if overflow <= 0:
+                    break
+                index = ordered_keys.index(key)
+                can_take = max(0, sizes[index] - minimums[index])
+                take = min(can_take, overflow)
+                sizes[index] -= take
+                overflow -= take
+
+            extra = max(0, available - sum(sizes))
+            if extra:
+                for key in ("folders", "pinned", "collections", "smart_collections"):
+                    index = ordered_keys.index(key)
+                    if self._left_sidebar_sections[key]["body"].isVisible():
+                        sizes[index] += extra
+                        break
+
+            splitter.setSizes([max(1, int(size)) for size in sizes])
+        except Exception:
+            pass
 
     def _build_layout(self) -> None:
         try:
@@ -997,6 +1096,12 @@ class WindowLayoutPanelsMixin:
         self.meta_detected_text_edit.setObjectName("metaDetectedTextEdit")
         self.meta_detected_text_edit.setPlaceholderText("OCR text or manually entered text...")
         self.meta_detected_text_edit.setMaximumHeight(90)
+        self.btn_save_text_ocr = QPushButton("Save Text OCR to Database")
+        self.btn_save_text_ocr.setObjectName("btnSaveMeta")
+        self.btn_save_text_ocr.setProperty("baseText", "Save Text OCR to Database")
+        self.btn_save_text_ocr.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_save_text_ocr.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.btn_save_text_ocr.clicked.connect(self._save_text_ocr_metadata)
         self.ocr_progress_lbl = ProgressStatusLabel("")
         self.ocr_progress_lbl.setObjectName("localAiProgressLabel")
         self._configure_progress_status_label(self.ocr_progress_lbl)
@@ -1254,6 +1359,12 @@ class WindowLayoutPanelsMixin:
         self.meta_desc.setPlaceholderText("Add a description...")
         self.meta_desc.setMaximumHeight(130)
         self.meta_desc.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.btn_save_description = QPushButton("Save Description to Database")
+        self.btn_save_description.setObjectName("btnSaveMeta")
+        self.btn_save_description.setProperty("baseText", "Save Description to Database")
+        self.btn_save_description.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_save_description.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.btn_save_description.clicked.connect(self._save_description_metadata)
 
         self.generate_description_btn_row = QWidget()
         self.generate_description_btn_row.setObjectName("generateDescriptionButtonRow")
@@ -1290,6 +1401,12 @@ class WindowLayoutPanelsMixin:
         self.meta_tags.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.meta_tags.textChanged.connect(self._save_native_tags)
         self.meta_tags.textChanged.connect(lambda: self._refresh_tag_list_rows_state())
+        self.btn_save_tags = QPushButton("Save Tags to Database")
+        self.btn_save_tags.setObjectName("btnSaveMeta")
+        self.btn_save_tags.setProperty("baseText", "Save Tags to Database")
+        self.btn_save_tags.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_save_tags.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.btn_save_tags.clicked.connect(self._save_tags_metadata)
 
         self.generate_tags_btn_row = QWidget()
         self.generate_tags_btn_row.setObjectName("generateTagsButtonRow")
@@ -1402,6 +1519,9 @@ class WindowLayoutPanelsMixin:
         right_layout.addWidget(self.btn_clear_bulk_tags)
         self.btn_clear_bulk_tags.setVisible(False)
 
+        self.meta_bottom_actions_sep = self._add_sep("metaBottomActionsSeparator")
+        right_layout.addWidget(self.meta_bottom_actions_sep)
+
         self.btn_save_meta = QPushButton("Save Changes to Database")
         self.btn_save_meta.setObjectName("btnSaveMeta")
         self.btn_save_meta.setProperty("baseText", "Save Changes to Database")
@@ -1479,16 +1599,19 @@ class WindowLayoutPanelsMixin:
         self.bulk_mode_tags_btn = QPushButton("Tags")
         self.bulk_mode_tags_btn.setObjectName("bulkEditorModeButton")
         self.bulk_mode_tags_btn.setCheckable(True)
+        self.bulk_mode_tags_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.bulk_mode_tags_btn.clicked.connect(lambda checked=False: self._set_active_bulk_editor_mode("tags"))
         bulk_editor_mode_layout.addWidget(self.bulk_mode_tags_btn)
         self.bulk_mode_captions_btn = QPushButton("Descriptions")
         self.bulk_mode_captions_btn.setObjectName("bulkEditorModeButton")
         self.bulk_mode_captions_btn.setCheckable(True)
+        self.bulk_mode_captions_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.bulk_mode_captions_btn.clicked.connect(lambda checked=False: self._set_active_bulk_editor_mode("captions"))
         bulk_editor_mode_layout.addWidget(self.bulk_mode_captions_btn)
         self.bulk_mode_ocr_btn = QPushButton("Text OCR")
         self.bulk_mode_ocr_btn.setObjectName("bulkEditorModeButton")
         self.bulk_mode_ocr_btn.setCheckable(True)
+        self.bulk_mode_ocr_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.bulk_mode_ocr_btn.clicked.connect(lambda checked=False: self._set_active_bulk_editor_mode("ocr"))
         bulk_editor_mode_layout.addWidget(self.bulk_mode_ocr_btn)
         bulk_editor_mode_layout.addStretch(1)
