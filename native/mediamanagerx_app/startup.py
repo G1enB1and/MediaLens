@@ -124,7 +124,7 @@ def _download_update_installer_with_dialog(app: QApplication, version: str, pare
 
 
 def _launch_update_installer(setup_path: Path) -> None:
-    subprocess.Popen([str(setup_path), "/SILENT", "/SP-", "/NOICONS", "/RELAUNCH"])
+    _popen_hidden_subprocess([str(setup_path), "/SILENT", "/SP-", "/NOICONS", "/RELAUNCH"])
 
 
 def _run_startup_update_check(app: QApplication, settings: QSettings, parent: QWidget | None = None) -> bool:

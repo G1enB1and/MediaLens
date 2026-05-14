@@ -6,6 +6,9 @@ from native.mediamanagerx_app.settings_scanner_metadata_pages import *
 from native.mediamanagerx_app.settings_duplicate_pages import *
 
 class AISettingsPage(SettingsPage):
+    aiModelStatusResolved = Signal(str, "QVariantMap", int)
+    paddleStatusResolved = Signal("QVariantMap", int)
+
     def __init__(self, dialog: "SettingsDialog") -> None:
         super().__init__(dialog)
         from app.mediamanager.ai_captioning.local_captioning import (
@@ -30,6 +33,7 @@ class AISettingsPage(SettingsPage):
             "caption_start": DEFAULT_CAPTION_START,
             "bad_words": DEFAULT_BAD_WORDS,
         }
+        self._status_refresh_generation = 0
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
@@ -344,6 +348,8 @@ class AISettingsPage(SettingsPage):
             self.bridge.localAiModelInstallStatus.connect(self._on_local_ai_model_install_status)
         if hasattr(self.bridge, "paddleOcrRuntimeInstallStatus"):
             self.bridge.paddleOcrRuntimeInstallStatus.connect(self._on_paddle_ocr_runtime_install_status)
+        self.aiModelStatusResolved.connect(self._on_ai_model_status_resolved)
+        self.paddleStatusResolved.connect(self._on_paddle_status_resolved)
         self.tag_prompt_edit.textChanged.connect(self._save)
         self.caption_prompt_edit.textChanged.connect(self._save)
         self.ocr_prompt_edit.textChanged.connect(self._save)
@@ -451,28 +457,77 @@ class AISettingsPage(SettingsPage):
     def _refresh_ai_model_statuses(self) -> None:
         if bool(getattr(self, "_loading", False)):
             return
+        self._status_refresh_generation += 1
+        generation = self._status_refresh_generation
         for kind in ("tagger", "captioner", "ocr"):
             model_id = self._selected_ai_model_id(kind)
             if not model_id:
                 continue
             if hasattr(self.bridge, "get_local_ai_model_status"):
-                try:
-                    self._apply_ai_model_status(kind, dict(self.bridge.get_local_ai_model_status(model_id, self._model_status_kind(kind)) or {}))
-                except Exception as exc:
-                    self._apply_ai_model_status(kind, {"state": "error", "message": str(exc) or "Could not read model status."})
-        self._refresh_paddle_ocr_status()
+                self._apply_ai_model_status(kind, {"state": "checking", "message": "Checking runtime status."})
+                threading.Thread(
+                    target=self._resolve_ai_model_status_async,
+                    args=(kind, model_id, self._model_status_kind(kind), generation),
+                    daemon=True,
+                    name=f"settings-ai-status-{kind}",
+                ).start()
+        self._apply_paddle_ocr_status({"state": "checking", "message": "Checking runtime status."})
+        threading.Thread(
+            target=self._resolve_paddle_status_async,
+            args=(generation,),
+            daemon=True,
+            name="settings-ai-status-paddle-ocr",
+        ).start()
+
+    def _resolve_ai_model_status_async(self, kind: str, model_id: str, status_kind: str, generation: int) -> None:
+        try:
+            status = dict(self.bridge.get_local_ai_model_status(model_id, status_kind) or {})
+        except RuntimeError as exc:
+            if "already deleted" in str(exc):
+                return
+            status = {"state": "error", "message": str(exc) or "Could not read model status."}
+        except Exception as exc:
+            status = {"state": "error", "message": str(exc) or "Could not read model status."}
+        self.aiModelStatusResolved.emit(str(kind or ""), dict(status or {}), int(generation))
+
+    def _resolve_paddle_status_async(self, generation: int) -> None:
+        try:
+            status = dict(self.bridge.get_paddle_ocr_status() or {}) if hasattr(self.bridge, "get_paddle_ocr_status") else {}
+        except RuntimeError as exc:
+            if "already deleted" in str(exc):
+                return
+            status = {"installed": False, "error": str(exc)}
+        except Exception as exc:
+            status = {"installed": False, "error": str(exc)}
+        self.paddleStatusResolved.emit(dict(status or {}), int(generation))
+
+    def _on_ai_model_status_resolved(self, kind: str, status: dict, generation: int) -> None:
+        if int(generation) != int(getattr(self, "_status_refresh_generation", 0)):
+            return
+        self._apply_ai_model_status(str(kind or ""), dict(status or {}))
+
+    def _on_paddle_status_resolved(self, status: dict, generation: int) -> None:
+        if int(generation) != int(getattr(self, "_status_refresh_generation", 0)):
+            return
+        self._apply_paddle_ocr_status(dict(status or {}))
 
     def _refresh_paddle_ocr_status(self) -> None:
-        Theme = _theme_api()
-        is_light = Theme.get_is_light()
-        ok_color = "#238636" if is_light else "#7ee787"
-        bad_color = "#c62828" if is_light else "#ff7b72"
         try:
             status = dict(self.bridge.get_paddle_ocr_status() or {}) if hasattr(self.bridge, "get_paddle_ocr_status") else {}
         except Exception as exc:
             status = {"installed": False, "error": str(exc)}
+        self._apply_paddle_ocr_status(status)
+
+    def _apply_paddle_ocr_status(self, status: dict) -> None:
+        Theme = _theme_api()
+        is_light = Theme.get_is_light()
+        ok_color = "#238636" if is_light else "#7ee787"
+        bad_color = "#c62828" if is_light else "#ff7b72"
         if str(status.get("state") or "").strip() == "installing":
             self.paddle_fast_status_label.setText(html.escape(str(status.get("message") or "Paddle OCR runtime is installing.")))
+            return
+        if str(status.get("state") or "").strip() == "checking":
+            self.paddle_fast_status_label.setText(html.escape(str(status.get("message") or "Checking runtime status.")))
             return
         installed = bool(status.get("installed"))
         if installed:
@@ -681,10 +736,10 @@ class LocalAiSetupDialog(QDialog):
         self.statusResolved.connect(self._on_status_resolved)
         self.paddleStatusResolved.connect(self._on_paddle_status_resolved)
 
+        self._apply_theme()
         self._build_rows()
         self._set_advanced_visible(False)
-        self.refresh_statuses()
-        self._apply_theme()
+        QTimer.singleShot(0, self.refresh_statuses)
 
     def _on_ui_flag_changed(self, key: str, _value: bool) -> None:
         if key == "ui.theme_mode":

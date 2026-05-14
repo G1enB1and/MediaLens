@@ -112,6 +112,12 @@ def _run_hidden_subprocess(cmd: list[str], **kwargs):
     return subprocess.run(cmd, **kwargs)
 
 
+def _popen_hidden_subprocess(cmd: list[str], **kwargs):
+    if _WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS:
+        kwargs = {**_WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS, **kwargs}
+    return subprocess.Popen(cmd, **kwargs)
+
+
 _FAULT_HANDLER_STREAM = None
 _SETTINGS_MIGRATED = False
 _APPDATA_DIRS_MIGRATED = False
