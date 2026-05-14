@@ -1,6 +1,39 @@
 # Change Log
 
-## v1.2.7 (Current)
+## v1.2.8 (Current)
+
+### Summary
+
+This release makes MediaLens feel more responsive during everyday browsing and editing. It also adds more direct controls for saving metadata, opening previews, and managing the left sidebar layout without unnecessary scrolling or waiting.
+
+### Highlights
+
+- Switch themes, open settings, toggle hidden files, and return from minimize with less visible lag.
+- Save Tags, Descriptions, or Text OCR directly from their Details panel sections.
+- Collapse sidebar sections and open bulk-editor thumbnails in the same lightbox used by the gallery.
+
+### Added
+
+- Added collapsible headers for Pinned Folders, Folders, Collections, and Smart Collections in the left sidebar.
+- Added targeted Details panel save buttons for Tags, Descriptions, and Text OCR.
+- Added a separator above the bottom Details panel save-all action.
+- Added lightbox opening from preview thumbnails in the bulk Tags and Descriptions editors.
+- Added placeholders for unsupported or corrupt images so blank gallery cards explain what happened.
+
+### Changed
+
+- Changed minimize and restore handling so resize, relayout, and thumbnail background work are coalesced instead of all resuming at once.
+- Changed settings, theme switching, hidden-file toggles, and masonry pagination refresh paths to reduce apparent lag.
+- Changed theme refresh sequencing so native widgets and the web gallery switch together instead of showing a mismatched intermediate state.
+- Changed theme coverage for settings, comparison, OCR review, dialogs, context menus, selection colors, no-text icons, and bulk thumbnail borders.
+- Changed sidebar section size restore so Pinned Folders keeps a usable height across sessions and is protected from being squeezed by the file tree.
+- Changed Details panel tag edits to save through the tag-only path instead of the full save-all handler.
+- Changed bulk editor mode buttons to use the pointing-hand cursor.
+- Changed gallery handling for unsupported or corrupt image files so previews and cards show a clear unavailable state.
+
+---
+
+## v1.2.7
 
 ### Summary
 

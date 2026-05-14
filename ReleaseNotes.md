@@ -1,18 +1,18 @@
-## MediaLens v1.2.7
+## MediaLens v1.2.8
 
 ### Summary
 
-This release makes Paddle OCR repair safer and easier to diagnose. MediaLens now prepares a clean OCR runtime first, verifies it, and only replaces the active runtime after the new one is working.
+MediaLens now feels smoother during common navigation and editing tasks. This update also gives you quicker ways to save specific metadata changes and more control over the left sidebar layout.
 
 ### Highlights
 
-- Paddle OCR repair is less likely to leave behind a broken partial runtime after a failed install.
-- Local AI setup keeps showing active Paddle install progress instead of switching back to old probe errors mid-install.
-- A dedicated Paddle install log now gives clearer details if OCR setup still fails on a specific PC.
+- Faster-feeling settings, theme changes, hidden-file toggles, pagination, and app restore after minimizing.
+- New in-section save buttons for Tags, Descriptions, and Text OCR in the Details panel.
+- Collapsible left sidebar sections and lightbox preview opening from bulk editor thumbnails.
 
 ### Notes
 
-- This update is focused on Paddle OCR setup reliability, especially for Windows systems using GPU OCR support.
+- This release also includes additional theme polish and clearer placeholders for unsupported or corrupt image files.
 
 Full Changelog:
-<https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md>
+https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md
