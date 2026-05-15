@@ -38,6 +38,7 @@ class TestDbInit(unittest.TestCase):
         self.assertIn("folder_selection_state", tables)
         self.assertIn("collections", tables)
         self.assertIn("collection_items", tables)
+        self.assertIn("local_ai_status_cache", tables)
 
     def test_init_db_upgrades_legacy_media_items_without_phash(self) -> None:
         tmp_dir = Path(".tmp-tests")

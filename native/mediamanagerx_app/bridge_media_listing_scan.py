@@ -1020,6 +1020,51 @@ class BridgeMediaListingScanMixin:
             return False
         return left_key == right_key or left_key.startswith(right_key + "/") or right_key.startswith(left_key + "/")
 
+    def _path_is_probably_directory_for_cache(self, path: str) -> bool:
+        try:
+            path_obj = Path(path)
+            if path_obj.exists():
+                return path_obj.is_dir()
+            raw = str(path or "").rstrip("\\/")
+            if raw.endswith(("\\", "/")):
+                return True
+            return not bool(Path(raw).suffix)
+        except Exception:
+            return False
+
+    def _path_is_in_cache_scope(self, path: str, roots: list[str], include_nested: bool) -> bool:
+        path_key = self._cache_path_key(path)
+        if not path_key:
+            return False
+        for root in roots:
+            root_key = self._cache_path_key(root)
+            if not root_key:
+                continue
+            if include_nested:
+                if path_key == root_key or path_key.startswith(root_key + "/"):
+                    return True
+            else:
+                try:
+                    parent_key = self._cache_path_key(str(Path(path).parent))
+                except Exception:
+                    parent_key = ""
+                if parent_key == root_key:
+                    return True
+        return False
+
+    def _path_matches_disk_cache_filters(self, path: str, meta: dict) -> bool:
+        try:
+            path_obj = Path(path)
+            if not path_obj.is_file():
+                return False
+            if not bool((meta or {}).get("show_hidden")) and self.repo.is_path_hidden(str(path_obj)):
+                return False
+            if bool((meta or {}).get("show_all_file_types")):
+                return True
+            return path_obj.suffix.lower() in (IMAGE_EXTS | VIDEO_EXTS)
+        except Exception:
+            return False
+
     def _invalidate_scan_caches_for_paths(self, paths: list[str] | tuple[str, ...] | set[str]) -> None:
         changed = [str(path or "") for path in (paths or []) if str(path or "").strip()]
         if not changed:
@@ -1027,30 +1072,74 @@ class BridgeMediaListingScanMixin:
             return
 
         removed_disk_keys: set[str] = set()
+        changed_file_keys = {
+            self._cache_path_key(path)
+            for path in changed
+            if path and not self._path_is_probably_directory_for_cache(path)
+        }
+        directory_changes = [
+            path for path in changed
+            if self._path_is_probably_directory_for_cache(path)
+        ]
         for cache_key, meta in list(self._disk_cache_scope_meta.items()):
             roots = list((meta or {}).get("folders") or [])
-            if any(self._paths_overlap_for_cache(root, path) for root in roots for path in changed):
+            if any(self._paths_overlap_for_cache(root, path) for root in roots for path in directory_changes):
                 removed_disk_keys.add(cache_key)
                 self._disk_cache_by_scope.pop(cache_key, None)
                 self._disk_cache_scope_meta.pop(cache_key, None)
+                continue
+            disk_files = self._disk_cache_by_scope.get(cache_key)
+            if disk_files is None:
+                continue
+            for path_key in changed_file_keys:
+                if path_key:
+                    disk_files.pop(path_key, None)
+            include_nested = bool((meta or {}).get("include_nested"))
+            for path in changed:
+                if self._path_is_probably_directory_for_cache(path):
+                    continue
+                path_key = self._cache_path_key(path)
+                if (
+                    path_key
+                    and self._path_is_in_cache_scope(path, roots, include_nested)
+                    and self._path_matches_disk_cache_filters(path, meta)
+                ):
+                    disk_files[path_key] = Path(path)
         if self._disk_cache_key in removed_disk_keys:
             self._disk_cache = {}
             self._disk_cache_key = ""
+        elif self._disk_cache_key:
+            self._disk_cache = self._disk_cache_by_scope.get(self._disk_cache_key, self._disk_cache)
 
         removed_scan_keys: set[str] = set()
+        affected_scan_keys: set[str] = set()
         for scan_key, roots in list(self._scan_scope_roots_by_key.items()):
             if any(self._paths_overlap_for_cache(root, path) for root in roots for path in changed):
+                affected_scan_keys.add(scan_key)
+            if any(self._paths_overlap_for_cache(root, path) for root in roots for path in directory_changes):
                 removed_scan_keys.add(scan_key)
                 self._scan_scope_roots_by_key.pop(scan_key, None)
-        self._warm_scan_keys.difference_update(removed_scan_keys)
-        if self._last_full_scan_key in removed_scan_keys:
+        self._warm_scan_keys.difference_update(affected_scan_keys)
+        if self._last_full_scan_key in affected_scan_keys:
             self._last_full_scan_key = ""
+        self._warm_scan_keys.difference_update(removed_scan_keys)
 
         removed_checkpoint = False
         with self._checkpoint_lock:
             for scan_key in removed_scan_keys:
                 if scan_key in self._scan_checkpoint:
                     self._scan_checkpoint.pop(scan_key, None)
+                    removed_checkpoint = True
+            for scan_key in affected_scan_keys.difference(removed_scan_keys):
+                done_paths = self._scan_checkpoint.get(scan_key)
+                if not done_paths:
+                    continue
+                before = len(done_paths)
+                done_paths.difference_update(
+                    path for path in list(done_paths)
+                    if any(self._paths_overlap_for_cache(path, changed_path) for changed_path in changed)
+                )
+                if len(done_paths) != before:
                     removed_checkpoint = True
             if removed_checkpoint:
                 self._checkpoint_dirty_count = 0

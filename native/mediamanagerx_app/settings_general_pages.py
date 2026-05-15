@@ -182,7 +182,7 @@ class GeneralSettingsPage(SettingsPage):
 
     def _on_randomize_changed(self, checked: bool) -> None:
         self.dialog.set_setting_bool("gallery.randomize", checked)
-        self.main_window._refresh_current_folder()
+        self.dialog.request_gallery_refresh()
 
     def _on_restore_last_changed(self, checked: bool) -> None:
         if not checked:
@@ -207,27 +207,27 @@ class GeneralSettingsPage(SettingsPage):
 
     def _on_show_hidden_changed(self, checked: bool) -> None:
         self.dialog.set_setting_bool("gallery.show_hidden", checked)
-        self.main_window._refresh_current_folder()
+        self.dialog.request_gallery_refresh()
 
     def _on_include_nested_files_changed(self, checked: bool) -> None:
         self.dialog.set_setting_bool("gallery.include_nested_files", checked)
-        self.main_window._refresh_current_folder()
+        self.dialog.request_gallery_refresh()
 
     def _on_show_folders_in_gallery_changed(self, checked: bool) -> None:
         self.dialog.set_setting_bool("gallery.show_folders", checked)
-        self.main_window._refresh_current_folder()
+        self.dialog.request_gallery_refresh()
 
     def _on_show_media_only_changed(self, checked: bool) -> None:
         if not checked:
             return
         self.dialog.set_setting_bool("gallery.show_all_file_types", False)
-        self.main_window._refresh_current_folder()
+        self.dialog.request_gallery_refresh()
 
     def _on_show_all_file_types_changed(self, checked: bool) -> None:
         if not checked:
             return
         self.dialog.set_setting_bool("gallery.show_all_file_types", True)
-        self.main_window._refresh_current_folder()
+        self.dialog.request_gallery_refresh()
 
     def _browse_start_folder(self) -> None:
         folder = self.bridge.pick_folder()
@@ -438,7 +438,7 @@ class PlayerSettingsPage(SettingsPage):
 
     def _on_autoplay_gallery_changed(self, checked: bool) -> None:
         self.dialog.set_setting_bool("player.autoplay_gallery_animated_gifs", checked)
-        self.main_window._refresh_current_folder()
+        self.dialog.request_gallery_refresh()
 
     def _set_loop_mode(self, mode: str) -> None:
         self.dialog.set_setting_str("player.video_loop_mode", mode)

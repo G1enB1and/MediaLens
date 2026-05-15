@@ -705,22 +705,45 @@ class WindowAppLifecycleMixin:
         self.open_local_ai_setup()
 
     def _all_local_ai_models_installed(self) -> bool:
-        if not hasattr(self.bridge, "get_local_ai_model_status"):
-            return False
         try:
             from app.mediamanager.ai_captioning.model_registry import MODEL_SPECS
 
+            models_dir = Path(str(self.bridge.settings.value("ai_caption/models_dir", self.bridge._local_ai_models_dir_default(), type=str) or self.bridge._local_ai_models_dir_default()))
             seen: set[str] = set()
             for spec in MODEL_SPECS:
                 if spec.settings_key in seen:
                     continue
                 seen.add(spec.settings_key)
-                status = dict(self.bridge.get_local_ai_model_status(spec.id, spec.kind) or {})
-                if status.get("state") != "installed":
+                if spec.settings_key in getattr(self.bridge, "_local_ai_model_installs", set()):
+                    return False
+                python_path = self.bridge._local_ai_runtime_python_path(spec)
+                model_files_installed = self.bridge._local_ai_model_files_installed(models_dir, spec.id)
+                installed = python_path.is_file() and model_files_installed
+                if not installed and model_files_installed and not bool(getattr(sys, "frozen", False)):
+                    configured = str(self.bridge.settings.value(f"ai_caption/runtime_python/{spec.settings_key}", "", type=str) or "").strip()
+                    if not configured and spec.settings_key == "gemma4":
+                        configured = str(self.bridge.settings.value("ai_caption/gemma_python", "", type=str) or "").strip()
+                    installed = not bool(configured)
+                if not installed:
                     return False
             return bool(seen)
         except Exception:
-            return False
+            if not hasattr(self.bridge, "get_local_ai_model_status"):
+                return False
+            try:
+                from app.mediamanager.ai_captioning.model_registry import MODEL_SPECS
+
+                seen: set[str] = set()
+                for spec in MODEL_SPECS:
+                    if spec.settings_key in seen:
+                        continue
+                    seen.add(spec.settings_key)
+                    status = dict(self.bridge.get_local_ai_model_status(spec.id, spec.kind) or {})
+                    if status.get("state") != "installed":
+                        return False
+                return bool(seen)
+            except Exception:
+                return False
 
     def _selected_local_ai_model_status(self, kind: str) -> dict:
         if not hasattr(self.bridge, "get_local_ai_model_status"):

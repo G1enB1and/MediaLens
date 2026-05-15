@@ -481,10 +481,21 @@ class RecycleBinViewerWindow(QMainWindow):
             self.grid_layout.addWidget(w, i // col_count, i % col_count)
 
     def _restore_item(self, file_id):
+        restored_path = ""
+        try:
+            conn = init_recycle_bin_db()
+            row = conn.execute("SELECT original_path FROM recycle_bin WHERE id = ?", (file_id,)).fetchone()
+            conn.close()
+            restored_path = str(row[0] or "") if row else ""
+        except Exception:
+            restored_path = ""
         if restore_from_recycle_bin(file_id):
             self.load_items()
             if self.main_window:
-                self.main_window.bridge._invalidate_scan_caches()
+                if restored_path:
+                    self.main_window.bridge._invalidate_scan_caches_for_paths([restored_path])
+                else:
+                    self.main_window.bridge._invalidate_scan_caches()
                 self.main_window.bridge.collectionsChanged.emit()
                 if hasattr(self.main_window, '_refresh_current_folder'):
                     self.main_window._refresh_current_folder()
@@ -496,10 +507,24 @@ class RecycleBinViewerWindow(QMainWindow):
     def _restore_all(self):
         reply = QMessageBox.question(self, "Restore All", "Are you sure you want to restore all files and folders to their original locations?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.Yes:
+            restored_paths: list[str] = []
+            try:
+                conn = init_recycle_bin_db()
+                restored_paths = [
+                    str(row[0] or "")
+                    for row in conn.execute("SELECT original_path FROM recycle_bin").fetchall()
+                    if str(row[0] or "").strip()
+                ]
+                conn.close()
+            except Exception:
+                restored_paths = []
             restore_all()
             self.load_items()
             if self.main_window:
-                self.main_window.bridge._invalidate_scan_caches()
+                if restored_paths:
+                    self.main_window.bridge._invalidate_scan_caches_for_paths(restored_paths)
+                else:
+                    self.main_window.bridge._invalidate_scan_caches()
                 self.main_window.bridge.collectionsChanged.emit()
                 if hasattr(self.main_window, '_refresh_current_folder'):
                     self.main_window._refresh_current_folder()

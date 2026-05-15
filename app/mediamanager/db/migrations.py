@@ -150,6 +150,24 @@ def _ensure_collection_folder_tables(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_collection_folders_path ON collection_folders(folder_path)")
 
 
+def _ensure_local_ai_status_cache_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS local_ai_status_cache (
+          cache_key TEXT PRIMARY KEY,
+          settings_key TEXT NOT NULL,
+          model_id TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          context_json TEXT NOT NULL,
+          payload_json TEXT NOT NULL,
+          created_at_utc TEXT NOT NULL,
+          updated_at_utc TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_local_ai_status_cache_settings ON local_ai_status_cache(settings_key)")
+
+
 def init_db(db_path: str) -> None:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     sql = _load_schema_sql()
@@ -174,6 +192,7 @@ def init_db(db_path: str) -> None:
         _ensure_media_item_date_columns(conn)
         _ensure_ocr_tables(conn)
         _ensure_collection_folder_tables(conn)
+        _ensure_local_ai_status_cache_table(conn)
         conn.commit()
     finally:
         conn.close()

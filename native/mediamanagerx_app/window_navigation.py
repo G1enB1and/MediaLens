@@ -290,11 +290,11 @@ class WindowNavigationMixin:
         self._navigate_to_folder(str(parent), record_history=True)
 
     def _refresh_current_folder(self) -> None:
-        self.bridge._invalidate_scan_caches()
         current_path = self.bridge._selected_folders[0] if self.bridge._selected_folders else ""
         if not current_path:
             self._update_navigation_state()
             return
+        self.bridge._invalidate_scan_caches_for_paths([current_path])
         self._navigate_to_folder(current_path, record_history=False, refresh=True)
 
     def _on_directory_loaded(self, path: str) -> None:

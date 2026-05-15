@@ -250,6 +250,19 @@ CREATE TABLE IF NOT EXISTS tag_list_items (
 CREATE INDEX IF NOT EXISTS idx_tag_list_items_list ON tag_list_items(tag_list_id, sort_order, tag_id);
 CREATE INDEX IF NOT EXISTS idx_tag_list_items_tag ON tag_list_items(tag_id);
 
+CREATE TABLE IF NOT EXISTS local_ai_status_cache (
+  cache_key TEXT PRIMARY KEY,
+  settings_key TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  context_json TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at_utc TEXT NOT NULL,
+  updated_at_utc TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_local_ai_status_cache_settings ON local_ai_status_cache(settings_key);
+
 CREATE TABLE IF NOT EXISTS folder_nodes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   path TEXT NOT NULL UNIQUE,

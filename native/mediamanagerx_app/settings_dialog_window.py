@@ -17,6 +17,9 @@ class SettingsDialog(QDialog):
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
         self.resize(980, 720)
         self.setModal(True)
+        self._gallery_refresh_timer = QTimer(self)
+        self._gallery_refresh_timer.setSingleShot(True)
+        self._gallery_refresh_timer.timeout.connect(self._run_requested_gallery_refresh)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 14, 14, 14)
@@ -121,6 +124,15 @@ class SettingsDialog(QDialog):
             page = self._ensure_page(current_row)
             if page is not None:
                 page.refresh()
+
+    def request_gallery_refresh(self, delay_ms: int = 120) -> None:
+        self._gallery_refresh_timer.start(max(0, int(delay_ms)))
+
+    def _run_requested_gallery_refresh(self) -> None:
+        try:
+            self.main_window._refresh_current_folder()
+        except Exception:
+            pass
 
     def _on_category_changed(self, index: int) -> None:
         self._ensure_page(index)

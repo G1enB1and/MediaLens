@@ -192,6 +192,146 @@ class BridgeLocalAiMixin:
             configured = str(self.settings.value("ai_caption/gemma_python", "", type=str) or "").strip()
         return Path(configured) if configured else default_python_for_runtime(self._local_ai_runtime_root(), spec)
 
+    @staticmethod
+    def _local_ai_file_signature(path: Path) -> dict:
+        try:
+            stat = Path(path).stat()
+            return {
+                "path": str(Path(path)),
+                "exists": True,
+                "is_file": Path(path).is_file(),
+                "size": int(stat.st_size),
+                "mtime_ns": int(stat.st_mtime_ns),
+            }
+        except Exception:
+            return {"path": str(Path(path)), "exists": False}
+
+    def _local_ai_model_marker_signatures(self, models_dir: Path, spec) -> list[dict]:
+        from app.mediamanager.ai_captioning.model_registry import CAPTION_MODEL_ID, GEMMA4_MODEL_ID, TAG_MODEL_ID
+
+        local_dir = Path(models_dir) / spec.id
+        markers: list[Path] = []
+        if spec.id == TAG_MODEL_ID:
+            markers = [local_dir / "model.onnx", local_dir / "selected_tags.csv"]
+        elif spec.id == CAPTION_MODEL_ID:
+            clip_dir = Path(models_dir) / "openai" / "clip-vit-large-patch14-336"
+            markers = [local_dir / "config.json", clip_dir / "config.json"]
+            try:
+                markers.extend(sorted(local_dir.glob("*.safetensors"))[:16])
+            except Exception:
+                pass
+        elif spec.id == GEMMA4_MODEL_ID:
+            try:
+                from app.mediamanager.ai_captioning.gemma_gguf import (
+                    gemma_profile_by_id,
+                    gemma_profile_mmproj_path,
+                    gemma_profile_model_path,
+                )
+
+                profile = gemma_profile_by_id(str(self.settings.value("ai_caption/gemma_profile_id", "", type=str) or ""))
+                selected_profile = gemma_profile_by_id(str(self.settings.value("ai_caption/gemma_selected_profile_id", "", type=str) or ""))
+                profile = profile or selected_profile
+                if profile is not None:
+                    markers.extend([
+                        gemma_profile_model_path(models_dir, profile),
+                        gemma_profile_mmproj_path(models_dir, profile),
+                    ])
+            except Exception:
+                pass
+            markers.extend([local_dir / "config.json", Path(models_dir) / "gemma_gguf", Path(models_dir) / "gemma4_runtime"])
+        else:
+            markers = [local_dir / "config.json"]
+        return [self._local_ai_file_signature(marker) for marker in markers]
+
+    def _local_ai_probe_cache_context(self, spec, python_path: Path, requested_device: str, gpu_index: int) -> dict:
+        models_dir = Path(str(self.settings.value("ai_caption/models_dir", self._local_ai_models_dir_default(), type=str) or self._local_ai_models_dir_default()))
+        backend = self._local_ai_runtime_backend(spec)
+        return {
+            "cache_version": 1,
+            "app_version": str(__version__),
+            "model_id": str(spec.id),
+            "kind": str(spec.kind),
+            "settings_key": str(spec.settings_key),
+            "backend": str(backend),
+            "runtime_root": str(self._local_ai_runtime_root()),
+            "runtime_python": str(Path(python_path)),
+            "runtime_python_signature": self._local_ai_file_signature(Path(python_path)),
+            "models_dir": str(models_dir),
+            "model_markers": self._local_ai_model_marker_signatures(models_dir, spec),
+            "requested_device": str(requested_device or "gpu"),
+            "gpu_index": int(gpu_index or 0),
+            "gemma_profile_id": str(self.settings.value("ai_caption/gemma_profile_id", "", type=str) or ""),
+            "gemma_selected_profile_id": str(self.settings.value("ai_caption/gemma_selected_profile_id", "", type=str) or ""),
+            "frozen": bool(getattr(sys, "frozen", False)),
+        }
+
+    @staticmethod
+    def _local_ai_probe_cache_key(context: dict) -> str:
+        raw = json.dumps(context, sort_keys=True, separators=(",", ":"), default=str)
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def _read_local_ai_probe_cache(self, spec, context: dict) -> dict | None:
+        try:
+            cache_key = self._local_ai_probe_cache_key(context)
+            row = self.conn.execute(
+                "SELECT context_json, payload_json FROM local_ai_status_cache WHERE cache_key = ?",
+                (cache_key,),
+            ).fetchone()
+            if not row:
+                return None
+            context_json = json.dumps(context, sort_keys=True, separators=(",", ":"), default=str)
+            if str(row[0] or "") != context_json:
+                return None
+            payload = json.loads(str(row[1] or "{}"))
+            return dict(payload) if isinstance(payload, dict) else None
+        except Exception as exc:
+            try:
+                self._log(f"Local AI status cache read failed for {getattr(spec, 'settings_key', 'unknown')}: {exc}")
+            except Exception:
+                pass
+            return None
+
+    def _write_local_ai_probe_cache(self, spec, context: dict, payload: dict) -> None:
+        try:
+            cache_key = self._local_ai_probe_cache_key(context)
+            now = datetime.now(timezone.utc).isoformat()
+            context_json = json.dumps(context, sort_keys=True, separators=(",", ":"), default=str)
+            payload_json = json.dumps(dict(payload or {}), sort_keys=True, separators=(",", ":"), default=str)
+            self.conn.execute(
+                """
+                INSERT INTO local_ai_status_cache(
+                    cache_key, settings_key, model_id, kind, context_json, payload_json, created_at_utc, updated_at_utc
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(cache_key) DO UPDATE SET
+                    payload_json = excluded.payload_json,
+                    updated_at_utc = excluded.updated_at_utc
+                """,
+                (
+                    cache_key,
+                    str(spec.settings_key),
+                    str(spec.id),
+                    str(spec.kind),
+                    context_json,
+                    payload_json,
+                    now,
+                    now,
+                ),
+            )
+            self.conn.commit()
+        except Exception as exc:
+            try:
+                self._log(f"Local AI status cache write failed for {getattr(spec, 'settings_key', 'unknown')}: {exc}")
+            except Exception:
+                pass
+
+    def _clear_local_ai_probe_cache(self, settings_key: str) -> None:
+        try:
+            self.conn.execute("DELETE FROM local_ai_status_cache WHERE settings_key = ?", (str(settings_key or ""),))
+            self.conn.commit()
+        except Exception:
+            pass
+
     def _local_ai_status_payload_for_spec(self, spec) -> dict:
         python_path = self._local_ai_runtime_python_path(spec)
         requirements_path = self._local_ai_requirements_path(spec)
@@ -933,27 +1073,37 @@ class BridgeLocalAiMixin:
             if str(cached_payload.get("profile_id") or "").strip() == selected_profile_id:
                 return cached_payload
 
+        ai_settings = self._local_ai_caption_settings()
+        requested_device = str(ai_settings.device or "gpu")
+        gpu_index = int(ai_settings.gpu_index or 0)
+        python_path = self._local_ai_runtime_python_path(spec)
+        persistent_context = self._local_ai_probe_cache_context(spec, python_path, requested_device, gpu_index)
+        if not force:
+            persistent_payload = self._read_local_ai_probe_cache(spec, persistent_context)
+            if persistent_payload is not None:
+                self._local_ai_runtime_status_cache[cache_key] = (now, dict(persistent_payload))
+                return dict(persistent_payload)
+
         backend = self._local_ai_runtime_backend(spec)
         if backend == "gguf":
             payload = self._local_ai_gemma_probe(spec)
             self._local_ai_runtime_status_cache[cache_key] = (now, dict(payload))
+            self._write_local_ai_probe_cache(spec, persistent_context, payload)
             return dict(payload)
 
-        python_path = self._local_ai_runtime_python_path(spec)
         if not python_path.is_file():
             payload = {"ok": False, "reason": "Runtime Python was not found.", "selected_device": "cpu"}
             self._local_ai_runtime_status_cache[cache_key] = (now, payload)
+            self._write_local_ai_probe_cache(spec, persistent_context, payload)
             return dict(payload)
 
-        ai_settings = self._local_ai_caption_settings()
-        requested_device = str(ai_settings.device or "gpu")
-        gpu_index = int(ai_settings.gpu_index or 0)
         command, worker_cwd, child_env = self._local_ai_runtime_probe_command(spec, python_path, requested_device, gpu_index)
         try:
             returncode, stdout, stderr = self._local_ai_run_command_capture(command, worker_cwd, env=child_env, timeout=30)
         except Exception as exc:
             payload = {"ok": False, "reason": f"Runtime probe failed: {exc}", "selected_device": "cpu"}
             self._local_ai_runtime_status_cache[cache_key] = (now, payload)
+            self._write_local_ai_probe_cache(spec, persistent_context, payload)
             return dict(payload)
 
         combined = "\n".join(part for part in (stdout, stderr) if str(part or "").strip())
@@ -973,6 +1123,7 @@ class BridgeLocalAiMixin:
         if returncode != 0 and not payload.get("reason"):
             payload["reason"] = f"Runtime probe failed ({self._local_ai_exit_code_text(returncode)})."
         self._local_ai_runtime_status_cache[cache_key] = (now, dict(payload))
+        self._write_local_ai_probe_cache(spec, persistent_context, payload)
         return dict(payload)
 
     @staticmethod
@@ -1298,6 +1449,7 @@ class BridgeLocalAiMixin:
                 if spec.settings_key == "gemma4" and os.name == "nt":
                     self._install_gemma_gguf_model(spec, payload, emit_install_status)
                     self._local_ai_runtime_status_cache.pop(spec.settings_key, None)
+                    self._clear_local_ai_probe_cache(spec.settings_key)
                     probe = self._local_ai_probe_runtime(spec, force=True)
                     payload = self._local_ai_status_payload_for_spec(spec)
                     final_message = f"{spec.install_label} is installed."
@@ -1355,6 +1507,7 @@ class BridgeLocalAiMixin:
                         else:
                             raise
                 self._local_ai_runtime_status_cache.pop(spec.settings_key, None)
+                self._clear_local_ai_probe_cache(spec.settings_key)
                 probe = self._local_ai_probe_runtime(spec, force=True)
                 payload = self._local_ai_status_payload_for_spec(spec)
                 final_message = f"{spec.install_label} is installed."
@@ -1408,6 +1561,7 @@ class BridgeLocalAiMixin:
                 ):
                     self.settings.remove(key)
             self._local_ai_runtime_status_cache.pop(spec.settings_key, None)
+            self._clear_local_ai_probe_cache(spec.settings_key)
             self.localAiModelInstallStatus.emit(spec.settings_key, self._local_ai_status_payload_for_spec(spec))
             return True
         except Exception as exc:
@@ -1433,6 +1587,7 @@ class BridgeLocalAiMixin:
                 if target.exists():
                     shutil.rmtree(target)
             self._local_ai_runtime_status_cache.pop(spec.settings_key, None)
+            self._clear_local_ai_probe_cache(spec.settings_key)
             self.localAiModelInstallStatus.emit(spec.settings_key, self._local_ai_status_payload_for_spec(spec))
             return True
         except Exception as exc:
@@ -1484,6 +1639,8 @@ class BridgeLocalAiMixin:
             try:
                 models_dir = Path(str(self.settings.value("ai_caption/models_dir", self._local_ai_models_dir_default(), type=str) or self._local_ai_models_dir_default()))
                 self._download_gemma_gguf_profile_concurrent(models_dir, profile, None, payload)
+                self._local_ai_runtime_status_cache.pop(spec.settings_key, None)
+                self._clear_local_ai_probe_cache(spec.settings_key)
                 refreshed = self._local_ai_status_payload_for_spec(spec)
                 refreshed.update(
                     {
@@ -1543,6 +1700,7 @@ class BridgeLocalAiMixin:
             if target.exists():
                 shutil.rmtree(target)
             self._local_ai_runtime_status_cache.pop(spec.settings_key, None)
+            self._clear_local_ai_probe_cache(spec.settings_key)
             self.localAiModelInstallStatus.emit(spec.settings_key, self._local_ai_status_payload_for_spec(spec))
             return True
         except Exception as exc:
