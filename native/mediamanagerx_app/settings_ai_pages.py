@@ -1617,6 +1617,7 @@ class LocalAiSetupDialog(QDialog):
         accent_text = Theme.mix(text, accent_str, 0.76)
         missing_fg = "#7c1f11" if Theme.get_is_light() else "#ffd1c7"
         error_fg = "#8a111a" if Theme.get_is_light() else "#ffd0d4"
+        selection_text = Theme.get_contrast_text(accent)
         _check_dir = (Path(__file__).with_name("web") / "scrollbar_arrows").as_posix()
         _lum_r = accent.redF(); _lum_g = accent.greenF(); _lum_b = accent.blueF()
         def _lin(c): return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
@@ -1627,28 +1628,53 @@ class LocalAiSetupDialog(QDialog):
                 background-color: {bg};
                 color: {text};
             }}
+            QDialog QWidget {{
+                color: {text};
+            }}
             QLabel {{
                 color: {text};
+                background: transparent;
             }}
             QLabel#localAiSetupTitle {{
                 color: {text};
+                background: transparent;
             }}
             QTextEdit#localAiModelDetailsView, QTextEdit#localAiTechnicalDetailsView {{
                 color: {text};
                 background: transparent;
                 border: none;
+                padding: 0;
+                selection-background-color: {accent_str};
+                selection-color: {selection_text};
+            }}
+            QTextEdit#localAiModelDetailsView QWidget, QTextEdit#localAiTechnicalDetailsView QWidget {{
+                background: transparent;
+            }}
+            QTextEdit#localAiModelDetailsView:disabled, QTextEdit#localAiTechnicalDetailsView:disabled {{
+                color: {muted};
+                background: transparent;
             }}
             QScrollArea {{
                 background: transparent;
                 border: none;
             }}
-            QScrollArea QWidget {{
+            QScrollArea > QWidget, QScrollArea QWidget#qt_scrollarea_viewport {{
+                background: transparent;
+            }}
+            QAbstractScrollArea {{
+                background: transparent;
+                border: none;
+            }}
+            QAbstractScrollArea::viewport {{
                 background: transparent;
             }}
             QFrame#localAiModelRow {{
                 background-color: {sidebar_bg};
                 border: 1px solid {border};
                 border-radius: 8px;
+            }}
+            QFrame#localAiModelRow QWidget {{
+                background: transparent;
             }}
             QFrame#localAiModelRow[installState="not_installed"] {{
                 border-color: {border};
@@ -1778,19 +1804,37 @@ class LocalAiSetupDialog(QDialog):
             }}
             QComboBox#localAiProfileCombo {{
                 background-color: {Theme.mix(control_bg, "#ffffff", 0.16 if Theme.get_is_light() else 0.12)};
+                color: {text};
                 border: 1px solid {border};
                 border-radius: 6px;
                 padding: 4px 8px;
                 min-height: 28px;
+                selection-background-color: {accent_str};
+                selection-color: {selection_text};
             }}
             QComboBox#localAiProfileCombo:hover {{
                 border-color: {accent_str};
             }}
+            QComboBox#localAiProfileCombo:disabled {{
+                color: {muted};
+                background-color: {control_bg};
+                border-color: {border};
+            }}
+            QComboBox#localAiProfileCombo::drop-down {{
+                border: none;
+                width: 24px;
+            }}
+            QComboBox#localAiProfileCombo::down-arrow {{
+                width: 10px;
+                height: 10px;
+            }}
             QComboBox#localAiProfileCombo QAbstractItemView {{
-                background-color: {bg};
+                background-color: {control_bg};
+                color: {text};
                 border: 1px solid {border};
-                selection-background-color: {accent_soft};
-                selection-color: {text};
+                selection-background-color: {accent_str};
+                selection-color: {selection_text};
+                outline: none;
             }}
             QLabel#localAiModelMeta {{
                 color: {muted};
@@ -1830,7 +1874,74 @@ class LocalAiSetupDialog(QDialog):
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
                 height: 0;
             }}
+            QScrollBar:horizontal {{
+                background: {Theme.get_scrollbar_track(accent)};
+                height: 10px;
+                margin: 0;
+                border: none;
+            }}
+            QScrollBar::handle:horizontal {{
+                background: {Theme.get_scrollbar_thumb(accent)};
+                border-radius: 5px;
+                min-width: 28px;
+            }}
+            QScrollBar::handle:horizontal:hover {{
+                background: {Theme.get_scrollbar_thumb_hover(accent)};
+            }}
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+                width: 0;
+            }}
         """)
+        try:
+            from native.mediamanagerx_app.theme_dialogs import _apply_themed_dialog_title_bar
+            _apply_themed_dialog_title_bar(self, accent)
+        except Exception:
+            pass
+        self._apply_local_ai_widget_palettes(bg, control_bg, text, muted, accent_str, selection_text)
+
+    def _apply_local_ai_widget_palettes(
+        self,
+        bg: str,
+        control_bg: str,
+        text: str,
+        muted: str,
+        accent: str,
+        selection_text: str,
+    ) -> None:
+        def apply_palette(widget: QWidget, base: str, window: str | None = None) -> None:
+            palette = widget.palette()
+            window_color = QColor(window or base)
+            base_color = QColor(base)
+            text_color = QColor(text)
+            muted_color = QColor(muted)
+            accent_color = QColor(accent)
+            selection_color = QColor(selection_text)
+            for role in (QPalette.ColorRole.Window, QPalette.ColorRole.Button):
+                palette.setColor(role, window_color)
+            palette.setColor(QPalette.ColorRole.Base, base_color)
+            palette.setColor(QPalette.ColorRole.AlternateBase, QColor(control_bg))
+            palette.setColor(QPalette.ColorRole.Text, text_color)
+            palette.setColor(QPalette.ColorRole.WindowText, text_color)
+            palette.setColor(QPalette.ColorRole.ButtonText, text_color)
+            palette.setColor(QPalette.ColorRole.PlaceholderText, muted_color)
+            palette.setColor(QPalette.ColorRole.Highlight, accent_color)
+            palette.setColor(QPalette.ColorRole.HighlightedText, selection_color)
+            widget.setPalette(palette)
+            widget.setAutoFillBackground(False)
+
+        apply_palette(self, bg, bg)
+        for scroll in self.findChildren(QAbstractScrollArea):
+            apply_palette(scroll, bg, bg)
+            viewport = scroll.viewport()
+            if viewport is not None:
+                apply_palette(viewport, bg, bg)
+        for combo in self.findChildren(QComboBox):
+            apply_palette(combo, control_bg, control_bg)
+        for view in self.findChildren(SelectableRichTextView):
+            apply_palette(view, bg, bg)
+            viewport = view.viewport()
+            if viewport is not None:
+                apply_palette(viewport, bg, bg)
 
 
 

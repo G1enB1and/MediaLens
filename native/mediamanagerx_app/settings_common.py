@@ -11,6 +11,7 @@ from pathlib import Path
 from PySide6.QtCore import QMimeData, QPointF, QRect, QSignalBlocker, QSize, Qt, Signal, QTime, QTimer
 from PySide6.QtGui import QColor, QCursor, QDrag, QIcon, QPainter, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (
+    QAbstractScrollArea,
     QAbstractItemView,
     QButtonGroup,
     QCheckBox,
