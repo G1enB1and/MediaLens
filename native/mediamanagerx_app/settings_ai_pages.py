@@ -850,6 +850,9 @@ class LocalAiSetupDialog(QDialog):
             gemma_profile_size_lbl.setObjectName("localAiModelMeta")
             gemma_profile_recommended_lbl = QLabel("")
             gemma_profile_recommended_lbl.setObjectName("localAiModelRecommended")
+            gemma_profile_fit_lbl = QLabel("")
+            gemma_profile_fit_lbl.setObjectName("localAiModelVramFit")
+            gemma_profile_fit_lbl.setWordWrap(True)
             gemma_profile_download_btn = QPushButton("Download Model")
             gemma_profile_download_btn.setObjectName("localAiProfileActionButton")
             gemma_profile_download_btn.setFixedHeight(28)
@@ -862,10 +865,11 @@ class LocalAiSetupDialog(QDialog):
             gemma_profile_delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             gemma_profile_layout.addWidget(gemma_profile_label, 0, 0, 1, 4)
             gemma_profile_layout.addWidget(gemma_profile_combo, 1, 0, 1, 4)
-            gemma_profile_layout.addWidget(gemma_profile_size_lbl, 2, 0)
-            gemma_profile_layout.addWidget(gemma_profile_recommended_lbl, 2, 1)
-            gemma_profile_layout.addWidget(gemma_profile_download_btn, 2, 2)
-            gemma_profile_layout.addWidget(gemma_profile_delete_btn, 2, 3)
+            gemma_profile_layout.addWidget(gemma_profile_fit_lbl, 2, 0, 1, 4)
+            gemma_profile_layout.addWidget(gemma_profile_size_lbl, 3, 0)
+            gemma_profile_layout.addWidget(gemma_profile_recommended_lbl, 3, 1)
+            gemma_profile_layout.addWidget(gemma_profile_download_btn, 3, 2)
+            gemma_profile_layout.addWidget(gemma_profile_delete_btn, 3, 3)
             gemma_profile_layout.setColumnStretch(0, 1)
             gemma_profile_row.setVisible(False)
 
@@ -951,6 +955,7 @@ class LocalAiSetupDialog(QDialog):
                 "gemma_profile_label": gemma_profile_label,
                 "gemma_profile_size_lbl": gemma_profile_size_lbl,
                 "gemma_profile_recommended_lbl": gemma_profile_recommended_lbl,
+                "gemma_profile_fit_lbl": gemma_profile_fit_lbl,
                 "gemma_profile_download_btn": gemma_profile_download_btn,
                 "gemma_profile_delete_btn": gemma_profile_delete_btn,
                 "gemma_profile_download_status": gemma_profile_download_status,
@@ -1204,15 +1209,46 @@ class LocalAiSetupDialog(QDialog):
         return "Enabled ✓" if selected_device.startswith("cuda") or selected_device == "gpu" else "Unavailable ✕"
 
     def _gemma_profile_ui_data(self):
-        from app.mediamanager.ai_captioning.gemma_gguf import choose_best_gemma_profile, gemma_profile_options
+        from app.mediamanager.ai_captioning.gemma_gguf import GEMMA_GGUF_HEADROOM_GB, choose_best_gemma_profile, gemma_profile_options
 
         vram = self.bridge._local_ai_detect_nvidia_vram() if hasattr(self.bridge, "_local_ai_detect_nvidia_vram") else {}
-        recommended = choose_best_gemma_profile(vram.get("total_vram_gb"), vram.get("free_vram_gb"))
+        total = max(0.0, float(vram.get("total_vram_gb") or 0.0))
+        free = max(0.0, float(vram.get("free_vram_gb") or 0.0))
+        usable = max(0.0, total - float(GEMMA_GGUF_HEADROOM_GB or 0.0))
+        if free > 0.0:
+            usable = min(usable or free, free + 0.5)
+        recommended = choose_best_gemma_profile(total, free)
         profiles = tuple(sorted(gemma_profile_options(), key=lambda profile: (profile.approx_total_gb, profile.quality_rank)))
-        return profiles, recommended
+        return profiles, recommended, {"total": total, "free": free, "usable": usable}
+
+    @staticmethod
+    def _gemma_profile_vram_fit(profile, vram_info: dict) -> tuple[str, str]:
+        total = float((vram_info or {}).get("total") or 0.0)
+        usable = float((vram_info or {}).get("usable") or 0.0)
+        if total <= 0.0:
+            return "unknown", "Could not detect available VRAM. MediaLens will use the safest model by default."
+        minimum = float(getattr(profile, "min_total_vram_gb", 0.0) or 0.0)
+        size = float(getattr(profile, "approx_total_gb", 0.0) or 0.0)
+        required = max(size, minimum)
+        if total < minimum or usable < size:
+            return "large", f"This model is larger than available VRAM. Needs about {required:.1f} GB; available is about {usable:.1f} GB."
+        if max(0.0, usable - size) <= 0.75:
+            return "close", f"This model should fit, but it is close to available VRAM. Needs about {required:.1f} GB; available is about {usable:.1f} GB."
+        return "fits", f"This model should fit within available VRAM. Needs about {required:.1f} GB; available is about {usable:.1f} GB."
+
+    def _gemma_profile_vram_color(self, fit_state: str) -> str:
+        Theme = _theme_api()
+        state = str(fit_state or "").strip()
+        if state == "fits":
+            return "#1f7a3f" if Theme.get_is_light() else "#7ee787"
+        if state == "close":
+            return "#8a6500" if Theme.get_is_light() else "#f2cc60"
+        if state == "large":
+            return "#b42318" if Theme.get_is_light() else "#ff7b72"
+        return Theme.get_text_muted()
 
     def _configure_gemma_profile_controls(self, row: dict[str, object]) -> None:
-        profiles, recommended = self._gemma_profile_ui_data()
+        profiles, recommended, vram_info = self._gemma_profile_ui_data()
         combo = row["gemma_profile_combo"]
         with QSignalBlocker(combo):
             combo.clear()
@@ -1221,13 +1257,19 @@ class LocalAiSetupDialog(QDialog):
                 if profile.id == recommended.id:
                     label += "  (Recommended)"
                 combo.addItem(label, profile.id)
+                idx = combo.count() - 1
+                fit_state, _message = self._gemma_profile_vram_fit(profile, vram_info)
+                combo.setItemData(idx, QBrush(QColor(self._gemma_profile_vram_color(fit_state))), Qt.ItemDataRole.ForegroundRole)
+                font = combo.font()
+                font.setBold(profile.id == recommended.id)
+                combo.setItemData(idx, font, Qt.ItemDataRole.FontRole)
         combo.currentIndexChanged.connect(lambda _index, r=row: self._on_gemma_profile_changed(r))
         row["gemma_profile_download_btn"].clicked.connect(lambda _checked=False, r=row: self._download_selected_gemma_profile(r))
         row["gemma_profile_delete_btn"].clicked.connect(lambda _checked=False, r=row: self._delete_selected_gemma_profile(r))
         self._sync_gemma_profile_controls(row)
 
     def _sync_gemma_profile_controls(self, row: dict[str, object]) -> None:
-        profiles, recommended = self._gemma_profile_ui_data()
+        profiles, recommended, vram_info = self._gemma_profile_ui_data()
         by_id = {profile.id: profile for profile in profiles}
         combo = row["gemma_profile_combo"]
         downloaded = set((row.get("latest_status") or {}).get("gemma_downloaded_profiles") or [])
@@ -1247,7 +1289,18 @@ class LocalAiSetupDialog(QDialog):
                 if profile.id == recommended.id:
                     label += "  (Recommended)"
                 combo.setItemText(idx, label)
+                fit_state, _message = self._gemma_profile_vram_fit(profile, vram_info)
+                combo.setItemData(idx, QBrush(QColor(self._gemma_profile_vram_color(fit_state))), Qt.ItemDataRole.ForegroundRole)
+                font = combo.font()
+                font.setBold(profile.id == recommended.id)
+                combo.setItemData(idx, font, Qt.ItemDataRole.FontRole)
         profile = by_id.get(str(combo.currentData() or "")) or recommended
+        fit_state, fit_message = self._gemma_profile_vram_fit(profile, vram_info)
+        fit_label = row.get("gemma_profile_fit_lbl")
+        if fit_label is not None:
+            fit_label.setText(fit_message)
+            fit_label.setProperty("fitState", fit_state)
+            fit_label.setStyleSheet(f"color: {self._gemma_profile_vram_color(fit_state)}; font-weight: 700;")
         row["gemma_profile_size_lbl"].setText(f"{profile.approx_total_gb:.1f} GB")
         row["gemma_profile_recommended_lbl"].setText("Recommended" if profile.id == recommended.id else "")
         is_downloaded = profile.id in downloaded
