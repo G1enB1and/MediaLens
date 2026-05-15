@@ -117,10 +117,14 @@ def init_recycle_bin_db():
             id TEXT PRIMARY KEY,
             original_path TEXT,
             archived_name TEXT,
+            item_type TEXT NOT NULL DEFAULT 'file',
             deleted_at DATETIME,
             expires_at DATETIME
         )
     ''')
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(recycle_bin)").fetchall()}
+    if "item_type" not in cols:
+        conn.execute("ALTER TABLE recycle_bin ADD COLUMN item_type TEXT NOT NULL DEFAULT 'file'")
     conn.commit()
     return conn
 
@@ -148,6 +152,7 @@ def move_to_recycle_bin(original_path: str, days: int) -> bool:
     try:
         p = Path(original_path)
         if not p.exists(): return False
+        item_type = "folder" if p.is_dir() else "file"
         
         bin_dir = get_recycle_bin_dir()
         file_id = str(uuid.uuid4())
@@ -162,9 +167,9 @@ def move_to_recycle_bin(original_path: str, days: int) -> bool:
         
         conn = init_recycle_bin_db()
         conn.execute('''
-            INSERT INTO recycle_bin (id, original_path, archived_name, deleted_at, expires_at)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (file_id, str(p.resolve()), archived_name, deleted_at.isoformat(), expires_at.isoformat()))
+            INSERT INTO recycle_bin (id, original_path, archived_name, item_type, deleted_at, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (file_id, str(p.resolve()), archived_name, item_type, deleted_at.isoformat(), expires_at.isoformat()))
         conn.commit()
         conn.close()
         return True
@@ -262,10 +267,11 @@ class RecycleBinItemWidget(QFrame):
     restoreClicked = Signal(str)
     deleteClicked = Signal(str)
     
-    def __init__(self, file_id, original_path, archived_name, deleted_at, expires_at, parent=None):
+    def __init__(self, file_id, original_path, archived_name, deleted_at, expires_at, item_type="file", parent=None):
         super().__init__(parent)
         self.file_id = file_id
         self.original_path = original_path
+        self.item_type = str(item_type or "file").strip().lower()
         
         accent = _get_accent()
         bg = Theme.get_control_bg(accent)
@@ -301,7 +307,14 @@ class RecycleBinItemWidget(QFrame):
         preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         preview_label.setStyleSheet("background-color: #1a1a1c; border-radius: 4px;")
         
-        if arch_path.exists():
+        if arch_path.exists() and arch_path.is_dir():
+            try:
+                file_count = sum(1 for child in arch_path.rglob("*") if child.is_file())
+            except Exception:
+                file_count = 0
+            preview_label.setText(f"Folder\n{file_count} file" if file_count == 1 else f"Folder\n{file_count} files")
+            preview_label.setStyleSheet(f"color: {self.text_color}; background-color: #1a1a1c; border-radius: 4px; font-weight: bold;")
+        elif arch_path.exists():
             pix = QPixmap(str(arch_path))
             if not pix.isNull():
                 preview_label.setPixmap(pix.scaled(260, 140, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
@@ -315,7 +328,8 @@ class RecycleBinItemWidget(QFrame):
         layout.addWidget(preview_label)
         
         # Details
-        name_label = QLabel(Path(original_path).name)
+        type_prefix = "Folder: " if self.item_type == "folder" or arch_path.is_dir() else ""
+        name_label = QLabel(f"{type_prefix}{Path(original_path).name}")
         name_label.setStyleSheet(f"color: {self.text_color}; font-weight: bold; font-size: 14px; background: transparent;")
         
         path_label = QLabel(str(Path(original_path).parent))
@@ -444,7 +458,7 @@ class RecycleBinViewerWindow(QMainWindow):
                 
         conn = init_recycle_bin_db()
         c = conn.cursor()
-        c.execute("SELECT id, original_path, archived_name, deleted_at, expires_at FROM recycle_bin ORDER BY deleted_at DESC")
+        c.execute("SELECT id, original_path, archived_name, deleted_at, expires_at, item_type FROM recycle_bin ORDER BY deleted_at DESC")
         rows = c.fetchall()
         conn.close()
         
@@ -480,7 +494,7 @@ class RecycleBinViewerWindow(QMainWindow):
             self.load_items()
 
     def _restore_all(self):
-        reply = QMessageBox.question(self, "Restore All", "Are you sure you want to restore all files to their original locations?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        reply = QMessageBox.question(self, "Restore All", "Are you sure you want to restore all files and folders to their original locations?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.Yes:
             restore_all()
             self.load_items()
@@ -491,7 +505,7 @@ class RecycleBinViewerWindow(QMainWindow):
                     self.main_window._refresh_current_folder()
 
     def _empty_all(self):
-        reply = QMessageBox.question(self, "Empty Now", "Are you sure you want to permanently delete all files in the MediaLens recycle bin?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        reply = QMessageBox.question(self, "Empty Now", "Are you sure you want to permanently delete all files and folders in the MediaLens recycle bin?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.Yes:
             empty_all()
             self.load_items()

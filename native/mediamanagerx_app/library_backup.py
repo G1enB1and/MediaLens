@@ -143,18 +143,24 @@ def _merge_recycle_bin_db(source: Path, target: Path) -> bool:
                 id TEXT PRIMARY KEY,
                 original_path TEXT,
                 archived_name TEXT,
+                item_type TEXT NOT NULL DEFAULT 'file',
                 deleted_at DATETIME,
                 expires_at DATETIME
             )
             """
         )
+        cols = {row[1] for row in dst.execute("PRAGMA table_info(recycle_bin)").fetchall()}
+        if "item_type" not in cols:
+            dst.execute("ALTER TABLE recycle_bin ADD COLUMN item_type TEXT NOT NULL DEFAULT 'file'")
+        src_cols = {row[1] for row in src.execute("PRAGMA table_info(recycle_bin)").fetchall()}
+        item_type_sql = "COALESCE(item_type, 'file')" if "item_type" in src_cols else "'file'"
         rows = src.execute(
-            "SELECT id, original_path, archived_name, deleted_at, expires_at FROM recycle_bin"
+            f"SELECT id, original_path, archived_name, {item_type_sql}, deleted_at, expires_at FROM recycle_bin"
         ).fetchall()
         dst.executemany(
             """
-            INSERT OR IGNORE INTO recycle_bin (id, original_path, archived_name, deleted_at, expires_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO recycle_bin (id, original_path, archived_name, item_type, deleted_at, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
