@@ -477,13 +477,37 @@ class WindowNativeActionsMixin:
         
         # Store for tree hover sync
         self.bridge._last_drag_count = count
+
+        if target_folder == "__INVALID__":
+            html = "<div style='white-space: nowrap;'>! Invalid destination</div>"
+            self.native_tooltip.update_text(html)
+            self.native_tooltip.follow_cursor()
+            return
+
+        if target_folder.startswith("__PINNED_FOLDERS__"):
+            folder_name = target_folder.split("|", 1)[1] if "|" in target_folder else ""
+            folder_text = folder_name if count == 1 and folder_name else (f"{count} folder" if count == 1 else f"{count} folders")
+            html = f"<div style='white-space: nowrap;'>+ Pin {folder_text}</div>"
+            self.native_tooltip.update_text(html)
+            self.native_tooltip.follow_cursor()
+            return
+
+        if target_folder.startswith("__COLLECTIONS__"):
+            parts = target_folder.split("|", 2)
+            item_text = parts[1] if len(parts) > 1 and parts[1] else (f"{count} item" if count == 1 else f"{count} items")
+            collection_name = parts[2] if len(parts) > 2 else ""
+            target_text = f" to <b>{collection_name}</b>" if collection_name else " to collections"
+            html = f"<div style='white-space: nowrap;'>+ Add {item_text}{target_text}</div>"
+            self.native_tooltip.update_text(html)
+            self.native_tooltip.follow_cursor()
+            return
         
         op = "Copy" if is_copy else "Move"
-        icon = "+" if is_copy else "â†’"
         items_text = f"{count} item" if count == 1 else f"{count} items"
         
         target_text = f" to <b>{target_folder}</b>" if target_folder else ""
         
+        icon = "+" if is_copy else "-&gt;"
         html = f"<div style='white-space: nowrap;'>{icon} {op} {items_text}{target_text}</div>"
         self.native_tooltip.update_text(html)
         self.native_tooltip.follow_cursor()

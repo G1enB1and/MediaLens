@@ -288,6 +288,17 @@ CREATE TABLE IF NOT EXISTS collection_items (
 CREATE INDEX IF NOT EXISTS idx_collection_items_collection ON collection_items(collection_id);
 CREATE INDEX IF NOT EXISTS idx_collection_items_media ON collection_items(media_id);
 
+CREATE TABLE IF NOT EXISTS collection_folders (
+  collection_id INTEGER NOT NULL,
+  folder_path TEXT NOT NULL,
+  created_at_utc TEXT NOT NULL,
+  PRIMARY KEY (collection_id, folder_path),
+  FOREIGN KEY(collection_id) REFERENCES collections(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_collection_folders_collection ON collection_folders(collection_id);
+CREATE INDEX IF NOT EXISTS idx_collection_folders_path ON collection_folders(folder_path);
+
 CREATE TABLE IF NOT EXISTS review_pair_exclusions (
   left_path TEXT NOT NULL,
   right_path TEXT NOT NULL,

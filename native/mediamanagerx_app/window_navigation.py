@@ -141,6 +141,9 @@ class WindowNavigationMixin:
         if path_str:
             try:
                 p = Path(path_str)
+                if p.exists() and p.is_dir():
+                    provider = QFileIconProvider()
+                    return provider.icon(QFileIconProvider.IconType.Folder).pixmap(QSize(64, 64))
                 if p.exists():
                     candidates: list[Path] = [p]
                     poster = self.bridge._ensure_video_poster(p)
@@ -799,11 +802,10 @@ class WindowNavigationMixin:
                 self._reload_collections()
         elif item and chosen == act_delete:
             collection_id = int(item.data(Qt.ItemDataRole.UserRole) or 0)
-            reply = QMessageBox.question(
+            reply = _run_themed_question_dialog(
                 self,
                 "Delete Collection",
                 f"Delete collection '{item.text()}'?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply == QMessageBox.StandardButton.Yes:
                 if self.bridge.delete_collection(collection_id):

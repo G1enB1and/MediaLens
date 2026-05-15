@@ -256,12 +256,16 @@ class BridgeFileOpsMixin:
     @Slot(str, bool, result=bool)
     def set_media_hidden(self, path: str, hidden: bool) -> bool:
         success = self.repo.set_media_hidden(path, hidden)
+        if success:
+            self._invalidate_scan_caches_for_paths([path])
         self.fileOpFinished.emit("hide" if hidden else "unhide", success, path, path)
         return success
 
     @Slot(str, bool, result=bool)
     def set_folder_hidden(self, path: str, hidden: bool) -> bool:
         success = self.repo.set_folder_hidden(path, hidden)
+        if success:
+            self._invalidate_scan_caches_for_paths([path])
         self.fileOpFinished.emit("hide" if hidden else "unhide", success, path, path)
         return success
 
@@ -436,7 +440,8 @@ class BridgeFileOpsMixin:
             try: newp = self._hide_by_renaming_dot(old)
             except Exception: pass
             self.fileOpFinished.emit("hide", bool(newp), old, newp)
-            self._invalidate_scan_caches()
+            if newp:
+                self._invalidate_scan_caches_for_paths([old, newp])
         threading.Thread(target=work, daemon=True).start()
         return True
 
@@ -460,7 +465,8 @@ class BridgeFileOpsMixin:
             try: newp = self._unhide_by_renaming_dot(old)
             except Exception: pass
             self.fileOpFinished.emit("unhide", bool(newp), old, newp)
-            self._invalidate_scan_caches()
+            if newp:
+                self._invalidate_scan_caches_for_paths([old, newp])
         threading.Thread(target=work, daemon=True).start()
         return True
 
@@ -492,7 +498,8 @@ class BridgeFileOpsMixin:
                     except Exception: pass
             except Exception: pass
             self.fileOpFinished.emit("rename", ok, old, newp)
-            self._invalidate_scan_caches()
+            if ok:
+                self._invalidate_scan_caches_for_paths([old, newp])
         threading.Thread(target=work, daemon=True).start()
         return True
 
@@ -501,6 +508,18 @@ class BridgeFileOpsMixin:
         parent = self.parent() if isinstance(self.parent(), QWidget) else None
         value, ok = _run_themed_text_input_dialog(parent, str(title or ""), str(label or ""), text=str(text or ""))
         return str(value or "") if ok else ""
+
+    @Slot(str, str, result=bool)
+    def themed_confirm(self, title: str, message: str) -> bool:
+        parent = self.parent() if isinstance(self.parent(), QWidget) else None
+        reply = _run_themed_question_dialog(
+            parent,
+            str(title or "Delete Confirmation"),
+            str(message or ""),
+            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            default_button=QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
 
     @Slot(str, result=str)
     def path_to_url(self, path: str) -> str:
@@ -529,15 +548,35 @@ class BridgeFileOpsMixin:
         if not target_dir.exists() or not target_dir.is_dir():
             self.fileOpFinished.emit(op_type, False, "", "")
             return
+        is_move = op_type in ("move", "paste_move")
+        try:
+            target_key = str(target_dir.resolve()).replace("/", "\\").rstrip("\\").casefold()
+        except Exception:
+            target_key = str(target_dir).replace("/", "\\").rstrip("\\").casefold()
+        safe_src_paths: list[Path] = []
+        for src in src_paths:
+            try:
+                src_key = str(src.resolve()).replace("/", "\\").rstrip("\\").casefold()
+            except Exception:
+                src_key = str(src).replace("/", "\\").rstrip("\\").casefold()
+            if src_key and target_key and (target_key == src_key or target_key.startswith(src_key + "\\")):
+                continue
+            if is_move and src_key and target_key and str(src.parent).replace("/", "\\").rstrip("\\").casefold() == target_key:
+                continue
+            safe_src_paths.append(src)
+        src_paths = safe_src_paths
+        if not src_paths:
+            self.fileOpFinished.emit(op_type, False, "", str(target_dir))
+            return
 
         def work():
             from app.mediamanager.db.media_repo import rename_media_path, move_directory_in_db, add_media_item, get_media_by_path
             from app.mediamanager.db.tags_repo import attach_tags, list_media_tags
             
             
-            is_move = op_type in ("move", "paste_move")
             sticky_action = None
             any_ok = False
+            changed_paths: list[str] = [str(target_dir)]
             
             try:
                 for src in src_paths:
@@ -549,35 +588,38 @@ class BridgeFileOpsMixin:
                     final_dst = dst
                     
                     if dst.exists():
-                        if dst.samefile(src):
+                        if is_move and dst.samefile(src):
                             continue
-                        
-                        if sticky_action:
+                        if not is_move and dst.samefile(src):
+                            final_dst = self._unique_path(dst)
+                            action = "keep_both"
+                        elif sticky_action:
                             res = {"action": sticky_action, "new_incoming": src.name}
                         else:
                             # Invoke dialog on main thread via signal
                             self._last_dlg_res = None
                             self.conflictDialogRequested.emit(str(dst), str(src))
-                            
+
                             # Busy wait for result (max 10 mins)
                             start_t = time.time()
                             while self._last_dlg_res is None and (time.time() - start_t < 600):
                                 time.sleep(0.05)
-                            
+
                             res = self._last_dlg_res or {"action": "skip"}
                             if res.get("apply_all"): sticky_action = res["action"]
                         
-                        action = res["action"]
-                        if action == "skip":
-                            continue
-                        elif action == "replace":
-                             final_dst = dst
-                        elif action == "keep_both":
-                             # Use the new name from dialog if provided
-                             new_name = res.get("new_incoming", src.name)
-                             final_dst = target_dir / new_name
-                             if final_dst.exists():
-                                 final_dst = self._unique_path(final_dst)
+                        if not (not is_move and action == "keep_both" and final_dst != dst):
+                            action = res["action"]
+                            if action == "skip":
+                                continue
+                            elif action == "replace":
+                                 final_dst = dst
+                            elif action == "keep_both":
+                                 # Use the new name from dialog if provided
+                                 new_name = res.get("new_incoming", src.name)
+                                 final_dst = target_dir / new_name
+                                 if final_dst.exists():
+                                     final_dst = self._unique_path(final_dst)
                     
                     # Execute with correct atomic logic
                     try:
@@ -600,13 +642,13 @@ class BridgeFileOpsMixin:
                             else: rename_media_path(self.conn, str(src), str(final_dst))
                         else:
                             # Copy operation
-                            if src.is_dir(): shutil.copytree(src, final_dst)
-                            else: shutil.copy2(src, final_dst)
-                            
-                            ext = final_dst.suffix.lower()
-                            mtype = "image" if ext in IMAGE_EXTS else "video"
-                            new_media_id = add_media_item(self.conn, str(final_dst), mtype)
-                            if src.is_file():
+                            if src.is_dir():
+                                shutil.copytree(src, final_dst)
+                            else:
+                                shutil.copy2(src, final_dst)
+                                ext = final_dst.suffix.lower()
+                                mtype = "image" if ext in IMAGE_EXTS else "video"
+                                new_media_id = add_media_item(self.conn, str(final_dst), mtype)
                                 src_media = get_media_by_path(self.conn, str(src))
                                 if src_media:
                                     src_tags = list_media_tags(self.conn, int(src_media["id"]))
@@ -614,6 +656,10 @@ class BridgeFileOpsMixin:
                                         attach_tags(self.conn, int(new_media_id), src_tags)
                         
                         any_ok = True
+                        if is_move:
+                            changed_paths.extend([str(src), str(final_dst)])
+                        else:
+                            changed_paths.append(str(final_dst))
                     except Exception as e:
                         pass
 
@@ -622,7 +668,8 @@ class BridgeFileOpsMixin:
             except Exception as e:
                 self.fileOpFinished.emit(op_type, False, "", "")
             
-            self._invalidate_scan_caches()
+            if any_ok:
+                self._invalidate_scan_caches_for_paths(changed_paths)
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -703,6 +750,7 @@ class BridgeFileOpsMixin:
             if not p.exists():
                 self.fileOpFinished.emit("delete", False, path_str, "")
                 return False
+            was_dir = p.is_dir()
 
             self.close_native_video()
             QApplication.processEvents()
@@ -733,9 +781,13 @@ class BridgeFileOpsMixin:
                     p.unlink()
 
             from app.mediamanager.utils.pathing import normalize_windows_path
-            self.conn.execute("DELETE FROM media_items WHERE path = ?", (normalize_windows_path(path_str),))
+            normalized = normalize_windows_path(path_str)
+            if was_dir:
+                self.conn.execute("DELETE FROM media_items WHERE path = ? OR path LIKE ?", (normalized, f"{normalized}/%"))
+            else:
+                self.conn.execute("DELETE FROM media_items WHERE path = ?", (normalized,))
             self.conn.commit()
-            self._invalidate_scan_caches()
+            self._invalidate_scan_caches_for_paths([path_str])
             self.collectionsChanged.emit()
             self.fileOpFinished.emit("delete", True, path_str, "")
             return True
@@ -750,6 +802,7 @@ class BridgeFileOpsMixin:
             if not p.exists():
                 self.fileOpFinished.emit("delete", False, path_str, "")
                 return False
+            was_dir = p.is_dir()
 
             self.close_native_video()
             QApplication.processEvents()
@@ -760,9 +813,13 @@ class BridgeFileOpsMixin:
                 p.unlink()
 
             from app.mediamanager.utils.pathing import normalize_windows_path
-            self.conn.execute("DELETE FROM media_items WHERE path = ?", (normalize_windows_path(path_str),))
+            normalized = normalize_windows_path(path_str)
+            if was_dir:
+                self.conn.execute("DELETE FROM media_items WHERE path = ? OR path LIKE ?", (normalized, f"{normalized}/%"))
+            else:
+                self.conn.execute("DELETE FROM media_items WHERE path = ?", (normalized,))
             self.conn.commit()
-            self._invalidate_scan_caches()
+            self._invalidate_scan_caches_for_paths([path_str])
             self.fileOpFinished.emit("delete", True, path_str, "")
             return True
         except Exception:

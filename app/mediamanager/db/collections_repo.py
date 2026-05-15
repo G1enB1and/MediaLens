@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Iterable
 
 from app.mediamanager.db.media_repo import add_media_item, get_media_by_path
+from app.mediamanager.db.scope_query import normalize_roots
 
 
 def _utc_now_iso() -> str:
@@ -21,9 +22,11 @@ def list_collections(conn: sqlite3.Connection) -> list[dict]:
           c.is_hidden,
           c.created_at_utc,
           c.updated_at_utc,
-          COUNT(ci.media_id) AS item_count
+          COUNT(DISTINCT ci.media_id) AS explicit_item_count,
+          COUNT(DISTINCT cf.folder_path) AS folder_count
         FROM collections c
         LEFT JOIN collection_items ci ON ci.collection_id = c.id
+        LEFT JOIN collection_folders cf ON cf.collection_id = c.id
         GROUP BY c.id, c.name, c.is_hidden, c.created_at_utc, c.updated_at_utc
         ORDER BY LOWER(c.name), c.id
         """
@@ -35,7 +38,9 @@ def list_collections(conn: sqlite3.Connection) -> list[dict]:
             "is_hidden": bool(row[2]),
             "created_at_utc": row[3],
             "updated_at_utc": row[4],
-            "item_count": int(row[5] or 0),
+            "item_count": count_collection_media(conn, int(row[0])),
+            "explicit_item_count": int(row[5] or 0),
+            "folder_count": int(row[6] or 0),
         }
         for row in rows
     ]
@@ -156,6 +161,85 @@ def add_media_paths_to_collection(conn: sqlite3.Connection, collection_id: int, 
     )
     conn.commit()
     return max(0, conn.total_changes - before - 1)
+
+
+def add_folder_paths_to_collection(conn: sqlite3.Connection, collection_id: int, folders: Iterable[str]) -> int:
+    collection = get_collection(conn, collection_id)
+    if not collection:
+        return 0
+
+    incoming = normalize_roots(str(folder or "").strip() for folder in folders if str(folder or "").strip())
+    if not incoming:
+        return 0
+
+    existing = list_collection_folders(conn, collection_id)
+    merged = normalize_roots([*existing, *incoming])
+    existing_keys = {str(folder or "").rstrip("/").casefold() for folder in existing}
+    merged_keys = {str(folder or "").rstrip("/").casefold() for folder in merged}
+    if merged_keys == existing_keys:
+        return 0
+
+    now = _utc_now_iso()
+    changed = 1
+    conn.execute("DELETE FROM collection_folders WHERE collection_id = ?", (int(collection_id),))
+    conn.executemany(
+        """
+        INSERT OR IGNORE INTO collection_folders(collection_id, folder_path, created_at_utc)
+        VALUES (?, ?, ?)
+        """,
+        [(int(collection_id), folder, now) for folder in merged],
+    )
+    conn.execute(
+        "UPDATE collections SET updated_at_utc = ? WHERE id = ?",
+        (now, int(collection_id)),
+    )
+    conn.commit()
+    return changed
+
+
+def list_collection_folders(conn: sqlite3.Connection, collection_id: int) -> list[str]:
+    rows = conn.execute(
+        """
+        SELECT folder_path
+        FROM collection_folders
+        WHERE collection_id = ?
+        ORDER BY LOWER(folder_path)
+        """,
+        (int(collection_id),),
+    ).fetchall()
+    return [str(row[0] or "") for row in rows if str(row[0] or "").strip()]
+
+
+def collection_media_where(collection_id: int, include_nested: bool = True) -> tuple[str, list]:
+    folder_match_sql = "m.path = cf.folder_path OR m.path LIKE cf.folder_path || '/%'" if include_nested else "m.path = cf.folder_path OR (m.path LIKE cf.folder_path || '/%' AND instr(substr(m.path, length(cf.folder_path) + 2), '/') = 0)"
+    where_sql = """
+        (
+          m.id IN (
+            SELECT ci.media_id
+            FROM collection_items ci
+            WHERE ci.collection_id = ?
+              AND NOT EXISTS (
+                SELECT 1
+                FROM collection_folders owned_cf
+                WHERE owned_cf.collection_id = ci.collection_id
+                  AND (m.path = owned_cf.folder_path OR m.path LIKE owned_cf.folder_path || '/%')
+              )
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM collection_folders cf
+            WHERE cf.collection_id = ?
+              AND ({folder_match_sql})
+          )
+        )
+    """.format(folder_match_sql=folder_match_sql)
+    return where_sql, [int(collection_id), int(collection_id)]
+
+
+def count_collection_media(conn: sqlite3.Connection, collection_id: int, include_nested: bool = True) -> int:
+    where_sql, params = collection_media_where(collection_id, include_nested=include_nested)
+    row = conn.execute(f"SELECT COUNT(DISTINCT m.id) FROM media_items m WHERE {where_sql}", params).fetchone()
+    return int(row[0] or 0) if row else 0
 
 
 def set_collection_hidden(conn: sqlite3.Connection, collection_id: int, hidden: bool) -> bool:

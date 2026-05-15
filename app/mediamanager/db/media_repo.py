@@ -546,12 +546,31 @@ def list_media_in_collection(
     collection_id: int,
     limit: Optional[int] = None,
     offset: Optional[int] = None,
+    include_nested: bool = True,
+) -> list[dict]:
+    from app.mediamanager.db.collections_repo import collection_media_where
+
+    where_sql, params = collection_media_where(int(collection_id), include_nested=include_nested)
+    return _list_media_with_where(conn, where_sql, params, limit=limit, offset=offset)
+
+
+def list_explicit_media_in_collection(
+    conn: sqlite3.Connection,
+    collection_id: int,
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
 ) -> list[dict]:
     where_sql = """
         m.id IN (
           SELECT ci.media_id
           FROM collection_items ci
           WHERE ci.collection_id = ?
+            AND NOT EXISTS (
+              SELECT 1
+              FROM collection_folders cf
+              WHERE cf.collection_id = ci.collection_id
+                AND (m.path = cf.folder_path OR m.path LIKE cf.folder_path || '/%')
+            )
         )
     """
     return _list_media_with_where(conn, where_sql, [int(collection_id)], limit=limit, offset=offset)

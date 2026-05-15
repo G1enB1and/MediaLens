@@ -470,8 +470,7 @@ class RecycleBinViewerWindow(QMainWindow):
         if restore_from_recycle_bin(file_id):
             self.load_items()
             if self.main_window:
-                self.main_window.bridge._disk_cache = {}
-                self.main_window.bridge._disk_cache_key = ""
+                self.main_window.bridge._invalidate_scan_caches()
                 self.main_window.bridge.collectionsChanged.emit()
                 if hasattr(self.main_window, '_refresh_current_folder'):
                     self.main_window._refresh_current_folder()
@@ -486,8 +485,7 @@ class RecycleBinViewerWindow(QMainWindow):
             restore_all()
             self.load_items()
             if self.main_window:
-                self.main_window.bridge._disk_cache = {}
-                self.main_window.bridge._disk_cache_key = ""
+                self.main_window.bridge._invalidate_scan_caches()
                 self.main_window.bridge.collectionsChanged.emit()
                 if hasattr(self.main_window, '_refresh_current_folder'):
                     self.main_window._refresh_current_folder()

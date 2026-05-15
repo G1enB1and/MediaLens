@@ -268,6 +268,72 @@ class FolderTreeView(QTreeView):
             self.setCursor(Qt.CursorShape.ArrowCursor)
         super().mouseMoveEvent(event)
 
+    def _drop_target_folder_at(self, pos: QPoint) -> str:
+        idx = self.indexAt(pos)
+        if idx.isValid():
+            model = self.model()
+            if isinstance(model, QSortFilterProxyModel):
+                source_idx = model.mapToSource(idx)
+                fs_model = model.sourceModel()
+                if isinstance(fs_model, QFileSystemModel):
+                    if fs_model.isDir(source_idx):
+                        return fs_model.filePath(source_idx)
+                    return fs_model.filePath(source_idx.parent())
+            elif isinstance(model, QFileSystemModel):
+                if model.isDir(idx):
+                    return model.filePath(idx)
+                return model.filePath(idx.parent())
+
+        main_win = self.window()
+        root_path = str(getattr(main_win, "_tree_root_path", "") or "")
+        if root_path:
+            try:
+                root = Path(root_path)
+                if root.exists() and root.is_dir():
+                    return str(root.absolute())
+            except Exception:
+                return root_path
+        return ""
+
+    @staticmethod
+    def _drag_paths_have_valid_destination(src_paths: list[str], target_path: str, is_copy: bool) -> bool:
+        target_key = str(target_path or "").replace("/", "\\").rstrip("\\").casefold()
+        if not src_paths or not target_key:
+            return False
+        for raw_path in src_paths:
+            src_key = str(raw_path or "").replace("/", "\\").rstrip("\\").casefold()
+            if not src_key:
+                continue
+            src_folder = os.path.dirname(src_key)
+            if target_key == src_key or target_key.startswith(src_key + "\\"):
+                continue
+            if not is_copy and src_folder == target_key:
+                continue
+            return True
+        return False
+
+    @staticmethod
+    def _drag_item_text(paths: list[str]) -> str:
+        files = 0
+        folders = 0
+        for raw_path in paths or []:
+            try:
+                p = Path(str(raw_path or ""))
+                if p.is_dir():
+                    folders += 1
+                else:
+                    files += 1
+            except Exception:
+                files += 1
+        total = files + folders
+        if total <= 0:
+            return "1 item"
+        if files and not folders:
+            return f"{files} file" if files == 1 else f"{files} files"
+        if folders and not files:
+            return f"{folders} folder" if folders == 1 else f"{folders} folders"
+        return f"{total} items"
+
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if event.mimeData().hasUrls():
             is_copy = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
@@ -277,28 +343,26 @@ class FolderTreeView(QTreeView):
             super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event: QDragMoveEvent) -> None:
-        idx = self.indexAt(event.position().toPoint())
-        if idx.isValid():
-            source_idx = self.model().mapToSource(idx)
-            fs_model = self.model().sourceModel()
-            if fs_model.isDir(source_idx):
-                target_folder = fs_model.filePath(source_idx)
-                
-                # Check modifier keys for Copy vs Move
-                is_copy = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
-                
-                # Update tooltip via bridge
-                main_win = self.window()
-                bridge = getattr(main_win, "bridge", None)
-                if bridge:
-                    # Count items from side-channel or mime
-                    count = len(bridge.drag_paths) if bridge.drag_paths else 1
-                    bridge.update_drag_tooltip(count, is_copy, Path(target_folder).name)
-                
+        pos = event.position().toPoint()
+        target_folder = self._drop_target_folder_at(pos)
+        if target_folder and event.mimeData().hasUrls():
+            is_copy = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+            main_win = self.window()
+            bridge = getattr(main_win, "bridge", None)
+            if bridge:
+                count = len(bridge.drag_paths) if bridge.drag_paths else max(1, len(event.mimeData().urls()))
+                src_paths = list(bridge.drag_paths) if bridge.drag_paths else [url.toLocalFile() for url in event.mimeData().urls() if url.toLocalFile()]
+                tooltip_target = Path(target_folder).name or target_folder
+                if not self._drag_paths_have_valid_destination(src_paths, target_folder, is_copy):
+                    tooltip_target = "__INVALID__"
+                bridge.update_drag_tooltip(count, is_copy, tooltip_target)
+
+            idx = self.indexAt(pos)
+            if idx.isValid():
                 self.setExpanded(idx, True)
-                event.setDropAction(Qt.DropAction.CopyAction if is_copy else Qt.DropAction.MoveAction)
-                event.accept()
-                return
+            event.setDropAction(Qt.DropAction.CopyAction if is_copy else Qt.DropAction.MoveAction)
+            event.accept()
+            return
         
         # If not over a folder, hide tooltip target
         main_win = self.window()
@@ -324,26 +388,7 @@ class FolderTreeView(QTreeView):
             bridge.hide_drag_tooltip()
 
         mime = event.mimeData()
-        idx = self.indexAt(event.position().toPoint())
-        
-        # Determine target folder
-        target_path = ""
-        if idx.isValid():
-            # Handle proxy model mapping
-            model = self.model()
-            if isinstance(model, QSortFilterProxyModel):
-                source_idx = model.mapToSource(idx)
-                fs_model = model.sourceModel()
-                if isinstance(fs_model, QFileSystemModel):
-                    if fs_model.isDir(source_idx):
-                        target_path = fs_model.filePath(source_idx)
-                    else:
-                        target_path = fs_model.filePath(source_idx.parent())
-            elif isinstance(model, QFileSystemModel):
-                if model.isDir(idx):
-                    target_path = model.filePath(idx)
-                else:
-                    target_path = model.filePath(idx.parent())
+        target_path = self._drop_target_folder_at(event.position().toPoint())
 
         if not target_path:
             event.ignore()
@@ -365,15 +410,17 @@ class FolderTreeView(QTreeView):
             event.ignore()
             return
 
-        # Filter out if moving to THE SAME folder
-        src_paths = [p for p in src_paths if os.path.dirname(p).replace("\\", "/").lower() != target_path.replace("\\", "/").lower()]
+        # Filter out invalid move targets; copy can intentionally duplicate into the source folder.
+        is_copy = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+        target_key = target_path.replace("\\", "/").lower()
+        if not is_copy:
+            src_paths = [p for p in src_paths if os.path.dirname(p).replace("\\", "/").lower() != target_key]
 
         if not src_paths:
             event.ignore()
             return
 
         # Determine if COPY or MOVE
-        is_copy = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
         op_type = "copy" if is_copy else "move"
         
         if bridge:
@@ -414,14 +461,15 @@ class CollectionListWidget(QListWidget):
     def dragMoveEvent(self, event: QDragMoveEvent) -> None:
         bridge = getattr(self.window(), "bridge", None)
         item = self.itemAt(event.position().toPoint())
-        if item and bridge:
-            count = len(bridge.drag_paths) if bridge.drag_paths else max(1, len(event.mimeData().urls()))
-            bridge.update_drag_tooltip(count, True, item.text())
+        if bridge:
+            paths = list(bridge.drag_paths) if bridge.drag_paths else [url.toLocalFile() for url in event.mimeData().urls() if url.toLocalFile()]
+            count = max(1, len(paths))
+            item_text = FolderTreeView._drag_item_text(paths)
+            target_name = item.text() if item else ""
+            bridge.update_drag_tooltip(count, True, f"__COLLECTIONS__|{item_text}|{target_name}")
             event.setDropAction(Qt.DropAction.CopyAction)
             event.accept()
             return
-        if bridge:
-            bridge.update_drag_tooltip(len(bridge.drag_paths) or 1, True, "")
         super().dragMoveEvent(event)
 
     def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:
@@ -436,7 +484,7 @@ class CollectionListWidget(QListWidget):
             bridge.hide_drag_tooltip()
 
         item = self.itemAt(event.position().toPoint())
-        if not item or not bridge:
+        if not bridge:
             event.ignore()
             return
 
@@ -447,12 +495,15 @@ class CollectionListWidget(QListWidget):
             event.ignore()
             return
 
-        collection_id = int(item.data(Qt.ItemDataRole.UserRole) or 0)
-        if collection_id <= 0:
+        if not item:
+            if bridge.add_paths_to_collection_interactive(src_paths):
+                event.acceptProposedAction()
+                return
             event.ignore()
             return
 
-        if bridge.add_paths_to_collection(collection_id, src_paths) > 0:
+        collection_id = int(item.data(Qt.ItemDataRole.UserRole) or 0)
+        if collection_id > 0 and bridge.add_paths_to_collection(collection_id, src_paths) > 0:
             event.acceptProposedAction()
             return
         event.ignore()
@@ -568,12 +619,13 @@ class PinnedFolderListWidget(QListWidget):
         folders = self._extract_folder_paths(event.mimeData(), bridge)
         if folders:
             if bridge:
-                bridge.update_drag_tooltip(len(folders), True, "Pinned Folders")
+                folder_name = Path(folders[0]).name if len(folders) == 1 else ""
+                bridge.update_drag_tooltip(len(folders), True, f"__PINNED_FOLDERS__|{folder_name}")
             event.setDropAction(Qt.DropAction.CopyAction)
             event.accept()
             return
         if bridge:
-            bridge.hide_drag_tooltip()
+            bridge.update_drag_tooltip(len(getattr(bridge, "drag_paths", [])) or 1, False, "__INVALID__")
         super().dragMoveEvent(event)
 
     def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:

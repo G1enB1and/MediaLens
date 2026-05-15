@@ -424,21 +424,62 @@ class BridgeNavigationCollectionsMixin:
 
     @Slot(int, list, result=int)
     def add_paths_to_collection(self, collection_id: int, paths: list[str]) -> int:
-        from app.mediamanager.db.collections_repo import add_media_paths_to_collection
+        from app.mediamanager.db.collections_repo import add_folder_paths_to_collection, add_media_paths_to_collection
         try:
-            added = add_media_paths_to_collection(self.conn, int(collection_id), paths)
+            media_paths, folder_paths = self._collection_paths_from_drop(paths)
+            added_media = add_media_paths_to_collection(self.conn, int(collection_id), media_paths)
+            added_folders = add_folder_paths_to_collection(self.conn, int(collection_id), folder_paths)
             self.collectionsChanged.emit()
+            added = int(added_media or 0) + int(added_folders or 0)
             if added and self._active_collection_id == int(collection_id):
                 self.selectionChanged.emit([])
-            return int(added)
+            return added
         except Exception:
             return 0
+
+    def _collection_paths_from_drop(self, paths: list[str]) -> tuple[list[str], list[str]]:
+        media_exts = {str(ext).lower() for ext in (IMAGE_EXTS | VIDEO_EXTS)}
+        media_paths: list[str] = []
+        folder_paths: list[str] = []
+        seen_media: set[str] = set()
+        seen_folders: set[str] = set()
+        for raw_path in paths or []:
+            path_str = str(raw_path or "").strip()
+            if not path_str:
+                continue
+            try:
+                path_obj = Path(path_str)
+            except Exception:
+                continue
+            if path_obj.is_dir():
+                try:
+                    normalized = str(path_obj.absolute())
+                except Exception:
+                    continue
+                key = normalized.replace("\\", "/").lower().rstrip("/")
+                if key in seen_folders:
+                    continue
+                seen_folders.add(key)
+                folder_paths.append(normalized)
+                continue
+            try:
+                if path_obj.suffix.lower() not in media_exts:
+                    continue
+                normalized = str(path_obj.absolute())
+            except Exception:
+                continue
+            key = normalized.replace("\\", "/").lower()
+            if key in seen_media:
+                continue
+            seen_media.add(key)
+            media_paths.append(normalized)
+        return media_paths, folder_paths
 
     @Slot(list, result=bool)
     def add_paths_to_collection_interactive(self, paths: list[str]) -> bool:
         from app.mediamanager.db.collections_repo import create_collection, list_collections
-        clean_paths = [str(path or "").strip() for path in paths if str(path or "").strip()]
-        if not clean_paths:
+        media_paths, folder_paths = self._collection_paths_from_drop(paths)
+        if not media_paths and not folder_paths:
             return False
         try:
             collections = list_collections(self.conn)
@@ -466,7 +507,7 @@ class BridgeNavigationCollectionsMixin:
                     return False
                 collection_id = int(selected["id"])
 
-            added = self.add_paths_to_collection(collection_id, clean_paths)
+            added = self.add_paths_to_collection(collection_id, [*media_paths, *folder_paths])
             return added > 0
         except Exception:
             return False

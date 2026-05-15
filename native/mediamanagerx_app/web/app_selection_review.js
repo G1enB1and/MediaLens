@@ -416,15 +416,28 @@ function deletePathFromUi(path, onDone) {
     }
     const parts = String(path).split(/[/\\]/);
     const name = parts[parts.length - 1] || path;
-    if (!window.confirm(`Permanently delete "${name}"?`)) {
+    const message = `Permanently delete "${name}"?`;
+    const runPermanentDelete = () => {
+      if (!gBridge.delete_path_permanent) {
+        finish(false);
+        return;
+      }
+      gBridge.delete_path_permanent(path, finish);
+    };
+    if (gBridge.themed_confirm) {
+      gBridge.themed_confirm('Delete Confirmation', message, function (confirmed) {
+        if (!confirmed) {
+          finish(false);
+          return;
+        }
+        runPermanentDelete();
+      });
+      return;
+    } else if (!window.confirm(message)) {
       finish(false);
       return;
     }
-    if (!gBridge.delete_path_permanent) {
-      finish(false);
-      return;
-    }
-    gBridge.delete_path_permanent(path, finish);
+    runPermanentDelete();
   });
 }
 

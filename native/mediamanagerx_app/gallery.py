@@ -241,11 +241,12 @@ class GalleryView(QWebEngineView):
                 src_paths = [url.toLocalFile() for url in mime.urls() if url.toLocalFile()]
             
             if src_paths:
+                is_copy = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
                 if bridge.drag_paths:
                     target_path = bridge.drag_target_folder
                 else:
                     target_path = ""
-                if not target_path and not bridge.drag_paths:
+                if not target_path and (not bridge.drag_paths or is_copy):
                     selected = bridge.get_selected_folders()
                     target_path = selected[0] if selected else ""
                 
@@ -254,18 +255,19 @@ class GalleryView(QWebEngineView):
 
                     # Internal gallery drags dropped back onto the gallery background
                     # should be treated as a cancelled drag, not as a move/copy into
-                    # the currently loaded folder.
+                    # the currently loaded folder, except Ctrl-copy which duplicates
+                    # into the current folder.
                     if bridge.drag_paths:
-                        if not bridge.drag_target_folder:
+                        if not bridge.drag_target_folder and not is_copy:
                             event.ignore()
                             return
 
                     # Filter out if moving to THE SAME folder
-                    src_paths = [p for p in src_paths if os.path.dirname(p).replace("\\", "/").lower() != target_path_norm]
+                    if not is_copy:
+                        src_paths = [p for p in src_paths if os.path.dirname(p).replace("\\", "/").lower() != target_path_norm]
                     
                     if src_paths:
                         # Determine if COPY or MOVE
-                        is_copy = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
                         op_type = "copy" if is_copy else "move"
                         
                         paths_obj = [Path(p) for p in src_paths]

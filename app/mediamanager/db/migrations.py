@@ -134,6 +134,22 @@ def _ensure_ocr_tables(conn: sqlite3.Connection) -> None:
     ensure_ocr_tables(conn)
 
 
+def _ensure_collection_folder_tables(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS collection_folders (
+          collection_id INTEGER NOT NULL,
+          folder_path TEXT NOT NULL,
+          created_at_utc TEXT NOT NULL,
+          PRIMARY KEY (collection_id, folder_path),
+          FOREIGN KEY(collection_id) REFERENCES collections(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_collection_folders_collection ON collection_folders(collection_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_collection_folders_path ON collection_folders(folder_path)")
+
+
 def init_db(db_path: str) -> None:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     sql = _load_schema_sql()
@@ -157,6 +173,7 @@ def init_db(db_path: str) -> None:
         _ensure_is_hidden_columns(conn)
         _ensure_media_item_date_columns(conn)
         _ensure_ocr_tables(conn)
+        _ensure_collection_folder_tables(conn)
         conn.commit()
     finally:
         conn.close()

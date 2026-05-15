@@ -219,6 +219,8 @@ class Bridge(BridgeMediaListingScanMixin, BridgeTagsMetadataMixin, BridgeLocalAi
         self._disk_cache_key: str = "" # Hash of selected folders list
         self._last_full_scan_key: str = ""
         self._disk_cache_by_scope: dict[str, dict[str, Path]] = {}
+        self._disk_cache_scope_meta: dict[str, dict] = {}
+        self._scan_scope_roots_by_key: dict[str, list[str]] = {}
         self._warm_scan_keys: set[str] = set()
         self._text_processing_generation: int = 0
         self._text_processing_paused: bool = False

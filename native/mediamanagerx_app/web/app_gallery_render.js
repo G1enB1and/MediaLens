@@ -132,13 +132,57 @@ function clearGalleryFolderDropTargets() {
   gCurrentDropFolderCard = null;
 }
 
-function getEligibleDroppedPaths(paths, targetPath) {
+function getEligibleDroppedPaths(paths, targetPath, isCopy = false) {
   if (!Array.isArray(paths) || !paths.length || !targetPath) return [];
   const targetNorm = targetPath.replace(/\//g, '\\').toLowerCase();
   return paths.filter((path) => {
-    const srcFolder = (path || '').replace(/\//g, '\\').replace(/\\[^\\]+$/, '').toLowerCase();
-    return srcFolder !== targetNorm;
+    const srcNorm = (path || '').replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+    const srcFolder = srcNorm.replace(/\\[^\\]+$/, '');
+    return (isCopy || srcFolder !== targetNorm) && targetNorm !== srcNorm && !targetNorm.startsWith(`${srcNorm}\\`);
   });
+}
+
+function beginGalleryCardDrag(e, item, card, type = 'file') {
+  const path = item && item.path ? item.path : '';
+  if (!path) return;
+  const paths = gSelectedPaths.has(path) ? Array.from(gSelectedPaths) : [path];
+  if (startNativeGalleryDrag(e, item, paths)) return;
+  const urls = paths.map(p => 'file:///' + p.replace(/\\/g, '/'));
+  const pathsJson = JSON.stringify(paths);
+  e.dataTransfer.setData('text/uri-list', urls.join('\r\n'));
+  e.dataTransfer.setData('text/plain', pathsJson);
+  e.dataTransfer.setData('web/mmx-paths', pathsJson);
+  e.dataTransfer.setData('application/x-mmx-type', type);
+  primeGalleryDragState(paths);
+  e.dataTransfer.effectAllowed = 'copyMove';
+
+  const previewImg = card && card.querySelector ? card.querySelector('img') : null;
+  if (previewImg) {
+    const canvas = buildDragPreviewCanvas(previewImg, item);
+    if (canvas) {
+      e.dataTransfer.setDragImage(canvas, 0, 0);
+    }
+  }
+}
+
+function updateGalleryCardDrag(e) {
+  if (gBridge && gBridge.update_drag_tooltip && e.clientX > 0 && e.clientY > 0) {
+    const isCopy = e.ctrlKey || e.metaKey;
+    updateGalleryDragHoverFromPoint(e.clientX, e.clientY, e.target, isCopy);
+    const count = gCurrentDragCount || 1;
+    gBridge.update_drag_tooltip(count, isCopy, gCurrentTargetFolderName || '__INVALID__');
+  }
+}
+
+function finishGalleryCardDrag(e) {
+  const isCopy = !!(e && (e.ctrlKey || e.metaKey));
+  if (e && e.clientX > 0 && e.clientY > 0) {
+    updateGalleryDragHoverFromPoint(e.clientX, e.clientY, e.target, isCopy);
+  }
+  if (!executeGalleryDropToCurrentTarget(isCopy) && isCopy) {
+    executeGalleryBackgroundCopy();
+  }
+  clearGalleryDragState();
 }
 
 function cancelInternalGalleryDrop(e) {
@@ -166,10 +210,10 @@ function getFolderCardFromPoint(clientX, clientY, fallbackTarget = null) {
   return getFolderCardFromEventTarget(fallbackTarget);
 }
 
-function updateGalleryDragHoverFromPoint(clientX, clientY, fallbackTarget = null) {
+function updateGalleryDragHoverFromPoint(clientX, clientY, fallbackTarget = null, isCopy = false) {
   const folderCard = getFolderCardFromPoint(clientX, clientY, fallbackTarget);
   const targetPath = folderCard ? (folderCard.getAttribute('data-path') || '') : '';
-  const eligiblePaths = getEligibleDroppedPaths(gCurrentDragPaths, targetPath);
+  const eligiblePaths = getEligibleDroppedPaths(gCurrentDragPaths, targetPath, isCopy);
   if (!folderCard || !targetPath || !eligiblePaths.length) {
     clearGalleryFolderDropTargets();
     return false;
@@ -187,7 +231,7 @@ function updateGalleryDragHoverFromPoint(clientX, clientY, fallbackTarget = null
 
 function executeGalleryDropToCurrentTarget(isCopy) {
   const targetPath = gCurrentDropFolderPath || '';
-  const eligiblePaths = getEligibleDroppedPaths(gCurrentDragPaths, targetPath);
+  const eligiblePaths = getEligibleDroppedPaths(gCurrentDragPaths, targetPath, isCopy);
   if (!targetPath || !eligiblePaths.length || gGalleryDragHandled) return false;
   gGalleryDragHandled = true;
   if (gBridge && gBridge.hide_drag_tooltip) gBridge.hide_drag_tooltip();
@@ -196,6 +240,21 @@ function executeGalleryDropToCurrentTarget(isCopy) {
   if (gBridge && (isCopy ? gBridge.copy_paths_async : gBridge.move_paths_async)) {
     const op = isCopy ? gBridge.copy_paths_async : gBridge.move_paths_async;
     op.call(gBridge, eligiblePaths, targetPath);
+    return true;
+  }
+  return false;
+}
+
+function executeGalleryBackgroundCopy() {
+  const targetPath = gSelectedFolders.length > 0 ? gSelectedFolders[0] : '';
+  const eligiblePaths = getEligibleDroppedPaths(gCurrentDragPaths, targetPath, true);
+  if (!targetPath || !eligiblePaths.length || gGalleryDragHandled) return false;
+  gGalleryDragHandled = true;
+  if (gBridge && gBridge.hide_drag_tooltip) gBridge.hide_drag_tooltip();
+  debugGalleryDrag(`execute background copy target=${targetPath} count=${eligiblePaths.length}`);
+  setGlobalLoading(true, 'Copying...', 25);
+  if (gBridge && gBridge.copy_paths_async) {
+    gBridge.copy_paths_async(eligiblePaths, targetPath);
     return true;
   }
   return false;
@@ -536,6 +595,7 @@ function createStructuredCard(item, idx) {
   });
 
   if (isFolder) {
+    card.draggable = true;
     card.addEventListener('dragenter', (e) => {
       if (!isInternalGalleryDragEvent(e)) return;
       const paths = getDraggedPathsFromEvent(e);
@@ -553,14 +613,17 @@ function createStructuredCard(item, idx) {
       if (!isInternalGalleryDragEvent(e)) return;
       const paths = getDraggedPathsFromEvent(e);
       const targetPath = item.path || '';
-      const eligiblePaths = getEligibleDroppedPaths(paths, targetPath);
+      const isCopy = e.ctrlKey || e.metaKey;
+      const eligiblePaths = getEligibleDroppedPaths(paths, targetPath, isCopy);
       if (!eligiblePaths.length) {
         card.classList.remove('folder-drop-target');
+        if (gBridge && gBridge.update_drag_tooltip) {
+          gBridge.update_drag_tooltip(gCurrentDragCount || paths.length || 1, false, '__INVALID__');
+        }
         return;
       }
       e.preventDefault();
       e.stopPropagation();
-      const isCopy = e.ctrlKey || e.metaKey;
       if (e.dataTransfer) e.dataTransfer.dropEffect = isCopy ? 'copy' : 'move';
       if (!card.classList.contains('folder-drop-target')) {
         clearGalleryFolderDropTargets();
@@ -582,7 +645,8 @@ function createStructuredCard(item, idx) {
       if (!isInternalGalleryDragEvent(e)) return;
       const paths = getDraggedPathsFromEvent(e);
       const targetPath = item.path || gCurrentDropFolderPath || '';
-      const eligiblePaths = getEligibleDroppedPaths(paths, targetPath);
+      const isCopy = e.ctrlKey || e.metaKey;
+      const eligiblePaths = getEligibleDroppedPaths(paths, targetPath, isCopy);
       e.preventDefault();
       e.stopPropagation();
       clearGalleryFolderDropTargets();
@@ -590,7 +654,6 @@ function createStructuredCard(item, idx) {
         debugGalleryDrag(`folder-card drop ignored target=${targetPath} paths=${paths.length}`);
         return;
       }
-      const isCopy = e.ctrlKey || e.metaKey;
       if (gBridge && gBridge.hide_drag_tooltip) gBridge.hide_drag_tooltip();
       debugGalleryDrag(`folder-card drop execute target=${targetPath} count=${eligiblePaths.length} op=${isCopy ? 'copy' : 'move'}`);
       setGlobalLoading(true, isCopy ? 'Copying…' : 'Moving…', 25);
@@ -599,6 +662,11 @@ function createStructuredCard(item, idx) {
         op.call(gBridge, eligiblePaths, targetPath);
       }
     });
+    card.addEventListener('dragstart', (e) => {
+      beginGalleryCardDrag(e, item, card, 'folder');
+    });
+    card.addEventListener('drag', updateGalleryCardDrag);
+    card.addEventListener('dragend', finishGalleryCardDrag);
   } else {
     card.draggable = true;
     card.addEventListener('dragover', (e) => {
@@ -611,34 +679,10 @@ function createStructuredCard(item, idx) {
       cancelInternalGalleryDrop(e);
     });
     card.addEventListener('dragstart', (e) => {
-      const path = item.path || '';
-      if (!path) return;
-      const paths = gSelectedPaths.has(path) ? Array.from(gSelectedPaths) : [path];
-      if (startNativeGalleryDrag(e, item, paths)) return;
-      const urls = paths.map(p => 'file:///' + p.replace(/\\/g, '/'));
-      const pathsJson = JSON.stringify(paths);
-      e.dataTransfer.setData('text/uri-list', urls.join('\r\n'));
-      e.dataTransfer.setData('text/plain', pathsJson);
-      e.dataTransfer.setData('web/mmx-paths', pathsJson);
-      e.dataTransfer.setData('application/x-mmx-type', 'file');
-      primeGalleryDragState(paths);
-      e.dataTransfer.effectAllowed = 'copyMove';
+      beginGalleryCardDrag(e, item, card, 'file');
     });
-    card.addEventListener('drag', (e) => {
-      if (gBridge && gBridge.update_drag_tooltip && e.clientX > 0 && e.clientY > 0) {
-        updateGalleryDragHoverFromPoint(e.clientX, e.clientY, e.target);
-        const isCopy = e.ctrlKey || e.metaKey;
-        const count = gCurrentDragCount || 1;
-        gBridge.update_drag_tooltip(count, isCopy, gCurrentTargetFolderName);
-      }
-    });
-    card.addEventListener('dragend', (e) => {
-      if (e && e.clientX > 0 && e.clientY > 0) {
-        updateGalleryDragHoverFromPoint(e.clientX, e.clientY, e.target);
-      }
-      executeGalleryDropToCurrentTarget(!!(e && (e.ctrlKey || e.metaKey)));
-      clearGalleryDragState();
-    });
+    card.addEventListener('drag', updateGalleryCardDrag);
+    card.addEventListener('dragend', finishGalleryCardDrag);
   }
 
   return card;
@@ -707,56 +751,16 @@ function createMasonryCard(item, idx) {
 
     card.draggable = true;
     card.addEventListener('dragstart', (e) => {
-      const path = item.path || '';
-      if (!path) return;
-
-      let paths = [];
-      if (gSelectedPaths.has(path)) {
-        paths = Array.from(gSelectedPaths);
-      } else {
-        paths = [path];
-      }
-
       if (window.qt && gBridge && gBridge.debug_log) {
+        const path = item.path || '';
+        const paths = gSelectedPaths.has(path) ? Array.from(gSelectedPaths) : [path];
         gBridge.debug_log("JS DragStart Image: SelectedCount=" + gSelectedPaths.size + " Dragging=" + path + " FinalCount=" + paths.length);
       }
-      console.log("JS DragStart Image:", paths);
-
-      if (startNativeGalleryDrag(e, item, paths)) return;
-
-      const urls = paths.map(p => 'file:///' + p.replace(/\\/g, '/'));
-      const pathsJson = JSON.stringify(paths);
-
-      e.dataTransfer.setData('text/uri-list', urls.join('\r\n'));
-      e.dataTransfer.setData('text/plain', pathsJson);
-      e.dataTransfer.setData('web/mmx-paths', pathsJson);
-      e.dataTransfer.setData('application/x-mmx-type', 'file');
-
-      primeGalleryDragState(paths);
-      e.dataTransfer.effectAllowed = 'copyMove';
-
-      const previewImg = card.querySelector('img');
-      if (previewImg) {
-        const canvas = buildDragPreviewCanvas(previewImg, item);
-        if (canvas) {
-          e.dataTransfer.setDragImage(canvas, 0, 0);
-        }
-      }
+      beginGalleryCardDrag(e, item, card, 'file');
     });
-    card.addEventListener('drag', (e) => {
-      if (gBridge && gBridge.update_drag_tooltip && e.clientX > 0 && e.clientY > 0) {
-        updateGalleryDragHoverFromPoint(e.clientX, e.clientY, e.target);
-        const isCopy = e.ctrlKey || e.metaKey;
-        const count = gCurrentDragCount || 1;
-        gBridge.update_drag_tooltip(count, isCopy, gCurrentTargetFolderName);
-      }
-    });
+    card.addEventListener('drag', updateGalleryCardDrag);
     card.addEventListener('dragend', (e) => {
-      if (e && e.clientX > 0 && e.clientY > 0) {
-        updateGalleryDragHoverFromPoint(e.clientX, e.clientY, e.target);
-      }
-      executeGalleryDropToCurrentTarget(!!(e && (e.ctrlKey || e.metaKey)));
-      clearGalleryDragState();
+      finishGalleryCardDrag(e);
       e.preventDefault();
     });
     return card;
@@ -816,37 +820,10 @@ function createMasonryCard(item, idx) {
 
   card.draggable = true;
   card.addEventListener('dragstart', (e) => {
-    const path = item.path || '';
-    if (!path) return;
-
-    const paths = gSelectedPaths.has(path) ? Array.from(gSelectedPaths) : [path];
-    if (startNativeGalleryDrag(e, item, paths)) return;
-    const urls = paths.map(p => 'file:///' + p.replace(/\\/g, '/'));
-    const pathsJson = JSON.stringify(paths);
-
-    e.dataTransfer.setData('text/uri-list', urls.join('\r\n'));
-    e.dataTransfer.setData('text/plain', pathsJson);
-    e.dataTransfer.setData('web/mmx-paths', pathsJson);
-    e.dataTransfer.setData('application/x-mmx-type', 'file');
-
-    primeGalleryDragState(paths);
-    e.dataTransfer.effectAllowed = 'copyMove';
+    beginGalleryCardDrag(e, item, card, 'file');
   });
-  card.addEventListener('drag', (e) => {
-    if (gBridge && gBridge.update_drag_tooltip && e.clientX > 0 && e.clientY > 0) {
-      updateGalleryDragHoverFromPoint(e.clientX, e.clientY, e.target);
-      const isCopy = e.ctrlKey || e.metaKey;
-      const count = gCurrentDragCount || 1;
-      gBridge.update_drag_tooltip(count, isCopy, gCurrentTargetFolderName);
-    }
-  });
-  card.addEventListener('dragend', (e) => {
-    if (e && e.clientX > 0 && e.clientY > 0) {
-      updateGalleryDragHoverFromPoint(e.clientX, e.clientY, e.target);
-    }
-    executeGalleryDropToCurrentTarget(!!(e && (e.ctrlKey || e.metaKey)));
-    clearGalleryDragState();
-  });
+  card.addEventListener('drag', updateGalleryCardDrag);
+  card.addEventListener('dragend', finishGalleryCardDrag);
 
   return card;
 }
@@ -1565,6 +1542,19 @@ function wireCtxMenu() {
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') hideCtx();
   });
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Delete') return;
+    const target = e.target;
+    if (target && target.closest && target.closest('input, textarea, select, [contenteditable="true"]')) return;
+    if (!gBridge || !gSelectedPaths || gSelectedPaths.size <= 0) return;
+    const paths = Array.from(gSelectedPaths).filter(Boolean);
+    if (!paths.length) return;
+    e.preventDefault();
+    e.stopPropagation();
+    deletePathsSequential(paths, () => {
+      refreshFromBridge(gBridge, false);
+    });
+  });
 
   // Consolidated mousedown listener for all context menu items
   // Immediate response beats potential dismissal loops.
@@ -1873,7 +1863,8 @@ function renderMediaList(items, scrollToTop = true) {
         const paths = getDraggedPathsFromEvent(e);
         if (folderTarget) {
           const targetPath = folderTarget.getAttribute('data-path') || '';
-          const eligiblePaths = getEligibleDroppedPaths(paths, targetPath);
+          const isCopy = e.ctrlKey || e.metaKey;
+          const eligiblePaths = getEligibleDroppedPaths(paths, targetPath, isCopy);
           if (eligiblePaths.length) {
             e.preventDefault();
             e.stopPropagation();
@@ -1881,7 +1872,6 @@ function renderMediaList(items, scrollToTop = true) {
             folderTarget.classList.add('folder-drop-target');
             gCurrentTargetFolderName = getItemName({ path: targetPath, is_folder: true });
             gCurrentDropFolderPath = targetPath;
-            const isCopy = e.ctrlKey || e.metaKey;
             if (e.dataTransfer) e.dataTransfer.dropEffect = isCopy ? 'copy' : 'move';
             if (gBridge && gBridge.update_drag_tooltip) {
               const count = gCurrentDragCount || eligiblePaths.length || 1;
@@ -1892,7 +1882,18 @@ function renderMediaList(items, scrollToTop = true) {
         }
         clearGalleryFolderDropTargets();
         e.preventDefault();
+        const isCopy = e.ctrlKey || e.metaKey;
+        if (isCopy && gSelectedFolders.length > 0) {
+          if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+          if (gBridge && gBridge.update_drag_tooltip) {
+            gBridge.update_drag_tooltip(gCurrentDragCount || paths.length || 1, true, getItemName({ path: gSelectedFolders[0], is_folder: true }));
+          }
+          return;
+        }
         if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
+        if (gBridge && gBridge.update_drag_tooltip) {
+          gBridge.update_drag_tooltip(gCurrentDragCount || paths.length || 1, false, '__INVALID__');
+        }
       });
       el.addEventListener('dragleave', (e) => {
         if (el.contains(e.relatedTarget)) return;
@@ -1903,18 +1904,36 @@ function renderMediaList(items, scrollToTop = true) {
         if (folderTarget && isInternalGalleryDragEvent(e)) {
           const paths = getDraggedPathsFromEvent(e);
           const targetPath = folderTarget.getAttribute('data-path') || gCurrentDropFolderPath || '';
-          const eligiblePaths = getEligibleDroppedPaths(paths, targetPath);
+          const isCopy = e.ctrlKey || e.metaKey;
+          const eligiblePaths = getEligibleDroppedPaths(paths, targetPath, isCopy);
           if (eligiblePaths.length) {
             e.preventDefault();
             e.stopPropagation();
             clearGalleryFolderDropTargets();
-            const isCopy = e.ctrlKey || e.metaKey;
             if (gBridge && gBridge.hide_drag_tooltip) gBridge.hide_drag_tooltip();
             debugGalleryDrag(`gallery drop execute target=${targetPath} count=${eligiblePaths.length} op=${isCopy ? 'copy' : 'move'}`);
             setGlobalLoading(true, isCopy ? 'Copying…' : 'Moving…', 25);
             if (gBridge && (isCopy ? gBridge.copy_paths_async : gBridge.move_paths_async)) {
               const op = isCopy ? gBridge.copy_paths_async : gBridge.move_paths_async;
               op.call(gBridge, eligiblePaths, targetPath);
+            }
+            return;
+          }
+        }
+        const isBackgroundCopy = !!(e.ctrlKey || e.metaKey);
+        const backgroundTarget = gSelectedFolders.length > 0 ? gSelectedFolders[0] : '';
+        if (isBackgroundCopy && backgroundTarget && isInternalGalleryDragEvent(e)) {
+          const paths = getDraggedPathsFromEvent(e);
+          const eligiblePaths = getEligibleDroppedPaths(paths, backgroundTarget, true);
+          if (eligiblePaths.length) {
+            e.preventDefault();
+            e.stopPropagation();
+            clearGalleryFolderDropTargets();
+            if (gBridge && gBridge.hide_drag_tooltip) gBridge.hide_drag_tooltip();
+            debugGalleryDrag(`gallery background copy target=${backgroundTarget} count=${eligiblePaths.length}`);
+            setGlobalLoading(true, 'Copying…', 25);
+            if (gBridge && gBridge.copy_paths_async) {
+              gBridge.copy_paths_async(eligiblePaths, backgroundTarget);
             }
             return;
           }

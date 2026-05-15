@@ -224,16 +224,18 @@ class BridgeMediaListingScanMixin:
     def _get_reconciled_candidates(self, folders: list, filter_type: str = "all", search_query: str = "") -> list[dict]:
         from app.mediamanager.db.media_repo import list_media_in_scope
         from app.mediamanager.utils.pathing import normalize_windows_path
+        from app.mediamanager.db.scope_query import normalize_roots
         ALL_EXTS = IMAGE_EXTS | VIDEO_EXTS
         image_exts = IMAGE_EXTS
         media_filter, _, tags_filter, desc_filter, ai_filter = self._parse_filter_groups(filter_type)
         if not folders: return []
         show_hidden = self._show_hidden_enabled()
         include_nested = self._gallery_include_nested_files_enabled()
+        normalized_folders = normalize_roots(str(folder or "") for folder in folders if str(folder or "").strip())
         current_key = hashlib.sha1(
             json.dumps(
                 {
-                    "folders": sorted(str(folder or "") for folder in folders),
+                    "folders": normalized_folders,
                     "show_hidden": bool(show_hidden),
                     "include_nested": bool(include_nested),
                 },
@@ -275,6 +277,11 @@ class BridgeMediaListingScanMixin:
                                 disk_files[normalize_windows_path(str(child))] = child
                 except Exception: pass
             self._disk_cache_by_scope[current_key] = disk_files
+            self._disk_cache_scope_meta[current_key] = {
+                "folders": normalized_folders,
+                "show_hidden": bool(show_hidden),
+                "include_nested": bool(include_nested),
+            }
             self._disk_cache, self._disk_cache_key = disk_files, current_key
         db_candidates = list_media_in_scope(self.conn, folders)
         surviving, covered = [], set()
@@ -324,19 +331,31 @@ class BridgeMediaListingScanMixin:
         return candidates
 
     def _get_collection_candidates(self, collection_id: int, filter_type: str = "all", search_query: str = "") -> list[dict]:
-        from app.mediamanager.db.media_repo import list_media_in_collection
+        from app.mediamanager.db.collections_repo import list_collection_folders
+        from app.mediamanager.db.media_repo import list_explicit_media_in_collection
         image_exts = IMAGE_EXTS
         show_hidden = self._show_hidden_enabled()
         media_filter, _, tags_filter, desc_filter, ai_filter = self._parse_filter_groups(filter_type)
         
-        raw_candidates = list_media_in_collection(self.conn, int(collection_id))
-        candidates = []
+        folder_sources = list_collection_folders(self.conn, int(collection_id))
+        candidates = self._get_reconciled_candidates(folder_sources, filter_type, search_query) if folder_sources else []
+        raw_candidates = list_explicit_media_in_collection(self.conn, int(collection_id))
         for r in raw_candidates:
             if not show_hidden and r.get("is_hidden"):
                 continue
             path_obj = Path(r["path"])
             if path_obj.exists() and path_obj.is_file():
                 candidates.append(r)
+
+        deduped_candidates: list[dict] = []
+        seen_paths: set[str] = set()
+        for r in candidates:
+            path_key = str(r.get("path") or "").replace("\\", "/").rstrip("/").casefold()
+            if not path_key or path_key in seen_paths:
+                continue
+            seen_paths.add(path_key)
+            deduped_candidates.append(r)
+        candidates = deduped_candidates
                 
         if media_filter == "image":
             candidates = [
@@ -618,6 +637,60 @@ class BridgeMediaListingScanMixin:
 
         return entries
 
+    def _list_collection_folder_entries(self, collection_id: int, search_query: str = "") -> list[dict]:
+        from app.mediamanager.db.collections_repo import list_collection_folders
+
+        folders = list_collection_folders(self.conn, int(collection_id))
+        if not folders:
+            return []
+
+        show_hidden = self._show_hidden_enabled()
+        query = (search_query or "").strip().lower()
+        seen: set[str] = set()
+        entries: list[dict] = []
+
+        for folder in folders:
+            folder_path = Path(folder)
+            if not folder_path.is_dir():
+                continue
+            norm = str(folder_path).lower().replace("\\", "/").rstrip("/")
+            if norm in seen:
+                continue
+            is_hidden = self.repo.is_path_hidden(str(folder_path))
+            if not show_hidden and is_hidden:
+                continue
+            if query:
+                haystack = f"{folder_path.name} {folder_path}".lower()
+                if query not in haystack:
+                    continue
+            seen.add(norm)
+            try:
+                stat = folder_path.stat()
+                modified_time = int(stat.st_mtime_ns)
+                created_time = int(stat.st_ctime_ns)
+            except Exception:
+                modified_time = 0
+                created_time = 0
+            normalized_date = self._normalized_file_date_ns(created_time, modified_time)
+            entries.append(
+                {
+                    "path": str(folder_path),
+                    "media_type": "folder",
+                    "is_folder": True,
+                    "is_hidden": is_hidden,
+                    "file_size": None,
+                    "file_created_time": created_time,
+                    "modified_time": modified_time,
+                    "original_file_date": normalized_date,
+                    "preferred_date": normalized_date or created_time or modified_time,
+                    "width": None,
+                    "height": None,
+                    "duration": None,
+                }
+            )
+
+        return entries
+
     def _sort_gallery_entries(self, entries: list[dict], sort_by: str) -> list[dict]:
         name_key = lambda row: Path(str(row.get("path", ""))).name.lower()
         date_key = lambda row: row.get("preferred_date") or self._preferred_date_ns(row)
@@ -684,6 +757,8 @@ class BridgeMediaListingScanMixin:
                 entries = self._list_folder_entries(folders, search_query) + entries
         elif self._active_collection_id is not None:
             entries = self._get_collection_candidates(self._active_collection_id, filter_type, search_query)
+            if self._gallery_show_folders_enabled() and self._gallery_view_mode() != "masonry" and self._review_group_mode() is None:
+                entries = self._list_collection_folder_entries(self._active_collection_id, search_query) + entries
         elif self._active_smart_collection_key:
             entries = self._get_smart_collection_candidates(self._active_smart_collection_key, filter_type, search_query)
         else:
@@ -788,8 +863,10 @@ class BridgeMediaListingScanMixin:
         self._disk_cache = {}
         self._disk_cache_key = ""
         self._disk_cache_by_scope.clear()
+        self._disk_cache_scope_meta.clear()
         self._last_full_scan_key = ""
         self._warm_scan_keys.clear()
+        self._scan_scope_roots_by_key.clear()
         with self._checkpoint_lock:
             self._scan_checkpoint.clear()
             self._checkpoint_dirty_count = 0
@@ -798,6 +875,58 @@ class BridgeMediaListingScanMixin:
                 self._checkpoint_path.unlink()
         except Exception:
             pass
+
+    @staticmethod
+    def _cache_path_key(path: str) -> str:
+        try:
+            from app.mediamanager.utils.pathing import normalize_windows_path
+            return normalize_windows_path(str(path or "")).rstrip("/").casefold()
+        except Exception:
+            return str(path or "").replace("\\", "/").rstrip("/").casefold()
+
+    def _paths_overlap_for_cache(self, left: str, right: str) -> bool:
+        left_key = self._cache_path_key(left)
+        right_key = self._cache_path_key(right)
+        if not left_key or not right_key:
+            return False
+        return left_key == right_key or left_key.startswith(right_key + "/") or right_key.startswith(left_key + "/")
+
+    def _invalidate_scan_caches_for_paths(self, paths: list[str] | tuple[str, ...] | set[str]) -> None:
+        changed = [str(path or "") for path in (paths or []) if str(path or "").strip()]
+        if not changed:
+            self._invalidate_scan_caches()
+            return
+
+        removed_disk_keys: set[str] = set()
+        for cache_key, meta in list(self._disk_cache_scope_meta.items()):
+            roots = list((meta or {}).get("folders") or [])
+            if any(self._paths_overlap_for_cache(root, path) for root in roots for path in changed):
+                removed_disk_keys.add(cache_key)
+                self._disk_cache_by_scope.pop(cache_key, None)
+                self._disk_cache_scope_meta.pop(cache_key, None)
+        if self._disk_cache_key in removed_disk_keys:
+            self._disk_cache = {}
+            self._disk_cache_key = ""
+
+        removed_scan_keys: set[str] = set()
+        for scan_key, roots in list(self._scan_scope_roots_by_key.items()):
+            if any(self._paths_overlap_for_cache(root, path) for root in roots for path in changed):
+                removed_scan_keys.add(scan_key)
+                self._scan_scope_roots_by_key.pop(scan_key, None)
+        self._warm_scan_keys.difference_update(removed_scan_keys)
+        if self._last_full_scan_key in removed_scan_keys:
+            self._last_full_scan_key = ""
+
+        removed_checkpoint = False
+        with self._checkpoint_lock:
+            for scan_key in removed_scan_keys:
+                if scan_key in self._scan_checkpoint:
+                    self._scan_checkpoint.pop(scan_key, None)
+                    removed_checkpoint = True
+            if removed_checkpoint:
+                self._checkpoint_dirty_count = 0
+        if removed_checkpoint:
+            self._save_scan_checkpoint()
 
     def _load_scan_checkpoint(self) -> dict[str, set[str]]:
         try:
@@ -840,7 +969,10 @@ class BridgeMediaListingScanMixin:
     def start_scan(self, folders: list, search_query: str = "") -> None:
         if not folders:
             return
-        scan_key = hashlib.sha1(",".join(sorted(str(folder) for folder in folders)).encode()).hexdigest()
+        from app.mediamanager.db.scope_query import normalize_roots
+        scan_roots = normalize_roots(str(folder or "") for folder in folders if str(folder or "").strip())
+        scan_key = hashlib.sha1(",".join(scan_roots).encode()).hexdigest()
+        self._scan_scope_roots_by_key[scan_key] = scan_roots
         if self._last_full_scan_key == scan_key or scan_key in self._warm_scan_keys:
             primary = folders[0] if folders else ""
             def emit_cached_scan_finished() -> None:
