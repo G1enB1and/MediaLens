@@ -1,6 +1,41 @@
 # Change Log
 
-## v1.2.8 (Current)
+## v1.2.9 (Current)
+
+### Summary
+
+This release expands folder workflows, collection behavior, and file handling while making gallery video playback and sorting more dependable. MediaLens now handles more real-world library layouts with less unnecessary scanning, smoother playback behavior, and clearer fallback handling.
+
+### Highlights
+
+- Drag folders between the gallery, file tree, pinned folders, collections, and external destinations with clearer move, copy, and pin behavior.
+- Keep collections live with folder sources, optional nested file inclusion, and MediaLens recycle bin recovery for deleted folders and file types.
+- Browse and sort larger galleries more smoothly, including WebM playback fixes and lightweight display for non-media files when enabled.
+
+### Added
+
+- Added folder drag-and-drop support for gallery folders, file tree destinations, pinned folders, collections, and Windows File Explorer destinations.
+- Added support for collections that include live folder sources instead of only copied file snapshots.
+- Added MediaLens recycle bin support for deleted folders and all file types that MediaLens can delete.
+- Added a General setting to switch between showing all file types and showing media files only, with lightweight icons for unsupported file types.
+- Added Local AI Models VRAM fit indicators, recommended-model emphasis, and a fit message below the model list.
+
+### Changed
+
+- Changed drag-and-drop tooltips for folders, pinned folders, collections, invalid destinations, and same-destination copy behavior.
+- Changed folder copy and move refresh handling to use narrower cache invalidation instead of broad app-wide cache clearing where possible.
+- Changed collections so folder display and Include nested files behavior match normal gallery folder behavior.
+- Changed unsupported file handling so non-media files avoid expensive metadata, thumbnail, OCR, and AI processing when shown.
+- Changed the Local AI Models window so light mode styling covers the model list and related controls more consistently.
+- Changed delete confirmation dialogs for folders and collections to use MediaLens themed titles, accent colors, and button styling.
+- Changed the empty no-folder gallery message so it spans the gallery, uses bold text, and explains how to pick a folder.
+- Changed in-place gallery video playback to clear stale frames when switching videos.
+- Changed WebM handling so playback controls appear correctly, invalid tiny dimensions no longer collapse masonry cards, and in-place playback sizing is more stable.
+- Changed sort-only gallery refreshes so they skip unnecessary scan and count work.
+
+---
+
+## v1.2.8
 
 ### Summary
 
