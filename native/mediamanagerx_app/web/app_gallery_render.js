@@ -2344,7 +2344,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   setupCustomSelect('sortSelect', (val) => {
     gSort = val;
-    if (gBridge) refreshFromBridge(gBridge, true);
+    if (gBridge) refreshFromBridge(gBridge, true, { skipScanRefresh: true, preserveCount: true });
   });
 
   setupGroupedFilterSelect('filterSelect', (val) => {

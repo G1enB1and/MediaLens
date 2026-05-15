@@ -503,8 +503,10 @@ function clearGalleryForPendingRefresh(message) {
   setGlobalLoading(true, message || 'Loading gallery...', 10);
 }
 
-function refreshFromBridge(bridge, resetPage = false) {
+function refreshFromBridge(bridge, resetPage = false, options = {}) {
   if (!bridge) return;
+  const skipScanRefresh = !!(options && options.skipScanRefresh);
+  const preserveCount = !!(options && options.preserveCount);
   const preserveScroll = prepareGalleryScrollPreservationForRefresh(resetPage);
   const refreshToken = ++gRefreshGeneration;
   const consumeSelectAllAfterRefresh = function () {
@@ -596,7 +598,7 @@ function refreshFromBridge(bridge, resetPage = false) {
               }
             });
           });
-          if (bridge.start_scan_paths) {
+          if (!skipScanRefresh && bridge.start_scan_paths) {
             bridge.start_scan_paths(asArray(items).filter(isSupportedMediaItem).map(item => item.path).filter(Boolean));
           }
         });
@@ -613,20 +615,27 @@ function refreshFromBridge(bridge, resetPage = false) {
         if (useInfinite) requestAnimationFrame(() => maybeLoadMoreInfiniteResults());
         // Hide the "Starting..." or "Loading..." overlay once we have the first batch of results.
         setGlobalLoading(false);
-        if (bridge.start_scan_paths) {
+        if (!skipScanRefresh && bridge.start_scan_paths) {
           bridge.start_scan_paths(asArray(items).filter(isSupportedMediaItem).map(item => item.path).filter(Boolean));
         }
-        fetchMediaCount(gSelectedFolders, gFilter, gSearchQuery || '').then(function (count) {
-          if (refreshToken !== gRefreshGeneration) return;
-          gTotal = count || 0;
+        if (preserveCount) {
           refreshGalleryFileCountChip();
           renderPager();
-        });
+        } else {
+          fetchMediaCount(gSelectedFolders, gFilter, gSearchQuery || '').then(function (count) {
+            if (refreshToken !== gRefreshGeneration) return;
+            gTotal = count || 0;
+            refreshGalleryFileCountChip();
+            renderPager();
+          });
+        }
       });
 
     // ── 2. Background Enrichment Scan ────────────────────────────────────
     // This fills in hashes and metadata in the DB.
-    ensureFullFolderScanRequested(bridge, gSelectedFolders, gSearchQuery || '');
+    if (!skipScanRefresh) {
+      ensureFullFolderScanRequested(bridge, gSelectedFolders, gSearchQuery || '');
+    }
     });
   });
 }
