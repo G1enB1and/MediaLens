@@ -1953,18 +1953,31 @@ class WindowSidebarBulkMixin:
         folders = list(getattr(self.bridge, "_selected_folders", []) or [])
         filter_type = str(getattr(self.bridge, "_current_gallery_filter", "all") or "all")
         search_query = self._effective_gallery_scope_search(include_tag_scope=False)
+        bridge = self.bridge
+        counts_ready = self.tagListScopeCountsReady
+
+        def normalize_tags(text: str) -> list[str]:
+            parts = re.split(r"[;,]", str(text or ""))
+            return [part.strip() for part in parts if part.strip()]
 
         def work() -> None:
+            try:
+                if bool(getattr(bridge, "_shutting_down", False)):
+                    return
+            except RuntimeError:
+                return
             started_at = time.perf_counter()
             counts: Counter[str] = Counter()
             try:
-                entries = self.bridge._get_gallery_entries(folders, "none", filter_type, search_query)
+                entries = bridge._get_gallery_entries(folders, "none", filter_type, search_query)
+            except (RuntimeError, ReferenceError):
+                return
             except Exception:
                 entries = []
             for entry in entries or []:
                 if entry.get("is_folder"):
                     continue
-                tags = self._normalize_tag_list(entry.get("tags") or "")
+                tags = normalize_tags(entry.get("tags") or "")
                 seen: set[str] = set()
                 for tag in tags:
                     key = tag.casefold()
@@ -1974,7 +1987,7 @@ class WindowSidebarBulkMixin:
                     counts[key] += 1
             resolved = dict(counts)
             try:
-                self.bridge._perf_log_elapsed(
+                bridge._perf_log_elapsed(
                     "tag_list_scope_counts_worker",
                     started_at,
                     threshold_ms=80,
@@ -1984,7 +1997,10 @@ class WindowSidebarBulkMixin:
             except Exception:
                 pass
             try:
-                self.tagListScopeCountsReady.emit(int(revision), cache_key, resolved)
+                if not bool(getattr(bridge, "_shutting_down", False)):
+                    counts_ready.emit(int(revision), cache_key, resolved)
+            except (RuntimeError, ReferenceError):
+                return
             except Exception:
                 pass
 
@@ -2008,7 +2024,34 @@ class WindowSidebarBulkMixin:
         self._tag_list_scope_counts_pending_key = None
         self._tag_list_scope_counts_cache_key = current_key
         self._tag_list_scope_counts_cache_value = dict(counts or {}) if isinstance(counts, dict) else {}
-        self._refresh_tag_list_panel()
+        self._apply_tag_list_scope_counts_to_rows()
+
+    def _apply_tag_list_scope_counts_to_rows(self) -> None:
+        if not hasattr(self, "tag_list_rows") or self.tag_list_rows.count() <= 0:
+            return
+        counts = getattr(self, "_tag_list_scope_counts_cache_value", None)
+        if not isinstance(counts, dict):
+            return
+        theme_kwargs = self._tag_list_theme_kwargs()
+        changed_rows: list[TagListTagRow] = []
+        for index in range(self.tag_list_rows.count()):
+            item = self.tag_list_rows.item(index)
+            row = self.tag_list_rows.itemWidget(item)
+            if not isinstance(row, TagListTagRow):
+                continue
+            key = str(row.tag_name or "").casefold()
+            changed = row.update_entry({
+                "scope_use_count": int(counts.get(key, 0)),
+                "global_use_count": row._global_use_count,
+                "selection_state": row._selection_state,
+                "filter_active": row._filter_active,
+            })
+            if changed:
+                changed_rows.append(row)
+        if theme_kwargs is None:
+            return
+        for row in changed_rows:
+            row.apply_theme(**theme_kwargs)
 
     def _reload_tag_lists(self, preferred_id: int | None = None) -> None:
         from app.mediamanager.db.tag_lists_repo import list_tag_lists
