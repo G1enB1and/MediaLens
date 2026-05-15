@@ -2186,14 +2186,19 @@ class WindowSidebarBulkMixin:
         self._apply_tag_list_theme()
 
     def _refresh_tag_list_scope_counts(self) -> None:
+        started_at = time.perf_counter()
         if not hasattr(self, "tag_list_panel") or not self._is_tag_list_panel_visible():
             return
         if not str(getattr(self.bridge, "_current_gallery_tag_scope_search", "") or "").strip():
             self._active_tag_scope_name = ""
         self._invalidate_tag_list_scope_counts_cache()
         self._refresh_tag_list_panel()
+        try:
+            self.bridge._perf_log_elapsed("tag_list_scope_counts_refresh", started_at, threshold_ms=80)
+        except Exception:
+            pass
 
-    def _schedule_tag_list_scope_counts_refresh(self, delay_ms: int = 450) -> None:
+    def _schedule_tag_list_scope_counts_refresh(self, delay_ms: int = 650) -> None:
         timer = getattr(self, "_tag_list_scope_counts_refresh_timer", None)
         if timer is None:
             timer = QTimer(self)

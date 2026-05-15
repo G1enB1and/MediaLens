@@ -648,10 +648,17 @@ class WindowAppLifecycleMixin:
         super().closeEvent(event)
 
     def open_settings(self) -> None:
+        started_at = time.perf_counter()
         try:
+            created = False
             if self._settings_dialog is None:
                 self._settings_dialog = SettingsDialog(self)
+                created = True
             self._settings_dialog.open_dialog()
+            try:
+                self.bridge._perf_log_elapsed("open_settings", started_at, threshold_ms=80, created=int(created))
+            except Exception:
+                pass
         except Exception as exc:
             try:
                 self.bridge._log(f"Failed to open settings dialog: {exc}")

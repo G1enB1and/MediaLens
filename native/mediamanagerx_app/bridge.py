@@ -241,6 +241,8 @@ class Bridge(BridgeMediaListingScanMixin, BridgeTagsMetadataMixin, BridgeLocalAi
         self._checkpoint_lock = threading.Lock()
         self._checkpoint_dirty_count = 0
         self._scan_checkpoint: dict[str, set[str]] = self._load_scan_checkpoint()
+        self._gallery_count_cache: dict[tuple, tuple[float, int]] = {}
+        self._gallery_count_cache_ttl_seconds = 4.0
 
         # Set by app.aboutToQuit so daemon threads stop emitting signals before
         # Qt deletes the Bridge's C++ half during shutdown.

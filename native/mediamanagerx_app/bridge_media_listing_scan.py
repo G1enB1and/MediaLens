@@ -9,6 +9,68 @@ from native.mediamanagerx_app.compare import *
 from native.mediamanagerx_app.metadata_payload import *
 
 class BridgeMediaListingScanMixin:
+    def _perf_log_elapsed(self, label: str, started_at: float, threshold_ms: int = 120, **fields) -> None:
+        try:
+            elapsed_ms = int((time.perf_counter() - float(started_at)) * 1000)
+            if elapsed_ms < int(threshold_ms):
+                return
+            detail = " ".join(f"{key}={value}" for key, value in fields.items() if value is not None)
+            self._log(f"Perf {label}: {elapsed_ms}ms{(' ' + detail) if detail else ''}")
+        except Exception:
+            pass
+
+    def _gallery_count_cache_key(self, folders: list, filter_type: str, search_query: str, *, files_only: bool) -> tuple:
+        try:
+            from app.mediamanager.db.scope_query import normalize_roots
+
+            normalized_folders = tuple(normalize_roots(str(folder or "") for folder in folders if str(folder or "").strip()))
+        except Exception:
+            normalized_folders = tuple(str(folder or "").strip().casefold() for folder in folders if str(folder or "").strip())
+        return (
+            normalized_folders,
+            str(filter_type or "all"),
+            str(search_query or ""),
+            bool(files_only),
+            bool(self._show_hidden_enabled()),
+            bool(self._gallery_include_nested_files_enabled()),
+            bool(self._gallery_should_show_all_file_types()),
+            str(self._gallery_view_mode()),
+        )
+
+    def _read_gallery_count_cache(self, key: tuple) -> int | None:
+        try:
+            cached = getattr(self, "_gallery_count_cache", {}).get(key)
+            if not cached:
+                return None
+            cached_at, value = cached
+            ttl = float(getattr(self, "_gallery_count_cache_ttl_seconds", 4.0) or 4.0)
+            if (time.monotonic() - float(cached_at)) > ttl:
+                getattr(self, "_gallery_count_cache", {}).pop(key, None)
+                return None
+            return int(value)
+        except Exception:
+            return None
+
+    def _write_gallery_count_cache(self, key: tuple, value: int) -> None:
+        try:
+            cache = getattr(self, "_gallery_count_cache", None)
+            if cache is None:
+                self._gallery_count_cache = {}
+                cache = self._gallery_count_cache
+            cache[key] = (time.monotonic(), int(value or 0))
+            if len(cache) > 128:
+                oldest = sorted(cache.items(), key=lambda item: item[1][0])[:32]
+                for old_key, _old_value in oldest:
+                    cache.pop(old_key, None)
+        except Exception:
+            pass
+
+    def _clear_gallery_count_cache(self) -> None:
+        try:
+            self._gallery_count_cache.clear()
+        except Exception:
+            pass
+
     @staticmethod
     def _is_supported_media_path(path: Path | str) -> bool:
         return Path(path).suffix.lower() in (IMAGE_EXTS | VIDEO_EXTS)
@@ -86,6 +148,7 @@ class BridgeMediaListingScanMixin:
 
     @Slot(list, int, int, str, str, str, result=list)
     def list_media(self, folders, limit=100, offset=0, sort_by="none", filter_type="all", search_query="") -> list:
+        started_at = time.perf_counter()
         try:
             try:
                 self.conn.commit()
@@ -254,6 +317,17 @@ class BridgeMediaListingScanMixin:
                 })
             return out
         except Exception: return []
+        finally:
+            self._perf_log_elapsed(
+                "list_media",
+                started_at,
+                folders=len(list(folders or [])),
+                limit=int(limit or 0),
+                offset=int(offset or 0),
+                sort=str(sort_by or "none"),
+                filter=str(filter_type or "all"),
+                search=1 if str(search_query or "").strip() else 0,
+            )
 
     @Slot(str, list, int, int, str, str, str)
     def list_media_async(self, request_id: str, folders, limit=100, offset=0, sort_by="none", filter_type="all", search_query="") -> None:
@@ -273,24 +347,42 @@ class BridgeMediaListingScanMixin:
 
     @Slot(list, str, str, result=int)
     def count_media(self, folders: list, filter_type: str = "all", search_query: str = "") -> int:
+        cache_key = self._gallery_count_cache_key(list(folders or []), filter_type, search_query, files_only=False)
+        cached = self._read_gallery_count_cache(cache_key)
+        if cached is not None:
+            return cached
+        started_at = time.perf_counter()
         try:
             try:
                 self.conn.commit()
             except Exception:
                 pass
-            return len(self._get_gallery_entries(folders, "none", filter_type, search_query))
+            count = len(self._get_gallery_entries(folders, "none", filter_type, search_query))
+            self._write_gallery_count_cache(cache_key, count)
+            return count
         except Exception: return 0
+        finally:
+            self._perf_log_elapsed("count_media", started_at, folders=len(list(folders or [])), filter=str(filter_type or "all"), search=1 if str(search_query or "").strip() else 0)
 
     @Slot(list, str, str, result=int)
     def count_media_files(self, folders: list, filter_type: str = "all", search_query: str = "") -> int:
+        cache_key = self._gallery_count_cache_key(list(folders or []), filter_type, search_query, files_only=True)
+        cached = self._read_gallery_count_cache(cache_key)
+        if cached is not None:
+            return cached
+        started_at = time.perf_counter()
         try:
             try:
                 self.conn.commit()
             except Exception:
                 pass
-            return sum(1 for entry in self._get_gallery_entries(folders, "none", filter_type, search_query) if not entry.get("is_folder"))
+            count = sum(1 for entry in self._get_gallery_entries(folders, "none", filter_type, search_query) if not entry.get("is_folder"))
+            self._write_gallery_count_cache(cache_key, count)
+            return count
         except Exception:
             return 0
+        finally:
+            self._perf_log_elapsed("count_media_files", started_at, folders=len(list(folders or [])), filter=str(filter_type or "all"), search=1 if str(search_query or "").strip() else 0)
 
     @Slot(str, list, str, str)
     def count_media_async(self, request_id: str, folders: list, filter_type: str = "all", search_query: str = "") -> None:
@@ -319,6 +411,7 @@ class BridgeMediaListingScanMixin:
         threading.Thread(target=work, daemon=True).start()
 
     def _get_reconciled_candidates(self, folders: list, filter_type: str = "all", search_query: str = "") -> list[dict]:
+        started_at = time.perf_counter()
         from app.mediamanager.db.media_repo import list_media_in_scope
         from app.mediamanager.utils.pathing import normalize_windows_path
         from app.mediamanager.db.scope_query import normalize_roots
@@ -431,6 +524,14 @@ class BridgeMediaListingScanMixin:
         
         if search_query.strip():
             candidates = [r for r in candidates if self._matches_media_search(r, search_query)]
+        self._perf_log_elapsed(
+            "reconcile_candidates",
+            started_at,
+            folders=len(list(folders or [])),
+            candidates=len(candidates),
+            filter=str(filter_type or "all"),
+            search=1 if str(search_query or "").strip() else 0,
+        )
         return candidates
 
     def _get_collection_candidates(self, collection_id: int, filter_type: str = "all", search_query: str = "") -> list[dict]:
@@ -989,6 +1090,7 @@ class BridgeMediaListingScanMixin:
         return is_warm, changed_paths, progress_started
 
     def _invalidate_scan_caches(self) -> None:
+        self._clear_gallery_count_cache()
         self._disk_cache = {}
         self._disk_cache_key = ""
         self._disk_cache_by_scope.clear()
@@ -1070,6 +1172,7 @@ class BridgeMediaListingScanMixin:
         if not changed:
             self._invalidate_scan_caches()
             return
+        self._clear_gallery_count_cache()
 
         removed_disk_keys: set[str] = set()
         changed_file_keys = {
