@@ -313,8 +313,9 @@ function createStructuredCard(item, idx) {
   const card = document.createElement('div');
   const isFolder = !!item.is_folder;
   const isUnsupportedFile = isUnsupportedFileItem(item);
+  const isVideo = isVideoMediaItem(item);
   const usesThumbnails = viewUsesThumbnails();
-  const supportsInlinePlayback = !isFolder && !isUnsupportedFile && item.media_type === 'video' && viewSupportsInlineVideoPlayback();
+  const supportsInlinePlayback = !isFolder && !isUnsupportedFile && isVideo && viewSupportsInlineVideoPlayback();
   const duplicateMode = isDuplicateModeActive();
   const duplicateGroupKey = String(item.duplicate_group_key || '');
   const normalizedItemPath = normalizeMediaPath(item.path || '');
@@ -356,10 +357,10 @@ function createStructuredCard(item, idx) {
     markCardMediaReady(card);
   } else if (!usesThumbnails) {
     const icon = document.createElement('div');
-    icon.className = `media-icon ${item.media_type === 'video' ? 'video-icon' : 'image-icon'}`;
+    icon.className = `media-icon ${isVideo ? 'video-icon' : 'image-icon'}`;
     thumbWrap.appendChild(icon);
     markCardMediaReady(card);
-  } else if (item.media_type === 'image') {
+  } else if (!isVideo) {
     if (item.media_error) {
       const errorThumb = createMediaErrorThumb(item.media_error);
       thumbWrap.appendChild(errorThumb);
@@ -454,7 +455,7 @@ function createStructuredCard(item, idx) {
   if (gGalleryViewMode === 'details') {
     const typeCell = document.createElement('div');
     typeCell.className = 'entry-detail';
-    typeCell.textContent = isFolder ? 'Folder' : (isUnsupportedFile ? getFileIconLabel(item) : (item.media_type === 'video' ? 'Video' : 'Image'));
+    typeCell.textContent = isFolder ? 'Folder' : (isUnsupportedFile ? getFileIconLabel(item) : (isVideo ? 'Video' : 'Image'));
     content.appendChild(typeCell);
 
     const modifiedCell = document.createElement('div');
@@ -469,7 +470,7 @@ function createStructuredCard(item, idx) {
   } else if (gGalleryViewMode === 'content') {
     const meta = document.createElement('div');
     meta.className = 'entry-detail';
-    meta.textContent = isFolder ? 'Folder' : [isUnsupportedFile ? getFileIconLabel(item) : (item.media_type === 'video' ? 'Video' : 'Image'), formatFileSize(item.file_size)].filter(Boolean).join(' • ');
+    meta.textContent = isFolder ? 'Folder' : [isUnsupportedFile ? getFileIconLabel(item) : (isVideo ? 'Video' : 'Image'), formatFileSize(item.file_size)].filter(Boolean).join(' • ');
     content.appendChild(meta);
   } else if (gGalleryViewMode === 'list') {
     folder.remove();
@@ -757,7 +758,7 @@ function createMediaErrorThumb(message) {
 function getSafeMediaAspectRatio(item, fallback = '16 / 9') {
   const width = Number(item && item.width);
   const height = Number(item && item.height);
-  const minDim = item && item.media_type === 'video' ? 16 : 0;
+  const minDim = item && isVideoMediaItem(item) ? 16 : 0;
   if (Number.isFinite(width) && Number.isFinite(height) && width > minDim && height > minDim) {
     return `${width} / ${height}`;
   }
@@ -789,17 +790,18 @@ function getInplacePlaybackRect(target, item = null) {
 
 function createMasonryCard(item, idx) {
   const mediaIdx = getItemIndex(item, idx);
+  const isVideo = isVideoMediaItem(item);
   const card = document.createElement('div');
   card.className = 'card loading';
   card.tabIndex = 0;
   if (item.thumb_bg_hint) card.setAttribute('data-thumb-bg-hint', item.thumb_bg_hint);
   if (item.width && item.height) {
-    card.style.aspectRatio = getSafeMediaAspectRatio(item, item.media_type === 'video' ? '16 / 9' : '1 / 1');
-  } else if (item.media_type === 'video') {
+    card.style.aspectRatio = getSafeMediaAspectRatio(item, isVideo ? '16 / 9' : '1 / 1');
+  } else if (isVideo) {
     card.style.aspectRatio = '16 / 9';
   }
 
-  if (item.media_type === 'image') {
+  if (!isVideo) {
     if (item.media_error) {
       card.appendChild(createMediaErrorThumb(item.media_error));
       markCardMediaReady(card);
@@ -938,7 +940,14 @@ function createReviewSingleGroupCard(item, idx) {
   const thumbWrap = document.createElement('div');
   thumbWrap.className = 'review-single-thumb';
   if (item.thumb_bg_hint) thumbWrap.setAttribute('data-thumb-bg-hint', item.thumb_bg_hint);
-  if (item.media_type === 'image') {
+  if (isVideoMediaItem(item)) {
+    const img = document.createElement('img');
+    img.className = 'review-single-thumb-img poster';
+    img.alt = '';
+    img.setAttribute('data-video-path', item.path || '');
+    thumbWrap.appendChild(img);
+    gPosterObserver.observe(img);
+  } else if (item.media_type === 'image') {
     const img = document.createElement('img');
     img.className = 'review-single-thumb-img';
     img.alt = '';
@@ -952,13 +961,6 @@ function createReviewSingleGroupCard(item, idx) {
       img.setAttribute('data-animated', 'true');
       img.setAttribute('data-path', item.path || '');
     }
-    thumbWrap.appendChild(img);
-    gPosterObserver.observe(img);
-  } else if (item.media_type === 'video') {
-    const img = document.createElement('img');
-    img.className = 'review-single-thumb-img poster';
-    img.alt = '';
-    img.setAttribute('data-video-path', item.path || '');
     thumbWrap.appendChild(img);
     gPosterObserver.observe(img);
   } else {
@@ -1491,7 +1493,7 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
   if (metaBtn) metaBtn.style.display = isSupportedMedia ? 'block' : 'none';
   if (addToCollectionBtn) addToCollectionBtn.style.display = (hasItem && isSupportedMedia) || (!hasItem && hasSelectedMediaCards()) ? 'block' : 'none';
   
-  const isRotatable = hasItem && isSupportedMedia && (item.media_type === 'image' || item.media_type === 'video');
+  const isRotatable = hasItem && isSupportedMedia && (item.media_type === 'image' || isVideoMediaItem(item));
   ['ctxRotCW', 'ctxRotCCW', 'ctxRotSep'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = isRotatable ? 'block' : 'none';

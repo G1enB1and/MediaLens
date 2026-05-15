@@ -757,8 +757,19 @@ function isExactDuplicateReviewItem(item) {
 
 function isSupportedMediaItem(item) {
   if (!item || item.is_folder) return false;
-  if (item.is_supported_media === false) return false;
+  const ext = String(item.path || '').toLowerCase().match(/\.[^\\.\/]+$/);
+  const suffix = ext ? ext[0] : '';
+  const isKnownVideo = ['.mp4', '.m4v', '.webm', '.mov', '.mkv', '.avi', '.wmv'].includes(suffix);
+  const isKnownImage = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.avif', '.svg'].includes(suffix);
+  if (item.is_supported_media === false && !isKnownVideo && !isKnownImage) return false;
+  if (isKnownVideo || isKnownImage) return true;
   return item.media_type === 'image' || item.media_type === 'video';
+}
+
+function isVideoMediaItem(item) {
+  if (!isSupportedMediaItem(item)) return false;
+  const ext = String(item.path || '').toLowerCase().match(/\.[^\\.\/]+$/);
+  return item.media_type === 'video' || (ext && ['.mp4', '.m4v', '.webm', '.mov', '.mkv', '.avi', '.wmv'].includes(ext[0]));
 }
 
 function isUnsupportedFileItem(item) {

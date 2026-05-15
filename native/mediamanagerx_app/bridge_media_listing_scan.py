@@ -73,6 +73,8 @@ class BridgeMediaListingScanMixin:
         if self._is_supported_media_path(path):
             normalized = dict(row)
             normalized["is_supported_media"] = True
+            suffix = path.suffix.lower()
+            normalized["media_type"] = "image" if suffix in IMAGE_EXTS else "video"
             return normalized
         if not self._gallery_should_show_all_file_types():
             return None
