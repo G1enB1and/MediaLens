@@ -32,6 +32,7 @@ class MainWindow(WindowAppLifecycleMixin, WindowNativeActionsMixin, WindowPrevie
     videoSidebarMetadataReady = Signal(str, dict)
     videoSidebarPosterReady = Signal(str, str)
     debugLogUploadFinished = Signal(bool, str)
+    tagListScopeCountsReady = Signal(int, object, object)
 
     def __init__(self) -> None:
         super().__init__()
@@ -82,6 +83,7 @@ class MainWindow(WindowAppLifecycleMixin, WindowNativeActionsMixin, WindowPrevie
         self.bridge.metadataRequested.connect(self._schedule_show_metadata_for_path)
         self.videoSidebarMetadataReady.connect(self._on_video_sidebar_metadata_ready)
         self.videoSidebarPosterReady.connect(self._on_video_sidebar_poster_ready)
+        self.tagListScopeCountsReady.connect(self._on_tag_list_scope_counts_ready)
         self.bridge.loadFolderRequested.connect(self._on_load_folder_requested)
         self.bridge.startNativeDragRequested.connect(self._start_native_gallery_drag)
         self.bridge.navigateToFolderRequested.connect(self._on_navigate_to_folder_requested)

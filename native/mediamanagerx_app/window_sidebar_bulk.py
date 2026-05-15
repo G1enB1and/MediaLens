@@ -1925,6 +1925,8 @@ class WindowSidebarBulkMixin:
     def _invalidate_tag_list_scope_counts_cache(self) -> None:
         self._tag_list_scope_counts_cache_key = None
         self._tag_list_scope_counts_cache_value = None
+        self._tag_list_scope_counts_pending_key = None
+        self._tag_list_scope_counts_revision = int(getattr(self, "_tag_list_scope_counts_revision", 0) or 0) + 1
 
     def _effective_gallery_scope_search(self, include_tag_scope: bool = True) -> str:
         base_query = str(getattr(self.bridge, "_current_gallery_search", "") or "").strip()
@@ -1935,41 +1937,78 @@ class WindowSidebarBulkMixin:
             return base_query
         return f"{base_query} {tag_scope_query}".strip() if base_query else tag_scope_query
 
-    def _current_scope_tag_counts(self) -> dict[str, int]:
-        cache_key = (
+    def _tag_list_scope_counts_key(self) -> tuple:
+        return (
             tuple(str(path or "").casefold() for path in list(getattr(self.bridge, "_selected_folders", []) or [])),
             str(getattr(self.bridge, "_current_gallery_filter", "all") or "all"),
             self._effective_gallery_scope_search(include_tag_scope=False),
         )
+
+    def _schedule_scope_tag_counts_worker(self, cache_key: tuple) -> None:
+        if getattr(self, "_tag_list_scope_counts_pending_key", None) == cache_key:
+            return
+        self._tag_list_scope_counts_pending_key = cache_key
+        revision = int(getattr(self, "_tag_list_scope_counts_revision", 0) or 0) + 1
+        self._tag_list_scope_counts_revision = revision
+        folders = list(getattr(self.bridge, "_selected_folders", []) or [])
+        filter_type = str(getattr(self.bridge, "_current_gallery_filter", "all") or "all")
+        search_query = self._effective_gallery_scope_search(include_tag_scope=False)
+
+        def work() -> None:
+            started_at = time.perf_counter()
+            counts: Counter[str] = Counter()
+            try:
+                entries = self.bridge._get_gallery_entries(folders, "none", filter_type, search_query)
+            except Exception:
+                entries = []
+            for entry in entries or []:
+                if entry.get("is_folder"):
+                    continue
+                tags = self._normalize_tag_list(entry.get("tags") or "")
+                seen: set[str] = set()
+                for tag in tags:
+                    key = tag.casefold()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    counts[key] += 1
+            resolved = dict(counts)
+            try:
+                self.bridge._perf_log_elapsed(
+                    "tag_list_scope_counts_worker",
+                    started_at,
+                    threshold_ms=80,
+                    tags=len(resolved),
+                    entries=len(entries or []),
+                )
+            except Exception:
+                pass
+            try:
+                self.tagListScopeCountsReady.emit(int(revision), cache_key, resolved)
+            except Exception:
+                pass
+
+        threading.Thread(target=work, daemon=True, name="tag-list-scope-counts").start()
+
+    def _current_scope_tag_counts(self) -> dict[str, int]:
+        cache_key = self._tag_list_scope_counts_key()
         if getattr(self, "_tag_list_scope_counts_cache_key", None) == cache_key:
             cached = getattr(self, "_tag_list_scope_counts_cache_value", None)
             if isinstance(cached, dict):
                 return dict(cached)
-        counts: Counter[str] = Counter()
-        try:
-            entries = self.bridge._get_gallery_entries(
-                list(getattr(self.bridge, "_selected_folders", []) or []),
-                "none",
-                getattr(self.bridge, "_current_gallery_filter", "all"),
-                self._effective_gallery_scope_search(include_tag_scope=False),
-            )
-        except Exception:
-            entries = []
-        for entry in entries or []:
-            if entry.get("is_folder"):
-                continue
-            tags = self._normalize_tag_list(entry.get("tags") or "")
-            seen: set[str] = set()
-            for tag in tags:
-                key = tag.casefold()
-                if key in seen:
-                    continue
-                seen.add(key)
-                counts[key] += 1
-        resolved = dict(counts)
-        self._tag_list_scope_counts_cache_key = cache_key
-        self._tag_list_scope_counts_cache_value = dict(resolved)
-        return resolved
+        self._schedule_scope_tag_counts_worker(cache_key)
+        return {}
+
+    def _on_tag_list_scope_counts_ready(self, revision: int, cache_key: object, counts: object) -> None:
+        current_key = self._tag_list_scope_counts_key()
+        if cache_key != current_key:
+            return
+        if int(revision or 0) != int(getattr(self, "_tag_list_scope_counts_revision", 0) or 0):
+            return
+        self._tag_list_scope_counts_pending_key = None
+        self._tag_list_scope_counts_cache_key = current_key
+        self._tag_list_scope_counts_cache_value = dict(counts or {}) if isinstance(counts, dict) else {}
+        self._refresh_tag_list_panel()
 
     def _reload_tag_lists(self, preferred_id: int | None = None) -> None:
         from app.mediamanager.db.tag_lists_repo import list_tag_lists

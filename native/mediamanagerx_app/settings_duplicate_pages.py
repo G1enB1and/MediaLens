@@ -421,7 +421,8 @@ class DuplicateSettingsPage(SettingsPage):
             )
             for folder_path in self._saved_preferred_folder_order:
                 self._add_folder_list_item(self.prioritized_folders_list, folder_path)
-            self._sync_folder_priority_lists()
+            if preferred_enabled:
+                self._sync_folder_priority_lists()
             with QSignalBlocker(self.merge_before_delete_toggle):
                 self.merge_before_delete_toggle.setChecked(bool(self.settings.value("duplicate/rules/merge_before_delete", False, type=bool)))
             for key, _label, default_value in DUPLICATE_MERGE_FIELDS:
@@ -429,8 +430,9 @@ class DuplicateSettingsPage(SettingsPage):
                     self.merge_toggles[key].setChecked(bool(self.settings.value(key.replace(".", "/"), default_value, type=bool)))
         finally:
             self._loading = False
-        self._sync_folder_priority_lists()
-        self._schedule_preferred_folder_layout_refresh()
+        if preferred_enabled:
+            self._sync_folder_priority_lists()
+            self._schedule_preferred_folder_layout_refresh()
 
 
 
