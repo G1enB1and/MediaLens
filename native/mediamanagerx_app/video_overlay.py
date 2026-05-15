@@ -303,6 +303,65 @@ class LightboxVideoOverlay(QWidget):
         self._current_source = ""
         self.player.mediaStatusChanged.connect(self._on_media_status)
 
+    def _replace_media_backend(self) -> None:
+        """Create fresh Qt multimedia objects so old decoder frames cannot leak."""
+        old_player = getattr(self, "player", None)
+        old_audio = getattr(self, "audio", None)
+        old_sink = getattr(self, "video_sink", None)
+
+        if old_player is not None:
+            try:
+                old_player.stop()
+                old_player.setVideoOutput(None)
+                old_player.setSource(QUrl())
+            except Exception:
+                pass
+            for signal_name in (
+                "positionChanged",
+                "durationChanged",
+                "playbackStateChanged",
+                "errorOccurred",
+                "mediaStatusChanged",
+            ):
+                try:
+                    getattr(old_player, signal_name).disconnect()
+                except Exception:
+                    pass
+            try:
+                old_player.deleteLater()
+            except Exception:
+                pass
+
+        if old_sink is not None:
+            try:
+                old_sink.videoFrameChanged.disconnect(self._on_frame)
+            except Exception:
+                pass
+            try:
+                old_sink.deleteLater()
+            except Exception:
+                pass
+
+        if old_audio is not None:
+            try:
+                old_audio.deleteLater()
+            except Exception:
+                pass
+
+        self.video_sink = QVideoSink(self)
+        self.video_sink.videoFrameChanged.connect(self._on_frame)
+
+        self.player = QMediaPlayer(self)
+        self.audio = QAudioOutput(self)
+        self.player.setAudioOutput(self.audio)
+        self.player.setVideoOutput(self.video_sink)
+
+        self.player.positionChanged.connect(self._on_position)
+        self.player.durationChanged.connect(self._on_duration)
+        self.player.playbackStateChanged.connect(self._on_playback_state_changed)
+        self.player.errorOccurred.connect(self._on_player_error)
+        self.player.mediaStatusChanged.connect(self._on_media_status)
+
     def _log(self, message: str) -> None:
         try:
             if callable(self.on_log):
@@ -664,10 +723,15 @@ class LightboxVideoOverlay(QWidget):
     def open_video(self, req: VideoRequest) -> None:
         path = str(Path(req.path))
         self._log(f"Video Overlay Opening: {path} ({req.width}x{req.height})")
+
+        self.video_view.set_image(None)
+        self._frame_count = 0
+        self._playback_started_emitted = False
+        self.slider.setValue(0)
+        self.slider.setRange(0, 0)
+        self.lbl_time.setText("0:00 / 0:00")
         
         self._loop = bool(req.loop)
-        self.audio.setMuted(bool(req.muted))
-        self.btn_mute.setIcon(self.icon_mute_off if req.muted else self.icon_mute_on)
 
         if req.width > 0 and req.height > 0:
             self._native_size = QSize(int(req.width), int(req.height))
@@ -680,33 +744,13 @@ class LightboxVideoOverlay(QWidget):
         # Sync volume slider
         self.vol_slider.setValue(int(self.audio.volume() * 100))
 
-        try:
-            self.player.stop()
-            self.player.positionChanged.disconnect()
-            self.player.durationChanged.disconnect()
-            self.player.playbackStateChanged.disconnect()
-            self.player.errorOccurred.disconnect()
-            self.player.mediaStatusChanged.disconnect()
-            self.player.deleteLater()
-            self.audio.deleteLater()
-        except Exception:
-            pass
+        # Recreate the sink too; reusing it can briefly deliver frames from the
+        # previous decoder after the next gallery card is already visible.
+        self._replace_media_backend()
 
-        # Completely recreate the QMediaPlayer and QAudioOutput instances to flush
-        # Qt's internal FFmpeg demuxer cache, ensuring rotated files are read freshly
-        self.player = QMediaPlayer(self)
-        self.audio = QAudioOutput(self)
-        self.player.setAudioOutput(self.audio)
-        self.player.setVideoOutput(self.video_sink)
-        
-        self.player.positionChanged.connect(self._on_position)
-        self.player.durationChanged.connect(self._on_duration)
-        self.player.playbackStateChanged.connect(self._on_playback_state_changed)
-        self.player.errorOccurred.connect(self._on_player_error)
-        self.player.mediaStatusChanged.connect(self._on_media_status)
-        
         self.audio.setVolume(self.vol_slider.value() / 100.0)
         self.audio.setMuted(bool(req.muted))
+        self.btn_mute.setIcon(self.icon_mute_off if req.muted else self.icon_mute_on)
         
         # Looping support varies by Qt version.
         if hasattr(self.player, "setLoops"):
@@ -743,7 +787,6 @@ class LightboxVideoOverlay(QWidget):
         if self._auto_pause_needed:
              QTimer.singleShot(2000, self._safety_auto_pause)
 
-        self._playback_started_emitted = False
         self._show_controls()
 
     def _safety_auto_pause(self) -> None:
@@ -771,6 +814,7 @@ class LightboxVideoOverlay(QWidget):
             self.player.setSource(QUrl())
         except Exception:
             pass
+        self.video_view.set_image(None)
         self.setVisible(False)
         # Only notify the web layer if we were actually open and requested; 
         # avoids closing image lightboxes when we "stop video" during navigation.
@@ -1124,4 +1168,3 @@ class LightboxVideoOverlay(QWidget):
                 self.on_next()
             except Exception:
                 pass
-
