@@ -1242,6 +1242,7 @@ async function main() {
       gShowHidden = !!(s && s['gallery.show_hidden']);
       gIncludeNestedFiles = !s || s['gallery.include_nested_files'] !== false;
       gShowFoldersInGallery = !s || s['gallery.show_folders'] !== false;
+      gShowAllFileTypes = !!(s && s['gallery.show_all_file_types']);
       syncGalleryScopeToggles();
 
       gMuteVideoByDefault = (s && s['gallery.mute_video_by_default'] !== undefined)
@@ -1551,7 +1552,7 @@ async function main() {
           if (themeRadio) themeRadio.checked = true;
           return;
         }
-        if (key === 'gallery.show_hidden' || key === 'gallery.include_nested_files' || key === 'gallery.show_folders' || key === 'gallery.view_mode' || key === 'gallery.group_by' || key === 'gallery.group_date_granularity' || key === 'gallery.similarity_threshold') {
+        if (key === 'gallery.show_hidden' || key === 'gallery.include_nested_files' || key === 'gallery.show_folders' || key === 'gallery.show_all_file_types' || key === 'gallery.view_mode' || key === 'gallery.group_by' || key === 'gallery.group_date_granularity' || key === 'gallery.similarity_threshold') {
           if (key === 'gallery.show_hidden') {
             gShowHidden = !!value;
             refreshAdvancedCollections();
@@ -1564,6 +1565,10 @@ async function main() {
             gShowFoldersInGallery = !!value;
             syncGalleryScopeToggles();
           }
+          if (key === 'gallery.show_all_file_types') {
+            gShowAllFileTypes = !!value;
+            syncGalleryScopeToggles();
+          }
           if (key === 'gallery.view_mode' && bridge.get_settings) {
             bridge.get_settings(function (s) {
               gCachedSettings = s || {};
@@ -1574,6 +1579,7 @@ async function main() {
               gSimilarityThreshold = (s && s['gallery.similarity_threshold']) || 'low';
               gIncludeNestedFiles = !s || s['gallery.include_nested_files'] !== false;
               gShowFoldersInGallery = !s || s['gallery.show_folders'] !== false;
+              gShowAllFileTypes = !!(s && s['gallery.show_all_file_types']);
               syncGalleryScopeToggles();
               if (!REVIEW_VIEW_MODES.has(gGalleryViewMode)) {
                 gLastStandardViewMode = gGalleryViewMode;

@@ -865,7 +865,11 @@ function renderDetailsHeader(container) {
 }
 
 function hasSelectedMediaCards() {
-  return queryGalleryCards('.selected').some(card => card.getAttribute('data-is-folder') !== 'true');
+  return queryGalleryCards('.selected').some(card => {
+    if (card.getAttribute('data-is-folder') === 'true') return false;
+    const path = card.getAttribute('data-path') || '';
+    return isSupportedMediaItem(gMedia.find(entry => entry.path === path));
+  });
 }
 
 function syncSelectedCardClasses() {

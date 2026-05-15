@@ -163,6 +163,7 @@
       <button class="ctx-item" id="ctxAddToCollection">Add to collection…</button>
       <button class="ctx-item" id="ctxNewFolder">New folder…</button>
       <button class="ctx-item" id="ctxDelete">Delete</button>
+      <button class="ctx-item" id="ctxOpenExternal">Open</button>
       <button class="ctx-item" id="ctxMeta">Show metadata</button>
       <button class="ctx-item" id="ctxExplorer">Open in Explorer</button>
       <div class="ctx-sep" id="ctxEditorSep" style="display: none;"></div>
@@ -305,6 +306,15 @@
               <input type="checkbox" id="toggleShowFoldersInGallery" />
               <span>Show folders in gallery</span>
             </label>
+            <div class="field">
+              <div class="field-label">Gallery file types</div>
+              <div class="segmented-control" id="galleryFileTypeModeGroup">
+                <input type="radio" name="gallery_file_type_mode" value="media" id="galleryFileTypesMedia" checked />
+                <label for="galleryFileTypesMedia">Media Files only</label>
+                <input type="radio" name="gallery_file_type_mode" value="all" id="galleryFileTypesAll" />
+                <label for="galleryFileTypesAll">All File Types</label>
+              </div>
+            </div>
             <div class="ctx-sep"></div>
             <div class="field">
               <div class="field-label">System Updates</div>

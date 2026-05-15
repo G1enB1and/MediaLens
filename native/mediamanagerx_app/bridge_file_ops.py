@@ -18,6 +18,7 @@ class BridgeFileOpsMixin:
                 "gallery.show_hidden",
                 "gallery.include_nested_files",
                 "gallery.show_folders",
+                "gallery.show_all_file_types",
                 "gallery.use_recycle_bin",
                 "gallery.mute_video_by_default",
                 "player.autoplay_gallery_animated_gifs",
@@ -43,10 +44,10 @@ class BridgeFileOpsMixin:
             self.settings.setValue(qkey, bool(value))
             if key == "gallery.randomize" and bool(value):
                 self._reset_session_shuffle_order()
-            if key.startswith("ui.") or key.startswith("metadata.display.") or key in {"gallery.show_hidden", "gallery.include_nested_files", "gallery.show_folders", "gallery.mute_video_by_default", "player.autoplay_gallery_animated_gifs", "player.autoplay_preview_animated_gifs"}:
+            if key.startswith("ui.") or key.startswith("metadata.display.") or key in {"gallery.show_hidden", "gallery.include_nested_files", "gallery.show_folders", "gallery.show_all_file_types", "gallery.mute_video_by_default", "player.autoplay_gallery_animated_gifs", "player.autoplay_preview_animated_gifs"}:
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, bool(value))
-                if key in {"gallery.show_hidden", "gallery.include_nested_files"}:
+                if key in {"gallery.show_hidden", "gallery.include_nested_files", "gallery.show_all_file_types"}:
                     self.galleryScopeChanged.emit()
             elif key in {"duplicate.rules.merge_before_delete", "duplicate.rules.preferred_folders_enabled"} or key.startswith("duplicate.rules.merge"):
                 self.settings.sync()
@@ -647,13 +648,14 @@ class BridgeFileOpsMixin:
                             else:
                                 shutil.copy2(src, final_dst)
                                 ext = final_dst.suffix.lower()
-                                mtype = "image" if ext in IMAGE_EXTS else "video"
-                                new_media_id = add_media_item(self.conn, str(final_dst), mtype)
-                                src_media = get_media_by_path(self.conn, str(src))
-                                if src_media:
-                                    src_tags = list_media_tags(self.conn, int(src_media["id"]))
-                                    if src_tags:
-                                        attach_tags(self.conn, int(new_media_id), src_tags)
+                                if ext in (IMAGE_EXTS | VIDEO_EXTS):
+                                    mtype = "image" if ext in IMAGE_EXTS else "video"
+                                    new_media_id = add_media_item(self.conn, str(final_dst), mtype)
+                                    src_media = get_media_by_path(self.conn, str(src))
+                                    if src_media:
+                                        src_tags = list_media_tags(self.conn, int(src_media["id"]))
+                                        if src_tags:
+                                            attach_tags(self.conn, int(new_media_id), src_tags)
                         
                         any_ok = True
                         if is_move:
@@ -695,6 +697,16 @@ class BridgeFileOpsMixin:
             if p_obj.is_dir(): os.startfile(p)
             else: subprocess.Popen(f'explorer.exe /select,"{p}"', shell=True)
         except Exception: pass
+
+    @Slot(str)
+    def open_file_external(self, path: str) -> None:
+        try:
+            p_obj = Path(path).absolute()
+            if not p_obj.exists() or not p_obj.is_file():
+                return
+            os.startfile(str(p_obj).replace("/", "\\"))
+        except Exception:
+            pass
 
     def _build_dropfiles_w(self, abs_paths: list[str]) -> bytes:
         import struct

@@ -9,6 +9,79 @@ from native.mediamanagerx_app.compare import *
 from native.mediamanagerx_app.metadata_payload import *
 
 class BridgeMediaListingScanMixin:
+    @staticmethod
+    def _is_supported_media_path(path: Path | str) -> bool:
+        return Path(path).suffix.lower() in (IMAGE_EXTS | VIDEO_EXTS)
+
+    def _gallery_should_show_all_file_types(self) -> bool:
+        if not self._gallery_show_all_file_types_enabled():
+            return False
+        if self._gallery_view_mode() == "masonry":
+            return False
+        if self._review_group_mode() in {"similar", "similar_only"}:
+            return False
+        return True
+
+    @staticmethod
+    def _file_icon_type_for_suffix(suffix: str) -> str:
+        ext = str(suffix or "").strip().lower()
+        if ext in {".txt", ".md", ".rtf", ".log", ".csv", ".json", ".xml", ".yaml", ".yml", ".ini", ".cfg"}:
+            return "text"
+        if ext in {".pdf"}:
+            return "pdf"
+        if ext in {".doc", ".docx", ".odt", ".pages"}:
+            return "document"
+        if ext in {".xls", ".xlsx", ".ods", ".tsv"}:
+            return "spreadsheet"
+        if ext in {".ppt", ".pptx", ".odp", ".key"}:
+            return "presentation"
+        if ext in {".zip", ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz"}:
+            return "archive"
+        if ext in {".mp3", ".wav", ".flac", ".aac", ".m4a", ".ogg", ".opus", ".wma"}:
+            return "audio"
+        if ext in {".py", ".js", ".ts", ".tsx", ".jsx", ".html", ".css", ".scss", ".sql", ".ps1", ".bat", ".cmd", ".sh", ".java", ".cs", ".cpp", ".c", ".h", ".hpp", ".rs", ".go", ".php", ".rb"}:
+            return "code"
+        return "generic"
+
+    @classmethod
+    def _filesystem_file_candidate(cls, path: Path, norm_path: str) -> dict:
+        suffix = path.suffix.lower()
+        is_supported = cls._is_supported_media_path(path)
+        try:
+            stat = path.stat()
+            file_size = int(stat.st_size)
+            modified_time = int(stat.st_mtime_ns)
+            file_created_time = int(stat.st_ctime_ns)
+        except Exception:
+            file_size = None
+            modified_time = None
+            file_created_time = None
+        return {
+            "id": -1,
+            "path": norm_path,
+            "media_type": "image" if suffix in IMAGE_EXTS else ("video" if suffix in VIDEO_EXTS else "file"),
+            "is_supported_media": bool(is_supported),
+            "file_icon_type": cls._file_icon_type_for_suffix(suffix),
+            "file_size": file_size,
+            "modified_time": modified_time,
+            "file_created_time": file_created_time,
+            "duration": None,
+            "_real_path": path,
+        }
+
+    def _normalize_db_file_candidate(self, row: dict, path: Path) -> dict | None:
+        if self._is_supported_media_path(path):
+            normalized = dict(row)
+            normalized["is_supported_media"] = True
+            return normalized
+        if not self._gallery_should_show_all_file_types():
+            return None
+        normalized = dict(row)
+        normalized["media_type"] = "file"
+        normalized["is_supported_media"] = False
+        normalized["file_icon_type"] = self._file_icon_type_for_suffix(path.suffix)
+        return normalized
+
     @Slot(list, int, int, str, str, str, result=list)
     def list_media(self, folders, limit=100, offset=0, sort_by="none", filter_type="all", search_query="") -> list:
         try:
@@ -88,8 +161,13 @@ class BridgeMediaListingScanMixin:
                 auto_date = int(r.get("preferred_date") or self._preferred_date_ns(r))
                 display_width = r.get("width")
                 display_height = r.get("height")
+                is_supported_media = r.get("is_supported_media")
+                if is_supported_media is None:
+                    is_supported_media = self._is_supported_media_path(p)
                 media_error = ""
-                if r.get("media_type") == "image" and p.suffix.lower() != ".svg":
+                if not is_supported_media:
+                    media_error = ""
+                elif r.get("media_type") == "image" and p.suffix.lower() != ".svg":
                     display_size = _image_size_with_svg_support(p)
                     if display_size.isValid():
                         next_width, next_height = int(display_size.width()), int(display_size.height())
@@ -110,6 +188,8 @@ class BridgeMediaListingScanMixin:
                     "path": str(p), 
                     "url": f"{QUrl.fromLocalFile(str(p)).toString()}?t={mtime}", 
                     "media_type": r["media_type"], 
+                    "is_supported_media": bool(is_supported_media),
+                    "file_icon_type": r.get("file_icon_type") or self._file_icon_type_for_suffix(p.suffix),
                     "is_folder": False,
                     "thumb_bg_hint": _thumbnail_bg_hint(p),
                     "is_hidden": bool(r.get("is_hidden")),
@@ -124,7 +204,7 @@ class BridgeMediaListingScanMixin:
                     "exif_date_taken": r.get("exif_date_taken"),
                     "metadata_date": r.get("metadata_date"),
                     "auto_date": auto_date,
-                    "file_size": r.get("file_size"),
+                    "file_size": r.get("file_size") if r.get("file_size") is not None else getattr(stat, "st_size", None),
                     "content_hash": r.get("content_hash") or "",
                     "phash": r.get("phash") or "",
                     "duplicate_group_key": r.get("duplicate_group_key") or "",
@@ -231,6 +311,7 @@ class BridgeMediaListingScanMixin:
         if not folders: return []
         show_hidden = self._show_hidden_enabled()
         include_nested = self._gallery_include_nested_files_enabled()
+        show_all_file_types = self._gallery_should_show_all_file_types()
         normalized_folders = normalize_roots(str(folder or "") for folder in folders if str(folder or "").strip())
         current_key = hashlib.sha1(
             json.dumps(
@@ -238,6 +319,7 @@ class BridgeMediaListingScanMixin:
                     "folders": normalized_folders,
                     "show_hidden": bool(show_hidden),
                     "include_nested": bool(include_nested),
+                    "show_all_file_types": bool(show_all_file_types),
                 },
                 sort_keys=True,
             ).encode()
@@ -265,7 +347,7 @@ class BridgeMediaListingScanMixin:
                                 p = curr_root / f
                                 if not show_hidden and self.repo.is_path_hidden(str(p)):
                                     continue
-                                if p.suffix.lower() in ALL_EXTS:
+                                if show_all_file_types or p.suffix.lower() in ALL_EXTS:
                                     disk_files[normalize_windows_path(str(p))] = p
                     else:
                         for child in folder_path.iterdir():
@@ -273,7 +355,7 @@ class BridgeMediaListingScanMixin:
                                 continue
                             if not show_hidden and self.repo.is_path_hidden(str(child)):
                                 continue
-                            if child.suffix.lower() in ALL_EXTS:
+                            if show_all_file_types or child.suffix.lower() in ALL_EXTS:
                                 disk_files[normalize_windows_path(str(child))] = child
                 except Exception: pass
             self._disk_cache_by_scope[current_key] = disk_files
@@ -281,9 +363,10 @@ class BridgeMediaListingScanMixin:
                 "folders": normalized_folders,
                 "show_hidden": bool(show_hidden),
                 "include_nested": bool(include_nested),
+                "show_all_file_types": bool(show_all_file_types),
             }
             self._disk_cache, self._disk_cache_key = disk_files, current_key
-        db_candidates = list_media_in_scope(self.conn, folders)
+        db_candidates = list_media_in_scope(self.conn, folders, media_only=not show_all_file_types)
         surviving, covered = [], set()
         
         for r in db_candidates:
@@ -294,17 +377,20 @@ class BridgeMediaListingScanMixin:
             path_obj = disk_files.get(norm) or Path(r["path"])
             if path_obj.exists() and path_obj.is_dir():
                 continue
+            normalized_row = self._normalize_db_file_candidate(r, path_obj)
+            if normalized_row is None:
+                continue
             if norm in disk_files or (include_nested and path_obj.exists()):
                 if norm in disk_files:
-                    r = dict(r)
-                    r["_real_path"] = disk_files[norm]
-                surviving.append(r)
+                    normalized_row = dict(normalized_row)
+                    normalized_row["_real_path"] = disk_files[norm]
+                surviving.append(normalized_row)
         
         for norm, p_obj in disk_files.items():
             if norm not in covered:
                 if not show_hidden and self.repo.is_path_hidden(str(p_obj)):
                     continue
-                surviving.append({"id": -1, "path": norm, "media_type": ("image" if p_obj.suffix.lower() in image_exts else "video"), "file_size": None, "modified_time": None, "duration": None, "_real_path": p_obj})
+                surviving.append(self._filesystem_file_candidate(p_obj, norm))
         
         candidates = surviving
         if media_filter == "image":
@@ -317,7 +403,7 @@ class BridgeMediaListingScanMixin:
         elif media_filter == "svg":
             candidates = [r for r in candidates if Path(r["path"]).suffix.lower() == ".svg"]
         elif media_filter == "video":
-            candidates = [r for r in candidates if Path(r["path"]).suffix.lower() not in image_exts]
+            candidates = [r for r in candidates if Path(r["path"]).suffix.lower() in VIDEO_EXTS]
         elif media_filter == "animated":
             candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
         candidates = self._apply_tags_filter(candidates, tags_filter)
@@ -339,13 +425,19 @@ class BridgeMediaListingScanMixin:
         
         folder_sources = list_collection_folders(self.conn, int(collection_id))
         candidates = self._get_reconciled_candidates(folder_sources, filter_type, search_query) if folder_sources else []
-        raw_candidates = list_explicit_media_in_collection(self.conn, int(collection_id))
+        raw_candidates = list_explicit_media_in_collection(
+            self.conn,
+            int(collection_id),
+            media_only=not self._gallery_should_show_all_file_types(),
+        )
         for r in raw_candidates:
             if not show_hidden and r.get("is_hidden"):
                 continue
             path_obj = Path(r["path"])
             if path_obj.exists() and path_obj.is_file():
-                candidates.append(r)
+                normalized_row = self._normalize_db_file_candidate(r, path_obj)
+                if normalized_row is not None:
+                    candidates.append(normalized_row)
 
         deduped_candidates: list[dict] = []
         seen_paths: set[str] = set()
@@ -367,7 +459,7 @@ class BridgeMediaListingScanMixin:
         elif media_filter == "svg":
             candidates = [r for r in candidates if Path(r["path"]).suffix.lower() == ".svg"]
         elif media_filter == "video":
-            candidates = [r for r in candidates if Path(r["path"]).suffix.lower() not in image_exts]
+            candidates = [r for r in candidates if Path(r["path"]).suffix.lower() in VIDEO_EXTS]
         elif media_filter == "animated":
             candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
         candidates = self._apply_tags_filter(candidates, tags_filter)
@@ -389,14 +481,21 @@ class BridgeMediaListingScanMixin:
         show_hidden = self._show_hidden_enabled()
         media_filter, _, tags_filter, desc_filter, ai_filter = self._parse_filter_groups(filter_type)
         cutoff_iso = self._smart_collection_cutoff_iso(int(definition.get("days") or 0))
-        raw_candidates = list_media_in_smart_collection(self.conn, str(definition.get("field") or ""), cutoff_iso)
+        raw_candidates = list_media_in_smart_collection(
+            self.conn,
+            str(definition.get("field") or ""),
+            cutoff_iso,
+            media_only=not self._gallery_should_show_all_file_types(),
+        )
         candidates = []
         for r in raw_candidates:
             if not show_hidden and r.get("is_hidden"):
                 continue
             path_obj = Path(r["path"])
             if path_obj.exists() and path_obj.is_file():
-                candidates.append(r)
+                normalized_row = self._normalize_db_file_candidate(r, path_obj)
+                if normalized_row is not None:
+                    candidates.append(normalized_row)
 
         if media_filter == "image":
             candidates = [
@@ -408,7 +507,7 @@ class BridgeMediaListingScanMixin:
         elif media_filter == "svg":
             candidates = [r for r in candidates if Path(r["path"]).suffix.lower() == ".svg"]
         elif media_filter == "video":
-            candidates = [r for r in candidates if Path(r["path"]).suffix.lower() not in image_exts]
+            candidates = [r for r in candidates if Path(r["path"]).suffix.lower() in VIDEO_EXTS]
         elif media_filter == "animated":
             candidates = [r for r in candidates if self._is_animated(Path(r["path"]))]
         candidates = self._apply_tags_filter(candidates, tags_filter)
@@ -765,11 +864,20 @@ class BridgeMediaListingScanMixin:
             entries = []
         if text_filter in {"text_detected", "no_text_detected"}:
             if text_filter == "no_text_detected":
-                entries = [entry for entry in entries if not self._effective_text_detected(entry)]
+                entries = [
+                    entry for entry in entries
+                    if self._is_supported_media_path(entry.get("_real_path") or entry.get("path") or "")
+                    and not self._effective_text_detected(entry)
+                ]
             else:
-                entries = [entry for entry in entries if self._effective_text_detected(entry)]
+                entries = [
+                    entry for entry in entries
+                    if self._is_supported_media_path(entry.get("_real_path") or entry.get("path") or "")
+                    and self._effective_text_detected(entry)
+                ]
         review_mode = self._review_group_mode()
         if review_mode in {"similar", "similar_only"}:
+            entries = [entry for entry in entries if not entry.get("is_folder") and self._is_supported_media_path(entry.get("_real_path") or entry.get("path") or "")]
             self._backfill_scope_content_hashes(entries)
             self._backfill_scope_phashes(entries)
             threshold, bucket_prefix = self._similarity_config()
@@ -781,6 +889,7 @@ class BridgeMediaListingScanMixin:
                 bucket_prefix=bucket_prefix,
             )
         if review_mode == "duplicates":
+            entries = [entry for entry in entries if not entry.get("is_folder")]
             self._backfill_scope_content_hashes(entries)
             return self._build_duplicate_entries(entries, sort_by)
         return self._sort_gallery_entries(entries, sort_by)
@@ -800,7 +909,10 @@ class BridgeMediaListingScanMixin:
         - changed_paths: files that need a deep scan
         - progress_started: whether this pass emitted scanStarted/scanProgress
         """
-        media_entries = [entry for entry in entries if not entry.get("is_folder")]
+        media_entries = [
+            entry for entry in entries
+            if not entry.get("is_folder") and self._is_supported_media_path(entry.get("_real_path") or entry.get("path") or "")
+        ]
         if not media_entries:
             return True, [], False
 
@@ -1042,7 +1154,7 @@ class BridgeMediaListingScanMixin:
 
     @Slot(list)
     def start_scan_paths(self, paths: list[str]) -> None:
-        clean_paths = [Path(path) for path in paths if str(path or "").strip()]
+        clean_paths = [Path(path) for path in paths if str(path or "").strip() and self._is_supported_media_path(path)]
         if not clean_paths:
             return
         # Always refresh the priority set so an in-flight full scan reorders its
@@ -1111,6 +1223,8 @@ class BridgeMediaListingScanMixin:
             if emit_progress:
                 self._safe_emit(self.scanProgress, p.name, int(((i + 1) / total) * 100) if total > 0 else 100)
             try:
+                if not self._is_supported_media_path(p):
+                    continue
                 stat = p.stat()
                 existing, skip = get_media_by_path(conn, str(p)), False
                 media_id = existing["id"] if existing else None

@@ -9,6 +9,24 @@ from app.mediamanager.db.pagination import page_to_limit_offset
 from app.mediamanager.db.scope_query import build_scope_where
 from app.mediamanager.utils.pathing import normalize_windows_path
 
+SUPPORTED_MEDIA_EXTS = (
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".gif",
+    ".bmp",
+    ".avif",
+    ".svg",
+    ".mp4",
+    ".m4v",
+    ".webm",
+    ".mov",
+    ".mkv",
+    ".avi",
+    ".wmv",
+)
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -536,9 +554,10 @@ def list_media_in_scope(
     selected_roots: list[str],
     limit: Optional[int] = None,
     offset: Optional[int] = None,
+    media_only: bool = False,
 ) -> list[dict]:
     where_sql, params = build_scope_where(selected_roots)
-    return _list_media_with_where(conn, where_sql, params, limit=limit, offset=offset)
+    return _list_media_with_where(conn, where_sql, params, limit=limit, offset=offset, media_only=media_only)
 
 
 def list_media_in_collection(
@@ -547,11 +566,12 @@ def list_media_in_collection(
     limit: Optional[int] = None,
     offset: Optional[int] = None,
     include_nested: bool = True,
+    media_only: bool = False,
 ) -> list[dict]:
     from app.mediamanager.db.collections_repo import collection_media_where
 
     where_sql, params = collection_media_where(int(collection_id), include_nested=include_nested)
-    return _list_media_with_where(conn, where_sql, params, limit=limit, offset=offset)
+    return _list_media_with_where(conn, where_sql, params, limit=limit, offset=offset, media_only=media_only)
 
 
 def list_explicit_media_in_collection(
@@ -559,6 +579,7 @@ def list_explicit_media_in_collection(
     collection_id: int,
     limit: Optional[int] = None,
     offset: Optional[int] = None,
+    media_only: bool = False,
 ) -> list[dict]:
     where_sql = """
         m.id IN (
@@ -573,7 +594,7 @@ def list_explicit_media_in_collection(
             )
         )
     """
-    return _list_media_with_where(conn, where_sql, [int(collection_id)], limit=limit, offset=offset)
+    return _list_media_with_where(conn, where_sql, [int(collection_id)], limit=limit, offset=offset, media_only=media_only)
 
 
 def list_media_in_smart_collection(
@@ -582,6 +603,7 @@ def list_media_in_smart_collection(
     cutoff_iso: str,
     limit: Optional[int] = None,
     offset: Optional[int] = None,
+    media_only: bool = False,
 ) -> list[dict]:
     field = str(field_name or "").strip()
     predicate_map = {
@@ -594,12 +616,17 @@ def list_media_in_smart_collection(
         "file_size_gt_1gb": "m.file_size_bytes > 1073741824",
     }
     if field in predicate_map:
-        return _list_media_with_where(conn, predicate_map[field], [], limit=limit, offset=offset)
+        return _list_media_with_where(conn, predicate_map[field], [], limit=limit, offset=offset, media_only=media_only)
     if field not in {"metadata_date", "modified_time_utc"}:
         return []
     db_field = "m.metadata_date" if field == "metadata_date" else "m.modified_time_utc"
     where_sql = f"{db_field} IS NOT NULL AND {db_field} != '' AND {db_field} >= ?"
-    return _list_media_with_where(conn, where_sql, [str(cutoff_iso or "")], limit=limit, offset=offset)
+    return _list_media_with_where(conn, where_sql, [str(cutoff_iso or "")], limit=limit, offset=offset, media_only=media_only)
+
+
+def _media_only_where(where_sql: str, params: list) -> tuple[str, list]:
+    suffix_sql = " OR ".join("LOWER(m.path) LIKE ?" for _ in SUPPORTED_MEDIA_EXTS)
+    return f"({where_sql}) AND ({suffix_sql})", [*params, *[f"%{ext}" for ext in SUPPORTED_MEDIA_EXTS]]
 
 
 def count_media_in_smart_collection(
@@ -671,9 +698,12 @@ def _list_media_with_where(
     *,
     limit: Optional[int] = None,
     offset: Optional[int] = None,
+    media_only: bool = False,
 ) -> list[dict]:
     _ensure_media_items_scan_columns(conn)
     _ensure_media_ai_columns(conn)
+    if media_only:
+        where_sql, params = _media_only_where(where_sql, params)
     if limit is not None:
         limit_sql = f" LIMIT {limit} OFFSET {offset or 0}"
     else:

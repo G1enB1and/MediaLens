@@ -322,6 +322,7 @@ let gAdvancedSearchCollections = [];
 let gShowHidden = false;
 let gIncludeNestedFiles = true;
 let gShowFoldersInGallery = true;
+let gShowAllFileTypes = false;
 
 function normalizedVideoLoopCutoffSeconds() {
   const parsed = Number(gVideoLoopCutoffSeconds);
@@ -752,6 +753,16 @@ function isExactDuplicateReviewItem(item) {
     if (matches > 1) return true;
   }
   return false;
+}
+
+function isSupportedMediaItem(item) {
+  if (!item || item.is_folder) return false;
+  if (item.is_supported_media === false) return false;
+  return item.media_type === 'image' || item.media_type === 'video';
+}
+
+function isUnsupportedFileItem(item) {
+  return !!(item && !item.is_folder && !isSupportedMediaItem(item));
 }
 
 function normalizeTextFilter(filterValue) {

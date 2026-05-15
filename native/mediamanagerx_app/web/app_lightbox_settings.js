@@ -597,7 +597,7 @@ function refreshFromBridge(bridge, resetPage = false) {
             });
           });
           if (bridge.start_scan_paths) {
-            bridge.start_scan_paths(asArray(items).filter(item => !item.is_folder).map(item => item.path).filter(Boolean));
+            bridge.start_scan_paths(asArray(items).filter(isSupportedMediaItem).map(item => item.path).filter(Boolean));
           }
         });
         return;
@@ -614,7 +614,7 @@ function refreshFromBridge(bridge, resetPage = false) {
         // Hide the "Starting..." or "Loading..." overlay once we have the first batch of results.
         setGlobalLoading(false);
         if (bridge.start_scan_paths) {
-          bridge.start_scan_paths(asArray(items).filter(item => !item.is_folder).map(item => item.path).filter(Boolean));
+          bridge.start_scan_paths(asArray(items).filter(isSupportedMediaItem).map(item => item.path).filter(Boolean));
         }
         fetchMediaCount(gSelectedFolders, gFilter, gSearchQuery || '').then(function (count) {
           if (refreshToken !== gRefreshGeneration) return;
@@ -776,9 +776,13 @@ function syncStartFolderEnabled() {
 function syncGalleryScopeToggles() {
   const settingsNestedToggle = document.getElementById('toggleIncludeNestedFiles');
   const settingsFoldersToggle = document.getElementById('toggleShowFoldersInGallery');
+  const settingsMediaFilesRadio = document.getElementById('galleryFileTypesMedia');
+  const settingsAllFileTypesRadio = document.getElementById('galleryFileTypesAll');
   const headerNestedToggle = document.getElementById('headerIncludeNestedFiles');
   if (settingsNestedToggle) settingsNestedToggle.checked = !!gIncludeNestedFiles;
   if (settingsFoldersToggle) settingsFoldersToggle.checked = !!gShowFoldersInGallery;
+  if (settingsMediaFilesRadio) settingsMediaFilesRadio.checked = !gShowAllFileTypes;
+  if (settingsAllFileTypesRadio) settingsAllFileTypesRadio.checked = !!gShowAllFileTypes;
   if (headerNestedToggle) headerNestedToggle.checked = !!gIncludeNestedFiles;
 }
 
@@ -812,6 +816,7 @@ function wireSettings() {
   const toggleShowHidden = document.getElementById('toggleShowHidden');
   const toggleIncludeNestedFiles = document.getElementById('toggleIncludeNestedFiles');
   const toggleShowFoldersInGallery = document.getElementById('toggleShowFoldersInGallery');
+  const fileTypeModeRadios = document.querySelectorAll('input[name="gallery_file_type_mode"]');
   const headerIncludeNestedFiles = document.getElementById('headerIncludeNestedFiles');
   const toggleMuteVideoByDefault = document.getElementById('toggleMuteVideoByDefault');
   const toggleAutoplayGalleryAnimatedGifs = document.getElementById('toggleAutoplayGalleryAnimatedGifs');
@@ -908,6 +913,31 @@ function wireSettings() {
       gPage = 0;
       clearGalleryForPendingRefresh('Loading gallery...');
       gBridge.set_setting_bool('gallery.show_folders', gShowFoldersInGallery, function () {});
+    });
+  }
+
+  if (fileTypeModeRadios && fileTypeModeRadios.length) {
+    fileTypeModeRadios.forEach((radio) => {
+      radio.addEventListener('change', () => {
+        if (!radio.checked || !gBridge || !gBridge.set_setting_bool) return;
+        gShowAllFileTypes = radio.value === 'all';
+        syncGalleryScopeToggles();
+        gPage = 0;
+        clearGalleryForPendingRefresh('Loading gallery...');
+        gBridge.set_setting_bool('gallery.show_all_file_types', gShowAllFileTypes, function () {});
+      });
+    });
+  }
+
+  const legacyShowAllFileTypesToggle = document.getElementById('toggleShowAllFileTypes');
+  if (legacyShowAllFileTypesToggle) {
+    legacyShowAllFileTypesToggle.addEventListener('change', () => {
+      if (!gBridge || !gBridge.set_setting_bool) return;
+      gShowAllFileTypes = !!legacyShowAllFileTypesToggle.checked;
+      syncGalleryScopeToggles();
+      gPage = 0;
+      clearGalleryForPendingRefresh('Loading gallery...');
+      gBridge.set_setting_bool('gallery.show_all_file_types', gShowAllFileTypes, function () {});
     });
   }
 

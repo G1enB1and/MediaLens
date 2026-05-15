@@ -69,6 +69,54 @@ function openFolderItem(path) {
   }
 }
 
+function openGalleryFileItem(item, mediaIdx) {
+  if (isUnsupportedFileItem(item)) {
+    if (gBridge && gBridge.open_file_external && item.path) {
+      gBridge.open_file_external(item.path);
+    } else if (gBridge && gBridge.open_in_explorer && item.path) {
+      gBridge.open_in_explorer(item.path);
+    }
+    return;
+  }
+  openLightboxByIndex(mediaIdx);
+}
+
+function getFileIconLabel(item) {
+  const type = String(item && item.file_icon_type || 'generic').toLowerCase();
+  const labels = {
+    archive: 'Archive',
+    audio: 'Audio',
+    code: 'Code',
+    document: 'Document',
+    generic: 'File',
+    pdf: 'PDF',
+    presentation: 'Presentation',
+    spreadsheet: 'Spreadsheet',
+    text: 'Text',
+  };
+  return labels[type] || 'File';
+}
+
+function createUnsupportedFileThumb(item) {
+  const iconType = String(item && item.file_icon_type || 'generic').toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'generic';
+  const fileThumb = document.createElement('div');
+  fileThumb.className = `file-thumb file-thumb-${iconType}`;
+  const icon = document.createElement('img');
+  icon.className = 'file-thumb-icon';
+  icon.alt = '';
+  icon.src = `icons/file-${iconType}.svg`;
+  icon.onerror = () => {
+    icon.onerror = null;
+    icon.src = 'icons/file-generic.svg';
+  };
+  fileThumb.appendChild(icon);
+  const label = document.createElement('div');
+  label.className = 'file-thumb-label';
+  label.textContent = getFileIconLabel(item);
+  fileThumb.appendChild(label);
+  return fileThumb;
+}
+
 function isInternalGalleryDragEvent(e) {
   if (gBridge && Array.isArray(gBridge.drag_paths) && gBridge.drag_paths.length) return true;
   const dt = e && e.dataTransfer;
@@ -264,8 +312,9 @@ function createStructuredCard(item, idx) {
   const mediaIdx = getItemIndex(item, idx);
   const card = document.createElement('div');
   const isFolder = !!item.is_folder;
+  const isUnsupportedFile = isUnsupportedFileItem(item);
   const usesThumbnails = viewUsesThumbnails();
-  const supportsInlinePlayback = !isFolder && item.media_type === 'video' && viewSupportsInlineVideoPlayback();
+  const supportsInlinePlayback = !isFolder && !isUnsupportedFile && item.media_type === 'video' && viewSupportsInlineVideoPlayback();
   const duplicateMode = isDuplicateModeActive();
   const duplicateGroupKey = String(item.duplicate_group_key || '');
   const normalizedItemPath = normalizeMediaPath(item.path || '');
@@ -281,7 +330,7 @@ function createStructuredCard(item, idx) {
   const duplicateKeepChecked = !!(duplicateKeepPathSet && normalizedItemPath && duplicateKeepPathSet.has(normalizedItemPath));
   const duplicateDeleteChecked = !!(duplicateDeletePathSet && normalizedItemPath && duplicateDeletePathSet.has(normalizedItemPath));
   const duplicateBestChecked = !!(normalizedDuplicateBestPath && normalizedItemPath && normalizedDuplicateBestPath === normalizedItemPath);
-  card.className = `card structured-card${isFolder ? ' folder-card ready' : ' loading'}`;
+  card.className = `card structured-card${isFolder ? ' folder-card ready' : (isUnsupportedFile ? ' file-card ready' : ' loading')}`;
   if (duplicateMode && !isFolder) card.classList.add('duplicate-card');
   if (duplicateMode && !isFolder) card.classList.add('review-card-pending');
   card.tabIndex = 0;
@@ -302,6 +351,9 @@ function createStructuredCard(item, idx) {
     folderThumb.className = 'folder-thumb';
     folderThumb.innerHTML = '<div class="folder-glyph"></div>';
     thumbWrap.appendChild(folderThumb);
+  } else if (isUnsupportedFile) {
+    thumbWrap.appendChild(createUnsupportedFileThumb(item));
+    markCardMediaReady(card);
   } else if (!usesThumbnails) {
     const icon = document.createElement('div');
     icon.className = `media-icon ${item.media_type === 'video' ? 'video-icon' : 'image-icon'}`;
@@ -402,7 +454,7 @@ function createStructuredCard(item, idx) {
   if (gGalleryViewMode === 'details') {
     const typeCell = document.createElement('div');
     typeCell.className = 'entry-detail';
-    typeCell.textContent = isFolder ? 'Folder' : (item.media_type === 'video' ? 'Video' : 'Image');
+    typeCell.textContent = isFolder ? 'Folder' : (isUnsupportedFile ? getFileIconLabel(item) : (item.media_type === 'video' ? 'Video' : 'Image'));
     content.appendChild(typeCell);
 
     const modifiedCell = document.createElement('div');
@@ -417,7 +469,7 @@ function createStructuredCard(item, idx) {
   } else if (gGalleryViewMode === 'content') {
     const meta = document.createElement('div');
     meta.className = 'entry-detail';
-    meta.textContent = isFolder ? 'Folder' : [item.media_type === 'video' ? 'Video' : 'Image', formatFileSize(item.file_size)].filter(Boolean).join(' • ');
+    meta.textContent = isFolder ? 'Folder' : [isUnsupportedFile ? getFileIconLabel(item) : (item.media_type === 'video' ? 'Video' : 'Image'), formatFileSize(item.file_size)].filter(Boolean).join(' • ');
     content.appendChild(meta);
   } else if (gGalleryViewMode === 'list') {
     folder.remove();
@@ -580,13 +632,13 @@ function createStructuredCard(item, idx) {
   card.addEventListener('click', (e) => handleCardSelection(card, item, mediaIdx, e));
   card.addEventListener('dblclick', () => {
     if (isFolder) openFolderItem(item.path);
-    else openLightboxByIndex(mediaIdx);
+    else openGalleryFileItem(item, mediaIdx);
   });
   card.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       if (isFolder) openFolderItem(item.path);
-      else openLightboxByIndex(mediaIdx);
+      else openGalleryFileItem(item, mediaIdx);
     }
   });
   card.addEventListener('contextmenu', (e) => {
@@ -1393,17 +1445,18 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
   // Show/hide per-item actions
   const hasItem = !!item;
   const isFolder = hasItem && !!item.is_folder;
-  ['ctxHide', 'ctxUnhide', 'ctxRename', 'ctxDelete', 'ctxExplorer', 'ctxCut', 'ctxCopy'].forEach(id => {
+  const isSupportedMedia = hasItem && isSupportedMediaItem(item);
+  ['ctxHide', 'ctxUnhide', 'ctxRename', 'ctxDelete', 'ctxOpenExternal', 'ctxExplorer', 'ctxCut', 'ctxCopy'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = hasItem ? 'block' : 'none';
   });
   if (pinFolderBtn) pinFolderBtn.style.display = hasItem && isFolder && !isPinnedFolder(item && item.path) ? 'block' : 'none';
   if (unpinFolderBtn) unpinFolderBtn.style.display = hasItem && isFolder && isPinnedFolder(item && item.path) ? 'block' : 'none';
   const metaBtn = document.getElementById('ctxMeta');
-  if (metaBtn) metaBtn.style.display = hasItem && !isFolder ? 'block' : 'none';
-  if (addToCollectionBtn) addToCollectionBtn.style.display = (hasItem && !isFolder) || (!hasItem && hasSelectedMediaCards()) ? 'block' : 'none';
+  if (metaBtn) metaBtn.style.display = isSupportedMedia ? 'block' : 'none';
+  if (addToCollectionBtn) addToCollectionBtn.style.display = (hasItem && isSupportedMedia) || (!hasItem && hasSelectedMediaCards()) ? 'block' : 'none';
   
-  const isRotatable = hasItem && !isFolder && (item.media_type === 'image' || item.media_type === 'video');
+  const isRotatable = hasItem && isSupportedMedia && (item.media_type === 'image' || item.media_type === 'video');
   ['ctxRotCW', 'ctxRotCCW', 'ctxRotSep'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = isRotatable ? 'block' : 'none';
@@ -1415,12 +1468,12 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
   const edSep = document.getElementById('ctxEditorSep');
   let hasEd = false;
   if (psBtn) {
-      const showPs = hasItem && !isFolder && !!gExternalEditors.photoshop;
+      const showPs = isSupportedMedia && !!gExternalEditors.photoshop;
       psBtn.style.display = showPs ? 'block' : 'none';
       if (showPs) hasEd = true;
   }
   if (affBtn) {
-      const showAff = hasItem && !isFolder && !!gExternalEditors.affinity;
+      const showAff = isSupportedMedia && !!gExternalEditors.affinity;
       affBtn.style.display = showAff ? 'block' : 'none';
       if (showAff) hasEd = true;
   }
@@ -1444,14 +1497,14 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
       if (gSelectedPaths.has(item.path)) {
         return Array.from(gSelectedPaths).filter(path => {
           const selectedItem = gMedia.find(entry => entry.path === path);
-          return selectedItem && !selectedItem.is_folder;
+          return isSupportedMediaItem(selectedItem);
         });
       }
-      return item.is_folder ? [] : [item.path];
+      return isSupportedMediaItem(item) ? [item.path] : [];
     }
     return Array.from(gSelectedPaths).filter(path => {
       const selectedItem = gMedia.find(entry => entry.path === path);
-      return selectedItem && !selectedItem.is_folder;
+      return isSupportedMediaItem(selectedItem);
     });
   })();
   if (compareImagesBtn) compareImagesBtn.style.display = compareTargetPaths.length === 2 ? 'block' : 'none';
@@ -1653,7 +1706,7 @@ function wireCtxMenu() {
       case 'ctxCompareImages': {
         const comparePaths = getTargetPaths().filter(path => {
           const selectedItem = gMedia.find(entry => entry.path === path);
-          return selectedItem && !selectedItem.is_folder;
+          return isSupportedMediaItem(selectedItem);
         }).slice(0, 2);
         if (comparePaths.length === 2 && gBridge && gBridge.compare_paths) {
           gBridge.compare_paths(comparePaths);
@@ -1664,7 +1717,7 @@ function wireCtxMenu() {
       case 'ctxCompareImage': {
         const comparePaths = getTargetPaths().filter(path => {
           const selectedItem = gMedia.find(entry => entry.path === path);
-          return selectedItem && !selectedItem.is_folder;
+          return isSupportedMediaItem(selectedItem);
         });
         if (comparePaths.length && gBridge && gBridge.compare_path_auto) {
           gBridge.compare_path_auto(comparePaths[0]);
@@ -1676,7 +1729,7 @@ function wireCtxMenu() {
       case 'ctxCompareRight': {
         const comparePaths = getTargetPaths().filter(path => {
           const selectedItem = gMedia.find(entry => entry.path === path);
-          return selectedItem && !selectedItem.is_folder;
+          return isSupportedMediaItem(selectedItem);
         });
         if (comparePaths.length && gBridge && gBridge.set_compare_path) {
           gBridge.set_compare_path(btn.id === 'ctxCompareLeft' ? 'left' : 'right', comparePaths[0]);
@@ -1688,6 +1741,16 @@ function wireCtxMenu() {
         if (item && item.path && gBridge && gBridge.open_in_explorer) {
           gBridge.open_in_explorer(item.path);
         }
+        break;
+      case 'ctxOpenExternal':
+        if (item && item.path) {
+          if (item.is_folder) {
+            openFolderItem(item.path);
+          } else {
+            openGalleryFileItem(item, gCtxIndex);
+          }
+        }
+        hideCtx();
         break;
         
       case 'ctxPhotoshop':
@@ -1748,8 +1811,8 @@ function wireCtxMenu() {
       case 'ctxAddToCollection':
         if (gBridge && gBridge.add_paths_to_collection_interactive) {
           const paths = getTargetPaths().filter(path => {
-            const card = queryGalleryCardByPath(path);
-            return !(card && card.getAttribute('data-is-folder') === 'true');
+            const selectedItem = gMedia.find(entry => entry.path === path);
+            return isSupportedMediaItem(selectedItem);
           });
           if (paths.length > 0) {
             gBridge.add_paths_to_collection_interactive(paths, function () { });
@@ -1757,7 +1820,7 @@ function wireCtxMenu() {
         }
         break;
       case 'ctxMeta':
-        if (item && item.path && gBridge && gBridge.show_metadata && !item.is_folder) {
+        if (item && item.path && gBridge && gBridge.show_metadata && isSupportedMediaItem(item)) {
           const pathForMeta = item.path;
           hideCtx();
           // Ensure the right panel is visible (void slot - no callback)
@@ -1850,7 +1913,7 @@ function renderMediaList(items, scrollToTop = true) {
         item.__galleryIndex = idx;
       });
       reconcileSelectionWithVisibleItems(gMedia);
-      renderTimelineRail(gGroupBy === 'date' ? buildGroupedItems(gMedia.filter(item => !item.is_folder)) : []);
+      renderTimelineRail(gGroupBy === 'date' ? buildGroupedItems(gMedia.filter(isSupportedMediaItem)) : []);
       scheduleTimelineScrollTargetRefresh();
       prioritizeVisibleMediaLoads(el);
       finalizeRender();

@@ -25,6 +25,16 @@ class GeneralSettingsPage(SettingsPage):
         self.show_hidden_toggle = QCheckBox("Show hidden files and folders")
         self.include_nested_files_toggle = QCheckBox("Include nested files in gallery")
         self.show_folders_in_gallery_toggle = QCheckBox("Show folders in gallery")
+        self.show_media_only_radio = QRadioButton("Show Media Files only")
+        self.show_all_file_types_radio = QRadioButton("Show All File Types")
+        self.file_type_mode_buttons = QButtonGroup(self)
+        self.file_type_mode_buttons.addButton(self.show_media_only_radio)
+        self.file_type_mode_buttons.addButton(self.show_all_file_types_radio)
+        file_type_mode_row = QHBoxLayout()
+        file_type_mode_row.setContentsMargins(24, 0, 0, 0)
+        file_type_mode_row.addWidget(self.show_media_only_radio)
+        file_type_mode_row.addWidget(self.show_all_file_types_radio)
+        file_type_mode_row.addStretch(1)
         startup_layout.addWidget(self.randomize_toggle)
         startup_layout.addWidget(self.startup_none_radio)
         startup_layout.addWidget(self.restore_last_toggle)
@@ -32,6 +42,8 @@ class GeneralSettingsPage(SettingsPage):
         startup_layout.addWidget(self.show_hidden_toggle)
         startup_layout.addWidget(self.include_nested_files_toggle)
         startup_layout.addWidget(self.show_folders_in_gallery_toggle)
+        startup_layout.addWidget(QLabel("Gallery file types"))
+        startup_layout.addLayout(file_type_mode_row)
 
         startup_layout.addWidget(QLabel("Starting folder"))
         folder_row = QHBoxLayout()
@@ -106,6 +118,8 @@ class GeneralSettingsPage(SettingsPage):
         self.show_hidden_toggle.toggled.connect(self._on_show_hidden_changed)
         self.include_nested_files_toggle.toggled.connect(self._on_include_nested_files_changed)
         self.show_folders_in_gallery_toggle.toggled.connect(self._on_show_folders_in_gallery_changed)
+        self.show_media_only_radio.toggled.connect(self._on_show_media_only_changed)
+        self.show_all_file_types_radio.toggled.connect(self._on_show_all_file_types_changed)
         self.use_recycle_bin_toggle.toggled.connect(self._on_recycle_bin_changed)
         self.use_medialens_retention_toggle.toggled.connect(self._on_medialens_retention_changed)
         self.retention_days_input.valueChanged.connect(lambda val: self.dialog.set_setting_str("gallery.medialens_retention_days", str(val)))
@@ -203,6 +217,18 @@ class GeneralSettingsPage(SettingsPage):
         self.dialog.set_setting_bool("gallery.show_folders", checked)
         self.main_window._refresh_current_folder()
 
+    def _on_show_media_only_changed(self, checked: bool) -> None:
+        if not checked:
+            return
+        self.dialog.set_setting_bool("gallery.show_all_file_types", False)
+        self.main_window._refresh_current_folder()
+
+    def _on_show_all_file_types_changed(self, checked: bool) -> None:
+        if not checked:
+            return
+        self.dialog.set_setting_bool("gallery.show_all_file_types", True)
+        self.main_window._refresh_current_folder()
+
     def _browse_start_folder(self) -> None:
         folder = self.bridge.pick_folder()
         if folder:
@@ -249,6 +275,11 @@ class GeneralSettingsPage(SettingsPage):
             self.include_nested_files_toggle.setChecked(bool(state.get("gallery.include_nested_files", True)))
         with QSignalBlocker(self.show_folders_in_gallery_toggle):
             self.show_folders_in_gallery_toggle.setChecked(bool(state.get("gallery.show_folders", True)))
+        show_all_file_types = bool(state.get("gallery.show_all_file_types", False))
+        with QSignalBlocker(self.show_media_only_radio):
+            self.show_media_only_radio.setChecked(not show_all_file_types)
+        with QSignalBlocker(self.show_all_file_types_radio):
+            self.show_all_file_types_radio.setChecked(show_all_file_types)
         with QSignalBlocker(self.use_recycle_bin_toggle):
             self.use_recycle_bin_toggle.setChecked(bool(self.settings.value("gallery/use_recycle_bin", True, type=bool)))
         with QSignalBlocker(self.use_medialens_retention_toggle):

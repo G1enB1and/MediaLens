@@ -48,6 +48,9 @@ class BridgeScannersSettingsMixin:
     def _gallery_show_folders_enabled(self) -> bool:
         return bool(self.settings.value("gallery/show_folders", True, type=bool))
 
+    def _gallery_show_all_file_types_enabled(self) -> bool:
+        return bool(self.settings.value("gallery/show_all_file_types", False, type=bool))
+
     def _preview_above_details_enabled(self) -> bool:
         return bool(self.settings.value("ui/preview_above_details", True, type=bool))
 
@@ -1059,6 +1062,10 @@ class BridgeScannersSettingsMixin:
         from app.mediamanager.utils.hashing import calculate_media_content_hash
 
         updates: list[tuple[str, str]] = []
+        cache = getattr(self, "_filesystem_hash_cache", None)
+        if not isinstance(cache, dict):
+            cache = {}
+            setattr(self, "_filesystem_hash_cache", cache)
         for entry in entries:
             if entry.get("is_folder"):
                 continue
@@ -1073,7 +1080,12 @@ class BridgeScannersSettingsMixin:
                 p = Path(path)
                 if not p.exists() or not p.is_file():
                     continue
-                content_hash = calculate_media_content_hash(p)
+                stat = p.stat()
+                cache_key = (str(p), int(stat.st_mtime_ns), int(stat.st_size))
+                content_hash = str(cache.get(cache_key) or "")
+                if not content_hash:
+                    content_hash = calculate_media_content_hash(p)
+                    cache[cache_key] = content_hash
             except Exception:
                 content_hash = ""
             if not content_hash:
@@ -1081,7 +1093,11 @@ class BridgeScannersSettingsMixin:
             if content_hash == existing_hash:
                 continue
             entry["content_hash"] = content_hash
-            updates.append((content_hash, path))
+            if int(entry.get("id") or -1) > 0:
+                updates.append((content_hash, path))
+        if len(cache) > 2048:
+            for cache_key in list(cache.keys())[:512]:
+                cache.pop(cache_key, None)
         if not updates:
             return
         try:
@@ -1190,6 +1206,7 @@ class BridgeScannersSettingsMixin:
                 "gallery.show_hidden": self._show_hidden_enabled(),
                 "gallery.include_nested_files": self._gallery_include_nested_files_enabled(),
                 "gallery.show_folders": self._gallery_show_folders_enabled(),
+                "gallery.show_all_file_types": self._gallery_show_all_file_types_enabled(),
                 "gallery.use_recycle_bin": bool(self.settings.value("gallery/use_recycle_bin", True, type=bool)),
                 "gallery.mute_video_by_default": self._mute_video_by_default_enabled(),
                 "player.autoplay_gallery_animated_gifs": self._autoplay_gallery_animated_gifs_enabled(),
@@ -1290,6 +1307,7 @@ class BridgeScannersSettingsMixin:
                 "gallery.show_hidden": False,
                 "gallery.include_nested_files": True,
                 "gallery.show_folders": True,
+                "gallery.show_all_file_types": False,
                 "gallery.use_recycle_bin": True,
                 "gallery.mute_video_by_default": True,
                 "player.autoplay_gallery_animated_gifs": True,
