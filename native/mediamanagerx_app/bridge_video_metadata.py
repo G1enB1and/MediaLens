@@ -43,13 +43,44 @@ class BridgeVideoMetadataMixin:
             if not streams: return (0, 0, False)
             for s in streams:
                 if s.get("codec_type") == "video":
-                    w_raw, h_raw = int(s.get("width", 0)), int(s.get("height", 0))
+                    def _int_field(name: str) -> int:
+                        try:
+                            return int(float(s.get(name, 0) or 0))
+                        except Exception:
+                            return 0
+
+                    w_raw = _int_field("width")
+                    h_raw = _int_field("height")
+                    if w_raw <= 1 or h_raw <= 1:
+                        coded_w = _int_field("coded_width")
+                        coded_h = _int_field("coded_height")
+                        if coded_w > 1 and coded_h > 1:
+                            w_raw, h_raw = coded_w, coded_h
+
                     sar = s.get("sample_aspect_ratio", "1:1")
                     parsed_sar = 1.0
                     if sar and ":" in sar and sar != "1:1":
                         try: num, den = sar.split(":", 1); parsed_sar = float(num) / float(den)
                         except Exception: pass
-                    w, h = max(2, int(w_raw * parsed_sar)), max(2, h_raw)
+                    if w_raw <= 1 or h_raw <= 1:
+                        dar = str(s.get("display_aspect_ratio") or "")
+                        if ":" in dar:
+                            try:
+                                dar_num, dar_den = dar.split(":", 1)
+                                dar_ratio = float(dar_num) / float(dar_den)
+                                if w_raw > 1 and h_raw <= 1 and dar_ratio > 0:
+                                    h_raw = max(2, round(w_raw / dar_ratio))
+                                elif h_raw > 1 and w_raw <= 1 and dar_ratio > 0:
+                                    w_raw = max(2, round(h_raw * dar_ratio))
+                            except Exception:
+                                pass
+                    if w_raw <= 1 or h_raw <= 1:
+                        self._log(f"Video size probe returned unusable dimensions for {video_path}: width={w_raw} height={h_raw}")
+                        continue
+                    w, h = int(w_raw * parsed_sar), int(h_raw)
+                    if w <= 1 or h <= 1:
+                        self._log(f"Video size probe returned implausible display dimensions for {video_path}: width={w} height={h}")
+                        continue
                     
                     cw_rot = 0
                     tags = s.get("tags", {})

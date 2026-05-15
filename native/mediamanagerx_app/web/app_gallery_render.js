@@ -402,7 +402,7 @@ function createStructuredCard(item, idx) {
           gPlayingInplaceCard.classList.remove('playing-inplace', 'playing-inprogress', 'playing-confirmed');
           gPlayingInplaceCard.removeAttribute('data-paused');
         }
-        const rect = thumbWrap.getBoundingClientRect();
+        const rect = getInplacePlaybackRect(thumbWrap, item);
         if (gBridge.open_native_video_inplace) {
           card.classList.add('playing-inplace', 'playing-inprogress');
           gPlayingInplaceCard = card;
@@ -754,6 +754,39 @@ function createMediaErrorThumb(message) {
   return errorThumb;
 }
 
+function getSafeMediaAspectRatio(item, fallback = '16 / 9') {
+  const width = Number(item && item.width);
+  const height = Number(item && item.height);
+  const minDim = item && item.media_type === 'video' ? 16 : 0;
+  if (Number.isFinite(width) && Number.isFinite(height) && width > minDim && height > minDim) {
+    return `${width} / ${height}`;
+  }
+  return fallback;
+}
+
+function getInplacePlaybackRect(target, item = null) {
+  const fallbackRatioText = getSafeMediaAspectRatio(item, '16 / 9');
+  const ratioParts = fallbackRatioText.split('/').map((part) => Number(part.trim()));
+  const ratio = ratioParts.length === 2 && ratioParts[0] > 0 && ratioParts[1] > 0
+    ? ratioParts[0] / ratioParts[1]
+    : (16 / 9);
+  const card = target && target.closest ? target.closest('.card') : null;
+  let rect = target && target.getBoundingClientRect ? target.getBoundingClientRect() : null;
+  if (!rect || rect.width < 24 || rect.height < 24) {
+    const cardRect = card && card.getBoundingClientRect ? card.getBoundingClientRect() : null;
+    if (cardRect && cardRect.width >= 24) {
+      const height = cardRect.height >= 24 ? cardRect.height : Math.max(48, Math.round(cardRect.width / ratio));
+      rect = {
+        x: cardRect.x,
+        y: cardRect.y,
+        width: cardRect.width,
+        height
+      };
+    }
+  }
+  return rect || { x: 0, y: 0, width: 0, height: 0 };
+}
+
 function createMasonryCard(item, idx) {
   const mediaIdx = getItemIndex(item, idx);
   const card = document.createElement('div');
@@ -761,7 +794,9 @@ function createMasonryCard(item, idx) {
   card.tabIndex = 0;
   if (item.thumb_bg_hint) card.setAttribute('data-thumb-bg-hint', item.thumb_bg_hint);
   if (item.width && item.height) {
-    card.style.aspectRatio = `${item.width} / ${item.height}`;
+    card.style.aspectRatio = getSafeMediaAspectRatio(item, item.media_type === 'video' ? '16 / 9' : '1 / 1');
+  } else if (item.media_type === 'video') {
+    card.style.aspectRatio = '16 / 9';
   }
 
   if (item.media_type === 'image') {
@@ -839,7 +874,7 @@ function createMasonryCard(item, idx) {
       gPlayingInplaceCard.removeAttribute('data-paused');
     }
 
-    const rect = card.getBoundingClientRect();
+    const rect = getInplacePlaybackRect(card, item);
     if (gBridge.open_native_video_inplace) {
       card.classList.add('playing-inplace', 'playing-inprogress');
       gPlayingInplaceCard = card;
@@ -2043,7 +2078,7 @@ function renderMediaList(items, scrollToTop = true) {
           ? 'Scanning current folder. Wait for results to finish loading.'
           : ((getReviewMode() === 'similar' || getReviewMode() === 'similar_only') ? 'No similar images found in the current scope.' : 'No duplicates found in the current scope.'))
         : (gNoFolderSelected
-          ? 'Go to File > Open to pick a folder to show files. You can change this in Settings > General.'
+          ? 'No folder selected. Go to File > Open to pick a folder to show files. You can change this in Settings > General.'
           : 'No media discovered yet.');
       el.appendChild(div);
       renderTimelineRail([]);

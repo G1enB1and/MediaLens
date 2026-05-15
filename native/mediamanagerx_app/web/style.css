@@ -2925,11 +2925,18 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 .gallery-content .empty,
 .gallery-list .empty,
 .gallery-details .empty {
-  padding: 10px 12px;
+  grid-column: 1 / -1;
+  column-span: all;
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+  padding: 10px 0;
   color: var(--muted);
-  font-size: 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  border: 0;
+  border-radius: 0;
+  white-space: normal;
 }
 
 /* Video Play Indicator */

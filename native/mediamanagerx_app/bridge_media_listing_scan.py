@@ -183,6 +183,21 @@ class BridgeMediaListingScanMixin:
                                 pass
                     elif p.suffix.lower() in {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif"}:
                         media_error = "Unsupported or corrupt image"
+                elif r.get("media_type") == "video":
+                    if int(display_width or 0) <= 16 or int(display_height or 0) <= 16:
+                        next_width, next_height, _ = self._probe_video_size(str(p))
+                        if next_width > 16 and next_height > 16:
+                            display_width, display_height = next_width, next_height
+                            try:
+                                self.conn.execute(
+                                    "UPDATE media_items SET width = ?, height = ? WHERE path = ?",
+                                    (display_width, display_height, str(r.get("path") or str(p)).replace("\\", "/").lower()),
+                                )
+                                self.conn.commit()
+                            except Exception:
+                                pass
+                        else:
+                            display_width, display_height = None, None
                     
                 out.append({
                     "path": str(p), 

@@ -288,6 +288,15 @@ class WindowNativeActionsMixin:
         # use the full-bounds fallback instead of the previous video's size.
         self.video_overlay._native_size = None
 
+        if w < 24 or h < 24:
+            ratio = (float(native_w) / float(native_h)) if native_w > 0 and native_h > 0 else (16.0 / 9.0)
+            w = max(int(w), 160)
+            h = max(int(h), int(round(w / ratio)))
+            try:
+                self.bridge._log(f"Expanded tiny in-place video rect for {path}: {w}x{h}")
+            except Exception:
+                pass
+
         # The rect from JS is already relative to the web view's viewport.
         # Since video_overlay is a child of self.web, we use parent-relative coords.
         target_rect = QRect(x, y, w, h)
@@ -322,6 +331,9 @@ class WindowNativeActionsMixin:
         # Define header height for clipping
         header_height = self._web_header_height()
         
+        if w < 24 or h < 24:
+            return
+
         # Relative coordinates for child widget
         target_rect = QRect(x, y, w, h)
         self.video_overlay.setGeometry(target_rect)

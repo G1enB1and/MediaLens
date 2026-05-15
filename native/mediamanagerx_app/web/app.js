@@ -924,7 +924,11 @@ function wireGalleryBackground() {
     maybeLoadMoreInfiniteResults();
     if (gPlayingInplaceCard && gBridge && gBridge.update_native_video_rect) {
       const target = gPlayingInplaceCard.querySelector('.structured-thumb') || gPlayingInplaceCard;
-      const rect = target.getBoundingClientRect();
+      const itemPath = gPlayingInplaceCard.getAttribute('data-path') || '';
+      const item = Array.isArray(gMedia) ? gMedia.find((media) => media && media.path === itemPath) : null;
+      const rect = typeof getInplacePlaybackRect === 'function'
+        ? getInplacePlaybackRect(target, item)
+        : target.getBoundingClientRect();
       // If it scrolls off-screen, we might want to stop it, 
       // but let's first try just moving it.
       gBridge.update_native_video_rect(rect.x, rect.y, rect.width, rect.height);
