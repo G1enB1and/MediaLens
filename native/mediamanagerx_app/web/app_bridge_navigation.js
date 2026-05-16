@@ -995,8 +995,14 @@ function waitForInitialReviewCards(root, generation) {
       resolve();
       return;
     }
+    const startedAt = Date.now();
+    const maxWaitMs = 2500;
     const step = () => {
       if (!gReviewLoadingActive || generation !== gReviewLoadingGeneration) {
+        resolve();
+        return;
+      }
+      if (Date.now() - startedAt >= maxWaitMs) {
         resolve();
         return;
       }

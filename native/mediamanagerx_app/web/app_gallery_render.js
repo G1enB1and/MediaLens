@@ -2100,18 +2100,7 @@ function renderMediaList(items, scrollToTop = true) {
 
     if (isDuplicateModeActive()) {
       if (gReviewLoadingActive) {
-        const staging = document.createElement('div');
-        const groups = renderDuplicateMediaList(staging, viewItems, {
-          deferFinalize: true
-        });
-        staging.classList.forEach((cls) => el.classList.add(cls));
-        const reviewLoadingGeneration = gReviewLoadingGeneration;
-        prioritizeVisibleMediaLoads(staging);
-        waitForInitialReviewCards(staging, reviewLoadingGeneration).then(() => {
-          if (!gReviewLoadingActive || reviewLoadingGeneration !== gReviewLoadingGeneration) return;
-          el.replaceChildren(...Array.from(staging.childNodes));
-          finalizeDuplicateMediaList(el, groups);
-        });
+        renderDuplicateMediaList(el, viewItems);
       } else {
         renderDuplicateMediaList(el, viewItems);
       }

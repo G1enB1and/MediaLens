@@ -63,6 +63,8 @@ class WindowSidebarBulkMixin:
                 self.bottom_panel.setVisible(next_visible)
                 if was_visible != next_visible:
                     QTimer.singleShot(0, self._restore_center_splitter_sizes)
+                    for delay_ms in (0, 90, 240):
+                        QTimer.singleShot(delay_ms, self._schedule_gallery_container_relayout)
                 if next_visible and not was_visible:
                     QTimer.singleShot(0, self._seed_compare_from_first_review_group)
                     QTimer.singleShot(50, self._refresh_compare_nav_buttons)
