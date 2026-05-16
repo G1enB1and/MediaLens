@@ -1,6 +1,40 @@
 # Change Log
 
-## v1.2.9 (Current)
+## v1.2.10 (Current)
+
+### Summary
+
+This release focuses on responsiveness in tag filtering, bulk editing, duplicate review, and comparison workflows. MediaLens now shows visible gallery updates sooner, avoids several unnecessary UI refresh passes, and recovers more reliably from panel resizing during review.
+
+### Highlights
+
+- Filter by tags with faster gallery updates and less blocking work from the tag list.
+- Review duplicates and similar files without the gallery waiting indefinitely behind off-screen loading work.
+- Use bulk tag and description editors with clearer per-file Save controls and more stable responsive row layouts.
+
+### Added
+
+- Added per-file Save Tags buttons in the bulk Tags editor.
+- Added per-file Save buttons beside Generate Description in the bulk Descriptions editor.
+- Added targeted performance logging around gallery refreshes, bulk editor rebuilds, metadata selection, and layout syncs.
+- Added short-lived gallery count caching and local AI status caching so repeated refreshes can avoid expensive checks.
+
+### Changed
+
+- Changed typed tag edits so they save only when the user clicks Save instead of auto-saving after input debounce.
+- Changed tag filtering so the gallery and bulk editor update before slower tag-list state refresh work.
+- Changed tag scope counts to update in place and reuse cached scope data when the active scope has not changed.
+- Changed bulk selected-file rows to avoid redundant full layout passes when width, row count, and orientation are unchanged.
+- Changed bulk row action button sizing so longer labels keep enough space before shorter Save buttons borrow equal width.
+- Changed bulk tag and description row buttons to use distinct object names and styling independent of single-file metadata visibility settings.
+- Changed duplicate and similar review loading so review results render directly instead of waiting for detached staged cards.
+- Changed comparison panel show and hide handling to notify the gallery after splitter resizing so WebEngine repaints without requiring a manual resize.
+- Changed startup dark-mode handling so the gallery background is dark before the WebEngine page finishes loading.
+- Changed settings, local AI status checks, scan cache invalidation, and settings-triggered gallery refreshes to do less broad repeated work.
+
+---
+
+## v1.2.9
 
 ### Summary
 

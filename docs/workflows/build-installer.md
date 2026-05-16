@@ -6,6 +6,8 @@ This workflow describes how to build the standalone executable and the Windows s
 
 Canonical human-facing copy: `docs/workflows/build-installer.md`
 
+Codex note: this workflow should be run with escalated sandbox permission from the start. The script invokes Inno Setup's `ISCC.exe` from outside the repo, so non-escalated runs can complete the PyInstaller bundle but fail at installer compilation with `Access is denied`.
+
 // turbo
 
 1. Run the build script, which uses the project `.venv` PyInstaller and then compiles the installer:
