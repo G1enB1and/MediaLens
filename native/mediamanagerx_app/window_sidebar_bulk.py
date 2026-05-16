@@ -1670,6 +1670,10 @@ class WindowSidebarBulkMixin:
             placeholder_text="Description for this file",
             generate_handler=self._run_local_ai_description_for_path,
             generate_button_text="Generate Description",
+            save_button_text="Save",
+            generate_button_object_name="bulkSelectedFileGenerateDescriptionButton",
+            save_button_object_name="bulkSelectedFileSaveDescriptionButton",
+            auto_save_on_edit_finished=False,
             thumbnail_lightbox_handler=self._open_bulk_selected_file_lightbox,
         )
         self._queue_bulk_caption_selected_files_layout_sync()
