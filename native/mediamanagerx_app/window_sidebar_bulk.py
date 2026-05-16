@@ -2337,23 +2337,39 @@ class WindowSidebarBulkMixin:
         for row in changed_rows:
             row.apply_theme(**theme_kwargs)
 
+    def _schedule_tag_list_rows_state_refresh(self, delay_ms: int = 120) -> None:
+        timer = getattr(self, "_tag_list_rows_state_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._refresh_tag_list_rows_state)
+            self._tag_list_rows_state_timer = timer
+        timer.start(max(0, int(delay_ms or 0)))
+
     def _tag_list_theme_kwargs(self) -> dict | None:
         if not hasattr(self, "tag_list_rows"):
             return None
         accent = QColor(getattr(self, "_current_accent", Theme.ACCENT_DEFAULT))
         text = Theme.get_text_color()
         text_muted = Theme.get_text_muted()
+        is_light = Theme.get_is_light()
+        contrast_base = QColor("#000000" if is_light else "#ffffff")
+        accent_text = Theme.mix(accent.name(), contrast_base.name(), 0.36 if is_light else 0.58)
+        accent_text_muted = Theme.mix(text_muted, accent, 0.28 if is_light else 0.22)
         return {
             "accent_color": accent.name(),
-            "accent_text": Theme.mix(text, accent, 0.78),
-            "accent_text_muted": Theme.mix(text_muted, accent, 0.48),
+            "accent_text": accent_text,
+            "accent_text_muted": accent_text_muted,
             "text": text,
             "text_muted": text_muted,
             "btn_bg": Theme.get_input_bg(accent),
             "btn_hover": Theme.get_btn_save_hover(accent),
             "btn_border": Theme.get_input_border(accent),
             "btn_border_hover": Theme.mix(Theme.get_border(accent), accent, 0.28),
-            "is_light": Theme.get_is_light(),
+            "tooltip_bg": Theme.get_bg(accent),
+            "tooltip_text": text,
+            "tooltip_border": Theme.get_input_border(accent),
+            "is_light": is_light,
         }
 
     def _apply_tag_list_theme(self) -> None:

@@ -1565,6 +1565,15 @@ class WindowPreviewMetadataMixin:
     def _save_native_tags(self) -> None:
         self._save_tags_metadata()
 
+    def _schedule_native_tags_save(self, delay_ms: int = 500) -> None:
+        timer = getattr(self, "_native_tags_save_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._save_native_tags)
+            self._native_tags_save_timer = timer
+        timer.start(max(0, int(delay_ms or 0)))
+
     def _metadata_save_paths(self) -> tuple[list[str], bool]:
         paths = self._current_file_paths()
         if not paths and hasattr(self, "_current_path") and self._current_path:
@@ -1592,7 +1601,7 @@ class WindowPreviewMetadataMixin:
             else:
                 self.bridge.set_media_tags(paths[0], tags)
             self._invalidate_tag_list_scope_counts_cache()
-            self._refresh_tag_list_scope_counts()
+            self._schedule_tag_list_scope_counts_refresh()
             self._set_metadata_save_status("Tags saved")
         except Exception as exc:
             self._set_metadata_save_status(f"Tags save failed: {exc}")

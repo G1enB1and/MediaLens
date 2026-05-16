@@ -839,7 +839,23 @@ class TagListTagRow(QWidget):
             return
         self.removeFromSelectionRequested.emit(self._tag_name)
 
-    def apply_theme(self, *, accent_color: str, accent_text: str, accent_text_muted: str, text: str, text_muted: str, btn_bg: str, btn_hover: str, btn_border: str, btn_border_hover: str, is_light: bool) -> None:
+    def apply_theme(
+        self,
+        *,
+        accent_color: str,
+        accent_text: str,
+        accent_text_muted: str,
+        text: str,
+        text_muted: str,
+        btn_bg: str,
+        btn_hover: str,
+        btn_border: str,
+        btn_border_hover: str,
+        is_light: bool,
+        tooltip_bg: str = "",
+        tooltip_text: str = "",
+        tooltip_border: str = "",
+    ) -> None:
         trash_svg_name = "trashcan.svg" if is_light else "trashcan-white.svg"
         trash_svg = (Path(__file__).with_name("web") / "icons" / trash_svg_name).as_posix()
         trash_red_svg = (Path(__file__).with_name("web") / "icons" / "trashcan-red.svg").as_posix()
@@ -859,6 +875,13 @@ class TagListTagRow(QWidget):
         self._drag_text_color = QColor(row_text)
         row_bg = btn_bg if row_filter_active else "transparent"
         row_border = accent_color if row_filter_active else "transparent"
+        tooltip_bg = tooltip_bg or btn_bg
+        tooltip_text = tooltip_text or text
+        tooltip_border = tooltip_border or btn_border
+        tooltip_qss = (
+            f"QToolTip {{ background-color: {tooltip_bg}; color: {tooltip_text}; "
+            f"border: 1px solid {tooltip_border}; padding: 4px 6px; }}"
+        )
 
         self.setStyleSheet(
             f"""
@@ -867,6 +890,11 @@ class TagListTagRow(QWidget):
                 border: 1px solid {row_border};
                 border-radius: 8px;
             }}
+            QLabel#tagListTagName {{
+                color: {row_text};
+                background: transparent;
+            }}
+            {tooltip_qss}
             """
         )
 
@@ -884,19 +912,21 @@ class TagListTagRow(QWidget):
         else:
             name_font.setWeight(QFont.Weight.Normal)
         self.name_lbl.setFont(name_font)
-        scope_text = accent_text if row_filter_active else text
-        button_qss = (
-            f"QPushButton {{ background-color: {btn_bg}; color: {text}; border: 1px solid {btn_border}; border-radius: 6px; padding: 2px 6px; }}"
-            f"QPushButton:hover {{ background-color: {btn_hover}; border-color: {btn_border_hover}; }}"
+        self.name_lbl.setStyleSheet(
+            f"QLabel#tagListTagName {{ color: {row_text}; background: transparent; font-weight: {row_weight}; }}"
+            f"{tooltip_qss}"
         )
+        scope_text = accent_text if row_filter_active else text
         self.scope_btn.setStyleSheet(
             f"QPushButton {{ background-color: {btn_bg}; color: {scope_text}; border: 1px solid {btn_border}; border-radius: 6px; padding: 2px 6px; }}"
             f"QPushButton:hover {{ background-color: {btn_hover}; border-color: {accent_color}; }}"
+            f"{tooltip_qss}"
         )
         self.add_btn.setStyleSheet(
             f"""
             QPushButton#tagListAddButton {{
                 background-color: {btn_bg};
+                color: {text};
                 border: 1px solid {btn_border};
                 border-radius: 6px;
                 padding: 0px;
@@ -907,6 +937,7 @@ class TagListTagRow(QWidget):
                 border-color: {accent_color};
                 image: url('{add_svg}');
             }}
+            {tooltip_qss}
             """
         )
 
@@ -917,6 +948,7 @@ class TagListTagRow(QWidget):
             f"""
             QPushButton#tagListRemoveFromListButton {{
                 background-color: {btn_bg};
+                color: {text};
                 border: 1px solid {btn_border};
                 border-radius: 8px;
                 padding: 6px;
@@ -928,6 +960,7 @@ class TagListTagRow(QWidget):
                 padding: 6px;
                 image: url('{trash_red_svg}');
             }}
+            {tooltip_qss}
             """
         )
 
@@ -946,6 +979,7 @@ class TagListTagRow(QWidget):
             f"""
             QPushButton#tagListRemoveFromSelectionButton {{
                 background-color: {btn_bg};
+                color: {text};
                 border: 1px solid {btn_border};
                 border-radius: 6px;
                 padding: 5px;
@@ -961,6 +995,7 @@ class TagListTagRow(QWidget):
                 border-color: {btn_border};
                 image: url('{close_disabled_svg}');
             }}
+            {tooltip_qss}
             """
         )
         self.remove_from_selection_btn.setProperty("removeEnabled", "true" if can_remove_from_selection else "false")
