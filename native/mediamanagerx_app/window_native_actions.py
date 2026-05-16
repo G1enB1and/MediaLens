@@ -833,7 +833,7 @@ class WindowNativeActionsMixin:
                     color: {text};
                     border-color: {accent_str};
                 }}
-                QPushButton#bulkSelectedFileGenerateButton, QPushButton#bulkBtnRunLocalAI {{
+                QPushButton#bulkSelectedFileGenerateButton, QPushButton#bulkSelectedFileGenerateTagsButton, QPushButton#bulkSelectedFileSaveTagsButton, QPushButton#bulkBtnRunLocalAI {{
                     background-color: {Theme.get_btn_save_bg(accent)};
                     color: {text};
                     border: 1px solid {Theme.get_border(accent)};
@@ -842,12 +842,12 @@ class WindowNativeActionsMixin:
                     font-size: 11px;
                     font-weight: 500;
                 }}
-                QPushButton#bulkSelectedFileGenerateButton:hover, QPushButton#bulkBtnRunLocalAI:hover {{
+                QPushButton#bulkSelectedFileGenerateButton:hover, QPushButton#bulkSelectedFileGenerateTagsButton:hover, QPushButton#bulkSelectedFileSaveTagsButton:hover, QPushButton#bulkBtnRunLocalAI:hover {{
                     background-color: {Theme.get_btn_save_hover(accent)};
                     color: {"#000" if is_light else "#fff"};
                     border-color: {accent_str};
                 }}
-                QPushButton#bulkSelectedFileGenerateButton:disabled, QPushButton#bulkBtnRunLocalAI:disabled {{
+                QPushButton#bulkSelectedFileGenerateButton:disabled, QPushButton#bulkSelectedFileGenerateTagsButton:disabled, QPushButton#bulkSelectedFileSaveTagsButton:disabled, QPushButton#bulkBtnRunLocalAI:disabled {{
                     background-color: {Theme.get_control_bg(accent)};
                     color: {text_muted};
                     border-color: {Theme.get_border(accent)};
@@ -1460,7 +1460,7 @@ class WindowNativeActionsMixin:
                 QPlainTextEdit#bulkTagEditorCommonTagsText, QPlainTextEdit#bulkTagEditorUncommonTagsText {{
                     selection-background-color: {Theme.get_accent_soft(accent)};
                 }}
-                QPushButton#bulkBtnSelectAllGallery, QPushButton#bulkBtnClearTags, QPushButton#bulkBtnRunLocalAI, QPushButton#bulkBtnSaveMeta, QPushButton#bulkBtnSaveToExif, QPushButton#bulkBtnOpenTagList, QPushButton#bulkSelectedFileGenerateButton {{
+                QPushButton#bulkBtnSelectAllGallery, QPushButton#bulkBtnClearTags, QPushButton#bulkBtnRunLocalAI, QPushButton#bulkBtnSaveMeta, QPushButton#bulkBtnSaveToExif, QPushButton#bulkBtnOpenTagList, QPushButton#bulkSelectedFileGenerateButton, QPushButton#bulkSelectedFileGenerateTagsButton, QPushButton#bulkSelectedFileSaveTagsButton {{
                     background-color: {Theme.get_btn_save_bg(accent)};
                     color: {text};
                     border: 1px solid {Theme.get_border(accent)};
@@ -1472,7 +1472,7 @@ class WindowNativeActionsMixin:
                 QPushButton#bulkBtnOpenTagList {{
                     font-weight: 700;
                 }}
-                QPushButton#bulkBtnSelectAllGallery:hover, QPushButton#bulkBtnClearTags:hover, QPushButton#bulkBtnRunLocalAI:hover, QPushButton#bulkBtnSaveMeta:hover, QPushButton#bulkBtnSaveToExif:hover, QPushButton#bulkBtnOpenTagList:hover, QPushButton#bulkSelectedFileGenerateButton:hover {{
+                QPushButton#bulkBtnSelectAllGallery:hover, QPushButton#bulkBtnClearTags:hover, QPushButton#bulkBtnRunLocalAI:hover, QPushButton#bulkBtnSaveMeta:hover, QPushButton#bulkBtnSaveToExif:hover, QPushButton#bulkBtnOpenTagList:hover, QPushButton#bulkSelectedFileGenerateButton:hover, QPushButton#bulkSelectedFileGenerateTagsButton:hover, QPushButton#bulkSelectedFileSaveTagsButton:hover {{
                     background-color: {Theme.get_btn_save_hover(accent)};
                     color: {"#000" if is_light else "#fff"};
                     border-color: {accent_str};

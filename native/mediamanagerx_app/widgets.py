@@ -1126,6 +1126,8 @@ class BulkSelectedFileRow(QWidget):
         thumbnail_bg_hint: str = "",
         generate_button_text: str = "",
         save_button_text: str = "",
+        generate_button_object_name: str = "bulkSelectedFileGenerateButton",
+        save_button_object_name: str = "bulkSelectedFileSaveButton",
         auto_save_on_edit_finished: bool = True,
         action_buttons: list[dict] | None = None,
         thumbnail_button_text: str = "",
@@ -1253,7 +1255,7 @@ class BulkSelectedFileRow(QWidget):
         self._simple_button_layout = simple_button_layout
 
         self.generate_btn = QPushButton(str(generate_button_text or ""), self.generate_btn_row)
-        self.generate_btn.setObjectName("bulkSelectedFileGenerateButton")
+        self.generate_btn.setObjectName(str(generate_button_object_name or "bulkSelectedFileGenerateButton"))
         self.generate_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.generate_btn.setFixedHeight(self._GENERATE_BUTTON_HEIGHT)
         self.generate_btn.setMinimumWidth(70)
@@ -1263,7 +1265,7 @@ class BulkSelectedFileRow(QWidget):
         simple_button_layout.addWidget(self.generate_btn)
 
         self.save_btn = QPushButton(str(save_button_text or ""), self.generate_btn_row)
-        self.save_btn.setObjectName("bulkSelectedFileGenerateButton")
+        self.save_btn.setObjectName(str(save_button_object_name or "bulkSelectedFileSaveButton"))
         self.save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.save_btn.setFixedHeight(self._GENERATE_BUTTON_HEIGHT)
         self.save_btn.setMinimumWidth(70)
