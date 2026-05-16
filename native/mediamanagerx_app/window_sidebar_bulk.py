@@ -1562,6 +1562,7 @@ class WindowSidebarBulkMixin:
         generate_button_object_name: str = "bulkSelectedFileGenerateButton",
         save_button_object_name: str = "bulkSelectedFileSaveButton",
         auto_save_on_edit_finished: bool = True,
+        perf_mode: str = "",
         action_handler=None,
         action_buttons: list[dict] | None = None,
         thumbnail_action_handler=None,
@@ -1570,8 +1571,11 @@ class WindowSidebarBulkMixin:
     ) -> None:
         if list_widget is None:
             return
+        started_at = time.perf_counter()
+        paths: list[str] = []
         list_widget.setUpdatesEnabled(False)
         try:
+            list_widget._bulk_layout_state = None
             self._detach_bulk_selected_file_rows(list_widget)
             list_widget.clear()
             paths = self._current_file_paths()
@@ -1616,6 +1620,13 @@ class WindowSidebarBulkMixin:
             list_widget.doItemsLayout()
         finally:
             list_widget.setUpdatesEnabled(True)
+        self.bridge._perf_log_elapsed(
+            "bulk_selected_files_rebuild",
+            started_at,
+            threshold_ms=80,
+            mode=str(perf_mode or ""),
+            rows=len(paths),
+        )
         QTimer.singleShot(0, lambda: self._load_visible_bulk_selected_file_thumbnails(list_widget, content_height))
 
     @staticmethod
@@ -1657,6 +1668,7 @@ class WindowSidebarBulkMixin:
             generate_button_object_name="bulkSelectedFileGenerateTagsButton",
             save_button_object_name="bulkSelectedFileSaveTagsButton",
             auto_save_on_edit_finished=False,
+            perf_mode="tags",
             thumbnail_lightbox_handler=self._open_bulk_selected_file_lightbox,
         )
         self._queue_bulk_selected_files_layout_sync()
@@ -1674,6 +1686,7 @@ class WindowSidebarBulkMixin:
             generate_button_object_name="bulkSelectedFileGenerateDescriptionButton",
             save_button_object_name="bulkSelectedFileSaveDescriptionButton",
             auto_save_on_edit_finished=False,
+            perf_mode="captions",
             thumbnail_lightbox_handler=self._open_bulk_selected_file_lightbox,
         )
         self._queue_bulk_caption_selected_files_layout_sync()
@@ -1716,6 +1729,7 @@ class WindowSidebarBulkMixin:
             placeholder_text="Detected text for this file",
             action_handler=self._handle_bulk_ocr_row_action,
             action_buttons=self._bulk_ocr_action_buttons(),
+            perf_mode="ocr",
             thumbnail_action_handler=self._open_ocr_review_panel_for_path,
             thumbnail_button_text="Review",
         )
@@ -1821,6 +1835,7 @@ class WindowSidebarBulkMixin:
     def _sync_bulk_selected_files_layout(self) -> None:
         if not hasattr(self, "bulk_selected_files_list"):
             return
+        started_at = time.perf_counter()
         list_widget = self.bulk_selected_files_list
         viewport = list_widget.viewport()
         if viewport is None:
@@ -1832,6 +1847,10 @@ class WindowSidebarBulkMixin:
         if not self._is_valid_bulk_selected_file_row(first_row):
             return
         host_width, stacked = self._bulk_selected_row_editor_width(list_widget, first_row)
+        layout_state = (host_width, bool(stacked), list_widget.count())
+        if getattr(list_widget, "_bulk_layout_state", None) == layout_state:
+            return
+        list_widget._bulk_layout_state = layout_state
         list_widget.doItemsLayout()
         for i in range(list_widget.count()):
             item = list_widget.item(i)
@@ -1845,6 +1864,15 @@ class WindowSidebarBulkMixin:
                 except RuntimeError:
                     pass
         viewport.update()
+        self.bridge._perf_log_elapsed(
+            "bulk_selected_files_layout",
+            started_at,
+            threshold_ms=80,
+            mode="tags",
+            rows=list_widget.count(),
+            stacked=int(bool(stacked)),
+            width=host_width,
+        )
         QTimer.singleShot(
             0,
             lambda: self._load_visible_bulk_selected_file_thumbnails(
@@ -1861,6 +1889,7 @@ class WindowSidebarBulkMixin:
     def _sync_bulk_caption_selected_files_layout(self) -> None:
         if not hasattr(self, "bulk_caption_selected_files_list"):
             return
+        started_at = time.perf_counter()
         list_widget = self.bulk_caption_selected_files_list
         viewport = list_widget.viewport()
         if viewport is None:
@@ -1872,6 +1901,10 @@ class WindowSidebarBulkMixin:
         if not self._is_valid_bulk_selected_file_row(first_row):
             return
         host_width, stacked = self._bulk_selected_row_editor_width(list_widget, first_row)
+        layout_state = (host_width, bool(stacked), list_widget.count())
+        if getattr(list_widget, "_bulk_layout_state", None) == layout_state:
+            return
+        list_widget._bulk_layout_state = layout_state
         list_widget.doItemsLayout()
         for i in range(list_widget.count()):
             item = list_widget.item(i)
@@ -1885,6 +1918,15 @@ class WindowSidebarBulkMixin:
                 except RuntimeError:
                     pass
         viewport.update()
+        self.bridge._perf_log_elapsed(
+            "bulk_selected_files_layout",
+            started_at,
+            threshold_ms=80,
+            mode="captions",
+            rows=list_widget.count(),
+            stacked=int(bool(stacked)),
+            width=host_width,
+        )
         QTimer.singleShot(
             0,
             lambda: self._load_visible_bulk_selected_file_thumbnails(
@@ -1901,6 +1943,7 @@ class WindowSidebarBulkMixin:
     def _sync_bulk_ocr_selected_files_layout(self) -> None:
         if not hasattr(self, "bulk_ocr_selected_files_list"):
             return
+        started_at = time.perf_counter()
         list_widget = self.bulk_ocr_selected_files_list
         viewport = list_widget.viewport()
         if viewport is None:
@@ -1912,6 +1955,10 @@ class WindowSidebarBulkMixin:
         if not self._is_valid_bulk_selected_file_row(first_row):
             return
         host_width, stacked = self._bulk_selected_row_editor_width(list_widget, first_row)
+        layout_state = (host_width, bool(stacked), list_widget.count())
+        if getattr(list_widget, "_bulk_layout_state", None) == layout_state:
+            return
+        list_widget._bulk_layout_state = layout_state
         list_widget.doItemsLayout()
         for i in range(list_widget.count()):
             item = list_widget.item(i)
@@ -1925,6 +1972,15 @@ class WindowSidebarBulkMixin:
                 except RuntimeError:
                     pass
         viewport.update()
+        self.bridge._perf_log_elapsed(
+            "bulk_selected_files_layout",
+            started_at,
+            threshold_ms=80,
+            mode="ocr",
+            rows=list_widget.count(),
+            stacked=int(bool(stacked)),
+            width=host_width,
+        )
         QTimer.singleShot(
             0,
             lambda: self._load_visible_bulk_selected_file_thumbnails(

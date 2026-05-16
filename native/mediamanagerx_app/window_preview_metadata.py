@@ -1666,6 +1666,7 @@ class WindowPreviewMetadataMixin:
             self._refresh_tag_list_rows_state()
 
     def _show_metadata_for_path(self, paths: list[str], request_revision: int | None = None) -> None:
+        started_at = time.perf_counter()
         active_revision = int(request_revision if request_revision is not None else getattr(self, "_metadata_request_revision", 0))
         if active_revision < int(getattr(self, "_metadata_request_revision", 0)):
             return
@@ -1692,12 +1693,13 @@ class WindowPreviewMetadataMixin:
         is_bulk = len(file_paths) > 1
         primary_path = file_paths[0] if file_paths else None
         if is_bulk:
+            bulk_mode = self._current_bulk_editor_mode()
             self._current_path = None
             self._current_metadata_kind = self._metadata_kind_for_path(primary_path)
             self._refresh_preview_for_path(None)
-            if self._current_bulk_editor_mode() == "captions":
+            if bulk_mode == "captions":
                 self._configure_bulk_caption_editor(len(file_paths))
-            elif self._current_bulk_editor_mode() == "ocr":
+            elif bulk_mode == "ocr":
                 self._configure_bulk_ocr_editor(len(file_paths))
             else:
                 self._configure_bulk_tag_editor(len(file_paths))
@@ -1714,6 +1716,13 @@ class WindowPreviewMetadataMixin:
             self._sync_tag_list_panel_visibility(refresh_contents=False)
             self._metadata_applied_revision = active_revision
             self._schedule_tag_list_refresh("rows", request_revision=active_revision)
+            self.bridge._perf_log_elapsed(
+                "show_metadata_bulk",
+                started_at,
+                threshold_ms=80,
+                mode=str(bulk_mode or ""),
+                paths=len(file_paths),
+            )
             return
 
         self._set_active_right_workspace("details")

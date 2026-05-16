@@ -83,6 +83,7 @@ function deselectAll(force = false) {
 window.deselectAll = deselectAll;
 
 function selectAll() {
+  const startedAt = performance.now();
   gSelectedPaths.clear();
   queryGalleryCards().forEach(c => {
     const selectCard = !isFolderCardElement(c) || shouldSelectFoldersOnSelectAll();
@@ -91,6 +92,10 @@ function selectAll() {
     if (path && selectCard) gSelectedPaths.add(path);
   });
   gIsCtxMenuClick = true; // Prevents the follow-up document click from deselecting
+  const elapsed = performance.now() - startedAt;
+  if (elapsed > 40) {
+    console.debug(`[perf] select_all_visible ${elapsed.toFixed(1)}ms paths=${gSelectedPaths.size}`);
+  }
   syncMetadataToBridge();
 }
 window.selectAll = selectAll;
@@ -118,6 +123,7 @@ function triggerRename() {
 window.triggerRename = triggerRename;
 
 function syncMetadataToBridge() {
+  const requestedAt = performance.now();
   if (gPendingMetadataSyncHandle) {
     cancelAnimationFrame(gPendingMetadataSyncHandle);
     gPendingMetadataSyncHandle = 0;
@@ -134,6 +140,10 @@ function syncMetadataToBridge() {
       if (revision !== gMetadataSyncRevision) return;
       if (gBridge && gBridge.show_metadata) {
         const paths = Array.from(gSelectedPaths);
+        const elapsed = performance.now() - requestedAt;
+        if (elapsed > 40 || paths.length > 100) {
+          console.debug(`[perf] metadata_sync_request ${elapsed.toFixed(1)}ms paths=${paths.length}`);
+        }
         gBridge.show_metadata(paths);
       }
     }, 0);
