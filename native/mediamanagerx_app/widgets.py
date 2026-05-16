@@ -1642,8 +1642,37 @@ class BulkSelectedFileRow(QWidget):
         available = max(24, width - (spacing * max(0, len(buttons) - 1)))
         base = max(24, available // len(buttons))
         remainder = available % len(buttons)
-        for index, button in enumerate(buttons):
-            button.setFixedWidth(base + (1 if index < remainder else 0))
+        desired_widths = [
+            max(46, int(button.fontMetrics().horizontalAdvance(str(button.text() or "").replace("\n", " ")) + 22))
+            for button in buttons
+        ]
+        min_widths = [
+            max(42, min(desired_widths[index], 54 if str(buttons[index].text() or "").strip().casefold() == "save" else 70))
+            for index in range(len(buttons))
+        ]
+        if base >= max(desired_widths):
+            widths = [base + (1 if index < remainder else 0) for index in range(len(buttons))]
+        else:
+            widths = [base + (1 if index < remainder else 0) for index in range(len(buttons))]
+            deficit_order = sorted(range(len(buttons)), key=lambda index: desired_widths[index] - widths[index], reverse=True)
+            for target_index in deficit_order:
+                needed = max(0, desired_widths[target_index] - widths[target_index])
+                if needed <= 0:
+                    continue
+                for donor_index in sorted(range(len(buttons)), key=lambda index: widths[index] - min_widths[index], reverse=True):
+                    if donor_index == target_index:
+                        continue
+                    spare = max(0, widths[donor_index] - min_widths[donor_index])
+                    if spare <= 0:
+                        continue
+                    moved = min(needed, spare)
+                    widths[donor_index] -= moved
+                    widths[target_index] += moved
+                    needed -= moved
+                    if needed <= 0:
+                        break
+        for button, button_width in zip(buttons, widths):
+            button.setFixedWidth(max(24, int(button_width)))
 
     def _layout_action_buttons(self, grid: bool) -> None:
         layout = getattr(self, "_action_layout", None)
