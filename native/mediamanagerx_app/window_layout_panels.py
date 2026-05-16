@@ -573,8 +573,14 @@ class WindowLayoutPanelsMixin:
         self.web = GalleryView(self.gallery_workspace)
         self.web.setMinimumHeight(0)
         self.web.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
+        self.web.setStyleSheet(f"background: {Theme.get_bg(accent_q)};")
+        self.web.setAutoFillBackground(True)
         if bool(_WINDOWS_WEBENGINE_RUNTIME.get("use_custom_page", True)):
             self.web.setPage(GalleryWebPage(self.web))
+        try:
+            self.web.page().setBackgroundColor(QColor(Theme.get_bg(accent_q)))
+        except Exception:
+            pass
         gallery_workspace_layout.addWidget(self.web)
         self.center_workspace_stack.addWidget(self.gallery_workspace)
 
