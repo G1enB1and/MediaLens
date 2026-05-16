@@ -944,21 +944,27 @@ window.__mmx_setSearchQuery = function (query) {
 
 window.__mmx_applyTagScope = function (query) {
   gActiveTagScopeQuery = String(query || '').trim();
-  if (gBridge && gBridge.set_current_gallery_tag_scope_state) {
-    gBridge.set_current_gallery_tag_scope_state(gActiveTagScopeQuery || '');
-  }
   gPage = 0;
   refreshFromBridge(gBridge, true);
+  const scopeQuery = gActiveTagScopeQuery || '';
+  window.setTimeout(function () {
+    if (gBridge && gBridge.set_current_gallery_tag_scope_state) {
+      gBridge.set_current_gallery_tag_scope_state(scopeQuery);
+    }
+  }, 0);
 };
 
 window.__mmx_applyTagScopeAndSelectAll = function (query) {
   gActiveTagScopeQuery = String(query || '').trim();
-  if (gBridge && gBridge.set_current_gallery_tag_scope_state) {
-    gBridge.set_current_gallery_tag_scope_state(gActiveTagScopeQuery || '');
-  }
   gSelectAllAfterRefresh = true;
   gPage = 0;
   refreshFromBridge(gBridge, true);
+  const scopeQuery = gActiveTagScopeQuery || '';
+  window.setTimeout(function () {
+    if (gBridge && gBridge.set_current_gallery_tag_scope_state) {
+      gBridge.set_current_gallery_tag_scope_state(scopeQuery);
+    }
+  }, 0);
 };
 
 window.__mmx_clearTagScope = function () {

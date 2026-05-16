@@ -1986,6 +1986,8 @@ class WindowPreviewMetadataMixin:
         tags_visible = not is_bulk and ("tags" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "tags", True))
         self.lbl_tags_cap.setVisible(tags_visible)
         self.meta_tags.setVisible(tags_visible)
+        if hasattr(self, "btn_generate_tags"):
+            self.btn_generate_tags.setVisible(tags_visible)
         if hasattr(self, "btn_save_tags"):
             self.btn_save_tags.setVisible(tags_visible)
         self.generate_tags_btn_row.setVisible(tags_visible)

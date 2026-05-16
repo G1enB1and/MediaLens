@@ -2318,6 +2318,17 @@ class WindowSidebarBulkMixin:
             pass
 
     def _schedule_tag_list_scope_counts_refresh(self, delay_ms: int = 650) -> None:
+        try:
+            cache_key = self._tag_list_scope_counts_key()
+            if (
+                getattr(self, "_tag_list_scope_counts_cache_key", None) == cache_key
+                and isinstance(getattr(self, "_tag_list_scope_counts_cache_value", None), dict)
+            ):
+                return
+            if getattr(self, "_tag_list_scope_counts_pending_key", None) == cache_key:
+                return
+        except Exception:
+            pass
         timer = getattr(self, "_tag_list_scope_counts_refresh_timer", None)
         if timer is None:
             timer = QTimer(self)
@@ -2531,7 +2542,7 @@ class WindowSidebarBulkMixin:
             )
         except Exception:
             pass
-        self._schedule_tag_list_rows_state_refresh(40)
+        self._schedule_tag_list_rows_state_refresh(900)
 
     def _clear_tag_scope_filter(self) -> None:
         self._active_tag_scope_name = ""
@@ -2541,7 +2552,7 @@ class WindowSidebarBulkMixin:
             )
         except Exception:
             pass
-        self._schedule_tag_list_rows_state_refresh(40)
+        self._schedule_tag_list_rows_state_refresh(300)
 
 
 
