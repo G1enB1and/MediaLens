@@ -288,6 +288,28 @@ class WindowSidebarBulkMixin:
             wrapper.setFixedWidth(available_w)
             wrapper.setSizePolicy(QSizePolicy.Policy.Ignored, wrapper.sizePolicy().verticalPolicy())
             wrapper.updateGeometry()
+        if hasattr(self, "generate_tags_btn_row"):
+            tag_buttons = [
+                button for button in (getattr(self, "btn_generate_tags", None), getattr(self, "btn_save_tags", None))
+                if button is not None
+            ]
+            if tag_buttons:
+                spacing = 8
+                try:
+                    layout = self.generate_tags_btn_row.layout()
+                    spacing = max(0, int(layout.spacing())) if layout is not None else spacing
+                except Exception:
+                    pass
+                usable_w = max(0, int(available_w or 0) - (spacing * max(0, len(tag_buttons) - 1)))
+                base_w = max(80, usable_w // len(tag_buttons))
+                remainder = usable_w % len(tag_buttons)
+                for index, button in enumerate(tag_buttons):
+                    button.setMinimumWidth(0)
+                    button.setMaximumWidth(16777215)
+                    button.setFixedWidth(base_w + (1 if index < remainder else 0))
+                    button.setSizePolicy(QSizePolicy.Policy.Fixed, button.sizePolicy().verticalPolicy())
+                    self._wrap_button_text(button, str(button.property("baseText") or button.text()).strip(), button.width())
+                    button.updateGeometry()
         for label in [
             getattr(self, "generate_description_progress_lbl", None),
             getattr(self, "generate_description_error_edit", None),
@@ -2505,7 +2527,7 @@ class WindowSidebarBulkMixin:
         self._active_tag_scope_name = str(tag_name or "").strip()
         try:
             self.web.page().runJavaScript(
-                f"try{{ window.__mmx_applyTagScope && window.__mmx_applyTagScope({json.dumps(query)}); }}catch(e){{}}"
+                f"try{{ if(window.__mmx_applyTagScopeAndSelectAll){{ window.__mmx_applyTagScopeAndSelectAll({json.dumps(query)}); }}else if(window.__mmx_applyTagScope){{ window.__mmx_applyTagScope({json.dumps(query)}); if(window.selectAll) window.selectAll(); }} }}catch(e){{}}"
             )
         except Exception:
             pass

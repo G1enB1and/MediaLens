@@ -1405,6 +1405,7 @@ class WindowLayoutPanelsMixin:
         self.btn_save_tags.setProperty("baseText", "Save Tags")
         self.btn_save_tags.setText("Save Tags")
         self.btn_save_tags.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_save_tags.setMinimumWidth(80)
         self.btn_save_tags.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.btn_save_tags.clicked.connect(self._save_tags_metadata)
 
@@ -1420,6 +1421,7 @@ class WindowLayoutPanelsMixin:
         self.btn_generate_tags.setProperty("baseText", "Generate Tags")
         self.btn_generate_tags.setToolTip("Generate local AI tags and merge them into the database tag field")
         self.btn_generate_tags.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_generate_tags.setMinimumWidth(80)
         self.btn_generate_tags.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.btn_generate_tags.clicked.connect(self._run_local_ai_tags)
         generate_tags_btn_layout.addWidget(self.btn_generate_tags, 1)
@@ -1672,7 +1674,6 @@ class WindowLayoutPanelsMixin:
         self.bulk_meta_tags = QLineEdit()
         self.bulk_meta_tags.setObjectName("bulkTagEditorTagsEdit")
         self.bulk_meta_tags.setPlaceholderText("tag1, tag2, tag3")
-        self.bulk_meta_tags.editingFinished.connect(self._save_native_tags)
         self.bulk_meta_tags.textChanged.connect(lambda _text: self._schedule_tag_list_rows_state_refresh())
         self.bulk_right_layout.addWidget(self.bulk_meta_tags)
 
