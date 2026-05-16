@@ -236,12 +236,10 @@ class WindowSidebarBulkMixin:
             getattr(self, "btn_open_tag_list", None),
             getattr(self, "btn_clear_bulk_tags", None),
             getattr(self, "btn_save_meta", None),
-            getattr(self, "btn_save_tags", None),
             getattr(self, "btn_save_description", None),
             getattr(self, "btn_save_text_ocr", None),
             getattr(self, "btn_use_ocr", None),
             getattr(self, "btn_use_ocr_gemma", None),
-            getattr(self, "btn_generate_tags", None),
             getattr(self, "btn_generate_description", None),
             getattr(self, "btn_import_exif", None),
             getattr(self, "btn_merge_hidden_meta", None),
@@ -1538,6 +1536,8 @@ class WindowSidebarBulkMixin:
         placeholder_text: str,
         generate_handler=None,
         generate_button_text: str = "",
+        save_button_text: str = "",
+        auto_save_on_edit_finished: bool = True,
         action_handler=None,
         action_buttons: list[dict] | None = None,
         thumbnail_action_handler=None,
@@ -1569,6 +1569,8 @@ class WindowSidebarBulkMixin:
                     content_height=content_height,
                     placeholder_text=placeholder_text,
                     generate_button_text=generate_button_text,
+                    save_button_text=save_button_text,
+                    auto_save_on_edit_finished=auto_save_on_edit_finished,
                     action_buttons=action_buttons,
                     thumbnail_button_text=thumbnail_button_text,
                 )
@@ -1625,6 +1627,8 @@ class WindowSidebarBulkMixin:
             placeholder_text="Tags for this file",
             generate_handler=self._run_local_ai_tags_for_path,
             generate_button_text="Generate Tags",
+            save_button_text="Save Tags",
+            auto_save_on_edit_finished=False,
             thumbnail_lightbox_handler=self._open_bulk_selected_file_lightbox,
         )
         self._queue_bulk_selected_files_layout_sync()
@@ -2076,7 +2080,10 @@ class WindowSidebarBulkMixin:
             index = 0
         if index >= 0:
             self.tag_list_select.setCurrentIndex(index)
-        self._refresh_tag_list_panel()
+        if self._is_tag_list_panel_visible():
+            self._refresh_tag_list_panel()
+        elif hasattr(self, "tag_list_rows"):
+            self.tag_list_rows.clear()
 
     def _create_tag_list(self) -> None:
         from app.mediamanager.db.tag_lists_repo import create_tag_list
@@ -2192,7 +2199,11 @@ class WindowSidebarBulkMixin:
         tag_list_id = self._active_tag_list_id()
         tag_list = get_tag_list(self.bridge.conn, tag_list_id) if tag_list_id > 0 else None
 
-        self.tag_list_rows.clear()
+        self.tag_list_rows.setUpdatesEnabled(False)
+        try:
+            self.tag_list_rows.clear()
+        finally:
+            self.tag_list_rows.setUpdatesEnabled(True)
         has_list = bool(tag_list)
         self.active_tag_list_name_lbl.setVisible(has_list)
         self.tag_list_sort_lbl.setVisible(has_list)
@@ -2250,17 +2261,21 @@ class WindowSidebarBulkMixin:
         entries = self._sort_tag_list_entries(entries, sort_mode)
         self.tag_list_rows.set_user_sort_enabled(sort_mode == "none")
 
-        for entry in entries:
-            item = QListWidgetItem()
-            item.setData(Qt.ItemDataRole.UserRole, int(entry.get("tag_id") or 0))
-            item.setSizeHint(QSize(0, 36))
-            self.tag_list_rows.addItem(item)
-            row = TagListTagRow(self.tag_list_rows, item, entry, self.tag_list_rows.viewport() or self.tag_list_rows)
-            row.addToSelectionRequested.connect(self._add_tag_to_current_editor)
-            row.removeFromSelectionRequested.connect(self._remove_tag_from_current_editor)
-            row.removeFromListRequested.connect(self._remove_tag_from_active_list)
-            row.filterRequested.connect(self._filter_gallery_by_tag)
-            self.tag_list_rows.setItemWidget(item, row)
+        self.tag_list_rows.setUpdatesEnabled(False)
+        try:
+            for entry in entries:
+                item = QListWidgetItem()
+                item.setData(Qt.ItemDataRole.UserRole, int(entry.get("tag_id") or 0))
+                item.setSizeHint(QSize(0, 36))
+                self.tag_list_rows.addItem(item)
+                row = TagListTagRow(self.tag_list_rows, item, entry, self.tag_list_rows.viewport() or self.tag_list_rows)
+                row.addToSelectionRequested.connect(self._add_tag_to_current_editor)
+                row.removeFromSelectionRequested.connect(self._remove_tag_from_current_editor)
+                row.removeFromListRequested.connect(self._remove_tag_from_active_list)
+                row.filterRequested.connect(self._filter_gallery_by_tag)
+                self.tag_list_rows.setItemWidget(item, row)
+        finally:
+            self.tag_list_rows.setUpdatesEnabled(True)
 
         self.tag_list_empty_lbl.setText("No tags in this list yet." if not entries else "")
         self.tag_list_empty_lbl.setVisible(not entries)
@@ -2490,11 +2505,11 @@ class WindowSidebarBulkMixin:
         self._active_tag_scope_name = str(tag_name or "").strip()
         try:
             self.web.page().runJavaScript(
-                f"try{{ if(window.__mmx_applyTagScopeAndSelectAll){{ window.__mmx_applyTagScopeAndSelectAll({json.dumps(query)}); }}else if(window.__mmx_applyTagScope){{ window.__mmx_applyTagScope({json.dumps(query)}); if(window.selectAll) window.selectAll(); }} }}catch(e){{}}"
+                f"try{{ window.__mmx_applyTagScope && window.__mmx_applyTagScope({json.dumps(query)}); }}catch(e){{}}"
             )
         except Exception:
             pass
-        self._refresh_tag_list_rows_state()
+        self._schedule_tag_list_rows_state_refresh(40)
 
     def _clear_tag_scope_filter(self) -> None:
         self._active_tag_scope_name = ""
@@ -2504,7 +2519,7 @@ class WindowSidebarBulkMixin:
             )
         except Exception:
             pass
-        self._refresh_tag_list_rows_state()
+        self._schedule_tag_list_rows_state_refresh(40)
 
 
 

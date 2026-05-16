@@ -678,6 +678,7 @@ class TagListRowsWidget(QListWidget):
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setUniformItemSizes(True)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
     def set_user_sort_enabled(self, enabled: bool) -> None:
@@ -1124,6 +1125,8 @@ class BulkSelectedFileRow(QWidget):
         placeholder_text: str = "Tags for this file",
         thumbnail_bg_hint: str = "",
         generate_button_text: str = "",
+        save_button_text: str = "",
+        auto_save_on_edit_finished: bool = True,
         action_buttons: list[dict] | None = None,
         thumbnail_button_text: str = "",
     ) -> None:
@@ -1237,17 +1240,37 @@ class BulkSelectedFileRow(QWidget):
         self.tags_edit.setPlainText(str(tags_text or ""))
         self.tags_edit.setFixedHeight(self._content_height)
         self.tags_edit.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self.tags_edit.editingFinished.connect(self._emit_tags_edited)
+        if bool(auto_save_on_edit_finished):
+            self.tags_edit.editingFinished.connect(self._emit_tags_edited)
         tags_host_layout.addWidget(self.tags_edit)
         action_buttons = [dict(item or {}) for item in list(action_buttons or []) if str((item or {}).get("key") or "").strip()]
-        self.generate_btn = QPushButton(str(generate_button_text or ""), self.tags_edit_host)
+
+        self.generate_btn_row = QWidget(self.tags_edit_host)
+        self.generate_btn_row.setObjectName("bulkSelectedFileSimpleButtonRow")
+        simple_button_layout = QHBoxLayout(self.generate_btn_row)
+        simple_button_layout.setContentsMargins(0, 0, 0, 0)
+        simple_button_layout.setSpacing(6)
+        self._simple_button_layout = simple_button_layout
+
+        self.generate_btn = QPushButton(str(generate_button_text or ""), self.generate_btn_row)
         self.generate_btn.setObjectName("bulkSelectedFileGenerateButton")
         self.generate_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.generate_btn.setFixedHeight(self._GENERATE_BUTTON_HEIGHT)
         self.generate_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.generate_btn.setVisible(bool(str(generate_button_text or "").strip()) and not action_buttons)
         self.generate_btn.clicked.connect(self._emit_generate_requested)
-        tags_host_layout.addWidget(self.generate_btn)
+        simple_button_layout.addWidget(self.generate_btn)
+
+        self.save_btn = QPushButton(str(save_button_text or ""), self.generate_btn_row)
+        self.save_btn.setObjectName("bulkSelectedFileGenerateButton")
+        self.save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.save_btn.setFixedHeight(self._GENERATE_BUTTON_HEIGHT)
+        self.save_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.save_btn.setVisible(bool(str(save_button_text or "").strip()) and not action_buttons)
+        self.save_btn.clicked.connect(self._emit_tags_edited)
+        simple_button_layout.addWidget(self.save_btn)
+        self.generate_btn_row.setVisible(self.generate_btn.isVisible() or self.save_btn.isVisible())
+        tags_host_layout.addWidget(self.generate_btn_row)
         self.action_buttons: list[QPushButton] = []
         self.action_button_row = QWidget(self.tags_edit_host)
         self.action_button_row.setObjectName("bulkSelectedFileActionButtonRow")
@@ -1333,7 +1356,7 @@ class BulkSelectedFileRow(QWidget):
 
     def _generate_button_extra_height(self) -> int:
         try:
-            if not self.generate_btn.isHidden():
+            if not self.generate_btn_row.isHidden():
                 return int(self._GENERATE_BUTTON_HEIGHT + self._GENERATE_BUTTON_GAP + self._GENERATE_BUTTON_BOTTOM_PADDING)
             if not self.action_button_row.isHidden():
                 rows = 2 if bool(getattr(self, "_action_buttons_grid", False)) else 1
@@ -1499,8 +1522,7 @@ class BulkSelectedFileRow(QWidget):
         clamped_width = max(self._MIN_EDITOR_WIDTH, int(host_width or 0))
         self.tags_edit_host.setFixedWidth(clamped_width)
         self.tags_edit.setFixedWidth(clamped_width)
-        if hasattr(self, "generate_btn"):
-            self.generate_btn.setFixedWidth(clamped_width)
+        self._apply_simple_button_widths(clamped_width)
         if getattr(self, "action_buttons", None):
             self._apply_action_button_widths(clamped_width, stacked)
         self._refresh_tags_host_height()
@@ -1598,6 +1620,22 @@ class BulkSelectedFileRow(QWidget):
             button.setFixedWidth(max(24, int(width)))
         self._refresh_tags_host_height()
 
+    def _apply_simple_button_widths(self, host_width: int) -> None:
+        buttons = [
+            button for button in (getattr(self, "generate_btn", None), getattr(self, "save_btn", None))
+            if button is not None and button.isVisible()
+        ]
+        if not buttons:
+            return
+        width = max(self._MIN_EDITOR_WIDTH, int(host_width or 0))
+        self.generate_btn_row.setFixedWidth(width)
+        spacing = max(0, int(getattr(self, "_simple_button_layout", None).spacing() if getattr(self, "_simple_button_layout", None) else 0))
+        available = max(24, width - (spacing * max(0, len(buttons) - 1)))
+        base = max(24, available // len(buttons))
+        remainder = available % len(buttons)
+        for index, button in enumerate(buttons):
+            button.setFixedWidth(base + (1 if index < remainder else 0))
+
     def _layout_action_buttons(self, grid: bool) -> None:
         layout = getattr(self, "_action_layout", None)
         buttons = list(getattr(self, "action_buttons", []) or [])
@@ -1690,8 +1728,7 @@ class BulkSelectedFileRow(QWidget):
                 )
             self.tags_edit_host.setFixedWidth(host_width)
             self.tags_edit.setFixedWidth(host_width)
-            if hasattr(self, "generate_btn"):
-                self.generate_btn.setFixedWidth(host_width)
+            self._apply_simple_button_widths(host_width)
             if getattr(self, "action_buttons", None):
                 self._apply_action_button_widths(host_width, bool(getattr(self, "_stacked_content", False)))
             self._refresh_tags_host_height()

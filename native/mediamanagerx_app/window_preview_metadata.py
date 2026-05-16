@@ -3165,7 +3165,6 @@ class WindowPreviewMetadataMixin:
             "tags": [
                 self.lbl_tags_cap,
                 self.meta_tags,
-                self.btn_save_tags,
                 self.generate_tags_btn_row,
                 self.generate_tags_progress_lbl,
                 self.generate_tags_error_edit,
