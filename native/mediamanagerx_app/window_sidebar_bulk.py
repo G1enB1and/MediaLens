@@ -1786,6 +1786,20 @@ class WindowSidebarBulkMixin:
             - 4,
         )
         stacked_threshold = max(BulkSelectedFileRow._STACKED_EDITOR_THRESHOLD, row.minimum_unstacked_editor_width())
+        is_stacked = bool(getattr(row, "_stacked_content", False))
+        hysteresis = 24
+        if is_stacked and normal_width < stacked_threshold + hysteresis:
+            stacked_width = max(
+                BulkSelectedFileRow._MIN_EDITOR_WIDTH,
+                viewport_width
+                - root_margins.left()
+                - root_margins.right()
+                - row_margins.left()
+                - row_margins.right()
+                - BulkSelectedFileRow._RIGHT_GUTTER
+                - 4,
+            )
+            return stacked_width, True
         if normal_width >= stacked_threshold:
             return normal_width, False
         stacked_width = max(

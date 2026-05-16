@@ -1254,13 +1254,16 @@ class BulkSelectedFileRow(QWidget):
         simple_button_layout.setSpacing(6)
         self._simple_button_layout = simple_button_layout
 
+        show_generate_btn = bool(str(generate_button_text or "").strip()) and not action_buttons
+        show_save_btn = bool(str(save_button_text or "").strip()) and not action_buttons
+
         self.generate_btn = QPushButton(str(generate_button_text or ""), self.generate_btn_row)
         self.generate_btn.setObjectName(str(generate_button_object_name or "bulkSelectedFileGenerateButton"))
         self.generate_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.generate_btn.setFixedHeight(self._GENERATE_BUTTON_HEIGHT)
         self.generate_btn.setMinimumWidth(70)
         self.generate_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self.generate_btn.setVisible(bool(str(generate_button_text or "").strip()) and not action_buttons)
+        self.generate_btn.setVisible(show_generate_btn)
         self.generate_btn.clicked.connect(self._emit_generate_requested)
         simple_button_layout.addWidget(self.generate_btn)
 
@@ -1270,10 +1273,10 @@ class BulkSelectedFileRow(QWidget):
         self.save_btn.setFixedHeight(self._GENERATE_BUTTON_HEIGHT)
         self.save_btn.setMinimumWidth(70)
         self.save_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self.save_btn.setVisible(bool(str(save_button_text or "").strip()) and not action_buttons)
+        self.save_btn.setVisible(show_save_btn)
         self.save_btn.clicked.connect(self._emit_tags_edited)
         simple_button_layout.addWidget(self.save_btn)
-        self.generate_btn_row.setVisible(self.generate_btn.isVisible() or self.save_btn.isVisible())
+        self.generate_btn_row.setVisible(show_generate_btn or show_save_btn)
         tags_host_layout.addWidget(self.generate_btn_row)
         self.action_buttons: list[QPushButton] = []
         self.action_button_row = QWidget(self.tags_edit_host)
@@ -1351,8 +1354,10 @@ class BulkSelectedFileRow(QWidget):
 
     def set_generate_enabled(self, enabled: bool) -> None:
         try:
-            if self.generate_btn.isVisible():
+            if not self.generate_btn.isHidden():
                 self.generate_btn.setEnabled(bool(enabled))
+            if hasattr(self, "save_btn") and not self.save_btn.isHidden():
+                self.save_btn.setEnabled(bool(enabled))
             for button in getattr(self, "action_buttons", []) or []:
                 button.setEnabled(bool(enabled))
         except RuntimeError:
@@ -1627,7 +1632,7 @@ class BulkSelectedFileRow(QWidget):
     def _apply_simple_button_widths(self, host_width: int) -> None:
         buttons = [
             button for button in (getattr(self, "generate_btn", None), getattr(self, "save_btn", None))
-            if button is not None and button.isVisible()
+            if button is not None and not button.isHidden()
         ]
         if not buttons:
             return
