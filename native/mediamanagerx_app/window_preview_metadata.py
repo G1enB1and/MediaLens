@@ -434,6 +434,7 @@ class WindowPreviewMetadataMixin:
             return
 
         is_bulk = len(paths) > 1
+        history_before = self.bridge.capture_edit_snapshots(paths) if hasattr(self.bridge, "capture_edit_snapshots") else {}
         tags_str = self._tag_editor_text()
         tags = self._normalize_tag_list(tags_str)
 
@@ -545,6 +546,11 @@ class WindowPreviewMetadataMixin:
         status_label.setText(f"âœ“ {'Tags' if is_bulk else 'Changes'} saved")
         QTimer.singleShot(3000, lambda: status_label.setText(""))
         self._refresh_tag_list_scope_counts()
+        if history_before and hasattr(self.bridge, "record_metadata_edit_history"):
+            self.bridge.record_metadata_edit_history(
+                history_before,
+                summary=("Edited tags for multiple items" if is_bulk else "Edited metadata"),
+            )
         return
 
         # --- Show confirmation then auto-clear after 3s ---
@@ -1593,6 +1599,7 @@ class WindowPreviewMetadataMixin:
         if not paths:
             return
         tags = self._normalize_tag_list(self._tag_editor_text())
+        history_before = self.bridge.capture_edit_snapshots(paths) if hasattr(self.bridge, "capture_edit_snapshots") else {}
         try:
             if is_bulk:
                 for path in paths:
@@ -1603,6 +1610,8 @@ class WindowPreviewMetadataMixin:
             self._invalidate_tag_list_scope_counts_cache()
             self._schedule_tag_list_scope_counts_refresh()
             self._set_metadata_save_status("Tags saved")
+            if history_before and hasattr(self.bridge, "record_metadata_edit_history"):
+                self.bridge.record_metadata_edit_history(history_before, summary="Edited tags")
         except Exception as exc:
             self._set_metadata_save_status(f"Tags save failed: {exc}")
 
@@ -1612,9 +1621,12 @@ class WindowPreviewMetadataMixin:
             return
         path = paths[0]
         desc = self.meta_desc.toPlainText()
+        history_before = self.bridge.capture_edit_snapshots(paths) if hasattr(self.bridge, "capture_edit_snapshots") else {}
         try:
             self.bridge.update_media_metadata(path, "", desc, self.meta_notes.toPlainText(), "", "", self.meta_ai_prompt_edit.toPlainText(), self.meta_ai_negative_prompt_edit.toPlainText(), self.meta_ai_params_edit.toPlainText())
             self._set_metadata_save_status("Description saved")
+            if history_before and hasattr(self.bridge, "record_metadata_edit_history"):
+                self.bridge.record_metadata_edit_history(history_before, summary="Edited description")
         except Exception as exc:
             self._set_metadata_save_status(f"Description save failed: {exc}")
 
@@ -1624,9 +1636,12 @@ class WindowPreviewMetadataMixin:
             return
         path = paths[0]
         detected_text = self.meta_detected_text_edit.toPlainText()
+        history_before = self.bridge.capture_edit_snapshots(paths) if hasattr(self.bridge, "capture_edit_snapshots") else {}
         try:
             self.bridge.update_media_detected_text(path, detected_text)
             self._set_metadata_save_status("Text OCR saved")
+            if history_before and hasattr(self.bridge, "record_metadata_edit_history"):
+                self.bridge.record_metadata_edit_history(history_before, summary="Edited Text OCR")
         except Exception as exc:
             self._set_metadata_save_status(f"Text OCR save failed: {exc}")
 

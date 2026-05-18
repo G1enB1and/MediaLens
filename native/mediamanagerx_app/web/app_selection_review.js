@@ -376,6 +376,42 @@ function toggleDuplicateDeletePath(groupKey, path, checked) {
 function deletePathsSequential(paths, onDone) {
   const queue = Array.isArray(paths) ? paths.slice() : [];
   if (queue.length) markGalleryMutationScrollPreserve(queue);
+  if (queue.length > 1 && gBridge && gBridge.delete_paths && gBridge.get_settings) {
+    gBridge.get_settings((settings) => {
+      const useRecycleBin = settings && settings['gallery.use_recycle_bin'] !== undefined
+        ? !!settings['gallery.use_recycle_bin']
+        : true;
+      const useMediaLensRetention = settings && settings['gallery.use_medialens_retention'] !== undefined
+        ? !!settings['gallery.use_medialens_retention']
+        : false;
+      if (useRecycleBin || useMediaLensRetention) {
+        gBridge.delete_paths(queue, false, function () {
+          if (typeof onDone === 'function') onDone();
+        });
+        return;
+      }
+      const message = `Permanently delete ${queue.length} items?`;
+      const runPermanentDelete = () => {
+        gBridge.delete_paths(queue, true, function () {
+          if (typeof onDone === 'function') onDone();
+        });
+      };
+      if (gBridge.themed_confirm) {
+        gBridge.themed_confirm('Delete Confirmation', message, function (confirmed) {
+          if (!confirmed) {
+            if (typeof onDone === 'function') onDone();
+            return;
+          }
+          runPermanentDelete();
+        });
+      } else if (window.confirm(message)) {
+        runPermanentDelete();
+      } else if (typeof onDone === 'function') {
+        onDone();
+      }
+    });
+    return;
+  }
   const step = () => {
     const next = queue.shift();
     if (!next) {
@@ -416,7 +452,10 @@ function deletePathFromUi(path, onDone) {
     const useRecycleBin = settings && settings['gallery.use_recycle_bin'] !== undefined
       ? !!settings['gallery.use_recycle_bin']
       : true;
-    if (useRecycleBin) {
+    const useMediaLensRetention = settings && settings['gallery.use_medialens_retention'] !== undefined
+      ? !!settings['gallery.use_medialens_retention']
+      : false;
+    if (useRecycleBin || useMediaLensRetention) {
       if (!gBridge.delete_path) {
         finish(false);
         return;

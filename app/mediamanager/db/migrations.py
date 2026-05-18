@@ -168,6 +168,49 @@ def _ensure_local_ai_status_cache_table(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_local_ai_status_cache_settings ON local_ai_status_cache(settings_key)")
 
 
+def _ensure_action_history_tables(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS action_history_entries (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          transaction_id TEXT NOT NULL,
+          timestamp_utc TEXT NOT NULL,
+          action_type TEXT NOT NULL,
+          origin TEXT NOT NULL DEFAULT 'user',
+          summary TEXT NOT NULL,
+          item_count INTEGER NOT NULL DEFAULT 0,
+          status TEXT NOT NULL DEFAULT 'success',
+          undo_state TEXT NOT NULL DEFAULT 'not_undoable',
+          metadata_json TEXT NOT NULL DEFAULT '{}'
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_action_history_entries_time ON action_history_entries(timestamp_utc DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_action_history_entries_type ON action_history_entries(action_type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_action_history_entries_transaction ON action_history_entries(transaction_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_action_history_entries_undo ON action_history_entries(undo_state, id)")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS action_history_items (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          entry_id INTEGER NOT NULL,
+          item_type TEXT NOT NULL DEFAULT 'file',
+          old_path TEXT,
+          new_path TEXT,
+          retention_id TEXT,
+          result TEXT NOT NULL DEFAULT 'success',
+          current_state TEXT NOT NULL DEFAULT 'applied',
+          last_change_source TEXT NOT NULL DEFAULT 'original_action',
+          notes TEXT,
+          metadata_json TEXT NOT NULL DEFAULT '{}',
+          FOREIGN KEY(entry_id) REFERENCES action_history_entries(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_action_history_items_entry ON action_history_items(entry_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_action_history_items_state ON action_history_items(current_state, last_change_source)")
+
+
 def init_db(db_path: str) -> None:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     sql = _load_schema_sql()
@@ -193,6 +236,7 @@ def init_db(db_path: str) -> None:
         _ensure_ocr_tables(conn)
         _ensure_collection_folder_tables(conn)
         _ensure_local_ai_status_cache_table(conn)
+        _ensure_action_history_tables(conn)
         conn.commit()
     finally:
         conn.close()

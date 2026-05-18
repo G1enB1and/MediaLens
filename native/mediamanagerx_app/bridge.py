@@ -50,6 +50,7 @@ class Bridge(BridgeMediaListingScanMixin, BridgeTagsMetadataMixin, BridgeLocalAi
     webThemeReady = Signal(str)
     # Async file ops (so WebEngine UI doesn't freeze during rename)
     fileOpFinished = Signal(str, bool, str, str)  # op, ok, old_path, new_path
+    actionHistoryChanged = Signal()
 
     # Media scanning signals
     scanStarted = Signal(str)

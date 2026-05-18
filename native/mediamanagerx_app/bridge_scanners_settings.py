@@ -1208,6 +1208,8 @@ class BridgeScannersSettingsMixin:
                 "gallery.show_folders": self._gallery_show_folders_enabled(),
                 "gallery.show_all_file_types": self._gallery_show_all_file_types_enabled(),
                 "gallery.use_recycle_bin": bool(self.settings.value("gallery/use_recycle_bin", True, type=bool)),
+                "gallery.use_medialens_retention": bool(self.settings.value("gallery/use_medialens_retention", False, type=bool)),
+                "gallery.medialens_retention_days": int(self.settings.value("gallery/medialens_retention_days", 30, type=int)),
                 "gallery.mute_video_by_default": self._mute_video_by_default_enabled(),
                 "player.autoplay_gallery_animated_gifs": self._autoplay_gallery_animated_gifs_enabled(),
                 "player.autoplay_preview_animated_gifs": self._autoplay_preview_animated_gifs_enabled(),

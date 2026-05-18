@@ -148,10 +148,10 @@ def auto_purge_recycle_bin():
     conn.commit()
     conn.close()
 
-def move_to_recycle_bin(original_path: str, days: int) -> bool:
+def move_to_recycle_bin_with_id(original_path: str, days: int) -> str:
     try:
         p = Path(original_path)
-        if not p.exists(): return False
+        if not p.exists(): return ""
         item_type = "folder" if p.is_dir() else "file"
         
         bin_dir = get_recycle_bin_dir()
@@ -172,9 +172,12 @@ def move_to_recycle_bin(original_path: str, days: int) -> bool:
         ''', (file_id, str(p.resolve()), archived_name, item_type, deleted_at.isoformat(), expires_at.isoformat()))
         conn.commit()
         conn.close()
-        return True
+        return file_id
     except Exception:
-        return False
+        return ""
+
+def move_to_recycle_bin(original_path: str, days: int) -> bool:
+    return bool(move_to_recycle_bin_with_id(original_path, days))
 
 def restore_from_recycle_bin(file_id: str) -> bool:
     try:

@@ -54,6 +54,17 @@ class WindowMenuShortcutMixin:
         file_menu = menubar.addMenu("&File")
 
         edit_menu = menubar.addMenu("&Edit")
+        self.act_menu_undo = QAction("Undo", self)
+        self.act_menu_undo.setShortcut("Ctrl+Z")
+        self.act_menu_undo.triggered.connect(self._on_undo_shortcut)
+        edit_menu.addAction(self.act_menu_undo)
+
+        self.act_menu_redo = QAction("Redo", self)
+        self.act_menu_redo.setShortcuts([QKeySequence("Ctrl+Y"), QKeySequence("Ctrl+Shift+Z")])
+        self.act_menu_redo.triggered.connect(self._on_redo_shortcut)
+        edit_menu.addAction(self.act_menu_redo)
+
+        edit_menu.addSeparator()
         
         self.act_open_bulk_tag_editor = QAction("Bulk Tag Editor", self)
         self.act_open_bulk_tag_editor.triggered.connect(self._open_bulk_tag_editor_from_menu)
@@ -158,6 +169,12 @@ class WindowMenuShortcutMixin:
 
         view_menu.addSeparator()
 
+        self.act_show_action_history = QAction("Action History", self)
+        self.act_show_action_history.triggered.connect(self.show_action_history)
+        view_menu.addAction(self.act_show_action_history)
+
+        view_menu.addSeparator()
+
         devtools_action = QAction("Toggle &DevTools", self)
         devtools_action.setShortcut("F12")
         devtools_action.triggered.connect(self.toggle_devtools)
@@ -211,6 +228,8 @@ class WindowMenuShortcutMixin:
 
         for m in (file_menu, edit_menu, view_menu, help_menu):
             m.aboutToShow.connect(self._dismiss_web_menus)
+
+        edit_menu.aboutToShow.connect(self._sync_history_menu_actions)
 
         self._build_menu_bar_controls()
 
@@ -437,15 +456,13 @@ class WindowMenuShortcutMixin:
         use_recycle = bool(self.bridge.settings.value("gallery/use_recycle_bin", True, type=bool))
         use_retention = bool(self.bridge.settings.value("gallery/use_medialens_retention", False, type=bool))
         if use_recycle or use_retention:
-            for p in paths:
-                self.bridge.delete_path(p)
+            self.bridge.delete_paths(paths, False)
         else:
             count = len(paths)
             msg = f"Are you sure you want to permanently delete {count} items?" if count > 1 else f"Are you sure you want to permanently delete '{Path(paths[0]).name}'?"
             ret = _run_themed_question_dialog(self, "Confirm Permanent Delete", msg)
             if ret == QMessageBox.StandardButton.Yes:
-                for p in paths:
-                    self.bridge.delete_path_permanent(p)
+                self.bridge.delete_paths(paths, True)
 
     def _on_shift_delete_shortcut(self) -> None:
         if self._is_input_focused(): return
@@ -456,8 +473,7 @@ class WindowMenuShortcutMixin:
         msg = f"Are you sure you want to permanently delete {count} items?" if count > 1 else f"Are you sure you want to permanently delete '{Path(paths[0]).name}'?"
         ret = _run_themed_question_dialog(self, "Confirm Permanent Delete", msg)
         if ret == QMessageBox.StandardButton.Yes:
-            for p in paths:
-                self.bridge.delete_path_permanent(p)
+            self.bridge.delete_paths(paths, True)
 
     def _on_rename_shortcut(self) -> None:
         if self._is_input_focused(): return
@@ -476,6 +492,58 @@ class WindowMenuShortcutMixin:
             pass
         else:
             self.web.page().runJavaScript("if(window.selectAll) window.selectAll();")
+
+    def _sync_history_menu_actions(self) -> None:
+        try:
+            state = self.bridge.get_action_history_state()
+            can_undo = bool(state.get("can_undo"))
+            can_redo = bool(state.get("can_redo"))
+        except Exception:
+            can_undo = False
+            can_redo = False
+        for action in (getattr(self, "act_undo", None), getattr(self, "act_menu_undo", None)):
+            if action is not None:
+                action.setEnabled(can_undo)
+        for action in (getattr(self, "act_redo", None), getattr(self, "act_menu_redo", None)):
+            if action is not None:
+                action.setEnabled(can_redo)
+
+    def _on_undo_shortcut(self) -> None:
+        if self._is_input_focused():
+            focused_input = self._focused_text_input()
+            if focused_input is not None and hasattr(focused_input, "undo"):
+                try:
+                    focused_input.undo()
+                except Exception:
+                    pass
+            return
+        if self.bridge.undo_last_action() and hasattr(self, "_refresh_current_folder"):
+            self._refresh_current_folder()
+
+    def _on_redo_shortcut(self) -> None:
+        if self._is_input_focused():
+            focused_input = self._focused_text_input()
+            if focused_input is not None and hasattr(focused_input, "redo"):
+                try:
+                    focused_input.redo()
+                except Exception:
+                    pass
+            return
+        if self.bridge.redo_last_action() and hasattr(self, "_refresh_current_folder"):
+            self._refresh_current_folder()
+
+    def show_action_history(self) -> None:
+        try:
+            from native.mediamanagerx_app.action_history_dialog import ActionHistoryDialog
+            self.action_history_dialog = ActionHistoryDialog(self, self)
+            self.action_history_dialog.show()
+            self.action_history_dialog.raise_()
+            self.action_history_dialog.activateWindow()
+        except Exception as exc:
+            try:
+                self.bridge._log(f"Failed to open action history: {exc}")
+            except Exception:
+                pass
 
 
 

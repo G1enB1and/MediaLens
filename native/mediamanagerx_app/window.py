@@ -145,6 +145,8 @@ class MainWindow(WindowAppLifecycleMixin, WindowNativeActionsMixin, WindowPrevie
         self.bridge.updateError.connect(self._on_update_error)
 
         self._setup_shortcuts()
+        self.bridge.actionHistoryChanged.connect(self._sync_history_menu_actions)
+        self._sync_history_menu_actions()
 
 
 

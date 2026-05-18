@@ -81,7 +81,7 @@ class BridgeFileOpsMixin:
                 "scanners.text_detection.schedule_month_day",
                 "scanners.ocr_text.schedule_month_day",
             }
-            if key not in ("gallery.startup_mode", "gallery.start_folder", "gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "gallery.similarity_threshold", "ui.accent_color", "ui.theme_mode", "ui.advanced_search_saved_queries", "metadata.display.order", "duplicate.settings.active_tab", "player.video_loop_mode", "player.video_loop_cutoff_seconds") and key not in scanner_schedule_keys and not key.startswith("metadata.layout.") and not key.startswith("duplicate.rules.") and key != "duplicate.priorities.order":
+            if key not in ("gallery.startup_mode", "gallery.start_folder", "gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "gallery.similarity_threshold", "gallery.medialens_retention_days", "ui.accent_color", "ui.theme_mode", "ui.advanced_search_saved_queries", "metadata.display.order", "duplicate.settings.active_tab", "player.video_loop_mode", "player.video_loop_cutoff_seconds") and key not in scanner_schedule_keys and not key.startswith("metadata.layout.") and not key.startswith("duplicate.rules.") and key != "duplicate.priorities.order":
                 return False
             if key == "gallery.startup_mode":
                 value = str(value or "none").strip().lower()
@@ -109,6 +109,11 @@ class BridgeFileOpsMixin:
             elif key == "player.video_loop_cutoff_seconds":
                 try:
                     value = str(max(1, int(str(value or "90").strip())))
+                except Exception:
+                    return False
+            elif key == "gallery.medialens_retention_days":
+                try:
+                    value = str(max(1, min(3650, int(str(value or "30").strip()))))
                 except Exception:
                     return False
             elif key in {"scanners.text_detection.interval_hours", "scanners.ocr_text.interval_hours"}:
@@ -256,27 +261,105 @@ class BridgeFileOpsMixin:
 
     @Slot(str, bool, result=bool)
     def set_media_hidden(self, path: str, hidden: bool) -> bool:
+        try:
+            before_hidden = bool(self.repo.is_path_hidden(path))
+        except Exception:
+            before_hidden = None
         success = self.repo.set_media_hidden(path, hidden)
         if success:
             self._invalidate_scan_caches_for_paths([path])
+            if before_hidden is None or before_hidden != bool(hidden):
+                try:
+                    from native.mediamanagerx_app.action_history import record_user_action
+                    record_user_action(
+                        self.conn,
+                        action_type="hidden",
+                        summary="Hid item" if hidden else "Unhid item",
+                        items=[{
+                            "item_type": "file",
+                            "old_path": path,
+                            "new_path": path,
+                            "result": "success",
+                            "current_state": "applied",
+                            "last_change_source": "original_action",
+                            "notes": "hidden" if hidden else "visible",
+                            "metadata": {"old_hidden": before_hidden, "new_hidden": bool(hidden), "target": "media"},
+                        }],
+                    )
+                    self.actionHistoryChanged.emit()
+                except Exception as exc:
+                    try: self._log(f"Action history hidden record failed: {exc}")
+                    except Exception: pass
         self.fileOpFinished.emit("hide" if hidden else "unhide", success, path, path)
         return success
 
     @Slot(str, bool, result=bool)
     def set_folder_hidden(self, path: str, hidden: bool) -> bool:
+        try:
+            before_hidden = bool(self.repo.is_path_hidden(path))
+        except Exception:
+            before_hidden = None
         success = self.repo.set_folder_hidden(path, hidden)
         if success:
             self._invalidate_scan_caches_for_paths([path])
+            if before_hidden is None or before_hidden != bool(hidden):
+                try:
+                    from native.mediamanagerx_app.action_history import record_user_action
+                    record_user_action(
+                        self.conn,
+                        action_type="hidden",
+                        summary="Hid folder" if hidden else "Unhid folder",
+                        items=[{
+                            "item_type": "folder",
+                            "old_path": path,
+                            "new_path": path,
+                            "result": "success",
+                            "current_state": "applied",
+                            "last_change_source": "original_action",
+                            "notes": "hidden" if hidden else "visible",
+                            "metadata": {"old_hidden": before_hidden, "new_hidden": bool(hidden), "target": "folder"},
+                        }],
+                    )
+                    self.actionHistoryChanged.emit()
+                except Exception as exc:
+                    try: self._log(f"Action history folder hidden record failed: {exc}")
+                    except Exception: pass
         self.fileOpFinished.emit("hide" if hidden else "unhide", success, path, path)
         return success
 
     @Slot(int, bool, result=bool)
     def set_collection_hidden(self, collection_id: int, hidden: bool) -> bool:
+        try:
+            row = self.conn.execute("SELECT name, is_hidden FROM collections WHERE id = ?", (int(collection_id),)).fetchone()
+            collection_name = str(row[0] or f"Collection {collection_id}") if row else f"Collection {collection_id}"
+            before_hidden = bool(row[1]) if row else None
+        except Exception:
+            collection_name = f"Collection {collection_id}"
+            before_hidden = None
         success = self.repo.set_collection_hidden(collection_id, hidden)
         if success:
-            # Emit a signal that collections updated if we have one
-            # self.collectionsUpdated.emit()
-            pass
+            if before_hidden is None or before_hidden != bool(hidden):
+                try:
+                    from native.mediamanagerx_app.action_history import record_user_action
+                    record_user_action(
+                        self.conn,
+                        action_type="hidden",
+                        summary="Hid collection" if hidden else "Unhid collection",
+                        items=[{
+                            "item_type": "collection",
+                            "old_path": collection_name,
+                            "new_path": collection_name,
+                            "result": "success",
+                            "current_state": "applied",
+                            "last_change_source": "original_action",
+                            "notes": "hidden" if hidden else "visible",
+                            "metadata": {"old_hidden": before_hidden, "new_hidden": bool(hidden), "target": "collection", "collection_id": int(collection_id)},
+                        }],
+                    )
+                    self.actionHistoryChanged.emit()
+                except Exception as exc:
+                    try: self._log(f"Action history collection hidden record failed: {exc}")
+                    except Exception: pass
         return success
 
     @Slot(result="QVariantMap")
@@ -339,87 +422,31 @@ class BridgeFileOpsMixin:
         """Rotate an image or video by degrees and update it in-place."""
         if not os.path.exists(path):
             return
-            
+
         def work():
             try:
-                is_video = path.lower().endswith(('.mp4', '.mkv', '.avi', '.mov', '.webm'))
-                if is_video:
-                    import subprocess, json, tempfile
-                    
-                    # 1. Probe current rotation
-                    current_ccw_rot = 0.0
-                    try:
-                        cmd_probe = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', path]
-                        res = _run_hidden_subprocess(cmd_probe, capture_output=True, text=True)
-                        data = json.loads(res.stdout)
-                        for st in data.get('streams', []):
-                            if st.get('codec_type') == 'video': # check video stream
-                                # Read tags (rare nowadays)
-                                tags = st.get('tags', {})
-                                if 'rotate' in tags:
-                                    current_ccw_rot = float(tags['rotate'])
-                                # Read side data (modern standard)
-                                for sd in st.get('side_data_list', []):
-                                    if 'rotation' in sd:
-                                        # FFprobe reports CCW as positive.
-                                        current_ccw_rot = float(sd['rotation'])
-                                break
-                    except Exception as e:
-                        print("Warning: Failed to probe rotation:", e)
-                    
-                    # Frontend degrees: 90 is CCW, -90 is CW. 
-                    # new_ccw = current + delta
-                    new_ccw_rot = (current_ccw_rot + degrees) % 360
-                    if new_ccw_rot < 0:
-                        new_ccw_rot += 360
-                    
-                    # 2. FFmpeg copy and set rotation
-                    # For FFmpeg, we set the input's display rotation so it copies that directly to the output.
-                    with tempfile.NamedTemporaryFile(suffix=os.path.splitext(path)[1], delete=False) as tmp:
-                        tmp_name = tmp.name
-                    
-                    cmd_ffmpeg = [
-                        'ffmpeg', '-y', 
-                        '-display_rotation', str(new_ccw_rot),
-                        '-i', path,
-                        '-c', 'copy',
-                        tmp_name
-                    ]
-                    
-                    # hide ffmpeg output
-                    _run_hidden_subprocess(cmd_ffmpeg, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    
-                    # 3. Replace original file
-                    import shutil
-                    shutil.move(tmp_name, path)
-                else:
-                    from PIL import Image
-                    with Image.open(path) as img:
-                        rotated = img.rotate(degrees, expand=True)
-                        exif = img.info.get('exif')
-                        if exif:
-                            rotated.save(path, exif=exif)
-                        else:
-                            rotated.save(path)
-                
-                # If this is a video, delete the cached poster so it regenerates on next view
-                if is_video:
-                    poster = self._video_poster_path(Path(path))
-                    if poster.exists():
-                        try: poster.unlink()
-                        except Exception: pass
-                        
-                # Update SQLite so width and height are inverted
+                self._rotate_media_sync(path, int(degrees or 0))
                 try:
-                    from app.mediamanager.utils.pathing import normalize_windows_path
-                    if hasattr(self, 'conn') and self.conn:
-                        norm = normalize_windows_path(path)
-                        # Swap width and height for 90-degree rotations
-                        if degrees in (90, -90, 270, -270):
-                            self.conn.execute("UPDATE media_items SET width = height, height = width WHERE path = ?", (norm,))
-                            self.conn.commit()
-                except Exception: pass
-                
+                    from native.mediamanagerx_app.action_history import record_user_action
+                    record_user_action(
+                        self.conn,
+                        action_type="rotate",
+                        summary=f"Rotated {Path(path).name}",
+                        items=[{
+                            "item_type": "file",
+                            "old_path": path,
+                            "new_path": path,
+                            "result": "success",
+                            "current_state": "applied",
+                            "last_change_source": "original_action",
+                            "notes": f"{int(degrees or 0)} degrees",
+                            "metadata": {"degrees": int(degrees or 0)},
+                        }],
+                    )
+                    self.actionHistoryChanged.emit()
+                except Exception as exc:
+                    try: self._log(f"Action history rotate record failed: {exc}")
+                    except Exception: pass
                 # Finally, inform frontend that a file was modified so it can refresh the thumbnail
                 self.fileOpFinished.emit("rotate", True, path, path)
             except Exception as e:
@@ -427,6 +454,63 @@ class BridgeFileOpsMixin:
 
         # Run in background to prevent freezing the UI on large videos
         threading.Thread(target=work, daemon=True).start()
+
+    def _rotate_media_sync(self, path: str, degrees: int) -> None:
+        is_video = path.lower().endswith(('.mp4', '.mkv', '.avi', '.mov', '.webm'))
+        if is_video:
+            import subprocess, tempfile
+            current_ccw_rot = 0.0
+            try:
+                cmd_probe = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', path]
+                res = _run_hidden_subprocess(cmd_probe, capture_output=True, text=True)
+                data = json.loads(res.stdout)
+                for st in data.get('streams', []):
+                    if st.get('codec_type') == 'video':
+                        tags = st.get('tags', {})
+                        if 'rotate' in tags:
+                            current_ccw_rot = float(tags['rotate'])
+                        for sd in st.get('side_data_list', []):
+                            if 'rotation' in sd:
+                                current_ccw_rot = float(sd['rotation'])
+                        break
+            except Exception as e:
+                print("Warning: Failed to probe rotation:", e)
+            new_ccw_rot = (current_ccw_rot + degrees) % 360
+            if new_ccw_rot < 0:
+                new_ccw_rot += 360
+            with tempfile.NamedTemporaryFile(suffix=os.path.splitext(path)[1], delete=False) as tmp:
+                tmp_name = tmp.name
+            cmd_ffmpeg = [
+                'ffmpeg', '-y',
+                '-display_rotation', str(new_ccw_rot),
+                '-i', path,
+                '-c', 'copy',
+                tmp_name
+            ]
+            _run_hidden_subprocess(cmd_ffmpeg, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            shutil.move(tmp_name, path)
+            poster = self._video_poster_path(Path(path))
+            if poster.exists():
+                try: poster.unlink()
+                except Exception: pass
+        else:
+            from PIL import Image
+            with Image.open(path) as img:
+                rotated = img.rotate(degrees, expand=True)
+                exif = img.info.get('exif')
+                if exif:
+                    rotated.save(path, exif=exif)
+                else:
+                    rotated.save(path)
+        try:
+            from app.mediamanager.utils.pathing import normalize_windows_path
+            if hasattr(self, 'conn') and self.conn:
+                norm = normalize_windows_path(path)
+                if degrees in (90, -90, 270, -270):
+                    self.conn.execute("UPDATE media_items SET width = height, height = width WHERE path = ?", (norm,))
+                    self.conn.commit()
+        except Exception:
+            pass
 
     @Slot(str, result=str)
     def hide_by_renaming_dot(self, path: str) -> str:
@@ -497,6 +581,18 @@ class BridgeFileOpsMixin:
                     from app.mediamanager.db.media_repo import rename_media_path
                     try: rename_media_path(self.conn, old, newp)
                     except Exception: pass
+                    try:
+                        from native.mediamanagerx_app.action_history import make_history_item, record_user_action
+                        record_user_action(
+                            self.conn,
+                            action_type="rename",
+                            summary=f'Renamed "{Path(old).name}" to "{Path(newp).name}"',
+                            items=[make_history_item(old_path=old, new_path=newp, item_type="folder" if Path(newp).is_dir() else "file")],
+                        )
+                        self.actionHistoryChanged.emit()
+                    except Exception as exc:
+                        try: self._log(f"Action history rename record failed: {exc}")
+                        except Exception: pass
             except Exception: pass
             self.fileOpFinished.emit("rename", ok, old, newp)
             if ok:
@@ -578,10 +674,20 @@ class BridgeFileOpsMixin:
             sticky_action = None
             any_ok = False
             changed_paths: list[str] = [str(target_dir)]
+            history_items: list[dict] = []
             
             try:
                 for src in src_paths:
                     if not src.exists():
+                        history_items.append({
+                            "item_type": "folder" if src.is_dir() else "file",
+                            "old_path": str(src),
+                            "new_path": str(target_dir / src.name),
+                            "result": "failed",
+                            "current_state": "failed",
+                            "last_change_source": "original_action",
+                            "notes": "Source path no longer exists.",
+                        })
                         continue
                     
                     dst = target_dir / src.name
@@ -612,6 +718,15 @@ class BridgeFileOpsMixin:
                         if not (not is_move and action == "keep_both" and final_dst != dst):
                             action = res["action"]
                             if action == "skip":
+                                history_items.append({
+                                    "item_type": "folder" if src.is_dir() else "file",
+                                    "old_path": str(src),
+                                    "new_path": str(dst),
+                                    "result": "failed",
+                                    "current_state": "failed",
+                                    "last_change_source": "original_action",
+                                    "notes": "Skipped because of a destination conflict.",
+                                })
                                 continue
                             elif action == "replace":
                                  final_dst = dst
@@ -658,14 +773,46 @@ class BridgeFileOpsMixin:
                                             attach_tags(self.conn, int(new_media_id), src_tags)
                         
                         any_ok = True
+                        history_items.append({
+                            "item_type": "folder" if final_dst.is_dir() else "file",
+                            "old_path": str(src),
+                            "new_path": str(final_dst),
+                            "result": "success",
+                            "current_state": "applied",
+                            "last_change_source": "original_action",
+                            "notes": "",
+                        })
                         if is_move:
                             changed_paths.extend([str(src), str(final_dst)])
                         else:
                             changed_paths.append(str(final_dst))
                     except Exception as e:
-                        pass
+                        history_items.append({
+                            "item_type": "folder" if src.is_dir() else "file",
+                            "old_path": str(src),
+                            "new_path": str(final_dst),
+                            "result": "failed",
+                            "current_state": "failed",
+                            "last_change_source": "original_action",
+                            "notes": str(e) or "Operation failed.",
+                        })
 
                 op_signal = "paste" if "paste" in op_type else op_type
+                if history_items:
+                    try:
+                        from native.mediamanagerx_app.action_history import action_summary, record_user_action
+                        success_count = sum(1 for item in history_items if item.get("result") == "success")
+                        record_user_action(
+                            self.conn,
+                            action_type="move" if is_move else "copy",
+                            summary=action_summary("move" if is_move else "copy", success_count),
+                            items=history_items,
+                            metadata={"target_dir": str(target_dir), "op_type": op_type},
+                        )
+                        self.actionHistoryChanged.emit()
+                    except Exception as exc:
+                        try: self._log(f"Action history file-op record failed: {exc}")
+                        except Exception: pass
                 self.fileOpFinished.emit(op_signal, any_ok, "", str(target_dir))
             except Exception as e:
                 self.fileOpFinished.emit(op_type, False, "", "")
@@ -758,49 +905,30 @@ class BridgeFileOpsMixin:
     @Slot(str, result=bool)
     def delete_path(self, path_str: str) -> bool:
         try:
-            p = Path(path_str)
-            if not p.exists():
-                self.fileOpFinished.emit("delete", False, path_str, "")
-                return False
-            was_dir = p.is_dir()
-
             self.close_native_video()
             QApplication.processEvents()
-
-            use_medialens_retention = bool(self.settings.value("gallery/use_medialens_retention", False, type=bool))
-            use_recycle = bool(self.settings.value("gallery/use_recycle_bin", True, type=bool))
-            
-            if use_medialens_retention:
-                from native.mediamanagerx_app.recycle_bin import move_to_recycle_bin
-                days = int(self.settings.value("gallery/medialens_retention_days", 30, type=int))
-                deleted = move_to_recycle_bin(path_str, days)
-                if not deleted and p.exists():
-                    if p.is_dir():
-                        shutil.rmtree(p)
-                    else:
-                        p.unlink()
-            elif use_recycle:
-                deleted = send_to_recycle_bin(path_str)
-                if not deleted and p.exists():
-                    if p.is_dir():
-                        shutil.rmtree(p)
-                    else:
-                        p.unlink()
-            else:
-                if p.is_dir():
-                    shutil.rmtree(p)
-                else:
-                    p.unlink()
-
-            from app.mediamanager.utils.pathing import normalize_windows_path
-            normalized = normalize_windows_path(path_str)
-            if was_dir:
-                self.conn.execute("DELETE FROM media_items WHERE path = ? OR path LIKE ?", (normalized, f"{normalized}/%"))
-            else:
-                self.conn.execute("DELETE FROM media_items WHERE path = ?", (normalized,))
-            self.conn.commit()
+            from native.mediamanagerx_app.action_delete import perform_delete
+            ok, item = perform_delete(self.conn, self.settings, path_str, permanent=False)
+            if not ok:
+                self.fileOpFinished.emit("delete", False, path_str, "")
+                return False
             self._invalidate_scan_caches_for_paths([path_str])
             self.collectionsChanged.emit()
+            try:
+                from native.mediamanagerx_app.action_history import record_user_action
+                retention_id = str(item.get("retention_id") or "")
+                record_user_action(
+                    self.conn,
+                    action_type="delete",
+                    summary=f'Deleted "{Path(path_str).name}"',
+                    items=[item],
+                    undo_state=None if retention_id else "not_undoable",
+                    metadata={"permanent": False},
+                )
+                self.actionHistoryChanged.emit()
+            except Exception as exc:
+                try: self._log(f"Action history delete record failed: {exc}")
+                except Exception: pass
             self.fileOpFinished.emit("delete", True, path_str, "")
             return True
         except Exception:
@@ -810,41 +938,388 @@ class BridgeFileOpsMixin:
     @Slot(str, result=bool)
     def delete_path_permanent(self, path_str: str) -> bool:
         try:
-            p = Path(path_str)
-            if not p.exists():
-                self.fileOpFinished.emit("delete", False, path_str, "")
-                return False
-            was_dir = p.is_dir()
-
             self.close_native_video()
             QApplication.processEvents()
-
-            if p.is_dir():
-                shutil.rmtree(p)
-            else:
-                p.unlink()
-
-            from app.mediamanager.utils.pathing import normalize_windows_path
-            normalized = normalize_windows_path(path_str)
-            if was_dir:
-                self.conn.execute("DELETE FROM media_items WHERE path = ? OR path LIKE ?", (normalized, f"{normalized}/%"))
-            else:
-                self.conn.execute("DELETE FROM media_items WHERE path = ?", (normalized,))
-            self.conn.commit()
+            from native.mediamanagerx_app.action_delete import perform_delete
+            ok, item = perform_delete(self.conn, self.settings, path_str, permanent=True)
+            if not ok:
+                self.fileOpFinished.emit("delete", False, path_str, "")
+                return False
             self._invalidate_scan_caches_for_paths([path_str])
+            try:
+                from native.mediamanagerx_app.action_history import record_user_action
+                record_user_action(
+                    self.conn,
+                    action_type="delete",
+                    summary=f'Permanently deleted "{Path(path_str).name}"',
+                    items=[item],
+                    undo_state="not_undoable",
+                    metadata={"permanent": True},
+                )
+                self.actionHistoryChanged.emit()
+            except Exception as exc:
+                try: self._log(f"Action history permanent delete record failed: {exc}")
+                except Exception: pass
             self.fileOpFinished.emit("delete", True, path_str, "")
             return True
         except Exception:
             self.fileOpFinished.emit("delete", False, path_str, "")
             return False
 
+    @Slot(list, bool, result=bool)
+    def delete_paths(self, paths: list[str], permanent: bool = False) -> bool:
+        clean_paths = self._dedupe_file_op_paths([str(path or "") for path in (paths or []) if str(path or "").strip()])
+        if not clean_paths:
+            self.fileOpFinished.emit("delete", False, "", "")
+            return False
+        try:
+            self.close_native_video()
+            QApplication.processEvents()
+            from native.mediamanagerx_app.action_delete import perform_delete
+            from native.mediamanagerx_app.action_history import record_user_action
+            history_items: list[dict] = []
+            changed_paths: list[str] = []
+            for path_str in clean_paths:
+                try:
+                    ok, item = perform_delete(self.conn, self.settings, path_str, permanent=bool(permanent))
+                except Exception as exc:
+                    ok = False
+                    item = {
+                        "item_type": "file",
+                        "old_path": path_str,
+                        "new_path": "",
+                        "retention_id": "",
+                        "result": "failed",
+                        "current_state": "failed",
+                        "last_change_source": "original_action",
+                        "notes": str(exc) or "Delete failed.",
+                    }
+                history_items.append(item)
+                if ok:
+                    changed_paths.append(path_str)
+            success_count = sum(1 for item in history_items if item.get("result") == "success")
+            if history_items:
+                has_retention = any(str(item.get("retention_id") or "") for item in history_items if item.get("result") == "success")
+                record_user_action(
+                    self.conn,
+                    action_type="delete",
+                    summary=("Permanently deleted " if permanent else "Deleted ") + ("1 item" if success_count == 1 else f"{success_count} items"),
+                    items=history_items,
+                    undo_state=None if has_retention else "not_undoable",
+                    metadata={"permanent": bool(permanent), "grouped": True},
+                )
+                self.actionHistoryChanged.emit()
+            if changed_paths:
+                self._invalidate_scan_caches_for_paths(changed_paths)
+                self.collectionsChanged.emit()
+            self.fileOpFinished.emit("delete", bool(changed_paths), "", "")
+            return bool(changed_paths)
+        except Exception:
+            self.fileOpFinished.emit("delete", False, "", "")
+            return False
+
     @Slot(str, str, result=str)
     def create_folder(self, parent_path: str, name: str) -> str:
         try:
             p = Path(parent_path) / name
+            existed = p.exists()
             p.mkdir(parents=True, exist_ok=True)
+            try:
+                from native.mediamanagerx_app.action_history import make_history_item, record_user_action
+                if not existed:
+                    record_user_action(
+                        self.conn,
+                        action_type="create_folder",
+                        summary=f'Created folder "{p.name}"',
+                        items=[make_history_item(new_path=str(p), item_type="folder")],
+                    )
+                    self.actionHistoryChanged.emit()
+            except Exception as exc:
+                try: self._log(f"Action history create-folder record failed: {exc}")
+                except Exception: pass
             return str(p)
         except Exception: return ""
+
+    @Slot(result=bool)
+    def undo_last_action(self) -> bool:
+        try:
+            from app.mediamanager.db import action_history_repo
+            entry = action_history_repo.latest_undoable_entry(self.conn)
+            if not entry:
+                return False
+            return self._undo_history_entry(int(entry["id"]), group=True)
+        except Exception as exc:
+            try: self._log(f"Undo failed: {exc}")
+            except Exception: pass
+            return False
+
+    @Slot(result=bool)
+    def redo_last_action(self) -> bool:
+        try:
+            from app.mediamanager.db import action_history_repo
+            entry = action_history_repo.latest_redoable_entry(self.conn)
+            if not entry:
+                return False
+            return self._redo_history_entry(int(entry["id"]), group=True)
+        except Exception as exc:
+            try: self._log(f"Redo failed: {exc}")
+            except Exception: pass
+            return False
+
+    @Slot(int, result=bool)
+    def undo_history_item(self, item_id: int) -> bool:
+        return self._undo_history_item(int(item_id), source="individual_undo")
+
+    @Slot(int, result=bool)
+    def redo_history_item(self, item_id: int) -> bool:
+        return self._redo_history_item(int(item_id), source="individual_redo")
+
+    @Slot(result="QVariantMap")
+    def get_action_history_state(self):
+        try:
+            from app.mediamanager.db import action_history_repo
+            return {
+                "can_undo": bool(action_history_repo.latest_undoable_entry(self.conn)),
+                "can_redo": bool(action_history_repo.latest_redoable_entry(self.conn)),
+            }
+        except Exception:
+            return {"can_undo": False, "can_redo": False}
+
+    @Slot(str, str, int, result=list)
+    def list_action_history(self, action_type: str = "all", search: str = "", limit: int = 200):
+        try:
+            from app.mediamanager.db import action_history_repo
+            return action_history_repo.list_entries(self.conn, limit=int(limit or 200), action_type=action_type, search=search)
+        except Exception:
+            return []
+
+    @Slot(int, result=list)
+    def list_action_history_items(self, entry_id: int):
+        try:
+            from app.mediamanager.db import action_history_repo
+            return action_history_repo.list_items(self.conn, int(entry_id))
+        except Exception:
+            return []
+
+    def _record_history_system_event(self, action_type: str, summary: str, items: list[dict], origin: str) -> None:
+        try:
+            from app.mediamanager.db import action_history_repo
+            action_history_repo.create_entry(
+                self.conn,
+                action_type=action_type,
+                summary=summary,
+                items=items,
+                origin=origin,
+                status="success",
+                undo_state="not_undoable",
+            )
+        except Exception:
+            pass
+
+    def _undo_history_entry(self, entry_id: int, *, group: bool) -> bool:
+        from app.mediamanager.db import action_history_repo
+        items = action_history_repo.list_items(self.conn, entry_id)
+        changed = 0
+        for item in items:
+            if str(item.get("current_state") or "") != "applied":
+                continue
+            if self._undo_history_item(int(item["id"]), source="group_undo", emit=False):
+                changed += 1
+        action_history_repo.recompute_entry_undo_state(self.conn, entry_id)
+        if changed:
+            self._after_history_restore()
+            self._record_history_system_event("undo", f"Undid action for {changed} items", [], "undo")
+            self.actionHistoryChanged.emit()
+        return changed > 0
+
+    def _redo_history_entry(self, entry_id: int, *, group: bool) -> bool:
+        from app.mediamanager.db import action_history_repo
+        items = action_history_repo.list_items(self.conn, entry_id)
+        changed = 0
+        for item in items:
+            if str(item.get("current_state") or "") != "undone":
+                continue
+            if str(item.get("last_change_source") or "") != "group_undo":
+                continue
+            if self._redo_history_item(int(item["id"]), source="group_redo", emit=False):
+                changed += 1
+        action_history_repo.recompute_entry_undo_state(self.conn, entry_id)
+        if changed:
+            self._after_history_restore()
+            self._record_history_system_event("redo", f"Redid action for {changed} items", [], "redo")
+            self.actionHistoryChanged.emit()
+        return changed > 0
+
+    def _undo_history_item(self, item_id: int, *, source: str, emit: bool = True) -> bool:
+        from app.mediamanager.db import action_history_repo
+        from native.mediamanagerx_app import action_history
+        found = action_history_repo.get_item_with_entry(self.conn, int(item_id))
+        if not found:
+            return False
+        item, entry = found
+        action_type = str(entry.get("action_type") or "")
+        entry_id = int(entry["id"])
+        if not item or str(item.get("current_state") or "") != "applied":
+            return False
+        old_path = str(item.get("old_path") or "")
+        new_path = str(item.get("new_path") or "")
+        item_type = str(item.get("item_type") or "file")
+        ok = False
+        note = None
+        try:
+            if action_type in {"move", "rename"}:
+                ok = action_history.move_path(new_path, old_path)
+                if ok:
+                    action_history.update_media_path_after_restore(self.conn, new_path, old_path, item_type)
+            elif action_type == "copy":
+                ok = action_history.delete_path_for_undo(new_path)
+            elif action_type == "create_folder":
+                target = Path(new_path)
+                ok = target.exists() and target.is_dir() and not any(target.iterdir())
+                if ok:
+                    target.rmdir()
+                else:
+                    note = "Folder is not empty or no longer exists."
+            elif action_type == "delete":
+                retention_id = str(item.get("retention_id") or "")
+                ok = bool(retention_id) and action_history.restore_retained_path(retention_id)
+                if ok:
+                    from app.mediamanager.db.media_repo import add_media_item
+                    try:
+                        if Path(old_path).is_file() and Path(old_path).suffix.lower() in (IMAGE_EXTS | VIDEO_EXTS):
+                            ext = Path(old_path).suffix.lower()
+                            add_media_item(self.conn, old_path, "image" if ext in IMAGE_EXTS else "video")
+                    except Exception:
+                        pass
+                else:
+                    note = "Undo not available: file no longer exists in MediaLens retention."
+            elif action_type == "metadata":
+                from native.mediamanagerx_app.action_edits import apply_edit_state
+                payload = json.loads(str(item.get("metadata_json") or "{}"))
+                ok = apply_edit_state(self.conn, dict(payload.get("old") or {}))
+            elif action_type == "hidden":
+                payload = json.loads(str(item.get("metadata_json") or "{}"))
+                old_hidden = bool(payload.get("old_hidden"))
+                target = str(payload.get("target") or item_type)
+                if target == "collection":
+                    ok = self.repo.set_collection_hidden(int(payload.get("collection_id") or 0), old_hidden)
+                elif target == "folder" or item_type == "folder":
+                    ok = self.repo.set_folder_hidden(old_path, old_hidden)
+                else:
+                    ok = self.repo.set_media_hidden(old_path, old_hidden)
+            elif action_type == "rotate":
+                payload = json.loads(str(item.get("metadata_json") or "{}"))
+                degrees = int(payload.get("degrees") or 0)
+                if degrees:
+                    self._rotate_media_sync(old_path, -degrees)
+                    ok = True
+        except Exception as exc:
+            ok = False
+            note = str(exc) or "Undo failed."
+        action_history_repo.update_item_state(
+            self.conn,
+            item_id,
+            current_state="undone" if ok else "unavailable",
+            last_change_source=source if ok else str(item.get("last_change_source") or "original_action"),
+            notes=note,
+        )
+        action_history_repo.recompute_entry_undo_state(self.conn, entry_id)
+        if ok and emit:
+            self._after_history_restore()
+            self.actionHistoryChanged.emit()
+        return ok
+
+    def _redo_history_item(self, item_id: int, *, source: str, emit: bool = True) -> bool:
+        from app.mediamanager.db import action_history_repo
+        from native.mediamanagerx_app import action_history
+        found = action_history_repo.get_item_with_entry(self.conn, int(item_id))
+        if not found:
+            return False
+        item, entry = found
+        action_type = str(entry.get("action_type") or "")
+        entry_id = int(entry["id"])
+        if not item or str(item.get("current_state") or "") != "undone":
+            return False
+        old_path = str(item.get("old_path") or "")
+        new_path = str(item.get("new_path") or "")
+        item_type = str(item.get("item_type") or "file")
+        ok = False
+        retention_id = None
+        note = None
+        try:
+            if action_type in {"move", "rename"}:
+                ok = action_history.move_path(old_path, new_path)
+                if ok:
+                    action_history.update_media_path_after_restore(self.conn, old_path, new_path, item_type)
+            elif action_type == "copy":
+                if item_type == "folder":
+                    shutil.copytree(old_path, new_path)
+                else:
+                    shutil.copy2(old_path, new_path)
+                ok = True
+            elif action_type == "create_folder":
+                Path(new_path).mkdir(parents=True, exist_ok=False)
+                ok = True
+            elif action_type == "delete":
+                days = int(self.settings.value("gallery/medialens_retention_days", 30, type=int))
+                retention_id = action_history.retain_path(old_path, days)
+                ok = bool(retention_id)
+                if not ok:
+                    note = "Redo delete failed because the path no longer exists."
+            elif action_type == "metadata":
+                from native.mediamanagerx_app.action_edits import apply_edit_state
+                payload = json.loads(str(item.get("metadata_json") or "{}"))
+                ok = apply_edit_state(self.conn, dict(payload.get("new") or {}))
+            elif action_type == "hidden":
+                payload = json.loads(str(item.get("metadata_json") or "{}"))
+                new_hidden = bool(payload.get("new_hidden"))
+                target = str(payload.get("target") or item_type)
+                if target == "collection":
+                    ok = self.repo.set_collection_hidden(int(payload.get("collection_id") or 0), new_hidden)
+                elif target == "folder" or item_type == "folder":
+                    ok = self.repo.set_folder_hidden(old_path, new_hidden)
+                else:
+                    ok = self.repo.set_media_hidden(old_path, new_hidden)
+            elif action_type == "rotate":
+                payload = json.loads(str(item.get("metadata_json") or "{}"))
+                degrees = int(payload.get("degrees") or 0)
+                if degrees:
+                    self._rotate_media_sync(old_path, degrees)
+                    ok = True
+        except Exception as exc:
+            ok = False
+            note = str(exc) or "Redo failed."
+        action_history_repo.update_item_state(
+            self.conn,
+            item_id,
+            current_state="applied" if ok else "unavailable",
+            last_change_source=source if ok else str(item.get("last_change_source") or "group_undo"),
+            retention_id=retention_id,
+            notes=note,
+        )
+        action_history_repo.recompute_entry_undo_state(self.conn, entry_id)
+        if ok and emit:
+            self._after_history_restore()
+            self.actionHistoryChanged.emit()
+        return ok
+
+    def _after_history_restore(self) -> None:
+        try:
+            self._invalidate_scan_caches()
+        except Exception:
+            pass
+        try:
+            self.collectionsChanged.emit()
+        except Exception:
+            pass
+        try:
+            self.galleryScopeChanged.emit()
+        except Exception:
+            pass
+        try:
+            self.galleryFilterSensitiveMetadataChanged.emit()
+        except Exception:
+            pass
 
     @Slot(str)
     def paste_into_folder_async(self, target_folder: str) -> None:

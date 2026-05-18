@@ -25,6 +25,41 @@ class BridgeTagsMetadataMixin:
         add_media_item(self.conn, clean, media_type)
         return get_media_by_path(self.conn, clean)
 
+    def capture_edit_snapshots(self, paths: list[str]) -> dict[str, dict]:
+        from native.mediamanagerx_app.action_edits import snapshot_edit_state
+
+        snapshots: dict[str, dict] = {}
+        for path in [str(p or "").strip() for p in (paths or []) if str(p or "").strip()]:
+            try:
+                snapshots[path] = snapshot_edit_state(self.conn, path)
+            except Exception:
+                pass
+        return snapshots
+
+    def record_metadata_edit_history(self, before: dict[str, dict], *, summary: str = "") -> None:
+        from native.mediamanagerx_app.action_edits import changed_field_labels, history_item_for_edit, snapshot_edit_state, snapshots_equal
+        from native.mediamanagerx_app.action_history import record_user_action
+
+        items: list[dict] = []
+        for path, old_snapshot in (before or {}).items():
+            try:
+                new_snapshot = snapshot_edit_state(self.conn, path)
+                if snapshots_equal(old_snapshot, new_snapshot):
+                    continue
+                labels = changed_field_labels(old_snapshot, new_snapshot)
+                items.append(history_item_for_edit(path, old_snapshot, new_snapshot, labels))
+            except Exception:
+                continue
+        if not items:
+            return
+        record_user_action(
+            self.conn,
+            action_type="metadata",
+            summary=summary or ("Edited metadata for 1 item" if len(items) == 1 else f"Edited metadata for {len(items)} items"),
+            items=items,
+        )
+        self.actionHistoryChanged.emit()
+
     @Slot(str, "QVariantMap")
     def update_media_ai_metadata(self, path: str, payload: dict) -> None:
         from app.mediamanager.db.ai_metadata_repo import upsert_media_ai_selected_fields
