@@ -82,7 +82,7 @@ Each group is labeled with meaningful differences:
 
 Always transparent. Always reversible.
 
-![Similar Groups](docs/Screenshot-Similar-Groups-Puppy.png)
+![Similar Groups](docs/Screenshots/Screenshot-Similar-Groups-Puppy.png)
 
 ---
 
@@ -97,7 +97,7 @@ Evaluate two images without leaving your workflow.
 
 Compare → decide → clean up.
 
-![Comparison](docs/Screenshot-Comparison-Zoom.png)
+![Comparison](docs/Screenshots/Screenshot-Comparison-Zoom.png)
 
 ---
 
@@ -111,14 +111,14 @@ Tags, descriptions, and OCR, all in one place.
 - Common vs uncommon tag detection
 - Tag lists with one-click apply
 
-![Bulk Tag Editor](docs/Screenshot-Bulk-Tag-Editor.png)
+![Bulk Tag Editor](docs/Screenshots/Screenshot-Bulk-Tag-Editor.png)
 
 #### Descriptions
 
 - Edit or generate captions in bulk
 - AI-assisted descriptions (local models)
 
-![Bulk Description Editor](docs/Screenshot-Bulk-Description-Editor.png)
+![Bulk Description Editor](docs/Screenshots/Screenshot-Bulk-Description-Editor.png)
 
 #### Text OCR (Fast + AI)
 
@@ -129,7 +129,7 @@ Tags, descriptions, and OCR, all in one place.
 - Mark files as “No Text”
 - Save and edit results directly
 
-![Bulk OCR Editor](docs/Screenshot-Bulk-OCR-Editor.png)
+![Bulk OCR Editor](docs/Screenshots/Screenshot-Bulk-OCR-Editor.png)
 
 ---
 
@@ -140,7 +140,7 @@ Tags, descriptions, and OCR, all in one place.
 - Confirm best result per file
 - Navigate quickly across files
 
-![OCR Review](docs/Screenshot-OCR-Review-Zoom.png)
+![OCR Review](docs/Screenshots/Screenshot-OCR-Review-Zoom.png)
 
 ---
 
@@ -159,7 +159,7 @@ MediaLens includes optional **local AI models** to help organize your media with
 - Run locally (GPU or CPU)
 - Never overwrite your data without permission
 
-![AI Descriptions Settings](docs/Screenshot-Settings-AI-Descriptions.png)
+![AI Descriptions Settings](docs/Screenshots/Screenshot-Settings-AI-Descriptions.png)
 
 ---
 
@@ -172,7 +172,7 @@ Find exactly what you're looking for without memorizing syntax.
 - Save searches
 - Sync between UI and raw search
 
-![Guided Search](docs/Screenshot-Guided-Search-File-Date-Panda.png)
+![Guided Search](docs/Screenshots/Screenshot-Guided-Search-File-Date-Panda.png)
 
 ---
 
@@ -188,9 +188,9 @@ Go beyond filenames.
 - Persistent tagging via file hashing
 - Works even if files move or rename
 
-![AI Detection](docs/Screenshot-AI-Detection-Google.png)
+![AI Detection](docs/Screenshots/Screenshot-AI-Detection-Google.png)
 
-![AI Metadata](docs/Screenshot-Settings-Metadata-AI.png)
+![AI Metadata](docs/Screenshots/Screenshot-Settings-Metadata-AI.png)
 
 ---
 
@@ -202,7 +202,7 @@ Explore your media by **when**, not just where.
 - Smooth timeline scrubbing
 - Jump instantly across large libraries
 
-![Timeline](docs/Screenshot-Timeline-Grid.png)
+![Timeline](docs/Screenshots/Screenshot-Timeline-Grid.png)
 
 ---
 
@@ -215,7 +215,7 @@ Keep your library up to date automatically.
 - Background processing
 - Resume interrupted scans
 
-![Scanners](docs/Screenshot-Settings-Scanners-Expanded.png)
+![Scanners](docs/Screenshots/Screenshot-Settings-Scanners-Expanded.png)
 
 ---
 
@@ -233,7 +233,7 @@ Your library is safe and portable.
 
 Includes automatic safety backups before restore.
 
-![Gallery](docs/Screenshot-Export-Library-Backup.png)
+![Gallery](docs/Screenshots/Screenshot-Export-Library-Backup.png)
 
 ---
 
