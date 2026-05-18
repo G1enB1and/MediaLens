@@ -1,6 +1,39 @@
 # Change Log
 
-## v1.2.10 (Current)
+## v1.2.11 (Current)
+
+### Summary
+
+This release introduces persistent Action History with undo and redo across sessions, making large cleanup and metadata workflows safer, easier to review, and easier to recover from. MediaLens now tracks whether previous actions remain reversible, adds clearer history states, and improves workflow organization across editing and review tools.
+
+### Highlights
+
+- Review recent deletes, moves, copies, renames, metadata edits, hidden-status changes, and rotations in one Action History window.
+- Undo and redo supported actions from keyboard shortcuts or Action History while MediaLens checks stale recovery paths only when needed.
+- Use a cleaner Edit and View menu layout with themed history, backup, and local AI status windows.
+
+### Added
+
+- Added Action History with grouped rows, item-level details, search, filters, and undo/redo controls.
+- Added undo and redo support for deletes, moves, copies, renames, folder creation, metadata edits, hidden status changes, and rotations.
+- Added persistent history validation so recent undo and redo actions remain available across sessions as long as their files or retained copies are still recoverable.
+- Added selective item undo and redo for grouped history actions.
+- Added Bulk Description Editor to the Edit menu.
+
+### Changed
+
+- Changed redo shortcuts to support both Ctrl+Y and Ctrl+Shift+Z.
+- Changed Action History validation so broad checks run when the history window opens, while keyboard shortcuts validate only the next undo or redo candidate.
+- Changed partial group undo and redo history messages to report how many items were handled and skipped.
+- Changed Action History item states to show clearer labels for active, undone, unavailable, and externally changed items.
+- Changed Action History, Library Backup options, and related dialog styling to support light theme, dark theme, native title bars, and accent-aware controls.
+- Changed the Edit menu so Action History sits directly below Redo, bulk editors are grouped there, and Local AI Models and Status is labeled as an edit action.
+- Changed the View menu so Masonry appears first and duplicate/similar views are separated into their own group.
+- Changed the Library Backup export note to use shorter wording without legacy app details.
+
+---
+
+## v1.2.10
 
 ### Summary
 
