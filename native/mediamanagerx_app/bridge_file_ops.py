@@ -1044,26 +1044,48 @@ class BridgeFileOpsMixin:
     def undo_last_action(self) -> bool:
         try:
             from app.mediamanager.db import action_history_repo
-            entry = action_history_repo.latest_undoable_entry(self.conn)
-            if not entry:
+            for _attempt in range(3):
+                entry = action_history_repo.latest_undoable_entry(self.conn)
+                if not entry:
+                    self._set_action_history_message("Nothing available to undo.")
+                    return False
+                if self._validate_action_history_entry(int(entry["id"])):
+                    continue
+                if self._undo_history_entry(int(entry["id"]), group=True):
+                    self._set_action_history_message("")
+                    return True
+                self._set_action_history_message(self._history_entry_unavailable_message(int(entry["id"]), "Undo"))
                 return False
-            return self._undo_history_entry(int(entry["id"]), group=True)
+            self._set_action_history_message("Undo not available: recent history changed during validation.")
+            return False
         except Exception as exc:
             try: self._log(f"Undo failed: {exc}")
             except Exception: pass
+            self._set_action_history_message(f"Undo failed: {exc}")
             return False
 
     @Slot(result=bool)
     def redo_last_action(self) -> bool:
         try:
             from app.mediamanager.db import action_history_repo
-            entry = action_history_repo.latest_redoable_entry(self.conn)
-            if not entry:
+            for _attempt in range(3):
+                entry = action_history_repo.latest_redoable_entry(self.conn)
+                if not entry:
+                    self._set_action_history_message("Nothing available to redo.")
+                    return False
+                if self._validate_action_history_entry(int(entry["id"])):
+                    continue
+                if self._redo_history_entry(int(entry["id"]), group=True):
+                    self._set_action_history_message("")
+                    return True
+                self._set_action_history_message(self._history_entry_unavailable_message(int(entry["id"]), "Redo"))
                 return False
-            return self._redo_history_entry(int(entry["id"]), group=True)
+            self._set_action_history_message("Redo not available: recent history changed during validation.")
+            return False
         except Exception as exc:
             try: self._log(f"Redo failed: {exc}")
             except Exception: pass
+            self._set_action_history_message(f"Redo failed: {exc}")
             return False
 
     @Slot(int, result=bool)
@@ -1105,43 +1127,11 @@ class BridgeFileOpsMixin:
     def validate_action_history(self, limit: int = 100) -> int:
         try:
             from app.mediamanager.db import action_history_repo
-            from app.mediamanager.db.media_repo import get_media_by_path
-            from native.mediamanagerx_app import action_history
 
             entries = action_history_repo.list_validation_candidate_entries(self.conn, limit=max(1, int(limit or 100)))
             changed = 0
-
-            def media_exists(path: str) -> bool:
-                return bool(get_media_by_path(self.conn, str(path or "")))
-
             for entry in entries:
-                entry_changed = False
-                for item in action_history_repo.list_items(self.conn, int(entry.get("id") or 0)):
-                    current_state, source, note = action_history.validate_history_item_availability(
-                        entry,
-                        item,
-                        media_exists_fn=media_exists,
-                    )
-                    if not current_state:
-                        continue
-                    next_source = source or str(item.get("last_change_source") or "original_action")
-                    if (
-                        current_state == str(item.get("current_state") or "")
-                        and next_source == str(item.get("last_change_source") or "")
-                        and (note or "") == str(item.get("notes") or "")
-                    ):
-                        continue
-                    action_history_repo.update_item_state(
-                        self.conn,
-                        int(item.get("id") or 0),
-                        current_state=current_state,
-                        last_change_source=next_source,
-                        notes=note,
-                    )
-                    changed += 1
-                    entry_changed = True
-                if entry_changed:
-                    action_history_repo.recompute_entry_undo_state(self.conn, int(entry.get("id") or 0))
+                changed += self._validate_action_history_entry(int(entry.get("id") or 0), emit=False)
             if changed:
                 self.actionHistoryChanged.emit()
             return changed
@@ -1149,6 +1139,70 @@ class BridgeFileOpsMixin:
             try: self._log(f"Action history validation failed: {exc}")
             except Exception: pass
             return 0
+
+    def _set_action_history_message(self, message: str) -> None:
+        self._last_action_history_message = str(message or "")
+        if message:
+            try: self._log(str(message))
+            except Exception: pass
+
+    def _validate_action_history_entry(self, entry_id: int, *, emit: bool = True) -> int:
+        from app.mediamanager.db import action_history_repo
+        from app.mediamanager.db.media_repo import get_media_by_path
+        from native.mediamanagerx_app import action_history
+
+        entry = action_history_repo.get_entry(self.conn, int(entry_id))
+        if not entry:
+            return 0
+        changed = 0
+
+        def media_exists(path: str) -> bool:
+            return bool(get_media_by_path(self.conn, str(path or "")))
+
+        for item in action_history_repo.list_items(self.conn, int(entry_id)):
+            current_state, source, note = action_history.validate_history_item_availability(
+                entry,
+                item,
+                media_exists_fn=media_exists,
+            )
+            if not current_state:
+                continue
+            next_source = source or str(item.get("last_change_source") or "original_action")
+            if (
+                current_state == str(item.get("current_state") or "")
+                and next_source == str(item.get("last_change_source") or "")
+                and (note or "") == str(item.get("notes") or "")
+            ):
+                continue
+            action_history_repo.update_item_state(
+                self.conn,
+                int(item.get("id") or 0),
+                current_state=current_state,
+                last_change_source=next_source,
+                notes=note,
+            )
+            changed += 1
+        if changed:
+            action_history_repo.recompute_entry_undo_state(self.conn, int(entry_id))
+            if emit:
+                self.actionHistoryChanged.emit()
+        return changed
+
+    def _history_entry_unavailable_message(self, entry_id: int, verb: str) -> str:
+        try:
+            from app.mediamanager.db import action_history_repo
+
+            items = action_history_repo.list_items(self.conn, int(entry_id))
+            notes = [
+                str(item.get("notes") or "").strip()
+                for item in items
+                if str(item.get("current_state") or "") == "unavailable" and str(item.get("notes") or "").strip()
+            ]
+            if notes:
+                return f"{verb} not available: {notes[0]}"
+        except Exception:
+            pass
+        return f"{verb} not available for the next action."
 
     def _record_history_system_event(self, action_type: str, summary: str, items: list[dict], origin: str) -> None:
         try:
@@ -1168,6 +1222,7 @@ class BridgeFileOpsMixin:
     def _undo_history_entry(self, entry_id: int, *, group: bool) -> bool:
         from app.mediamanager.db import action_history_repo
         items = action_history_repo.list_items(self.conn, entry_id)
+        successful = [item for item in items if str(item.get("result") or "") == "success"]
         changed = 0
         for item in items:
             if str(item.get("current_state") or "") != "applied":
@@ -1177,13 +1232,19 @@ class BridgeFileOpsMixin:
         action_history_repo.recompute_entry_undo_state(self.conn, entry_id)
         if changed:
             self._after_history_restore()
-            self._record_history_system_event("undo", f"Undid action for {changed} items", [], "undo")
+            self._record_history_system_event(
+                "undo",
+                self._history_group_result_summary("Undid action", changed, len(successful)),
+                [],
+                "undo",
+            )
             self.actionHistoryChanged.emit()
         return changed > 0
 
     def _redo_history_entry(self, entry_id: int, *, group: bool) -> bool:
         from app.mediamanager.db import action_history_repo
         items = action_history_repo.list_items(self.conn, entry_id)
+        successful = [item for item in items if str(item.get("result") or "") == "success"]
         changed = 0
         for item in items:
             if str(item.get("current_state") or "") != "undone":
@@ -1195,9 +1256,26 @@ class BridgeFileOpsMixin:
         action_history_repo.recompute_entry_undo_state(self.conn, entry_id)
         if changed:
             self._after_history_restore()
-            self._record_history_system_event("redo", f"Redid action for {changed} items", [], "redo")
+            self._record_history_system_event(
+                "redo",
+                self._history_group_result_summary("Redid action", changed, len(successful)),
+                [],
+                "redo",
+            )
             self.actionHistoryChanged.emit()
         return changed > 0
+
+    @staticmethod
+    def _history_group_result_summary(verb: str, changed: int, total: int) -> str:
+        changed = int(changed or 0)
+        total = int(total or 0)
+        changed_label = "item" if changed == 1 else "items"
+        if total > 0 and changed != total:
+            skipped = max(0, total - changed)
+            skipped_label = "item" if skipped == 1 else "items"
+            total_label = "item" if total == 1 else "items"
+            return f"{verb} for {changed} of {total} {total_label}; {skipped} {skipped_label} skipped"
+        return f"{verb} for {changed} {changed_label}"
 
     def _undo_history_item(self, item_id: int, *, source: str, emit: bool = True) -> bool:
         from app.mediamanager.db import action_history_repo

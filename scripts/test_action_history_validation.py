@@ -3,6 +3,7 @@ import sqlite3
 from app.mediamanager.db import action_history_repo
 from app.mediamanager.db.migrations import _ensure_action_history_tables
 from native.mediamanagerx_app.action_history import make_history_item, validate_history_item_availability
+from native.mediamanagerx_app.bridge_file_ops import BridgeFileOpsMixin
 
 
 def _conn():
@@ -67,3 +68,26 @@ def test_copy_validation_marks_missing_copy_as_externally_undone():
     assert state == "undone"
     assert source == "external_change"
     assert "already undone" in note
+
+
+def test_redo_move_validation_blocks_occupied_destination():
+    entry = {"action_type": "move"}
+    item = make_history_item(old_path="C:/safe/source.jpg", new_path="C:/safe/dest/source.jpg")
+    item["current_state"] = "undone"
+    item["last_change_source"] = "group_undo"
+
+    state, source, note = validate_history_item_availability(
+        entry,
+        item,
+        path_exists_fn=lambda _path: True,
+    )
+
+    assert state == "unavailable"
+    assert source is None
+    assert "destination path is already occupied" in note
+
+
+def test_group_result_summary_reports_skipped_items():
+    summary = BridgeFileOpsMixin._history_group_result_summary("Undid action", 8, 10)
+
+    assert summary == "Undid action for 8 of 10 items; 2 items skipped"
