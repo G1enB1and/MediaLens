@@ -1,203 +1,165 @@
 ﻿# MediaLens
 
-![Gallery](docs/Screenshots/MediaLens-Logo-1024.png)
+![MediaLens Logo](docs/Screenshots/MediaLens-Logo-1024.png)
 
-**MediaLens helps you clean up duplicate and similar images with confidence, by showing exactly how files differ and which one to keep, then becomes the best way to explore and organize your media every day.**
+**MediaLens helps you clean up duplicate and similar images with confidence, then becomes the fastest way to explore, understand, and organize your entire media library.**
 
-If you’ve ever tried to clean up duplicates and:
+If you’ve ever:
 
 - Didn’t know which version to keep
 - Ended up with multiple slightly different edits
-- Struggled to find anything in a growing media library
+- Struggled to find anything later
 
-MediaLens is built for that entire experience, not just the cleanup.
-
-Instead of just showing duplicates, MediaLens breaks down how files differ: size, resolution, edits, format, and more, then helps you make the right decision with confidence.
-
-Built to be safe and transparent. MediaLens never deletes files blindly and always shows exactly why one file is preferred over another.
+MediaLens is built for that entire experience, not just detection, but decision and long-term organization.
 
 ---
 
-### Why not just use a duplicate cleaner?
+## Why MediaLens?
 
-Most tools show you duplicates.
+Most tools show duplicates.
 
-MediaLens shows you what actually changed and helps you choose the best version without guessing.
+**MediaLens shows what actually changed and helps you decide.**
 
-And once cleanup is done…
+- See differences like resolution, edits, format, text, and more
+- Get clear “best version” recommendations based on your rules
+- Review safely before anything is removed
 
-- It becomes the fastest way to browse, search, tag, and understand your entire media library.
+No guesswork. No blind deletes.
 
 ---
 
-## More than just duplicate cleanup
+## What it becomes after cleanup
 
-Once your library is under control, MediaLens becomes a powerful daily tool:
+Once your library is clean, MediaLens becomes your daily workspace:
 
-- Instantly find files using advanced search, filters, and tags
-- Organize beyond folders using collections and smart grouping
-- Bulk edit and apply tags across hundreds of files in seconds
-- Extract and edit AI prompts, EXIF data, and embedded metadata
-- Navigate massive libraries smoothly without losing context
+- Fast search, filtering, and tagging
+- Collections beyond folders
+- Bulk editing across hundreds of files
+- Timeline browsing by when things happened
+- Deep metadata + AI understanding
 
 ---
 
 ## Built For
 
-MediaLens is built for anyone dealing with duplicate-heavy or complex image libraries, especially where variations, edits, or AI-generated images make it hard to know what to keep.
-
-- AI image/video generators
-- Photographers with large photo archives
+- AI image/video creators
+- Photographers with large archives
 - Video editors and content creators
-- Researchers building datasets or tagging systems
-- Power users who want control over their files
-
----
-
-## What Makes MediaLens Different?
-
-- Unlike traditional duplicate cleaners, MediaLens doesn’t just detect duplicates, it explains their differences and helps you make the right decision.
-- Transparent explanations for why files are similar and which to keep
-- Define rules for automatic cleanup based on what matters most to you.
-- Instead of guessing, you see exactly what changed: resolution, edits, format, text, color, and more, so you can make the right call instantly.
-- Go beyond surface-level metadata to find embedded AI prompts and even full generation workflows hidden inside your files
-- Collections go beyond traditional folders, letting you organize files based on metadata instead of location.
-
----
-
-### What cleanup feels like
-
-1. Scan your library
-2. See duplicates grouped instantly
-3. Intelligent recommendations are preselected based on your rules
-4. Review suggestions and make changes if needed
-5. Open comparison and inspect differences
-6. Clean up safely with auto resolve all or per group and move on
-
-No guesswork. No accidental deletes. No digging through folders.
-
----
-
-## Why people keep MediaLens open
-
-MediaLens isn’t just a cleanup tool, it becomes your daily media workspace.
-
-- A masonry-style gallery that feels like a living collage, not a file list
-- Smooth playback of videos and GIFs directly in the gallery
-- High-contrast previews for PNG and SVG so transparent assets are always visible
-- Fast, flexible filtering and search that actually helps you find things
-- Tagging and bulk editing workflows designed for real use.
-
-It’s built to make your media library feel usable, explorable, and under control.
+- Dataset builders and researchers
+- Anyone with messy, duplicate-heavy libraries
 
 ---
 
 ## Key Features
 
-### Intelligent Duplicate & Similarity Detection
+### Intelligent Duplicate & Similarity Cleanup
 
-MediaLens doesn’t just find identical files, it understands variations.
+MediaLens doesn’t just detect duplicates, it understands variations.
 
 #### Detect
 
 - Exact duplicates (content hash)
 - Visually similar images (perceptual hashing)
-- Resized, compressed, and edited variants
-- Color vs grayscale versions
-- Cropped vs full compositions
-- Text or watermark added/removed
+- Edited, resized, compressed variants
+- Crops, grayscale, watermark/text changes
 
 #### Understand
 
-Each group is analyzed and labeled with meaningful differences:
+Each group is labeled with meaningful differences:
 
-- Largest / smallest file size
-- Highest resolution
-- Preferred file format
-- Color vs grayscale
-- Cropped vs full composition
+- Resolution, size, format
+- Cropped vs full
+- Text detected
 - Metadata richness
-- Folder organization
-- Text detection
+- Folder priority
 
-#### Decide (or let MediaLens decide for you)
+### Decide
 
-- ★ Best overall recommendation based on configurable priorities
-- Labels explaining differences like cropped, newest edit, highest resolution, etc.
-- Keep or delete selections per file preset based on your rules
-- Non-destructive metadata merging
-- Auto-resolve with flexible rules
+- ★ Best overall recommendation
+- Configurable rules for what “best” means
+- Auto-resolve entire libraries safely
+- Metadata merge before deletion
 
-#### Stay in control
+Always transparent. Always reversible.
 
-- Configure ranking priorities (what “best” means to you)
-- Define variant rules (prefer this / prefer that / keep both)
-- Safely review before deleting
-- Never deletes files blindly. Decisions are always explainable and reviewable
-- Designed to prevent destructive mistakes in large libraries
-
-![Gallery](docs/Screenshots/Screenshot-Similar-File-Settings-Top.png)
-
-![Gallery](docs/Screenshots/Screenshot-Similar-File-Settings-Bottom.png)
+![Similar Groups](docs/Screenshot-Similar-Groups-Puppy.png)
 
 ---
 
 ### Image Comparison
 
-Evaluate two images in place without leaving your workflow.
+Evaluate two images without leaving your workflow.
 
-- Side-by-side slots with a central **reveal slider** for precise visual comparison
-- Drag-and-drop, browse, or right-click actions like `Compare Images` and `Compare With Left/Right`
-- Synchronized zoom and pan keep both images perfectly aligned during inspection
-- Hold-to-isolate preview lets you instantly focus on one image at a time
-- Reuses similarity card design for a consistent, familiar experience
+- Side-by-side with reveal slider
+- Synchronized zoom and pan
+- “Best in comparison” suggestions
+- Integrated keep/delete actions
 
-![Gallery](docs/Screenshots/Screenshot-Image-Comparison-New.png)
+Compare → decide → clean up.
 
-#### Smarter decisions, not just visual checks
-
-- Labels are recalculated for the current two-image comparison (not reused from larger groups)
-- Highlights meaningful differences like:
-  - Largest vs smallest file
-  - Newer vs older edit
-  - Color vs grayscale
-  - Cropped vs full composition
-- ★ Best overall recommendation adapts to the current comparison context
-
-#### Built into your cleanup workflow
-
-- Keep, Mark as Best, and Delete actions work seamlessly with existing duplicate resolution
-- Compare → decide → clean up without switching tools or losing context
+![Comparison](docs/Screenshot-Comparison-Zoom.png)
 
 ---
 
-### Tagging & Bulk Editing
+### Bulk Editing Workspace
 
-MediaLens makes tagging fast, visual, and scalable.
+Tags, descriptions, and OCR, all in one place.
 
-#### Tag List Workspace
+#### Tags
 
-- Dedicated panel for managing and organizing tags
-- Saved tag lists with drag-and-drop sorting
-- One-click tag filtering directly from the list
-- Tag usage counts with instant gallery filtering
+- Bulk edit across hundreds of files
+- Common vs uncommon tag detection
+- Tag lists with one-click apply
 
-#### Bulk Tag Editor
+![Bulk Tag Editor](docs/Screenshot-Bulk-Tag-Editor.png)
 
-- Edit tags across multiple files at once
-- See **common vs uncommon tags** across selections
-- Select entire gallery scope instantly
-- Apply tags in seconds instead of minutes
+#### Descriptions
 
-#### Designed for real workflows
+- Edit or generate captions in bulk
+- AI-assisted descriptions (local models)
 
-- Add tags directly from the Tag List with one click
-- Automatically saves changes for faster iteration
-- Move between tag scopes without losing context
+![Bulk Description Editor](docs/Screenshot-Bulk-Description-Editor.png)
 
-This turns tagging from a chore into a fast, interactive workflow.
+#### Text OCR (Fast + AI)
 
-![Gallery](docs/Screenshots/Screenshot-Bulk-Tag-Editor.png)
+- Extract text from images and video previews
+- Choose:
+  - Fast OCR (quick)
+  - AI OCR (higher accuracy)
+- Mark files as “No Text”
+- Save and edit results directly
+
+![Bulk OCR Editor](docs/Screenshot-Bulk-OCR-Editor.png)
+
+---
+
+#### OCR Review
+
+- Large preview with zoom + pan
+- Compare Fast OCR vs AI OCR vs your edits
+- Confirm best result per file
+- Navigate quickly across files
+
+![OCR Review](docs/Screenshot-OCR-Review-Zoom.png)
+
+---
+
+### Built-in AI (Local & Private)
+
+MediaLens includes optional **local AI models** to help organize your media without sending your files to the cloud.
+
+- Generate tags automatically
+- Generate descriptions
+- High-accuracy OCR
+- Works with AI-generated images
+
+#### Designed for control
+
+- Models install on demand
+- Run locally (GPU or CPU)
+- Never overwrite your data without permission
+
+![AI Descriptions Settings](docs/Screenshot-Settings-AI-Descriptions.png)
 
 ---
 
@@ -205,144 +167,123 @@ This turns tagging from a chore into a fast, interactive workflow.
 
 Find exactly what you're looking for without memorizing syntax.
 
-- Guided search builder with visual query controls
-- Combine filters like date ranges, metadata, tags, and text
-- Save searches for reuse
-- Sync between visual builder and raw search input
+- Visual query builder
+- Combine tags, metadata, text, dates
+- Save searches
+- Sync between UI and raw search
 
-Search becomes something you can _build_, not just type.
-
-![Gallery](docs/Screenshots/Screenshot-Advanced-Search.png)
+![Guided Search](docs/Screenshot-Guided-Search-File-Date-Panda.png)
 
 ---
 
-### Advanced Metadata System
+### Metadata System
 
-Go beyond filenames, and even beyond traditional metadata.
+Go beyond filenames.
 
-#### Extract
+- Extract:
+  - AI prompts & workflows
+  - EXIF / camera data
+  - Embedded metadata
+- Edit metadata in bulk
+- Persistent tagging via file hashing
+- Works even if files move or rename
 
-- AI prompts & generation parameters
-- EXIF & camera data
-- Embedded comments and tags
+![AI Detection](docs/Screenshot-AI-Detection-Google.png)
 
-#### Choose your workflow
-
-- Fast local database
-- Embedded metadata in files
-- Edit metadata in bulk across files or folders
-- Persistent tagging via file hashing (even after moving/renaming files)
-
-![Gallery](docs/Screenshots/Screenshot-Metadata-AI-Detection.png)  
+![AI Metadata](docs/Screenshot-Settings-Metadata-AI.png)
 
 ---
 
-### Timeline-Based Browsing
+### Timeline Browsing
 
-Explore your media by **when it was created, modified, acquired, taken, or automatically determined**.
+Explore your media by **when**, not just where.
 
-- Group by **day, month, or year**
-- Smooth timeline scrubbing with live feedback
-- Active / visible context highlighting
-- Infinite scrolling for continuous browsing
-- Jump through large libraries instantly
+- Group by day, month, year
+- Smooth timeline scrubbing
+- Jump instantly across large libraries
 
-This transforms browsing from "where is it?" to **"when did I make it?"**
+![Timeline](docs/Screenshot-Timeline-Grid.png)
 
-![Gallery](docs/Screenshots/Screenshot-Group-By-Date-SVG-Previews.png)  
+---
+
+### Automated Scanning
+
+Keep your library up to date automatically.
+
+- Scheduled scans (hourly, daily, weekly, or monthly)
+- Folder-based monitoring
+- Background processing
+- Resume interrupted scans
+
+![Scanners](docs/Screenshot-Settings-Scanners-Expanded.png)
+
+---
+
+### Backup & Restore
+
+Your library is safe and portable.
+
+- Export full library backups
+- Restore fully or partially
+- Merge or replace:
+  - Metadata
+  - Thumbnails
+  - AI models
+  - App data
+
+Includes automatic safety backups before restore.
+
+![Gallery](docs/Screenshot-Export-Library-Backup.png)
 
 ---
 
 ### High-Performance Gallery
 
-- Smooth browsing for images, GIFs, and videos
+- Smooth browsing of images, GIFs, and videos
+- Masonry, grid, and list views
 - Infinite scroll where it matters
-- Lightbox for focused, full-size viewing
+- Lightbox with zoom + pan
 
-#### Multiple view modes
-
-- Masonry
-- Grid (various sizes)
-- List / Details / Content views
+Built for thousands of files without slowing down.
 
 ---
 
 ### Smart Organization
 
-- Search, filter, and sort your entire library
-- Collections for flexible grouping (independent of folders)
-- Drag-and-drop between folders directly in the gallery, file tree, or explorer
-- Clean, responsive UI designed for real work sessions
-
----
-
-### Built for Large Libraries
-
-- Lazy loading and optimized scanning
-- Hybrid pagination + infinite scroll strategy
-- Timeline-aware navigation at scale
-- Designed to handle **thousands of files without breaking flow**
-
----
-
-### Clean, Stable UI
-
-- Dark and light themes with accent color of your choice
-- Responsive layout that adapts to screen size
-- Optimized rendering for multiple animated GIFs and videos in a collage-style masonry view with no stutter, lag, or flicker
-- Carefully tuned interactions for smooth, predictable behavior
-
----
-
-### Masonry View
-
-Masonry view gallery feels like a multi-media collage, able to play multiple animated gifs and videos in place with no wasted space or lag.
-
-![Gallery](docs/Screenshots/Screenshot-Masonry-Text-Detected.png)
-
----
-
-### What makes the viewer different
-
-MediaLens isn’t just fast — it’s designed for how people actually browse media.
-
-- No wasted space — masonry layout adapts to every image
-- Multiple videos and GIFs play smoothly at the same time
-- Transparent PNG and SVG files are always visible (no more black-on-dark issues)
-- Drag and drop previews show exactly what you’re moving without covering your target
-- Works seamlessly across Explorer, creative tools, and your workflow
+- Collections independent of folders
+- Drag-and-drop between folders
+- Flexible filtering and sorting
+- Clean, responsive UI
 
 ---
 
 ## Getting Started
 
-### Recommended (Windows)
+### Windows Installer
 
-Download the latest installer:
+Download the latest release:
 
-<https://github.com/G1enB1and/MediaLens/releases>
+[https://github.com/G1enB1and/MediaLens/releases](https://github.com/G1enB1and/MediaLens/releases)
 
-- One-click setup
+- One-click install
 - All dependencies included
-- Desktop shortcut created automatically
+- Ready to go
 
 ---
 
-## Power Users (Run from Source)
+## Run from Source
 
-```powershell
-
-git clone https://github.com/G1enB1and/MediaLens.git
-
+git clone [https://github.com/G1enB1and/MediaLens.git](https://github.com/G1enB1and/MediaLens.git)  
 cd MediaLens
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -U pip
-python -m pip install -e .
-python scripts\setup.py
-python run.py
 
-```
+python -m venv .venv  
+..venv\Scripts\Activate.ps1
+
+python -m pip install -U pip  
+python -m pip install -e .
+
+python scripts\setup.py  
+python run.py
 
 ---
 
@@ -353,42 +294,26 @@ MediaLens is evolving into a full intelligent media platform.
 ### Near-Term
 
 - Batch rename engine
-- Improved metadata automation and syncing
 - Rating system
-- Database export / import
-- Slideshow player with hotkeys and settings for speed and how to handle mixed media types
-- Better status updates
-- More smart filter types - possibly photo vs illustration
-- More hash types like dash and color diff to identify filters and color touchups
+- Expanded filters (photo vs illustration, etc.)
 
----
+### AI
 
-### AI-Powered Features
+- Prompt library tools
+- “Chat with your images”
+- Advanced similarity validation
 
-- Auto-tagging and image descriptions
-- Prompt extraction and management
-- Prompt library and workflow tools
-- "Chat with your images" (vision + LLM integration)
-- Segment Anything (SAM) integration
-- AI-assisted similarity validation for edge cases
+### Ecosystem
 
----
-
-### Ecosystem & Sync
-
-- Google Photos / Drive import
-- OneDrive / Dropbox / cloud integrations
-- Cross-device sync options
-- Local-first + private cloud (NAS / Docker support)
-
----
+- Cloud integrations (Drive, OneDrive, etc.)
+- Cross-device sync
+- Local-first sync options
 
 ### Advanced Tools
 
-- Facial recognition and grouping
-- Dataset creation tools (AI training workflows)
-- Bulk metadata generation and export
-- Media analysis and filtering tools
+- Facial recognition
+- Dataset creation workflows
+- Bulk metadata generation
 
 ---
 
