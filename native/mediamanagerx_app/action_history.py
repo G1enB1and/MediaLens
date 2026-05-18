@@ -154,3 +154,101 @@ def path_exists(path: str) -> bool:
         return Path(path).exists()
     except Exception:
         return False
+
+
+def retained_path_available(retention_id: str) -> bool:
+    if not str(retention_id or "").strip():
+        return False
+    try:
+        from native.mediamanagerx_app.recycle_bin import get_recycle_bin_dir, init_recycle_bin_db
+
+        conn = init_recycle_bin_db()
+        try:
+            row = conn.execute(
+                "SELECT archived_name FROM recycle_bin WHERE id = ?",
+                (str(retention_id),),
+            ).fetchone()
+        finally:
+            conn.close()
+        return bool(row and (get_recycle_bin_dir() / str(row[0] or "")).exists())
+    except Exception:
+        return False
+
+
+def validate_history_item_availability(
+    entry: dict,
+    item: dict,
+    *,
+    path_exists_fn=path_exists,
+    retained_exists_fn=retained_path_available,
+    media_exists_fn=None,
+) -> tuple[str | None, str | None, str | None]:
+    action_type = str(entry.get("action_type") or "")
+    state = str(item.get("current_state") or "")
+    old_path = str(item.get("old_path") or "")
+    new_path = str(item.get("new_path") or "")
+    retention_id = str(item.get("retention_id") or "")
+
+    def exists(path: str) -> bool:
+        return bool(path and path_exists_fn(path))
+
+    def media_exists(path: str) -> bool:
+        if media_exists_fn is None:
+            return exists(path)
+        return bool(path and media_exists_fn(path))
+
+    if state == "applied":
+        if action_type in {"move", "rename"}:
+            if not exists(new_path):
+                if exists(old_path):
+                    return "undone", "external_change", "Already appears restored outside MediaLens."
+                return "unavailable", None, "Undo not available: destination item no longer exists."
+            if exists(old_path):
+                return "unavailable", None, "Undo not available: original path is already occupied."
+        elif action_type == "copy":
+            if not exists(new_path):
+                return "undone", "external_change", "Copied item no longer exists; marked as already undone."
+        elif action_type == "create_folder":
+            target = Path(new_path)
+            if not exists(new_path):
+                return "undone", "external_change", "Folder no longer exists; marked as already undone."
+            try:
+                if not target.is_dir() or any(target.iterdir()):
+                    return "unavailable", None, "Undo not available: folder is no longer empty."
+            except Exception:
+                return "unavailable", None, "Undo not available: folder could not be checked."
+        elif action_type == "delete":
+            if exists(old_path):
+                return "undone", "external_change", "Item already appears restored outside MediaLens."
+            if not retained_exists_fn(retention_id):
+                return "unavailable", None, "Undo not available: file no longer exists in MediaLens retention."
+        elif action_type in {"metadata", "rotate"}:
+            if not media_exists(old_path):
+                return "unavailable", None, "Undo not available: media item no longer exists in the library."
+
+    if state == "undone":
+        if action_type in {"move", "rename"}:
+            if exists(new_path) and not exists(old_path):
+                return "applied", "external_change", "Item already appears reapplied outside MediaLens."
+            if not exists(old_path):
+                return "unavailable", None, "Redo not available: original item no longer exists."
+            if exists(new_path):
+                return "unavailable", None, "Redo not available: destination path is already occupied."
+        elif action_type == "copy":
+            if exists(new_path):
+                return "applied", "external_change", "Copied item already exists again."
+            if not exists(old_path):
+                return "unavailable", None, "Redo not available: source item no longer exists."
+        elif action_type == "create_folder":
+            if exists(new_path):
+                return "applied", "external_change", "Folder already exists again."
+        elif action_type == "delete":
+            if not exists(old_path):
+                if retained_exists_fn(retention_id):
+                    return "applied", "external_change", "Item already appears deleted into MediaLens retention."
+                return "unavailable", None, "Redo not available: item no longer exists."
+        elif action_type in {"metadata", "rotate"}:
+            if not media_exists(old_path):
+                return "unavailable", None, "Redo not available: media item no longer exists in the library."
+
+    return None, None, None

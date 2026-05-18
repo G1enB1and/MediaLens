@@ -1101,6 +1101,55 @@ class BridgeFileOpsMixin:
         except Exception:
             return []
 
+    @Slot(int, result=int)
+    def validate_action_history(self, limit: int = 100) -> int:
+        try:
+            from app.mediamanager.db import action_history_repo
+            from app.mediamanager.db.media_repo import get_media_by_path
+            from native.mediamanagerx_app import action_history
+
+            entries = action_history_repo.list_validation_candidate_entries(self.conn, limit=max(1, int(limit or 100)))
+            changed = 0
+
+            def media_exists(path: str) -> bool:
+                return bool(get_media_by_path(self.conn, str(path or "")))
+
+            for entry in entries:
+                entry_changed = False
+                for item in action_history_repo.list_items(self.conn, int(entry.get("id") or 0)):
+                    current_state, source, note = action_history.validate_history_item_availability(
+                        entry,
+                        item,
+                        media_exists_fn=media_exists,
+                    )
+                    if not current_state:
+                        continue
+                    next_source = source or str(item.get("last_change_source") or "original_action")
+                    if (
+                        current_state == str(item.get("current_state") or "")
+                        and next_source == str(item.get("last_change_source") or "")
+                        and (note or "") == str(item.get("notes") or "")
+                    ):
+                        continue
+                    action_history_repo.update_item_state(
+                        self.conn,
+                        int(item.get("id") or 0),
+                        current_state=current_state,
+                        last_change_source=next_source,
+                        notes=note,
+                    )
+                    changed += 1
+                    entry_changed = True
+                if entry_changed:
+                    action_history_repo.recompute_entry_undo_state(self.conn, int(entry.get("id") or 0))
+            if changed:
+                self.actionHistoryChanged.emit()
+            return changed
+        except Exception as exc:
+            try: self._log(f"Action history validation failed: {exc}")
+            except Exception: pass
+            return 0
+
     def _record_history_system_event(self, action_type: str, summary: str, items: list[dict], origin: str) -> None:
         try:
             from app.mediamanager.db import action_history_repo

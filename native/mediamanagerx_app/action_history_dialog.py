@@ -35,6 +35,7 @@ class ActionHistoryDialog(QDialog):
         self.setMinimumSize(980, 620)
         self._entries: list[dict] = []
         self._selected_entry_id = 0
+        self._validation_completed = False
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setSingleShot(True)
         self._refresh_timer.timeout.connect(self.refresh)
@@ -284,6 +285,12 @@ class ActionHistoryDialog(QDialog):
         self._refresh_timer.start(150)
 
     def refresh(self) -> None:
+        if not self._validation_completed:
+            self._validation_completed = True
+            try:
+                self.bridge.validate_action_history(150)
+            except Exception:
+                pass
         action_type = str(self.filter_combo.currentData() or "all")
         search = self.search_edit.text().strip()
         self._entries = list(self.bridge.list_action_history(action_type, search, 300) or [])
@@ -337,11 +344,15 @@ class ActionHistoryDialog(QDialog):
             self.items_table.setRowCount(0)
             return
         self.details_title.setText(str(entry.get("summary") or "Action"))
-        self.details_meta.setText(
-            f"{self._format_time(str(entry.get('timestamp_utc') or ''), long=True)} | "
-            f"Status: {self._status_text(entry)} | Transaction: {entry.get('transaction_id')}"
-        )
         items = list(self.bridge.list_action_history_items(int(entry_id)) or [])
+        counts = self._item_state_counts(items)
+        detail_parts = [
+            self._format_time(str(entry.get("timestamp_utc") or ""), long=True),
+            f"Status: {self._status_text(entry)}",
+            self._counts_text(counts),
+            f"Transaction: {entry.get('transaction_id')}",
+        ]
+        self.details_meta.setText(" | ".join(part for part in detail_parts if part))
         self.items_table.setRowCount(0)
         for row_idx, item in enumerate(items):
             self.items_table.insertRow(row_idx)
@@ -374,6 +385,27 @@ class ActionHistoryDialog(QDialog):
         layout.addWidget(undo)
         layout.addWidget(redo)
         return box
+
+    def _item_state_counts(self, items: list[dict]) -> dict[str, int]:
+        counts = {"applied": 0, "undone": 0, "unavailable": 0, "failed": 0}
+        for item in items:
+            state = str(item.get("current_state") or "")
+            if state in counts:
+                counts[state] += 1
+        return counts
+
+    def _counts_text(self, counts: dict[str, int]) -> str:
+        parts = []
+        for key, label in (
+            ("applied", "active"),
+            ("undone", "undone"),
+            ("unavailable", "unavailable"),
+            ("failed", "failed"),
+        ):
+            value = int(counts.get(key) or 0)
+            if value:
+                parts.append(f"{value} {label}")
+        return ", ".join(parts)
 
     def _undo(self) -> None:
         if self.bridge.undo_last_action():
@@ -408,12 +440,32 @@ class ActionHistoryDialog(QDialog):
 
     def _status_text(self, entry: dict) -> str:
         status = str(entry.get("status") or "success").replace("_", " ").title()
-        undo_state = str(entry.get("undo_state") or "").replace("_", " ").title()
+        undo_state_raw = str(entry.get("undo_state") or "")
+        undo_state = {
+            "undoable": "Undoable",
+            "redoable": "Redoable",
+            "partially_undone": "Partially Undoable",
+            "not_undoable": "Not Undoable",
+        }.get(undo_state_raw, undo_state_raw.replace("_", " ").title())
         return f"{status} | {undo_state}" if undo_state else status
 
     def _item_state_text(self, item: dict) -> str:
-        state = str(item.get("current_state") or "").replace("_", " ").title()
-        source = str(item.get("last_change_source") or "").replace("_", " ").title()
+        state_raw = str(item.get("current_state") or "")
+        source_raw = str(item.get("last_change_source") or "")
+        state = {
+            "applied": "Active",
+            "undone": "Undone",
+            "unavailable": "Unavailable",
+            "failed": "Failed",
+        }.get(state_raw, state_raw.replace("_", " ").title())
+        source = {
+            "original_action": "Original action",
+            "group_undo": "Group undo",
+            "group_redo": "Group redo",
+            "individual_undo": "Individual undo",
+            "individual_redo": "Individual redo",
+            "external_change": "External change",
+        }.get(source_raw, source_raw.replace("_", " ").title())
         notes = str(item.get("notes") or "").strip()
         label = f"{state} | {source}" if source else state
         return f"{label} | {notes}" if notes else label

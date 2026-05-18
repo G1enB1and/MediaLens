@@ -255,6 +255,23 @@ def latest_redoable_entry(conn: sqlite3.Connection) -> dict | None:
     return _row_to_dict(row, ENTRY_COLUMNS) if row else None
 
 
+def list_validation_candidate_entries(conn: sqlite3.Connection, *, limit: int = 100) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT id, transaction_id, timestamp_utc, action_type, origin, summary,
+               item_count, status, undo_state, metadata_json,
+               NULL AS first_old_path,
+               NULL AS first_new_path
+        FROM action_history_entries
+        WHERE origin = 'user' AND undo_state IN ('undoable', 'partially_undone', 'redoable')
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (max(1, int(limit or 100)),),
+    ).fetchall()
+    return [_row_to_dict(row, ENTRY_COLUMNS) for row in rows]
+
+
 def clear_redo_stack(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -311,6 +328,7 @@ def recompute_entry_undo_state(conn: sqlite3.Connection, entry_id: int) -> str:
     else:
         applied = [row for row in successful if str(row.get("current_state") or "") == "applied"]
         undone = [row for row in successful if str(row.get("current_state") or "") == "undone"]
+        unavailable = [row for row in successful if str(row.get("current_state") or "") == "unavailable"]
         group_undone = [
             row
             for row in undone
@@ -320,7 +338,7 @@ def recompute_entry_undo_state(conn: sqlite3.Connection, entry_id: int) -> str:
             state = "redoable"
         elif group_undone and not applied:
             state = "redoable"
-        elif applied and undone:
+        elif applied and (undone or unavailable):
             state = "partially_undone"
         elif applied:
             state = "undoable"
