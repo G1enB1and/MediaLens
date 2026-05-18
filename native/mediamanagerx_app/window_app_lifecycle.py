@@ -188,7 +188,7 @@ class WindowAppLifecycleMixin:
         if importing:
             note = QLabel("The main database is always restored as a replacement. Optional data can be merged with current files, or replaced by unchecking merge.")
         else:
-            note = QLabel("The main database is always included. Legacy MediaManagerX files and debug logs are excluded. Recycle-bin retention, thumbnails, AI models, and runtimes are optional; AI data can be large.")
+            note = QLabel("The main database is always included. Recycle-bin retention, thumbnails, AI models, and runtimes are optional; AI data can be large.")
         note.setObjectName("libraryBackupNote")
         note.setWordWrap(True)
         layout.addWidget(note)
