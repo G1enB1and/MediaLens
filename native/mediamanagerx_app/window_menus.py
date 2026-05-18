@@ -81,6 +81,10 @@ class WindowMenuShortcutMixin:
         self.act_show_action_history = QAction("Action History", self)
         self.act_show_action_history.triggered.connect(self.show_action_history)
         edit_menu.addAction(self.act_show_action_history)
+
+        self.act_show_ai_models_status = QAction("Edit AI Models and Status", self)
+        self.act_show_ai_models_status.triggered.connect(lambda: self.open_local_ai_setup())
+        edit_menu.addAction(self.act_show_ai_models_status)
         
         edit_menu.addSeparator()
 
@@ -113,6 +117,16 @@ class WindowMenuShortcutMixin:
         self.gallery_view_group = QActionGroup(self)
         self.gallery_view_group.setExclusive(True)
         self.gallery_view_actions: dict[str, QAction] = {}
+
+        def add_gallery_view_action(mode: str, label: str) -> None:
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.triggered.connect(lambda checked=False, mode=mode: self._set_gallery_view_mode(mode))
+            self.gallery_view_group.addAction(action)
+            self.gallery_view_actions[mode] = action
+            view_menu.addAction(action)
+
+        add_gallery_view_action("masonry", "Masonry")
         for mode, label in (
             ("grid_small", "Grid (Small)"),
             ("grid_medium", "Grid (Medium)"),
@@ -121,17 +135,15 @@ class WindowMenuShortcutMixin:
             ("list", "List"),
             ("details", "Details"),
             ("content", "Content"),
+        ):
+            add_gallery_view_action(mode, label)
+        view_menu.addSeparator()
+        for mode, label in (
             ("duplicates", "Duplicates"),
             ("similar", "Duplicates and Similar"),
             ("similar_only", "Similar"),
-            ("masonry", "Masonry"),
         ):
-            action = QAction(label, self)
-            action.setCheckable(True)
-            action.triggered.connect(lambda checked=False, mode=mode: self._set_gallery_view_mode(mode))
-            self.gallery_view_group.addAction(action)
-            self.gallery_view_actions[mode] = action
-            view_menu.addAction(action)
+            add_gallery_view_action(mode, label)
         self._sync_gallery_view_actions()
 
         view_menu.addSeparator()
@@ -168,11 +180,6 @@ class WindowMenuShortcutMixin:
         self.act_show_dismissed_progress_toasts = QAction("Show Hidden Progress Toasts", self)
         self.act_show_dismissed_progress_toasts.triggered.connect(self.bridge.reveal_progress_toasts)
         view_menu.addAction(self.act_show_dismissed_progress_toasts)
-
-        view_menu.addSeparator()
-        self.act_show_ai_models_status = QAction("Show AI Models and Status", self)
-        self.act_show_ai_models_status.triggered.connect(lambda: self.open_local_ai_setup())
-        view_menu.addAction(self.act_show_ai_models_status)
 
         view_menu.addSeparator()
 

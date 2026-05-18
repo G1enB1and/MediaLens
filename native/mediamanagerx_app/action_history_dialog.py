@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ctypes
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -38,6 +40,7 @@ class ActionHistoryDialog(QDialog):
         self._refresh_timer.timeout.connect(self.refresh)
         self._build_ui()
         self._apply_theme()
+        QTimer.singleShot(0, self._apply_title_bar_theme)
         try:
             self.bridge.actionHistoryChanged.connect(self._schedule_refresh)
         except Exception:
@@ -129,12 +132,14 @@ class ActionHistoryDialog(QDialog):
         control_bg = Theme.get_control_bg(accent)
         hover_bg = Theme.get_btn_save_hover(accent)
         input_bg = Theme.get_input_bg(accent)
+        scrollbar_track = Theme.get_scrollbar_track(accent)
+        scrollbar_thumb = Theme.get_scrollbar_thumb(accent)
+        scrollbar_thumb_hover = Theme.get_scrollbar_thumb_hover(accent)
         text = Theme.get_text_color()
         muted = Theme.get_text_muted()
         border = Theme.get_border(accent)
         accent_str = accent.name()
         selection_text = Theme.get_contrast_text(accent)
-        soft_accent = Theme.get_accent_soft(accent)
         palette = self.palette()
         palette.setColor(QPalette.ColorRole.Window, QColor(bg))
         palette.setColor(QPalette.ColorRole.Base, QColor(control_bg))
@@ -219,23 +224,61 @@ class ActionHistoryDialog(QDialog):
                 padding: 6px;
             }}
             QScrollBar:vertical, QScrollBar:horizontal {{
-                background: {bg};
+                background: {scrollbar_track};
                 border: none;
             }}
             QScrollBar::handle:vertical, QScrollBar::handle:horizontal {{
-                background: {soft_accent};
+                background: {scrollbar_thumb};
                 border-radius: 4px;
                 min-height: 24px;
                 min-width: 24px;
             }}
             QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover {{
-                background: {accent_str};
+                background: {scrollbar_thumb_hover};
             }}
         """)
         for table in (self.entries_table, self.items_table):
             table.setAlternatingRowColors(True)
             table.viewport().setAutoFillBackground(True)
             table.viewport().setPalette(palette)
+        self._apply_title_bar_theme()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._apply_title_bar_theme()
+
+    def _apply_title_bar_theme(self) -> None:
+        if sys.platform != "win32" or not self.isVisible():
+            return
+        try:
+            is_dark = not Theme.get_is_light()
+            bg_color = QColor(Theme.get_bg(QColor(str(self.bridge.settings.value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT))))
+            hwnd = int(self.winId())
+            value = ctypes.c_int(1 if is_dark else 0)
+            for attribute in (20, 19):
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd,
+                    attribute,
+                    ctypes.byref(value),
+                    ctypes.sizeof(value),
+                )
+
+            bg_ref = (bg_color.blue() << 16) | (bg_color.green() << 8) | bg_color.red()
+            fg_ref = 0x00000000 if not is_dark else 0x00FFFFFF
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd,
+                35,
+                ctypes.byref(ctypes.c_int(bg_ref)),
+                ctypes.sizeof(ctypes.c_int(bg_ref)),
+            )
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd,
+                36,
+                ctypes.byref(ctypes.c_int(fg_ref)),
+                ctypes.sizeof(ctypes.c_int(fg_ref)),
+            )
+        except Exception:
+            pass
 
     def _schedule_refresh(self) -> None:
         self._refresh_timer.start(150)
