@@ -69,6 +69,18 @@ class WindowMenuShortcutMixin:
         self.act_open_bulk_tag_editor = QAction("Bulk Tag Editor", self)
         self.act_open_bulk_tag_editor.triggered.connect(self._open_bulk_tag_editor_from_menu)
         edit_menu.addAction(self.act_open_bulk_tag_editor)
+
+        self.act_open_bulk_caption_editor = QAction("Bulk Captioning Editor", self)
+        self.act_open_bulk_caption_editor.triggered.connect(self._open_bulk_caption_editor_from_menu)
+        edit_menu.addAction(self.act_open_bulk_caption_editor)
+
+        self.act_open_bulk_description_editor = QAction("Bulk Description Editor", self)
+        self.act_open_bulk_description_editor.triggered.connect(self._open_bulk_caption_editor_from_menu)
+        edit_menu.addAction(self.act_open_bulk_description_editor)
+
+        self.act_show_action_history = QAction("Action History", self)
+        self.act_show_action_history.triggered.connect(self.show_action_history)
+        edit_menu.addAction(self.act_show_action_history)
         
         edit_menu.addSeparator()
 
@@ -97,11 +109,6 @@ class WindowMenuShortcutMixin:
         file_menu.addAction(quit_action)
 
         view_menu = menubar.addMenu("&View")
-
-        self.act_open_bulk_caption_editor = QAction("Bulk Captioning Editor", self)
-        self.act_open_bulk_caption_editor.triggered.connect(self._open_bulk_caption_editor_from_menu)
-        view_menu.addAction(self.act_open_bulk_caption_editor)
-        view_menu.addSeparator()
 
         self.gallery_view_group = QActionGroup(self)
         self.gallery_view_group.setExclusive(True)
@@ -166,12 +173,6 @@ class WindowMenuShortcutMixin:
         self.act_show_ai_models_status = QAction("Show AI Models and Status", self)
         self.act_show_ai_models_status.triggered.connect(lambda: self.open_local_ai_setup())
         view_menu.addAction(self.act_show_ai_models_status)
-
-        view_menu.addSeparator()
-
-        self.act_show_action_history = QAction("Action History", self)
-        self.act_show_action_history.triggered.connect(self.show_action_history)
-        view_menu.addAction(self.act_show_action_history)
 
         view_menu.addSeparator()
 

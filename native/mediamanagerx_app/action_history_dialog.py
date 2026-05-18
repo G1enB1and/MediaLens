@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from native.mediamanagerx_app.main import Theme
+from native.mediamanagerx_app.theme_dialogs import Theme
 
 
 class ActionHistoryDialog(QDialog):
@@ -128,21 +128,47 @@ class ActionHistoryDialog(QDialog):
         bg = Theme.get_bg(accent)
         control_bg = Theme.get_control_bg(accent)
         hover_bg = Theme.get_btn_save_hover(accent)
+        input_bg = Theme.get_input_bg(accent)
         text = Theme.get_text_color()
         muted = Theme.get_text_muted()
         border = Theme.get_border(accent)
         accent_str = accent.name()
+        selection_text = Theme.get_contrast_text(accent)
+        soft_accent = Theme.get_accent_soft(accent)
+        palette = self.palette()
+        palette.setColor(QPalette.ColorRole.Window, QColor(bg))
+        palette.setColor(QPalette.ColorRole.Base, QColor(control_bg))
+        palette.setColor(QPalette.ColorRole.AlternateBase, QColor(input_bg))
+        palette.setColor(QPalette.ColorRole.Text, QColor(text))
+        palette.setColor(QPalette.ColorRole.WindowText, QColor(text))
+        palette.setColor(QPalette.ColorRole.Button, QColor(control_bg))
+        palette.setColor(QPalette.ColorRole.ButtonText, QColor(text))
+        palette.setColor(QPalette.ColorRole.Highlight, accent)
+        palette.setColor(QPalette.ColorRole.HighlightedText, QColor(selection_text))
+        self.setPalette(palette)
+        self.setAutoFillBackground(True)
         self.setStyleSheet(f"""
-            QDialog {{ background-color: {bg}; color: {text}; }}
+            ActionHistoryDialog, QDialog {{ background-color: {bg}; color: {text}; }}
+            QWidget {{ background-color: {bg}; color: {text}; }}
             QLabel {{ color: {text}; background: transparent; }}
             QLabel#historyDetailsTitle {{ font-size: 16px; font-weight: bold; }}
             QLabel#historyDetailsMeta {{ color: {muted}; }}
             QLineEdit, QComboBox {{
-                background-color: {control_bg};
+                background-color: {input_bg};
                 color: {text};
                 border: 1px solid {border};
                 border-radius: 6px;
                 padding: 6px 8px;
+            }}
+            QLineEdit:focus, QComboBox:focus {{
+                border-color: {accent_str};
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {control_bg};
+                color: {text};
+                border: 1px solid {border};
+                selection-background-color: {accent_str};
+                selection-color: {selection_text};
             }}
             QPushButton {{
                 background-color: {control_bg};
@@ -151,16 +177,39 @@ class ActionHistoryDialog(QDialog):
                 border-radius: 6px;
                 padding: 6px 12px;
             }}
-            QPushButton:hover {{ background-color: {hover_bg}; border-color: {accent_str}; }}
+            QPushButton:hover {{ background-color: {hover_bg}; border-color: {accent_str}; color: {text}; }}
             QPushButton:disabled {{ color: {muted}; border-color: {border}; background-color: transparent; }}
+            QSplitter::handle {{
+                background-color: {border};
+            }}
+            QSplitter::handle:hover {{
+                background-color: {accent_str};
+            }}
             QTableWidget {{
                 background-color: {control_bg};
+                alternate-background-color: {input_bg};
                 color: {text};
                 gridline-color: {border};
                 border: 1px solid {border};
                 border-radius: 6px;
                 selection-background-color: {accent_str};
-                selection-color: white;
+                selection-color: {selection_text};
+                outline: 0;
+            }}
+            QTableWidget::item {{
+                background-color: transparent;
+                color: {text};
+                padding: 4px;
+            }}
+            QTableWidget::item:selected {{
+                background-color: {accent_str};
+                color: {selection_text};
+            }}
+            QTableCornerButton::section {{
+                background-color: {bg};
+                border: none;
+                border-bottom: 1px solid {border};
+                border-right: 1px solid {border};
             }}
             QHeaderView::section {{
                 background-color: {bg};
@@ -169,7 +218,24 @@ class ActionHistoryDialog(QDialog):
                 border-bottom: 1px solid {border};
                 padding: 6px;
             }}
+            QScrollBar:vertical, QScrollBar:horizontal {{
+                background: {bg};
+                border: none;
+            }}
+            QScrollBar::handle:vertical, QScrollBar::handle:horizontal {{
+                background: {soft_accent};
+                border-radius: 4px;
+                min-height: 24px;
+                min-width: 24px;
+            }}
+            QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover {{
+                background: {accent_str};
+            }}
         """)
+        for table in (self.entries_table, self.items_table):
+            table.setAlternatingRowColors(True)
+            table.viewport().setAutoFillBackground(True)
+            table.viewport().setPalette(palette)
 
     def _schedule_refresh(self) -> None:
         self._refresh_timer.start(150)
