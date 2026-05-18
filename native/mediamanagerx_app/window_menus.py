@@ -64,6 +64,10 @@ class WindowMenuShortcutMixin:
         self.act_menu_redo.triggered.connect(self._on_redo_shortcut)
         edit_menu.addAction(self.act_menu_redo)
 
+        self.act_show_action_history = QAction("Action History", self)
+        self.act_show_action_history.triggered.connect(self.show_action_history)
+        edit_menu.addAction(self.act_show_action_history)
+
         edit_menu.addSeparator()
         
         self.act_open_bulk_tag_editor = QAction("Bulk Tag Editor", self)
@@ -77,10 +81,6 @@ class WindowMenuShortcutMixin:
         self.act_open_bulk_description_editor = QAction("Bulk Description Editor", self)
         self.act_open_bulk_description_editor.triggered.connect(self._open_bulk_caption_editor_from_menu)
         edit_menu.addAction(self.act_open_bulk_description_editor)
-
-        self.act_show_action_history = QAction("Action History", self)
-        self.act_show_action_history.triggered.connect(self.show_action_history)
-        edit_menu.addAction(self.act_show_action_history)
 
         self.act_show_ai_models_status = QAction("Edit AI Models and Status", self)
         self.act_show_ai_models_status.triggered.connect(lambda: self.open_local_ai_setup())

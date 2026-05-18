@@ -11,6 +11,97 @@ from native.mediamanagerx_app.bridge import *
 from native.mediamanagerx_app.gallery import *
 
 class WindowAppLifecycleMixin:
+    def _apply_library_backup_options_theme(self, dialog: QDialog) -> None:
+        accent_q = _dialog_accent()
+        bg = Theme.get_bg(accent_q)
+        control_bg = Theme.get_control_bg(accent_q)
+        input_bg = Theme.get_input_bg(accent_q)
+        text = Theme.get_text_color()
+        muted = Theme.get_text_muted()
+        border = Theme.get_border(accent_q)
+        hover = Theme.get_btn_save_hover(accent_q)
+        accent = accent_q.name()
+        selection_text = Theme.get_contrast_text(accent_q)
+        check_path = (Path(__file__).with_name("web") / "scrollbar_arrows" / "check.svg").as_posix()
+
+        palette = dialog.palette()
+        palette.setColor(QPalette.ColorRole.Window, QColor(bg))
+        palette.setColor(QPalette.ColorRole.Base, QColor(input_bg))
+        palette.setColor(QPalette.ColorRole.AlternateBase, QColor(control_bg))
+        palette.setColor(QPalette.ColorRole.Text, QColor(text))
+        palette.setColor(QPalette.ColorRole.WindowText, QColor(text))
+        palette.setColor(QPalette.ColorRole.Button, QColor(control_bg))
+        palette.setColor(QPalette.ColorRole.ButtonText, QColor(text))
+        palette.setColor(QPalette.ColorRole.Highlight, accent_q)
+        palette.setColor(QPalette.ColorRole.HighlightedText, QColor(selection_text))
+        dialog.setPalette(palette)
+        dialog.setAutoFillBackground(True)
+        dialog.setStyleSheet(f"""
+            QDialog {{
+                background-color: {bg};
+                color: {text};
+            }}
+            QWidget {{
+                background-color: {bg};
+                color: {text};
+            }}
+            QLabel {{
+                color: {text};
+                background: transparent;
+            }}
+            QLabel#libraryBackupNote {{
+                color: {muted};
+            }}
+            QCheckBox {{
+                color: {text};
+                spacing: 8px;
+                background: transparent;
+            }}
+            QCheckBox:disabled {{
+                color: {muted};
+            }}
+            QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+                border: 1px solid {border};
+                border-radius: 4px;
+                background-color: {input_bg};
+            }}
+            QCheckBox::indicator:hover {{
+                border-color: {accent};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {accent};
+                border-color: {accent};
+                image: url({check_path});
+            }}
+            QCheckBox::indicator:disabled {{
+                background-color: transparent;
+                border-color: {border};
+            }}
+            QPushButton {{
+                background-color: {control_bg};
+                color: {text};
+                border: 1px solid {border};
+                border-radius: 8px;
+                padding: 8px 18px;
+                min-width: 88px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background-color: {hover};
+                border-color: {accent};
+            }}
+            QPushButton:pressed {{
+                background-color: {Theme.mix(hover, accent_q, 0.12)};
+                border-color: {accent};
+            }}
+            QPushButton:disabled {{
+                color: {muted};
+            }}
+        """)
+        QTimer.singleShot(0, lambda: _apply_themed_dialog_title_bar(dialog, accent_q))
+
     def _library_backup_options_dialog(self, *, importing: bool, manifest: dict | None = None) -> dict:
         dialog = QDialog(self)
         dialog.setWindowTitle("Import Library Backup" if importing else "Export Library Backup")
@@ -98,6 +189,7 @@ class WindowAppLifecycleMixin:
             note = QLabel("The main database is always restored as a replacement. Optional data can be merged with current files, or replaced by unchecking merge.")
         else:
             note = QLabel("The main database is always included. Legacy MediaManagerX files and debug logs are excluded. Recycle-bin retention, thumbnails, AI models, and runtimes are optional; AI data can be large.")
+        note.setObjectName("libraryBackupNote")
         note.setWordWrap(True)
         layout.addWidget(note)
 
@@ -113,6 +205,7 @@ class WindowAppLifecycleMixin:
         buttons_layout.addWidget(ok_btn)
         layout.addWidget(buttons)
 
+        self._apply_library_backup_options_theme(dialog)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return {"accepted": False}
         return {
