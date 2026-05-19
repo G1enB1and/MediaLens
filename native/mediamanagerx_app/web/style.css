@@ -3553,19 +3553,16 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 }
 
 #filterSelect.header-icon-select .select-trigger {
-  background-image: url('./icons/filter-add-svgrepo-com-white.svg');
+  background-image: url('./icons/filter-alt-3-svgrepo-com-white.svg');
 }
 
 .light-mode #filterSelect.header-icon-select .select-trigger {
-  background-image: url('./icons/filter-add-svgrepo-com.svg');
+  background-image: url('./icons/filter-alt-3-svgrepo-com.svg');
 }
 
-#filterSelect.header-icon-select.has-filter .select-trigger {
-  background-image: url('./icons/filter-remove-solid-svgrepo-com-white.svg');
-}
-
-.light-mode #filterSelect.header-icon-select.has-filter .select-trigger {
-  background-image: url('./icons/filter-remove-solid-svgrepo-com.svg');
+#filterSelect.header-icon-select:not(.has-filter) .select-trigger,
+.light-mode #filterSelect.header-icon-select:not(.has-filter) .select-trigger {
+  background-image: url('./icons/filter-alt-3-svgrepo-com-gray.svg');
 }
 
 #groupBySelect.header-icon-select .select-trigger {
@@ -3582,11 +3579,11 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 }
 
 #groupBySelect.header-icon-select.is-grouped .select-trigger {
-  background-image: url('./icons/group-delete-svgrepo-com-white.svg');
+  background-image: url('./icons/group-list-svgrepo-com-white.svg');
 }
 
 .light-mode #groupBySelect.header-icon-select.is-grouped .select-trigger {
-  background-image: url('./icons/group-delete-svgrepo-com.svg');
+  background-image: url('./icons/group-list-svgrepo-com.svg');
 }
 
 .advanced-search-join-wrap {
