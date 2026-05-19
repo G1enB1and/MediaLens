@@ -202,8 +202,8 @@ body.top-panel-hidden header {
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-  row-gap: 6px;
-  padding: 12px 16px;
+  row-gap: 11px;
+  padding: 12px 6px;
   min-width: 0;
 }
 
@@ -1072,12 +1072,19 @@ body.compare-review-single-mode main {
   width: 100%;
   max-width: none;
   min-width: 0;
-  height: 32px;
+  height: 30px;
+  min-height: 30px;
+  max-height: 30px;
   border-radius: var(--advanced-search-radius);
   font-size: 13px;
+  align-self: flex-start;
+  overflow: visible;
 }
 
 .advanced-search-inline-select .select-trigger {
+  height: 30px;
+  min-height: 30px;
+  max-height: 30px;
   padding: 0 22px 0 9px;
 }
 
@@ -3776,6 +3783,12 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   border-radius: var(--advanced-search-radius);
 }
 
+#advancedSearchRules .advanced-search-inline-select {
+  height: 30px;
+  min-height: 30px;
+  max-height: 30px;
+}
+
 #advancedSearchRules .advanced-search-inline-select.open,
 #advSavedSearchSelect.advanced-search-custom-select.open {
   border-radius: var(--advanced-search-radius) var(--advanced-search-radius) 0 0;
@@ -3789,6 +3802,12 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 #advancedSearchRules .advanced-search-inline-select .select-trigger,
 #advSavedSearchSelect.advanced-search-custom-select .select-trigger {
   border-radius: inherit;
+}
+
+#advancedSearchRules .advanced-search-inline-select .select-trigger {
+  height: 30px;
+  min-height: 30px;
+  max-height: 30px;
 }
 
 .select-options div {
