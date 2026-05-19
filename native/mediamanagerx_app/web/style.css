@@ -3627,6 +3627,7 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 
 #filterSelect.header-icon-select,
 #groupBySelect.header-icon-select,
+#similarityThresholdSelect.header-icon-select,
 #dateGranularitySelect.header-icon-select {
   width: 30px;
   min-width: 30px;
@@ -3660,6 +3661,10 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 
 #groupBySelect.header-icon-select .select-options {
   min-width: 232px;
+}
+
+#similarityThresholdSelect.header-icon-select .select-options {
+  min-width: 217px;
 }
 
 #dateGranularitySelect.header-icon-select .select-options {
@@ -3719,6 +3724,14 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 
 .light-mode #dateGranularitySelect.header-icon-select .select-trigger {
   background-image: url('./icons/calendar-svgrepo-com.svg');
+}
+
+#similarityThresholdSelect.header-icon-select .select-trigger {
+  background-image: url('./icons/threshold-off-svgrepo-com-white.svg');
+}
+
+.light-mode #similarityThresholdSelect.header-icon-select .select-trigger {
+  background-image: url('./icons/threshold-off-svgrepo-com.svg');
 }
 
 .advanced-search-join-wrap {
@@ -3922,6 +3935,20 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--muted);
+}
+
+.select-options .select-menu-header {
+  padding: 8px 12px 7px;
+  cursor: default;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--input-bg), var(--fg) 4%);
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.select-options .select-menu-header:hover {
+  background: color-mix(in srgb, var(--input-bg), var(--fg) 4%);
 }
 
 .select-options .select-group-label:hover {

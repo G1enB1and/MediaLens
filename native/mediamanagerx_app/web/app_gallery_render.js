@@ -20,6 +20,7 @@ function normalizeHeaderSelectLabel(text) {
     .replace(/^Sort:\s*/i, '')
     .replace(/^Filter:\s*/i, '')
     .replace(/^Group By:\s*/i, '')
+    .replace(/^Similarity Threshold:\s*/i, '')
     .trim() || 'None';
 }
 
@@ -51,6 +52,11 @@ function updateHeaderIconSelectState(el) {
   }
   if (el.id === 'dateGranularitySelect') {
     el.title = `Date: ${label}`;
+    el.setAttribute('aria-label', el.title);
+    return;
+  }
+  if (el.id === 'similarityThresholdSelect') {
+    el.title = `Similarity threshold: ${label}`;
     el.setAttribute('aria-label', el.title);
   }
 }
