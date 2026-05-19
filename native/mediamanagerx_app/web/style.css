@@ -3504,7 +3504,8 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 }
 
 #filterSelect.header-icon-select,
-#groupBySelect.header-icon-select {
+#groupBySelect.header-icon-select,
+#dateGranularitySelect.header-icon-select {
   width: 30px;
   min-width: 30px;
   max-width: 30px;
@@ -3537,6 +3538,10 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 
 #groupBySelect.header-icon-select .select-options {
   min-width: 232px;
+}
+
+#dateGranularitySelect.header-icon-select .select-options {
+  min-width: 120px;
 }
 
 #sortSelect.header-icon-select .select-trigger {
@@ -3584,6 +3589,14 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 
 .light-mode #groupBySelect.header-icon-select.is-grouped .select-trigger {
   background-image: url('./icons/group-list-svgrepo-com.svg');
+}
+
+#dateGranularitySelect.header-icon-select .select-trigger {
+  background-image: url('./icons/calendar-svgrepo-com-white.svg');
+}
+
+.light-mode #dateGranularitySelect.header-icon-select .select-trigger {
+  background-image: url('./icons/calendar-svgrepo-com.svg');
 }
 
 .advanced-search-join-wrap {

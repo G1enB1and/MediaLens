@@ -47,6 +47,11 @@ function updateHeaderIconSelectState(el) {
     el.classList.toggle('is-grouped', isGrouped);
     el.title = `Group by: ${label}`;
     el.setAttribute('aria-label', el.title);
+    return;
+  }
+  if (el.id === 'dateGranularitySelect') {
+    el.title = `Date: ${label}`;
+    el.setAttribute('aria-label', el.title);
   }
 }
 
