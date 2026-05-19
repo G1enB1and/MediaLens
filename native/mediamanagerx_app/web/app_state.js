@@ -59,6 +59,7 @@ let gGalleryResizeObserver = null;
 let gGalleryLastLayoutWidth = 0;
 let gGalleryLastLayoutHeight = 0;
 let gIsRenderingGallery = false;
+let gPendingGalleryRender = null;
 let gAppMinimized = false;
 let gAppRestoringUntil = 0;
 let gAppRestoreGeneration = 0;

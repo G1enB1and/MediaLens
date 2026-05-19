@@ -1973,13 +1973,24 @@ function wireCtxMenu() {
 // applySearch is no longer used for local filtering.
 
 function renderMediaList(items, scrollToTop = true) {
-  if (gIsRenderingGallery) return;
-  gIsRenderingGallery = true;
   items = asArray(items);
+  if (gIsRenderingGallery) {
+    gPendingGalleryRender = {
+      items,
+      scrollToTop: !!scrollToTop,
+    };
+    return;
+  }
+  gIsRenderingGallery = true;
 
   const finalizeRender = () => {
     requestAnimationFrame(() => {
       gIsRenderingGallery = false;
+      const pendingRender = gPendingGalleryRender;
+      gPendingGalleryRender = null;
+      if (pendingRender) {
+        renderMediaList(pendingRender.items, pendingRender.scrollToTop);
+      }
     });
   };
 

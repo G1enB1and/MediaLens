@@ -794,6 +794,9 @@ function applyGalleryViewMode(mode) {
   const el = document.getElementById('mediaList');
   if (!el) return;
   applyGalleryClasses(el, nextMode);
+  if (gGroupBy === 'date' && !REVIEW_VIEW_MODES.has(nextMode)) {
+    el.classList.add('gallery-grouped');
+  }
 }
 
 function viewUsesThumbnails() {
