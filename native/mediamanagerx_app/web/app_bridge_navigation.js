@@ -281,6 +281,7 @@ function updateFolderAddressOverflow() {
   const overflow = address.querySelector('.folder-address-overflow');
   const segments = Array.from(address.querySelectorAll('.folder-address-segment[data-crumb-index]'));
   const chevrons = Array.from(address.querySelectorAll('.folder-address-chevron[data-after-index]'));
+  const currentChildrenChevron = address.querySelector('.folder-address-chevron[data-current-children="true"]');
   if (!segments.length || !overflow) {
     gCollapsedAddressCrumbs = [];
     return;
@@ -303,10 +304,10 @@ function updateFolderAddressOverflow() {
   }));
   const hiddenIndexes = [];
   const collapsibleIndexes = [];
-  for (let i = 1; i < Math.max(1, segments.length - 1); i += 1) {
+  for (let i = 1; i < segments.length; i += 1) {
     collapsibleIndexes.push(i);
   }
-  const currentSegment = segments[segments.length - 1] || null;
+  const currentIndex = segments.length - 1;
 
   const applyHiddenIndexes = () => {
     segments.forEach((segment) => {
@@ -317,6 +318,9 @@ function updateFolderAddressOverflow() {
       const index = Number(chevron.dataset.afterIndex || -1);
       chevron.hidden = hiddenIndexes.includes(index);
     });
+    if (currentChildrenChevron) {
+      currentChildrenChevron.hidden = hiddenIndexes.includes(currentIndex);
+    }
     gCollapsedAddressCrumbs = hiddenIndexes.map((index) => crumbs[index]).filter(Boolean);
     overflow.hidden = gCollapsedAddressCrumbs.length === 0;
   };
@@ -324,9 +328,6 @@ function updateFolderAddressOverflow() {
   while (address.scrollWidth > address.clientWidth + 1 && collapsibleIndexes.length > 0) {
     hiddenIndexes.push(collapsibleIndexes.shift());
     applyHiddenIndexes();
-  }
-  if (address.scrollWidth > address.clientWidth + 1 && currentSegment) {
-    currentSegment.classList.add('allow-overflow-truncation');
   }
 }
 
@@ -460,6 +461,7 @@ function renderFolderAddress() {
     const chevron = createFolderAddressChevron('Show folders in the current folder', () => {
       toggleFolderCrumbMenu(currentPath, chevron, 0, gCurrentFolderChildren);
     });
+    chevron.dataset.currentChildren = 'true';
     el.appendChild(chevron);
   }
   requestAnimationFrame(updateSelectedFolderLabelVisibility);
