@@ -505,6 +505,10 @@ function closeFolderCrumbMenu(fromLevel = 0) {
   }
 }
 
+window.hideFolderAddressMenus = function hideFolderAddressMenus() {
+  closeFolderCrumbMenu();
+};
+
 function positionFolderCrumbMenu(anchorRect, menu, preferredDirection = 'below') {
   if (!anchorRect || !menu) return;
   const viewportWidth = window.innerWidth;

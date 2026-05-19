@@ -873,6 +873,8 @@ class WindowAppLifecycleMixin:
         return False
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if event.type() in {QEvent.Type.ApplicationDeactivate, QEvent.Type.WindowDeactivate}:
+            self._dismiss_web_menus()
         if event.type() == QEvent.Type.Resize:
             watched_viewports = {
                 getattr(getattr(self, "scroll_area", None), "viewport", lambda: None)(),
@@ -940,9 +942,11 @@ class WindowAppLifecycleMixin:
         return False # Accept the event and let others handle it
 
     def _dismiss_web_menus(self) -> None:
-        """Tell the web gallery to hide its custom context menu."""
+        """Tell the web gallery to hide custom menus."""
         try:
-            self.web.page().runJavaScript("window.hideCtx && window.hideCtx();")
+            self.web.page().runJavaScript(
+                "try{ window.hideCtx && window.hideCtx(); window.hideFolderAddressMenus && window.hideFolderAddressMenus(); }catch(e){}"
+            )
         except Exception:
             pass
 

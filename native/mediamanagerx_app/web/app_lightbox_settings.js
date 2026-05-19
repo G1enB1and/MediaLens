@@ -736,11 +736,32 @@ function wirePager() {
     });
   }
 
+  const shouldKeepFolderCrumbMenuOpen = (target) => (
+    target && (
+      target.closest('.folder-crumb-menu')
+      || target.closest('.folder-address-chevron')
+      || target.closest('.folder-address-overflow')
+    )
+  );
+
+  document.addEventListener('pointerdown', (e) => {
+    if (shouldKeepFolderCrumbMenuOpen(e.target)) return;
+    closeFolderCrumbMenu();
+  }, true);
+
   document.addEventListener('click', (e) => {
-    if (e.target && (e.target.closest('.folder-crumb-menu') || e.target.closest('.folder-address-chevron') || e.target.closest('.folder-address-overflow'))) {
+    if (shouldKeepFolderCrumbMenuOpen(e.target)) {
       return;
     }
     closeFolderCrumbMenu();
+  });
+
+  window.addEventListener('blur', () => {
+    closeFolderCrumbMenu();
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) closeFolderCrumbMenu();
   });
 
   window.addEventListener('resize', () => {
