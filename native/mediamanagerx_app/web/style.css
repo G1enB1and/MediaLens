@@ -173,6 +173,7 @@ html {
 .app-body {
   flex: 1;
   display: flex;
+  flex-direction: column;
   overflow: hidden;
 }
 
@@ -807,6 +808,63 @@ main {
   overflow-y: scroll;
   background: var(--bg);
   position: relative;
+}
+
+.gallery-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 8px 8px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.gallery-footer .files-count-chip {
+  justify-content: flex-start;
+  height: 24px;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+.gallery-footer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.gallery-footer .pager {
+  margin-left: auto;
+}
+
+.gallery-footer .tb-btn,
+.gallery-footer .tb-page {
+  height: 24px;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+.gallery-footer .tb-icon-btn,
+.gallery-footer .tb-page {
+  min-width: 24px;
+}
+
+.gallery-footer .tb-icon-btn {
+  width: 24px;
+  padding: 0;
+}
+
+.gallery-footer .tb-icon-btn img {
+  width: 12px;
+  height: 12px;
 }
 
 body.compare-review-single-mode main {
@@ -3424,11 +3482,6 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 
 .controls .search-input-row {
   gap: 6px;
-}
-
-.controls .pager {
-  margin-left: 0;
-  flex: 0 0 auto;
 }
 
 .files-count-chip {
