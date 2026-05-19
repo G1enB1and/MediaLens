@@ -233,7 +233,7 @@ Your library is safe and portable.
 
 Includes automatic safety backups before restore.
 
-![Gallery](docs/Screenshots/Screenshot-Export-Library-Backup.png)
+![Backup & Restore](docs/Screenshots/Screenshot-Export-Library-Backup.png)
 
 ---
 
@@ -254,6 +254,20 @@ Built for thousands of files without slowing down.
 - Drag-and-drop between folders
 - Flexible filtering and sorting
 - Clean, responsive UI
+
+---
+
+### Action History
+
+Review and recover previous actions with persistent undo and redo history.
+
+- Undo or redo deletes, moves, copies, renames, folder creation, metadata edits, rotations, and hidden-status changes
+- Supports both bulk actions and single-file edits
+- Clearly shows what can still be undone or redone
+- Explains when recovery is no longer possible
+- Works with MediaLens Retention and the Windows Recycle Bin
+
+![Action History](docs/Screenshots/Screenshot-Action-History.png)
 
 ---
 
