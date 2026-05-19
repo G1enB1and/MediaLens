@@ -1,6 +1,36 @@
 # Change Log
 
-## v1.2.11 (Current)
+## v1.2.12 (Current)
+
+### Summary
+
+This release polishes the gallery header, breadcrumb navigation, and grouped browsing behavior so everyday folder navigation takes less space and behaves more predictably. MediaLens now handles compact controls, address overflow, and date-grouped layouts more like a native file browser.
+
+### Highlights
+
+- Use a cleaner two-row gallery header with compact icon buttons for nested files, sorting, filtering, grouping, and date granularity.
+- Navigate long folder paths more easily with a This PC breadcrumb entry, Explorer-style overflow, and better drive switching.
+- Switch to Group By Date more reliably without group headers collapsing into masonry or grid columns.
+
+### Added
+
+- Added a This PC breadcrumb icon at the start of drive-based paths so Windows drives are easier to reach from the address bar.
+- Added Explorer-style breadcrumb overflow that moves hidden path segments into a dropdown from left to right as space gets tight.
+- Added compact SVG-only controls for Include nested files, Sort by, Filter by, Group by, and Group By Date granularity.
+- Added light, dark, and inactive SVG variants for the new compact gallery header controls.
+
+### Changed
+
+- Changed the gallery header layout so compact controls and search share the second row, with the search box expanding or shrinking before controls wrap.
+- Changed gallery header buttons, chips, search, and breadcrumbs to use more consistent heights, corners, spacing, and borders.
+- Changed breadcrumb menu dismissal so address bar dropdowns close when clicking outside the gallery as well as inside it.
+- Changed Group By Date rendering so grouped gallery headers keep the full-width grouped layout during refreshes and setting changes.
+- Changed gallery rendering so refreshes requested during an active render are queued and replayed instead of being dropped.
+- Changed the Guided Search Builder control heights and header spacing to better match the surrounding compact header controls.
+
+---
+
+## v1.2.11
 
 ### Summary
 

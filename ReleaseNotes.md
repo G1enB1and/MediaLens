@@ -1,18 +1,18 @@
-## MediaLens v1.2.11
+## MediaLens v1.2.12
 
 ### Summary
 
-This release introduces persistent Action History with undo and redo across sessions, making large cleanup and metadata workflows safer, easier to review, and easier to recover from. MediaLens now tracks whether previous actions remain reversible, adds clearer history states, and improves workflow organization across editing and review tools.
+This release makes the gallery header more compact and dependable while improving breadcrumb navigation and date-grouped browsing. MediaLens now uses smaller icon controls, handles long folder paths more naturally, and keeps grouped gallery sections laid out correctly during refreshes.
 
 ### Highlights
 
-- Review recent file and metadata actions in a dedicated Action History window.
-- Undo or redo supported actions across sessions when the original files or retained copies are still available.
-- Work with a cleaner Edit and View menu layout plus improved light and dark theme coverage for related dialogs.
+- Browse with a cleaner two-row header that gives more room to search while keeping sort, filter, group, date, and nested-file controls close at hand.
+- Move through long folder paths with a This PC breadcrumb icon and Explorer-style overflow dropdowns.
+- Switch to Group By Date without group headers getting trapped inside masonry or grid columns.
 
 ### Notes
 
-- Action History validates recoverability lazily so normal browsing and editing stay responsive.
+- This release focuses on gallery navigation, header polish, and grouped layout reliability.
 - This release does not include installer or runtime packaging changes.
 
 Full Changelog:
