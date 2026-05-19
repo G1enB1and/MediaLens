@@ -41,7 +41,7 @@
           </button>
           <button class="icon-btn" id="openSettings" title="Settings">⚙</button>
         </div>
-        <div class="controls">
+        <div class="controls" data-pager>
           <div class="custom-select header-icon-select" id="sortSelect" tabindex="0">
             <div class="select-trigger">Sort: None</div>
             <div class="select-options">
@@ -108,29 +108,26 @@
             </div>
           </div>
           <button class="header-toggle-icon-btn" id="headerIncludeNestedFiles" type="button" title="Include nested files: on" aria-label="Include nested files: on" aria-pressed="true"></button>
-        </div>
-      </div>
-
-      <div class="toolbar" data-pager>
-        <div class="search">
-          <div class="search-input-row">
-            <input id="searchInput" class="search-input" placeholder="Search…" />
-            <button class="icon-btn advanced-search-toggle" id="toggleAdvancedSearch" title="Expand Advanced Search" aria-label="Toggle Advanced Search" aria-expanded="false">
-              <img src="icons/search-expand-white.png" alt="" id="iconAdvancedSearch" />
+          <div class="search">
+            <div class="search-input-row">
+              <input id="searchInput" class="search-input" placeholder="Search..." />
+              <button class="icon-btn advanced-search-toggle" id="toggleAdvancedSearch" title="Expand Advanced Search" aria-label="Toggle Advanced Search" aria-expanded="false">
+                <img src="icons/search-expand-white.png" alt="" id="iconAdvancedSearch" />
+              </button>
+            </div>
+          </div>
+          <div class="files-count-chip" id="galleryCountChip">0 Files</div>
+          <div class="pager">
+            <button class="tb-btn" data-prev>Prev</button>
+            <div class="tb-links" data-links></div>
+            <button class="tb-btn" data-next>Next</button>
+            <button class="tb-btn tb-icon-btn" id="scrollBottom" title="Scroll to bottom" aria-label="Scroll to bottom">
+              <img src="icons/to_bottom.svg" alt="" />
+            </button>
+            <button class="tb-btn tb-icon-btn" id="scrollTop" title="Scroll to top" aria-label="Scroll to top">
+              <img src="icons/to_top.svg" alt="" />
             </button>
           </div>
-        </div>
-        <div class="files-count-chip" id="galleryCountChip">0 Files</div>
-        <div class="pager">
-          <button class="tb-btn" data-prev>Prev</button>
-          <div class="tb-links" data-links></div>
-          <button class="tb-btn" data-next>Next</button>
-          <button class="tb-btn tb-icon-btn" id="scrollBottom" title="Scroll to bottom" aria-label="Scroll to bottom">
-            <img src="icons/to_bottom.svg" alt="" />
-          </button>
-          <button class="tb-btn tb-icon-btn" id="scrollTop" title="Scroll to top" aria-label="Scroll to top">
-            <img src="icons/to_top.svg" alt="" />
-          </button>
         </div>
       </div>
       <div class="advanced-search-panel" id="advancedSearchPanel" hidden>
