@@ -3495,6 +3495,95 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   max-width: min(100%, 320px);
 }
 
+.custom-select.header-icon-select {
+  width: 30px;
+  min-width: 30px;
+  max-width: 30px;
+  flex: 0 0 30px;
+  border-radius: 8px;
+}
+
+#filterSelect.header-icon-select,
+#groupBySelect.header-icon-select {
+  width: 30px;
+  min-width: 30px;
+  max-width: 30px;
+  flex: 0 0 30px;
+}
+
+.header-icon-select .select-trigger {
+  width: 100%;
+  padding: 0;
+  color: transparent;
+  font-size: 0;
+  text-indent: -9999px;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 17px 17px;
+}
+
+.header-icon-select .select-trigger::after {
+  content: none;
+}
+
+.header-icon-select .select-options {
+  min-width: 220px;
+  right: auto;
+}
+
+#filterSelect.header-icon-select .select-options {
+  min-width: 265px;
+}
+
+#groupBySelect.header-icon-select .select-options {
+  min-width: 232px;
+}
+
+#sortSelect.header-icon-select .select-trigger {
+  background-image: url('./icons/sort-svgrepo-com-white.svg');
+}
+
+.light-mode #sortSelect.header-icon-select .select-trigger {
+  background-image: url('./icons/sort-svgrepo-com.svg');
+}
+
+#sortSelect.header-icon-select.is-none .select-trigger,
+.light-mode #sortSelect.header-icon-select.is-none .select-trigger {
+  background-image: url('./icons/sort-svgrepo-com-gray.svg');
+}
+
+#filterSelect.header-icon-select .select-trigger {
+  background-image: url('./icons/filter-add-svgrepo-com-white.svg');
+}
+
+.light-mode #filterSelect.header-icon-select .select-trigger {
+  background-image: url('./icons/filter-add-svgrepo-com.svg');
+}
+
+#filterSelect.header-icon-select.has-filter .select-trigger {
+  background-image: url('./icons/filter-remove-solid-svgrepo-com-white.svg');
+}
+
+.light-mode #filterSelect.header-icon-select.has-filter .select-trigger {
+  background-image: url('./icons/filter-remove-solid-svgrepo-com.svg');
+}
+
+#groupBySelect.header-icon-select .select-trigger {
+  background-image: url('./icons/group-svgrepo-com-white.svg');
+}
+
+.light-mode #groupBySelect.header-icon-select .select-trigger {
+  background-image: url('./icons/group-svgrepo-com.svg');
+}
+
+#groupBySelect.header-icon-select.is-grouped .select-trigger {
+  background-image: url('./icons/group-delete-svgrepo-com-white.svg');
+}
+
+.light-mode #groupBySelect.header-icon-select.is-grouped .select-trigger {
+  background-image: url('./icons/group-delete-svgrepo-com.svg');
+}
+
 .advanced-search-join-wrap {
   display: flex;
   flex-direction: column;

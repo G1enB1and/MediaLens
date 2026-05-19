@@ -7,6 +7,47 @@ function setCustomSelectValue(selectId, value) {
   trigger.textContent = option.textContent;
   el.querySelectorAll('.selected').forEach(node => node.classList.remove('selected'));
   option.classList.add('selected');
+  updateHeaderIconSelectState(el);
+}
+
+function headerSelectOptionText(el) {
+  const selected = el && el.querySelector('.select-options [data-value].selected');
+  return selected ? String(selected.textContent || '').trim() : '';
+}
+
+function normalizeHeaderSelectLabel(text) {
+  return String(text || '')
+    .replace(/^Sort:\s*/i, '')
+    .replace(/^Filter:\s*/i, '')
+    .replace(/^Group By:\s*/i, '')
+    .trim() || 'None';
+}
+
+function updateHeaderIconSelectState(el) {
+  if (!el || !el.classList || !el.classList.contains('header-icon-select')) return;
+  const selected = el.querySelector('.select-options [data-value].selected');
+  const value = String(selected && selected.getAttribute('data-value') || '');
+  const label = normalizeHeaderSelectLabel(headerSelectOptionText(el));
+  if (el.id === 'sortSelect') {
+    const isNone = value === 'none' || !value;
+    el.classList.toggle('is-none', isNone);
+    el.title = `Sorts: ${label}`;
+    el.setAttribute('aria-label', el.title);
+    return;
+  }
+  if (el.id === 'filterSelect') {
+    const isActive = value && value !== 'all';
+    el.classList.toggle('has-filter', isActive);
+    el.title = `Filter by: ${normalizeHeaderSelectLabel(el.querySelector('.select-trigger')?.textContent || label)}`;
+    el.setAttribute('aria-label', el.title);
+    return;
+  }
+  if (el.id === 'groupBySelect') {
+    const isGrouped = value && value !== 'none';
+    el.classList.toggle('is-grouped', isGrouped);
+    el.title = `Group by: ${label}`;
+    el.setAttribute('aria-label', el.title);
+  }
 }
 
 function syncGroupByUi() {
@@ -2200,6 +2241,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!el) return;
     const trigger = el.querySelector('.select-trigger');
     const options = el.querySelector('.select-options');
+    updateHeaderIconSelectState(el);
 
     // Toggle open
     el.addEventListener('click', (e) => {
@@ -2221,6 +2263,7 @@ document.addEventListener('DOMContentLoaded', () => {
       trigger.textContent = text;
       el.querySelectorAll('.selected').forEach(s => s.classList.remove('selected'));
       opt.classList.add('selected');
+      updateHeaderIconSelectState(el);
       el.classList.remove('open');
 
       // Callback
@@ -2246,6 +2289,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const value = opt.getAttribute('data-value');
         opt.classList.toggle('selected', gFilterGroups[group] === value);
       });
+      updateHeaderIconSelectState(el);
     }
 
     render(gFilterGroups);
