@@ -14,6 +14,25 @@ class WindowNavigationMixin:
     def _update_navigation_state(self) -> None:
         self.bridge._can_nav_back = self._folder_history_index > 0
         self.bridge._can_nav_forward = 0 <= self._folder_history_index < (len(self._folder_history) - 1)
+        self.bridge._nav_back_path = (
+            self._folder_history[self._folder_history_index - 1]
+            if self.bridge._can_nav_back
+            else ""
+        )
+        self.bridge._nav_forward_path = (
+            self._folder_history[self._folder_history_index + 1]
+            if self.bridge._can_nav_forward
+            else ""
+        )
+        current_path = self.bridge._selected_folders[0] if self.bridge._selected_folders else ""
+        self.bridge._nav_up_path = ""
+        if current_path:
+            try:
+                parent = Path(current_path).parent
+                if str(parent) != str(Path(current_path)):
+                    self.bridge._nav_up_path = str(parent)
+            except Exception:
+                self.bridge._nav_up_path = ""
         self.bridge.emit_navigation_state()
 
     def _sync_tree_to_folder(self, path_str: str) -> None:

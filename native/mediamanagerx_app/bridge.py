@@ -57,7 +57,7 @@ class Bridge(BridgeMediaListingScanMixin, BridgeTagsMetadataMixin, BridgeLocalAi
     scanFinished = Signal(str, int)  # folder, count
     selectionChanged = Signal(list)  # list of folder paths
     scanProgress = Signal(str, int)  # file_path, percentage
-    navigationStateChanged = Signal(bool, bool, bool, str)  # can_back, can_forward, can_up, current_path
+    navigationStateChanged = Signal(bool, bool, bool, str, str, str, str)  # can_back, can_forward, can_up, current_path, back_path, forward_path, up_path
     childFoldersListed = Signal(str, list)  # request_id, folders
     mediaCounted = Signal(str, int)  # request_id, count
     mediaFileCounted = Signal(str, int)  # request_id, file count
@@ -107,6 +107,9 @@ class Bridge(BridgeMediaListingScanMixin, BridgeTagsMetadataMixin, BridgeLocalAi
         self._last_dlg_res = None
         self._can_nav_back = False
         self._can_nav_forward = False
+        self._nav_back_path = ""
+        self._nav_forward_path = ""
+        self._nav_up_path = ""
         self._local_ai_service = None
         self._local_ai_service_key = ""
         self._local_ai_running = False

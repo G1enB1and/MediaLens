@@ -125,6 +125,25 @@ function getFolderBreadcrumbs(path) {
   });
 }
 
+function folderTooltipName(path) {
+  const normalized = normalizeFolderPath(path);
+  if (!normalized) return '';
+  const breadcrumbs = getFolderBreadcrumbs(normalized).filter(crumb => !crumb.isThisPc);
+  if (breadcrumbs.length > 0) {
+    return breadcrumbs[breadcrumbs.length - 1].label || normalized;
+  }
+  const parts = normalized.split('\\').filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : normalized;
+}
+
+function setNavButtonTooltip(button, baseText, enabled, targetPath = '') {
+  if (!button) return;
+  const targetName = enabled ? folderTooltipName(targetPath) : '';
+  const text = targetName ? `${baseText} to ${targetName}` : baseText;
+  button.title = text;
+  button.setAttribute('aria-label', text);
+}
+
 function createFolderAddressChevron(title, onClick) {
   const chevron = document.createElement('button');
   chevron.className = 'folder-address-chevron';
@@ -735,6 +754,9 @@ function applyNavigationState(state = {}) {
   if (forwardBtn) forwardBtn.disabled = !gNavState.canForward;
   if (upBtn) upBtn.disabled = !gNavState.canUp;
   if (refreshBtn) refreshBtn.disabled = !gNavState.currentPath;
+  setNavButtonTooltip(backBtn, 'Back', gNavState.canBack, state.backPath || '');
+  setNavButtonTooltip(forwardBtn, 'Forward', gNavState.canForward, state.forwardPath || '');
+  setNavButtonTooltip(upBtn, 'Up', gNavState.canUp, state.upPath || '');
   if (prevPath !== normalizeFolderPath(gNavState.currentPath)) {
     closeFolderCrumbMenu();
     gCurrentFolderChildren = [];

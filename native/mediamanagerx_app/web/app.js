@@ -1399,12 +1399,15 @@ async function main() {
     }
 
     if (bridge.navigationStateChanged) {
-      bridge.navigationStateChanged.connect(function (canBack, canForward, canUp, currentPath) {
+      bridge.navigationStateChanged.connect(function (canBack, canForward, canUp, currentPath, backPath, forwardPath, upPath) {
         applyNavigationState({
           canBack,
           canForward,
           canUp,
           currentPath,
+          backPath,
+          forwardPath,
+          upPath,
         });
       });
     }

@@ -231,6 +231,9 @@ class BridgeNavigationCollectionsMixin:
             "canForward": self._can_nav_forward,
             "canUp": can_up,
             "currentPath": current_path,
+            "backPath": getattr(self, "_nav_back_path", ""),
+            "forwardPath": getattr(self, "_nav_forward_path", ""),
+            "upPath": getattr(self, "_nav_up_path", ""),
         }
 
     def emit_navigation_state(self) -> None:
@@ -240,6 +243,9 @@ class BridgeNavigationCollectionsMixin:
             bool(state.get("canForward")),
             bool(state.get("canUp")),
             str(state.get("currentPath", "")),
+            str(state.get("backPath", "")),
+            str(state.get("forwardPath", "")),
+            str(state.get("upPath", "")),
         )
 
     def _list_child_folders_impl(self, folder_path: str) -> list:
