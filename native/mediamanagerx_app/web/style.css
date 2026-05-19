@@ -3225,6 +3225,12 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   white-space: nowrap;
 }
 
+.folder-address-segment[hidden],
+.folder-address-chevron[hidden],
+.folder-address-overflow[hidden] {
+  display: none !important;
+}
+
 .folder-address-segment-label {
   min-width: 0;
   overflow: hidden;
@@ -3255,8 +3261,12 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 }
 
 .folder-address-segment.current {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   font-weight: 600;
+}
+
+.folder-address-segment.current.allow-overflow-truncation {
+  flex: 0 1 auto;
 }
 
 .folder-address-separator {

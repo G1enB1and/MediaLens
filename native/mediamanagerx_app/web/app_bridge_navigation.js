@@ -288,6 +288,7 @@ function updateFolderAddressOverflow() {
 
   segments.forEach((segment) => {
     segment.hidden = false;
+    segment.classList.remove('allow-overflow-truncation');
   });
   chevrons.forEach((chevron) => {
     chevron.hidden = false;
@@ -302,9 +303,10 @@ function updateFolderAddressOverflow() {
   }));
   const hiddenIndexes = [];
   const collapsibleIndexes = [];
-  for (let i = 1; i < segments.length; i += 1) {
+  for (let i = 1; i < Math.max(1, segments.length - 1); i += 1) {
     collapsibleIndexes.push(i);
   }
+  const currentSegment = segments[segments.length - 1] || null;
 
   const applyHiddenIndexes = () => {
     segments.forEach((segment) => {
@@ -322,6 +324,9 @@ function updateFolderAddressOverflow() {
   while (address.scrollWidth > address.clientWidth + 1 && collapsibleIndexes.length > 0) {
     hiddenIndexes.push(collapsibleIndexes.shift());
     applyHiddenIndexes();
+  }
+  if (address.scrollWidth > address.clientWidth + 1 && currentSegment) {
+    currentSegment.classList.add('allow-overflow-truncation');
   }
 }
 
