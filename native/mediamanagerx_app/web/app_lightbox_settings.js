@@ -814,7 +814,13 @@ function syncGalleryScopeToggles() {
   if (settingsFoldersToggle) settingsFoldersToggle.checked = !!gShowFoldersInGallery;
   if (settingsMediaFilesRadio) settingsMediaFilesRadio.checked = !gShowAllFileTypes;
   if (settingsAllFileTypesRadio) settingsAllFileTypesRadio.checked = !!gShowAllFileTypes;
-  if (headerNestedToggle) headerNestedToggle.checked = !!gIncludeNestedFiles;
+  if (headerNestedToggle) {
+    const nestedStateText = gIncludeNestedFiles ? 'on' : 'off';
+    headerNestedToggle.classList.toggle('is-on', !!gIncludeNestedFiles);
+    headerNestedToggle.setAttribute('aria-pressed', gIncludeNestedFiles ? 'true' : 'false');
+    headerNestedToggle.setAttribute('aria-label', `Include nested files: ${nestedStateText}`);
+    headerNestedToggle.title = `Include nested files: ${nestedStateText}`;
+  }
 }
 
 function wireSettings() {
@@ -931,8 +937,8 @@ function wireSettings() {
   }
 
   if (headerIncludeNestedFiles) {
-    headerIncludeNestedFiles.addEventListener('change', () => {
-      applyIncludeNestedFilesSetting(!!headerIncludeNestedFiles.checked);
+    headerIncludeNestedFiles.addEventListener('click', () => {
+      applyIncludeNestedFilesSetting(!gIncludeNestedFiles);
     });
   }
 

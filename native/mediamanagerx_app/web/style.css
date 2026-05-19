@@ -3424,36 +3424,36 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   white-space: nowrap;
 }
 
-.header-toggle-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  min-height: 34px;
-  padding: 0 12px;
+.header-toggle-icon-btn {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  padding: 0;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--input-bg);
-  color: var(--fg);
-  font-size: 13px;
-  white-space: nowrap;
+  border-radius: 8px;
+  background: center / 17px 17px no-repeat var(--input-bg) url('./icons/diagram-nested-svgrepo-com-gray.svg');
   cursor: pointer;
-  user-select: none;
 }
 
-.header-toggle-chip span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.header-toggle-icon-btn:hover {
+  border-color: var(--border-strong);
+  background-color: var(--hover-bg);
 }
 
-.header-toggle-chip:hover {
-  border-color: var(--accent);
-  background: var(--hover-bg);
+.header-toggle-icon-btn:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent), transparent 35%);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent), transparent 78%);
 }
 
-.header-toggle-chip input {
-  margin: 0;
+.header-toggle-icon-btn.is-on {
+  border-color: var(--border);
+  background-color: var(--input-bg);
+  background-image: url('./icons/diagram-nested-svgrepo-com-white.svg');
+}
+
+.light-mode .header-toggle-icon-btn.is-on {
+  background-image: url('./icons/diagram-nested-svgrepo-com.svg');
 }
 
 /* Custom Select Replacement */
