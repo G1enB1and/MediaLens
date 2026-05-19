@@ -31,7 +31,7 @@ function updateHeaderIconSelectState(el) {
   if (el.id === 'sortSelect') {
     const isNone = value === 'none' || !value;
     el.classList.toggle('is-none', isNone);
-    el.title = `Sorts: ${label}`;
+    el.title = `Sort by: ${label}`;
     el.setAttribute('aria-label', el.title);
     return;
   }

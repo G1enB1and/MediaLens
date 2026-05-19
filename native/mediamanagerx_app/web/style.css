@@ -3569,11 +3569,16 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 }
 
 #groupBySelect.header-icon-select .select-trigger {
-  background-image: url('./icons/group-svgrepo-com-white.svg');
+  background-image: url('./icons/group-list-svgrepo-com-white.svg');
 }
 
 .light-mode #groupBySelect.header-icon-select .select-trigger {
-  background-image: url('./icons/group-svgrepo-com.svg');
+  background-image: url('./icons/group-list-svgrepo-com.svg');
+}
+
+#groupBySelect.header-icon-select:not(.is-grouped) .select-trigger,
+.light-mode #groupBySelect.header-icon-select:not(.is-grouped) .select-trigger {
+  background-image: url('./icons/group-list-svgrepo-com-gray.svg');
 }
 
 #groupBySelect.header-icon-select.is-grouped .select-trigger {
