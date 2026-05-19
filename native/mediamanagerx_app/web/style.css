@@ -830,12 +830,57 @@ main {
   font-size: 12px;
 }
 
+.gallery-footer .scan-indicator {
+  position: static;
+  transform: none;
+  z-index: auto;
+  width: auto;
+  min-width: 0;
+  max-width: 520px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transition: none;
+  flex: 1 1 auto;
+}
+
+.gallery-footer .scan-indicator:hover {
+  background: transparent;
+}
+
+.gallery-footer .scan-content {
+  gap: 4px;
+}
+
+.gallery-footer .scan-text {
+  align-items: center;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.gallery-footer .scan-label {
+  flex: 0 0 auto;
+  letter-spacing: 0.35px;
+}
+
+.gallery-footer .scan-file {
+  min-width: 0;
+}
+
+.gallery-footer .scan-progress-container {
+  height: 3px;
+}
+
 .gallery-footer-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
+  margin-left: auto;
   min-width: 0;
 }
 

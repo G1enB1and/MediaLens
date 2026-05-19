@@ -224,6 +224,17 @@
 
       <div class="gallery-footer" data-pager>
         <div class="files-count-chip" id="galleryCountChip">0 Files</div>
+        <div id="scanIndicator" class="scan-indicator gallery-footer-scan" hidden>
+          <div class="scan-content">
+            <div class="scan-text">
+              <span class="scan-label">Scanning:</span>
+              <span id="scanFile" class="scan-file">...</span>
+            </div>
+            <div class="scan-progress-container">
+              <div id="scanBar" class="scan-bar"></div>
+            </div>
+          </div>
+        </div>
         <div class="gallery-footer-actions">
           <div class="pager">
             <button class="tb-btn" data-prev>Prev</button>
@@ -432,17 +443,6 @@
       </div>
     </div>
 
-    <div id="scanIndicator" class="scan-indicator" hidden>
-      <div class="scan-content">
-        <div class="scan-text">
-          <span class="scan-label">Scanning:</span>
-          <span id="scanFile" class="scan-file">...</span>
-        </div>
-        <div class="scan-progress-container">
-          <div id="scanBar" class="scan-bar"></div>
-        </div>
-      </div>
-    </div>
     <div id="textProcessingToast" class="scan-indicator" style="bottom: 88px;" hidden>
       <div class="scan-content">
         <div class="scan-text">
