@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from native.mediamanagerx_app.common import *
 from native.mediamanagerx_app.image_utils import *
 from native.mediamanagerx_app.runtime_paths import *
@@ -242,6 +244,22 @@ class BridgeNavigationCollectionsMixin:
 
     def _list_child_folders_impl(self, folder_path: str) -> list:
         try:
+            if str(folder_path or "").strip() == "__medialens_this_pc__":
+                drives: list[dict] = []
+                if os.name == "nt":
+                    for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+                        drive = f"{letter}:\\"
+                        try:
+                            root = Path(drive)
+                            if root.exists() and root.is_dir():
+                                drives.append({
+                                    "name": f"{letter}:",
+                                    "path": drive,
+                                })
+                        except Exception:
+                            continue
+                return drives
+
             root = Path(str(folder_path or ""))
             if not root.exists() or not root.is_dir():
                 return []

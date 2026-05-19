@@ -82,6 +82,9 @@ function normalizeFolderPath(path) {
   return String(path || '').replace(/\//g, '\\').trim();
 }
 
+const THIS_PC_CRUMB_PATH = '__medialens_this_pc__';
+let gCollapsedAddressCrumbs = [];
+
 function getFolderBreadcrumbs(path) {
   const normalized = normalizeFolderPath(path);
   if (!normalized) return [];
@@ -105,7 +108,7 @@ function getFolderBreadcrumbs(path) {
   if (driveMatch) {
     const drive = driveMatch[0];
     const parts = normalized.slice(drive.length).split('\\').filter(Boolean);
-    const breadcrumbs = [{ label: drive, path: `${drive}\\` }];
+    const breadcrumbs = [{ label: 'This PC', path: THIS_PC_CRUMB_PATH, isThisPc: true }, { label: drive, path: `${drive}\\` }];
     let current = drive;
     parts.forEach((part) => {
       current += `\\${part}`;
@@ -120,6 +123,80 @@ function getFolderBreadcrumbs(path) {
     current = current ? `${current}\\${part}` : part;
     return { label: part, path: current };
   });
+}
+
+function createFolderAddressChevron(title, onClick) {
+  const chevron = document.createElement('button');
+  chevron.className = 'folder-address-chevron';
+  chevron.type = 'button';
+  chevron.title = title;
+  chevron.setAttribute('aria-haspopup', 'menu');
+  chevron.setAttribute('aria-expanded', 'false');
+  chevron.addEventListener('click', (e) => {
+    e.stopPropagation();
+    onClick(chevron);
+  });
+  return chevron;
+}
+
+function createFolderAddressSegment(crumb, index, isCurrent) {
+  const btn = document.createElement('button');
+  btn.className = 'folder-address-segment';
+  if (crumb.isThisPc) btn.classList.add('this-pc');
+  if (isCurrent) btn.classList.add('current');
+  btn.type = 'button';
+  btn.title = crumb.isThisPc ? 'This PC' : crumb.path;
+  if (crumb.isThisPc) btn.setAttribute('aria-label', 'This PC');
+  btn.dataset.path = crumb.path;
+  btn.dataset.crumbIndex = String(index);
+
+  if (crumb.isThisPc) {
+    const icon = document.createElement('span');
+    icon.className = 'folder-address-this-pc-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    btn.appendChild(icon);
+  }
+
+  if (!crumb.isThisPc) {
+    const label = document.createElement('span');
+    label.className = 'folder-address-segment-label';
+    label.textContent = crumb.label;
+    btn.appendChild(label);
+  }
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (crumb.isThisPc) {
+      const firstChevron = document.querySelector('.folder-address-chevron[data-after-index="0"]');
+      if (firstChevron) toggleFolderCrumbMenu(THIS_PC_CRUMB_PATH, firstChevron, 0);
+      return;
+    }
+    openFolderItem(crumb.path);
+  });
+  return btn;
+}
+
+function createFolderAddressOverflowButton() {
+  const btn = document.createElement('button');
+  btn.className = 'folder-address-overflow';
+  btn.type = 'button';
+  btn.textContent = '...';
+  btn.title = 'Show hidden path folders';
+  btn.setAttribute('aria-haspopup', 'menu');
+  btn.setAttribute('aria-expanded', 'false');
+  btn.hidden = true;
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const items = (gCollapsedAddressCrumbs || [])
+      .filter((crumb) => crumb && crumb.path && !crumb.isThisPc)
+      .map((crumb) => ({
+        name: crumb.label,
+        path: crumb.path,
+      }));
+    if (!items.length) return;
+    openFolderCrumbMenu(items, btn, 0, null, '');
+  });
+  return btn;
 }
 
 function fetchFolderChildren(path) {
@@ -197,17 +274,63 @@ function getFolderAddressContentWidth(address) {
   return width;
 }
 
+function updateFolderAddressOverflow() {
+  const address = document.getElementById('selectedFolder');
+  if (!address || address.classList.contains('is-editing')) return;
+
+  const overflow = address.querySelector('.folder-address-overflow');
+  const segments = Array.from(address.querySelectorAll('.folder-address-segment[data-crumb-index]'));
+  const chevrons = Array.from(address.querySelectorAll('.folder-address-chevron[data-after-index]'));
+  if (!segments.length || !overflow) {
+    gCollapsedAddressCrumbs = [];
+    return;
+  }
+
+  segments.forEach((segment) => {
+    segment.hidden = false;
+  });
+  chevrons.forEach((chevron) => {
+    chevron.hidden = false;
+  });
+  overflow.hidden = true;
+  gCollapsedAddressCrumbs = [];
+
+  const crumbs = segments.map((segment) => ({
+    label: segment.querySelector('.folder-address-segment-label')?.textContent || segment.textContent || '',
+    path: segment.dataset.path || '',
+    isThisPc: segment.dataset.path === THIS_PC_CRUMB_PATH,
+  }));
+  const hiddenIndexes = [];
+  const collapsibleIndexes = [];
+  for (let i = 1; i < segments.length; i += 1) {
+    collapsibleIndexes.push(i);
+  }
+
+  const applyHiddenIndexes = () => {
+    segments.forEach((segment) => {
+      const index = Number(segment.dataset.crumbIndex || -1);
+      segment.hidden = hiddenIndexes.includes(index);
+    });
+    chevrons.forEach((chevron) => {
+      const index = Number(chevron.dataset.afterIndex || -1);
+      chevron.hidden = hiddenIndexes.includes(index);
+    });
+    gCollapsedAddressCrumbs = hiddenIndexes.map((index) => crumbs[index]).filter(Boolean);
+    overflow.hidden = gCollapsedAddressCrumbs.length === 0;
+  };
+
+  while (address.scrollWidth > address.clientWidth + 1 && collapsibleIndexes.length > 0) {
+    hiddenIndexes.push(collapsibleIndexes.shift());
+    applyHiddenIndexes();
+  }
+}
+
 function updateSelectedFolderLabelVisibility() {
   const address = document.getElementById('selectedFolder');
   const row = address ? address.closest('.kv') : null;
   if (!address || !row) return;
-  const folderNav = row.querySelector('.folder-nav');
-  const rowStyles = window.getComputedStyle(row);
-  const gap = parseFloat(rowStyles.columnGap || rowStyles.gap || '0') || 0;
-  const navWidth = folderNav ? Math.ceil(folderNav.getBoundingClientRect().width || folderNav.scrollWidth || 0) : 0;
-  const contentWidth = getFolderAddressContentWidth(address);
-  const nextBasis = Math.max(0, navWidth + gap + contentWidth);
-  row.style.flexBasis = `${nextBasis}px`;
+  row.style.flexBasis = '';
+  updateFolderAddressOverflow();
 }
 
 function fetchMediaList(folders, limit, offset, sortBy, filterType, searchQuery) {
@@ -312,50 +435,28 @@ function renderFolderAddress() {
 
   const crumbs = getFolderBreadcrumbs(currentPath);
   el.innerHTML = '';
+  gCollapsedAddressCrumbs = [];
   crumbs.forEach((crumb, index) => {
-    const btn = document.createElement('button');
-    btn.className = 'folder-address-segment';
-    if (index === crumbs.length - 1) btn.classList.add('current');
-    btn.type = 'button';
-    btn.textContent = crumb.label;
-    btn.title = crumb.path;
-    btn.dataset.path = crumb.path;
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openFolderItem(crumb.path);
-    });
+    const btn = createFolderAddressSegment(crumb, index, index === crumbs.length - 1);
     el.appendChild(btn);
 
     if (index < crumbs.length - 1) {
-      const chevron = document.createElement('button');
-      chevron.className = 'folder-address-chevron';
-      chevron.type = 'button';
-      chevron.textContent = '>';
-      chevron.title = `Show folders under ${crumb.label}`;
-      chevron.setAttribute('aria-haspopup', 'menu');
-      chevron.setAttribute('aria-expanded', 'false');
-      chevron.addEventListener('click', (e) => {
-        e.stopPropagation();
+      const chevron = createFolderAddressChevron(`Show folders under ${crumb.label}`, () => {
         toggleFolderCrumbMenu(crumb.path, chevron, 0);
       });
+      chevron.dataset.afterIndex = String(index);
       el.appendChild(chevron);
+      if (index === 0 && crumbs[0] && crumbs[0].isThisPc) {
+        el.appendChild(createFolderAddressOverflowButton());
+      }
     }
   });
   if (Array.isArray(gCurrentFolderChildren) && gCurrentFolderChildren.length > 0) {
-    const chevron = document.createElement('button');
-    chevron.className = 'folder-address-chevron';
-    chevron.type = 'button';
-    chevron.textContent = '>';
-    chevron.title = 'Show folders in the current folder';
-    chevron.setAttribute('aria-haspopup', 'menu');
-    chevron.setAttribute('aria-expanded', 'false');
-    chevron.addEventListener('click', (e) => {
-      e.stopPropagation();
+    const chevron = createFolderAddressChevron('Show folders in the current folder', () => {
       toggleFolderCrumbMenu(currentPath, chevron, 0, gCurrentFolderChildren);
     });
     el.appendChild(chevron);
   }
-  el.scrollLeft = el.scrollWidth;
   requestAnimationFrame(updateSelectedFolderLabelVisibility);
 }
 
@@ -463,7 +564,7 @@ function populateFolderCrumbMenu(level, items) {
     label.textContent = item.name || item.path || '';
     const arrow = document.createElement('span');
     arrow.className = 'folder-crumb-menu-item-arrow';
-    arrow.textContent = '>';
+    arrow.setAttribute('aria-hidden', 'true');
 
     btn.appendChild(label);
     btn.appendChild(arrow);

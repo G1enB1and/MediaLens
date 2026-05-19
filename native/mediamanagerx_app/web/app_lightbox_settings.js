@@ -721,6 +721,7 @@ function wirePager() {
     addressBar.addEventListener('click', (e) => {
       if (e.target && e.target.closest('.folder-address-segment')) return;
       if (e.target && e.target.closest('.folder-address-chevron')) return;
+      if (e.target && e.target.closest('.folder-address-overflow')) return;
       if (gAddressBarEditing) return;
       closeFolderCrumbMenu();
       gAddressBarEditing = true;
@@ -736,7 +737,7 @@ function wirePager() {
   }
 
   document.addEventListener('click', (e) => {
-    if (e.target && (e.target.closest('.folder-crumb-menu') || e.target.closest('.folder-address-chevron'))) {
+    if (e.target && (e.target.closest('.folder-crumb-menu') || e.target.closest('.folder-address-chevron') || e.target.closest('.folder-address-overflow'))) {
       return;
     }
     closeFolderCrumbMenu();
