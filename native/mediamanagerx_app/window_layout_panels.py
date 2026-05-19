@@ -542,6 +542,8 @@ class WindowLayoutPanelsMixin:
 
         # Center: embedded WebEngine UI scaffold + future bottom chat panel
         center_container = QWidget(splitter)
+        center_container.setMinimumWidth(0)
+        center_container.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
         center_container_layout = QVBoxLayout(center_container)
         center_container_layout.setContentsMargins(0, 0, 0, 0)
 
@@ -553,26 +555,31 @@ class WindowLayoutPanelsMixin:
         self.center_splitter = center_splitter
 
         center = QWidget(center_splitter)
+        center.setMinimumWidth(0)
         center.setMinimumHeight(0)
-        center.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
+        center.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         center_layout = QVBoxLayout(center)
         center_layout.setContentsMargins(0, 0, 0, 0)
 
         self.center_workspace_stack = QStackedWidget(center)
         self.center_workspace_stack.setObjectName("centerWorkspaceStack")
+        self.center_workspace_stack.setMinimumWidth(0)
         self.center_workspace_stack.setMinimumHeight(0)
-        self.center_workspace_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
+        self.center_workspace_stack.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         center_layout.addWidget(self.center_workspace_stack)
 
         self.gallery_workspace = QWidget(self.center_workspace_stack)
         self.gallery_workspace.setObjectName("galleryWorkspace")
+        self.gallery_workspace.setMinimumWidth(0)
+        self.gallery_workspace.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         gallery_workspace_layout = QVBoxLayout(self.gallery_workspace)
         gallery_workspace_layout.setContentsMargins(0, 0, 0, 0)
         gallery_workspace_layout.setSpacing(0)
 
         self.web = GalleryView(self.gallery_workspace)
+        self.web.setMinimumWidth(0)
         self.web.setMinimumHeight(0)
-        self.web.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
+        self.web.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.web.setStyleSheet(f"background: {Theme.get_bg(accent_q)};")
         self.web.setAutoFillBackground(True)
         if bool(_WINDOWS_WEBENGINE_RUNTIME.get("use_custom_page", True)):
