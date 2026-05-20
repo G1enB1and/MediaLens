@@ -229,6 +229,9 @@ class WindowSidebarBulkMixin:
         if hasattr(self, "bulk_ocr_right_layout"):
             self.bulk_ocr_right_layout.activate()
         if self._is_bulk_editor_active():
+            # Bulk row editors size themselves against the QListWidget viewport.  After
+            # the outer sidebar changes width, force that row-level pass to rerun so
+            # the text boxes stay locked to the thumbnail/button column math.
             current_mode = self._current_bulk_editor_mode()
             if current_mode == "ocr" and hasattr(self, "_queue_bulk_ocr_selected_files_layout_sync"):
                 self._queue_bulk_ocr_selected_files_layout_sync()
@@ -352,6 +355,12 @@ class WindowSidebarBulkMixin:
         for widget in active_container.findChildren(QWidget):
             if not isinstance(widget, (QLineEdit, QTextEdit, QPlainTextEdit)):
                 continue
+            # Do not apply full-sidebar widths to editors embedded inside
+            # BulkSelectedFileRow.  Those rows have their own width contract based on
+            # the visible list viewport, thumbnail column, button row, margins, and
+            # stacked/non-stacked mode.  Overriding them here was the regression that
+            # made row text boxes overflow while previews and buttons still looked
+            # correct.
             if self._is_bulk_editor_active() and self._is_bulk_selected_file_row_child(widget, active_container):
                 continue
             widget.setMinimumWidth(0)
@@ -454,7 +463,7 @@ class WindowSidebarBulkMixin:
             if target is not None:
                 self.bulk_pages_stack.setCurrentWidget(target)
         if self._is_bulk_editor_active():
-            selection_count = len(self._current_file_paths())
+            selection_count = len(self._current_bulk_media_paths())
             if next_mode == "captions":
                 self._configure_bulk_caption_editor(selection_count)
             elif next_mode == "ocr":
@@ -680,7 +689,7 @@ class WindowSidebarBulkMixin:
         QTimer.singleShot(0, self._select_all_visible_gallery_items)
 
     def _save_bulk_descriptions_to_db(self) -> None:
-        paths = self._current_file_paths()
+        paths = self._current_bulk_media_paths()
         if not paths:
             return
         updated = 0
@@ -713,7 +722,7 @@ class WindowSidebarBulkMixin:
         QTimer.singleShot(3000, lambda: self.bulk_caption_status_lbl.setText(""))
 
     def _clear_bulk_descriptions(self) -> None:
-        paths = self._current_file_paths()
+        paths = self._current_bulk_media_paths()
         if not paths:
             return
         for path in paths:
@@ -841,10 +850,25 @@ class WindowSidebarBulkMixin:
             file_paths.append(path)
         return file_paths
 
+    def _current_bulk_media_paths(self, paths: list[str] | None = None) -> list[str]:
+        # Bulk editors run metadata, thumbnail, OCR, and local AI work.  Keep their
+        # selection scoped to supported media even when the gallery is configured to
+        # show other file types such as text documents.
+        file_paths = self._current_file_paths(paths)
+        media_paths: list[str] = []
+        for path in file_paths:
+            try:
+                is_supported = bool(self.bridge._is_supported_media_path(path))
+            except Exception:
+                is_supported = Path(path).suffix.lower() in (IMAGE_EXTS | VIDEO_EXTS)
+            if is_supported:
+                media_paths.append(path)
+        return media_paths
+
     def _selected_paths_tag_summary(self) -> tuple[list[str], list[str]]:
         from app.mediamanager.utils.pathing import normalize_windows_path
 
-        paths = self._current_file_paths()
+        paths = self._current_bulk_media_paths()
         if not paths:
             return [], []
         unique_paths: list[str] = []
@@ -1010,7 +1034,7 @@ class WindowSidebarBulkMixin:
         return
 
     def _save_bulk_ocr_text_to_db(self) -> None:
-        paths = self._current_file_paths()
+        paths = self._current_bulk_media_paths()
         if not paths or not hasattr(self, "bulk_ocr_selected_files_list"):
             return
         updated = 0
@@ -1030,7 +1054,7 @@ class WindowSidebarBulkMixin:
         self._bulk_ocr_status(f"OCR text saved for {updated} item{'s' if updated != 1 else ''}")
 
     def _clear_bulk_ocr_text(self) -> None:
-        paths = self._current_file_paths()
+        paths = self._current_bulk_media_paths()
         if not paths:
             return
         updated = 0
@@ -1079,7 +1103,7 @@ class WindowSidebarBulkMixin:
         self._current_paths = [item for item in current_paths if str(item or "").casefold() != target]
 
     def _sync_bulk_ocr_selection_controls(self) -> None:
-        selection_count = len(self._current_file_paths())
+        selection_count = len(self._current_bulk_media_paths())
         if hasattr(self, "bulk_ocr_selection_lbl"):
             self.bulk_ocr_selection_lbl.setText(f"<span style=\"font-weight:700;\">{selection_count}</span> files selected")
         for button, text in (
@@ -1194,7 +1218,7 @@ class WindowSidebarBulkMixin:
             self._run_bulk_ocr_for_paths(self._bulk_ai_ocr_source(), [clean_path])
 
     def _run_bulk_ocr_for_paths(self, source: str, paths: list[str] | None = None) -> None:
-        clean_paths = self._current_file_paths(paths)
+        clean_paths = self._current_bulk_media_paths(paths)
         if not clean_paths or not hasattr(self.bridge, "run_manual_ocr_with_source"):
             return
         source_key = str(source or "paddle_fast").strip() or "paddle_fast"
@@ -1233,8 +1257,10 @@ class WindowSidebarBulkMixin:
 
     def _open_ocr_review_for_current_file(self) -> None:
         path = str(getattr(self, "_current_path", "") or "").strip()
+        if path and not self._current_bulk_media_paths([path]):
+            path = ""
         if not path:
-            paths = self._current_file_paths()
+            paths = self._current_bulk_media_paths()
             path = paths[0] if paths else ""
         self._open_ocr_review_panel_for_path(path)
 
@@ -1272,9 +1298,9 @@ class WindowSidebarBulkMixin:
         return "Pan and Zoom with mouse scrollwheel to cursor position"
 
     def _ocr_review_selected_paths(self) -> list[str]:
-        paths = self._current_file_paths()
+        paths = self._current_bulk_media_paths()
         current = str(getattr(self, "_ocr_review_path", "") or "").strip()
-        if current and current not in paths and Path(current).is_file():
+        if current and current not in paths and Path(current).is_file() and self._current_bulk_media_paths([current]):
             paths.insert(0, current)
         return paths
 
@@ -1606,7 +1632,7 @@ class WindowSidebarBulkMixin:
             list_widget._bulk_layout_state = None
             self._detach_bulk_selected_file_rows(list_widget)
             list_widget.clear()
-            paths = self._current_file_paths()
+            paths = self._current_bulk_media_paths()
             payloads = self._bulk_selected_file_payloads(paths)
             try:
                 from app.mediamanager.utils.pathing import normalize_windows_path
@@ -2307,7 +2333,7 @@ class WindowSidebarBulkMixin:
         if tag_list_id <= 0:
             return
         tags: list[str] = []
-        for path in self._current_file_paths():
+        for path in self._current_bulk_media_paths() if self._is_bulk_editor_active() else self._current_file_paths():
             try:
                 payload = self.bridge.get_media_metadata(path)
                 tags = self._merge_tag_lists(tags, list(payload.get("tags") or []))
@@ -2582,7 +2608,7 @@ class WindowSidebarBulkMixin:
 
     def _add_tag_to_current_editor(self, tag_name: str) -> None:
         if self._is_bulk_editor_active():
-            paths = self._current_file_paths()
+            paths = self._current_bulk_media_paths()
             for path in paths:
                 try:
                     self.bridge.attach_media_tags(path, [tag_name])
@@ -2615,7 +2641,7 @@ class WindowSidebarBulkMixin:
             from app.mediamanager.db.tags_repo import list_media_tags
 
             remove_key = str(tag_name or "").casefold()
-            paths = self._current_file_paths()
+            paths = self._current_bulk_media_paths()
             for path in paths:
                 try:
                     media = get_media_by_path(self.bridge.conn, path)

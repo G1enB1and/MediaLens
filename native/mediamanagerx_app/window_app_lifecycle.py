@@ -876,6 +876,10 @@ class WindowAppLifecycleMixin:
         if event.type() in {QEvent.Type.ApplicationDeactivate, QEvent.Type.WindowDeactivate}:
             self._dismiss_web_menus()
         if event.type() == QEvent.Type.Resize:
+            # Every right-sidebar scroll viewport can change width independently when
+            # switching bulk modes or resizing the splitter.  Keep them all wired to
+            # the same width sync so row editors never keep a stale size from another
+            # bulk page.
             watched_viewports = {
                 getattr(getattr(self, "scroll_area", None), "viewport", lambda: None)(),
                 getattr(getattr(self, "bulk_scroll_area", None), "viewport", lambda: None)(),
