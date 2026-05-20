@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
     QStyleOptionViewItem,
     QStackedWidget,
     QTabBar,
+    QTabWidget,
     QTextEdit,
     QTimeEdit,
     QTreeWidget,
