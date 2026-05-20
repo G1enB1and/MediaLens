@@ -879,6 +879,8 @@ class WindowAppLifecycleMixin:
             watched_viewports = {
                 getattr(getattr(self, "scroll_area", None), "viewport", lambda: None)(),
                 getattr(getattr(self, "bulk_scroll_area", None), "viewport", lambda: None)(),
+                getattr(getattr(self, "bulk_caption_scroll_area", None), "viewport", lambda: None)(),
+                getattr(getattr(self, "bulk_ocr_scroll_area", None), "viewport", lambda: None)(),
             }
             if watched in watched_viewports:
                 self._queue_sidebar_panel_width_sync()

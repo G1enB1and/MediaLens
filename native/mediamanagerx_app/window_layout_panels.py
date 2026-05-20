@@ -24,6 +24,11 @@ class WindowLayoutPanelsMixin:
         icon_path = Path(__file__).with_name("web") / "scrollbar_arrows" / f"{mode}_{direction}.svg"
         return QIcon(str(icon_path))
 
+    def _native_show_preview_icon(self) -> QIcon:
+        suffix = "" if Theme.get_is_light() else "-white"
+        icon_path = Path(__file__).with_name("web") / "icons" / f"photo-svgrepo-com{suffix}.svg"
+        return QIcon(str(icon_path))
+
     def _set_bulk_tag_section_toggle(self, toggle: QToolButton, label: str, expanded: bool) -> None:
         toggle.setText(label)
         toggle.setProperty("sectionLabel", label)
@@ -958,10 +963,12 @@ class WindowLayoutPanelsMixin:
         preview_header_layout.addWidget(self.btn_close_preview)
 
         # Toggle ON (Show) button
-        self.btn_show_preview_inline = QPushButton("â›¶") # Unicode maximize/corners
+        self.btn_show_preview_inline = QPushButton("")
         self.btn_show_preview_inline.setObjectName("btnShowPreviewInline")
         self.btn_show_preview_inline.setToolTip("Show preview image")
         self.btn_show_preview_inline.setFixedSize(QSize(22, 22))
+        self.btn_show_preview_inline.setIcon(self._native_show_preview_icon())
+        self.btn_show_preview_inline.setIconSize(QSize(14, 14))
         self.btn_show_preview_inline.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_show_preview_inline.clicked.connect(lambda: self.bridge.set_setting_bool("ui.preview_above_details", True))
         preview_header_layout.addWidget(self.btn_show_preview_inline)

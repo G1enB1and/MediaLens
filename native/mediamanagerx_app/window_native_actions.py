@@ -624,6 +624,8 @@ class WindowNativeActionsMixin:
             button = getattr(self, attr, None)
             if button is not None:
                 button.setIcon(self._native_arrow_icon(direction))
+        if hasattr(self, "btn_show_preview_inline"):
+            self.btn_show_preview_inline.setIcon(self._native_show_preview_icon())
         for toggle in (
             getattr(self, "bulk_common_tags_toggle", None),
             getattr(self, "bulk_uncommon_tags_toggle", None),

@@ -1239,9 +1239,11 @@ class BulkSelectedFileRow(QWidget):
         self.tags_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.tags_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.tags_edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        self.tags_edit.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
         self.tags_edit.setPlainText(str(tags_text or ""))
         self.tags_edit.setFixedHeight(self._content_height)
-        self.tags_edit.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.tags_edit.setMinimumWidth(0)
+        self.tags_edit.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         if bool(auto_save_on_edit_finished):
             self.tags_edit.editingFinished.connect(self._emit_tags_edited)
         tags_host_layout.addWidget(self.tags_edit)
@@ -1531,6 +1533,7 @@ class BulkSelectedFileRow(QWidget):
         clamped_width = max(self._MIN_EDITOR_WIDTH, int(host_width or 0))
         self.tags_edit_host.setFixedWidth(clamped_width)
         self.tags_edit.setFixedWidth(clamped_width)
+        self._refresh_tags_edit_wrap(clamped_width)
         self._apply_simple_button_widths(clamped_width)
         if getattr(self, "action_buttons", None):
             self._apply_action_button_widths(clamped_width, stacked)
@@ -1766,11 +1769,22 @@ class BulkSelectedFileRow(QWidget):
                 )
             self.tags_edit_host.setFixedWidth(host_width)
             self.tags_edit.setFixedWidth(host_width)
+            self._refresh_tags_edit_wrap(host_width)
             self._apply_simple_button_widths(host_width)
             if getattr(self, "action_buttons", None):
                 self._apply_action_button_widths(host_width, bool(getattr(self, "_stacked_content", False)))
             self._refresh_tags_host_height()
             self._sync_thumbnail_column_size(host_width, bool(getattr(self, "_stacked_content", False)))
+        except RuntimeError:
+            pass
+
+    def _refresh_tags_edit_wrap(self, width: int) -> None:
+        try:
+            wrap_width = max(1, int(width or 0) - 2 * int(self.tags_edit.frameWidth()))
+            self.tags_edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+            self.tags_edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+            self.tags_edit.document().setTextWidth(wrap_width)
+            self.tags_edit.viewport().update()
         except RuntimeError:
             pass
 

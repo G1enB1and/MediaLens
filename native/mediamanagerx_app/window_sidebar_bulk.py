@@ -228,6 +228,14 @@ class WindowSidebarBulkMixin:
             self.bulk_caption_right_layout.activate()
         if hasattr(self, "bulk_ocr_right_layout"):
             self.bulk_ocr_right_layout.activate()
+        if self._is_bulk_editor_active():
+            current_mode = self._current_bulk_editor_mode()
+            if current_mode == "ocr" and hasattr(self, "_queue_bulk_ocr_selected_files_layout_sync"):
+                self._queue_bulk_ocr_selected_files_layout_sync()
+            elif current_mode == "captions" and hasattr(self, "_queue_bulk_caption_selected_files_layout_sync"):
+                self._queue_bulk_caption_selected_files_layout_sync()
+            elif hasattr(self, "_queue_bulk_selected_files_layout_sync"):
+                self._queue_bulk_selected_files_layout_sync()
 
     def _update_sidebar_action_buttons(self, available_w: int | None = None) -> None:
         if not hasattr(self, "scroll_area"):
@@ -332,17 +340,35 @@ class WindowSidebarBulkMixin:
             label.setSizePolicy(QSizePolicy.Policy.Ignored, label.sizePolicy().verticalPolicy())
             label.updateGeometry()
         if self._is_bulk_editor_active():
-            active_container = self.bulk_caption_scroll_container if self._current_bulk_editor_mode() == "captions" and hasattr(self, "bulk_caption_scroll_container") else self.bulk_scroll_container
+            current_mode = self._current_bulk_editor_mode()
+            if current_mode == "ocr" and hasattr(self, "bulk_ocr_scroll_container"):
+                active_container = self.bulk_ocr_scroll_container
+            elif current_mode == "captions" and hasattr(self, "bulk_caption_scroll_container"):
+                active_container = self.bulk_caption_scroll_container
+            else:
+                active_container = self.bulk_scroll_container
         else:
             active_container = self.scroll_container
         for widget in active_container.findChildren(QWidget):
             if not isinstance(widget, (QLineEdit, QTextEdit, QPlainTextEdit)):
+                continue
+            if self._is_bulk_editor_active() and self._is_bulk_selected_file_row_child(widget, active_container):
                 continue
             widget.setMinimumWidth(0)
             widget.setMaximumWidth(16777215)
             widget.setFixedWidth(available_w)
             widget.setSizePolicy(QSizePolicy.Policy.Ignored, widget.sizePolicy().verticalPolicy())
             widget.updateGeometry()
+
+    def _is_bulk_selected_file_row_child(self, widget: QWidget, boundary: QWidget | None = None) -> bool:
+        if str(widget.objectName() or "") == "bulkSelectedFileTagsEdit":
+            return True
+        parent = widget.parentWidget()
+        while parent is not None and parent is not boundary:
+            if isinstance(parent, (BulkSelectedFileRow, BulkSelectedFilesListWidget)):
+                return True
+            parent = parent.parentWidget()
+        return False
 
     def _metadata_content_widgets(self) -> list[QWidget]:
         widgets: list[QWidget] = [
