@@ -39,6 +39,23 @@ def test_recompute_keeps_partially_available_group_undoable():
     assert int(action_history_repo.latest_undoable_entry(conn)["id"]) == entry_id
 
 
+def test_delete_all_action_history_clears_entries_and_items():
+    conn = _conn()
+    action_history_repo.create_entry(
+        conn,
+        action_type="move",
+        summary="Moved file",
+        items=[{"old_path": "C:/a.jpg", "new_path": "C:/b.jpg"}],
+    )
+
+    deleted = action_history_repo.delete_all(conn)
+
+    assert deleted == 1
+    assert action_history_repo.list_entries(conn) == []
+    assert action_history_repo.latest_undoable_entry(conn) is None
+    assert conn.execute("SELECT COUNT(*) FROM action_history_items").fetchone()[0] == 0
+
+
 def test_delete_validation_marks_missing_retention_unavailable():
     entry = {"action_type": "delete"}
     item = make_history_item(old_path="C:/safe/deleted.jpg", retention_id="missing-retention-id")

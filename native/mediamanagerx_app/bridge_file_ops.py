@@ -1123,6 +1123,20 @@ class BridgeFileOpsMixin:
         except Exception:
             return []
 
+    @Slot(result=int)
+    def delete_all_action_history(self) -> int:
+        try:
+            from app.mediamanager.db import action_history_repo
+            count = action_history_repo.delete_all(self.conn)
+            self._set_action_history_message("")
+            self.actionHistoryChanged.emit()
+            return int(count or 0)
+        except Exception as exc:
+            try: self._log(f"Delete all action history failed: {exc}")
+            except Exception: pass
+            self._set_action_history_message(f"Delete all action history failed: {exc}")
+            return 0
+
     @Slot(int, result=int)
     def validate_action_history(self, limit: int = 100) -> int:
         try:

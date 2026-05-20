@@ -283,6 +283,15 @@ def clear_redo_stack(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def delete_all(conn: sqlite3.Connection) -> int:
+    row = conn.execute("SELECT COUNT(*) FROM action_history_entries").fetchone()
+    count = int(row[0] or 0) if row else 0
+    conn.execute("DELETE FROM action_history_items")
+    conn.execute("DELETE FROM action_history_entries")
+    conn.commit()
+    return count
+
+
 def update_entry_state(conn: sqlite3.Connection, entry_id: int, undo_state: str, status: str | None = None) -> None:
     if status is None:
         conn.execute(
