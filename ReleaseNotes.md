@@ -1,18 +1,18 @@
-## MediaLens v1.2.12
+## MediaLens v1.2.13
 
 ### Summary
 
-This release makes the gallery header more compact and dependable while improving breadcrumb navigation and date-grouped browsing. MediaLens now uses smaller icon controls, handles long folder paths more naturally, and keeps grouped gallery sections laid out correctly during refreshes.
+This release improves confidence during cleanup and review. Action History is easier to read, multi-file context actions behave more predictably, and duplicate comparison views keep the gallery footer out of the way when the comparison panel is open.
 
 ### Highlights
 
-- Browse with a cleaner two-row header that gives more room to search while keeping sort, filter, group, date, and nested-file controls close at hand.
-- Move through long folder paths with a This PC breadcrumb icon and Explorer-style overflow dropdowns.
-- Switch to Group By Date without group headers getting trapped inside masonry or grid columns.
+- Action History now explains recent edits in plain English, including scoped description before-and-after details for new edits.
+- Right-click Delete, Cut, and Copy now work with multiple files selected.
+- Duplicate and similar comparison views now hide the gallery footer while the comparison panel is open.
 
 ### Notes
 
-- This release focuses on gallery navigation, header polish, and grouped layout reliability.
+- This release focuses on review workflow polish, clearer history details, scanner status stability, and duplicate comparison layout behavior.
 - This release does not include installer or runtime packaging changes.
 
 Full Changelog:

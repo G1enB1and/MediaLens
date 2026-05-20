@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QStyle,
     QTableWidget,
     QTableWidgetItem,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -180,9 +181,11 @@ class ActionHistoryDialog(QDialog):
         self.details_meta = QLabel("")
         self.details_meta.setObjectName("historyDetailsMeta")
         self.details_meta.setWordWrap(True)
-        self.details_summary = QLabel("")
+        self.details_summary = QFrame()
         self.details_summary.setObjectName("historyDetailsSummary")
-        self.details_summary.setWordWrap(True)
+        self.details_summary_layout = QVBoxLayout(self.details_summary)
+        self.details_summary_layout.setContentsMargins(10, 8, 10, 8)
+        self.details_summary_layout.setSpacing(6)
         details_layout.addWidget(self.details_title)
         details_layout.addWidget(self.details_meta)
         details_layout.addWidget(self.details_summary)
@@ -266,12 +269,31 @@ class ActionHistoryDialog(QDialog):
             QLabel {{ color: {text}; background: transparent; }}
             QLabel#historyDetailsTitle {{ font-size: 16px; font-weight: bold; }}
             QLabel#historyDetailsMeta {{ color: {muted}; }}
-            QLabel#historyDetailsSummary {{
-                color: {text};
+            QFrame#historyDetailsSummary {{
                 background-color: {input_bg};
                 border: 1px solid {border};
                 border-radius: 6px;
-                padding: 8px 10px;
+            }}
+            QLabel#historySummaryFilename {{
+                color: {text};
+                font-weight: bold;
+                padding-bottom: 2px;
+            }}
+            QLabel#historySummaryBody {{
+                color: {text};
+                padding: 2px 0px 4px 18px;
+            }}
+            QLabel#historySummaryMuted {{
+                color: {muted};
+                padding-left: 18px;
+            }}
+            QToolButton#historySummarySection {{
+                background: transparent;
+                border: none;
+                color: {text};
+                font-weight: bold;
+                padding: 2px 0px;
+                text-align: left;
             }}
             QLineEdit {{
                 background-color: {input_bg};
@@ -515,7 +537,7 @@ class ActionHistoryDialog(QDialog):
         if not entry:
             self.details_title.setText("Select an action")
             self.details_meta.setText("")
-            self.details_summary.setText("")
+            self._clear_details_summary()
             self.items_table.setRowCount(0)
             return
         self.details_title.setText(str(entry.get("summary") or "Action"))
@@ -527,7 +549,7 @@ class ActionHistoryDialog(QDialog):
             self._counts_text(counts),
         ]
         self.details_meta.setText(" | ".join(part for part in detail_parts if part))
-        self.details_summary.setText(self._entry_detail_text(entry, items))
+        self._render_details_summary(entry, items)
         self.items_table.setRowCount(0)
         for row_idx, item in enumerate(items):
             self.items_table.insertRow(row_idx)
@@ -653,6 +675,124 @@ class ActionHistoryDialog(QDialog):
             return f"{Path(old_path).parent} -> {Path(new_path).parent}"
         return old_path or new_path
 
+    def _clear_details_summary(self) -> None:
+        layout = getattr(self, "details_summary_layout", None)
+        if layout is None:
+            return
+        while layout.count():
+            child = layout.takeAt(0)
+            widget = child.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def _render_details_summary(self, entry: dict, items: list[dict]) -> None:
+        self._clear_details_summary()
+        if not items:
+            self._add_summary_label(
+                "This history entry records a system action and does not contain individual file changes.",
+                object_name="historySummaryMuted",
+            )
+            return
+        if len(items) == 1:
+            self._render_single_item_summary(entry, items[0])
+            return
+        self._add_summary_label(f"Items: {len(items)}", object_name="historySummaryFilename")
+        self._add_collapsible_section(
+            "What Changed",
+            [self._entry_detail_text(entry, items)],
+            checked=True,
+        )
+
+    def _render_single_item_summary(self, entry: dict, item: dict) -> None:
+        data = self._single_item_detail_data(entry, item)
+        self._add_summary_label(f"Filename: {data['filename']}", object_name="historySummaryFilename")
+        body_lines = [data["change"], data["state"], data["action"]]
+        nested = []
+        before = str(data.get("before") or "")
+        after = str(data.get("after") or "")
+        if before or after:
+            nested = [
+                ("Before", [before or "blank"]),
+                ("After", [after or "blank"]),
+            ]
+        self._add_collapsible_section(
+            "What Changed",
+            [line for line in body_lines if line],
+            checked=True,
+            nested=nested,
+        )
+
+    def _add_summary_label(self, text: str, *, object_name: str = "historySummaryBody") -> QLabel:
+        label = QLabel(str(text or ""))
+        label.setObjectName(object_name)
+        label.setWordWrap(True)
+        self.details_summary_layout.addWidget(label)
+        return label
+
+    def _add_collapsible_section(
+        self,
+        title: str,
+        lines: list[str],
+        *,
+        checked: bool,
+        nested: list[tuple[str, list[str]]] | None = None,
+    ) -> None:
+        button = QToolButton()
+        button.setObjectName("historySummarySection")
+        button.setText(str(title or "Section"))
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        button.setArrowType(Qt.ArrowType.DownArrow if checked else Qt.ArrowType.RightArrow)
+        button.setCheckable(True)
+        button.setChecked(bool(checked))
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.details_summary_layout.addWidget(button)
+
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(12, 0, 0, 0)
+        content_layout.setSpacing(4)
+        for line in lines:
+            label = QLabel(str(line or ""))
+            label.setObjectName("historySummaryBody")
+            label.setWordWrap(True)
+            content_layout.addWidget(label)
+        for nested_title, nested_lines in nested or []:
+            nested_container = QWidget()
+            nested_layout = QVBoxLayout(nested_container)
+            nested_layout.setContentsMargins(0, 0, 0, 0)
+            nested_layout.setSpacing(4)
+            nested_button = QToolButton()
+            nested_button.setObjectName("historySummarySection")
+            nested_button.setText(str(nested_title or "Section"))
+            nested_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+            nested_button.setArrowType(Qt.ArrowType.DownArrow)
+            nested_button.setCheckable(True)
+            nested_button.setChecked(True)
+            nested_button.setCursor(Qt.CursorShape.PointingHandCursor)
+            nested_layout.addWidget(nested_button)
+            nested_content = QWidget()
+            nested_content_layout = QVBoxLayout(nested_content)
+            nested_content_layout.setContentsMargins(12, 0, 0, 0)
+            nested_content_layout.setSpacing(2)
+            for nested_line in nested_lines:
+                label = QLabel(str(nested_line or ""))
+                label.setObjectName("historySummaryBody")
+                label.setWordWrap(True)
+                nested_content_layout.addWidget(label)
+            nested_layout.addWidget(nested_content)
+            nested_button.toggled.connect(
+                lambda enabled, child=nested_content, toggle=nested_button: self._set_summary_section_visible(toggle, child, enabled)
+            )
+            content_layout.addWidget(nested_container)
+        content.setVisible(bool(checked))
+        button.toggled.connect(lambda enabled, child=content, toggle=button: self._set_summary_section_visible(toggle, child, enabled))
+        self.details_summary_layout.addWidget(content)
+
+    @staticmethod
+    def _set_summary_section_visible(button: QToolButton, content: QWidget, visible: bool) -> None:
+        button.setArrowType(Qt.ArrowType.DownArrow if visible else Qt.ArrowType.RightArrow)
+        content.setVisible(bool(visible))
+
     def _entry_detail_text(self, entry: dict, items: list[dict]) -> str:
         action_type = str(entry.get("action_type") or "")
         if not items:
@@ -680,12 +820,57 @@ class ActionHistoryDialog(QDialog):
         }.get(action_type, "changed")
         return f"This action {action_label} {len(items)} {item_label}. {status}. {change_text}"
 
+    def _single_item_detail_data(self, entry: dict, item: dict) -> dict[str, str]:
+        before, after = self._item_before_after_text(entry, item)
+        return {
+            "filename": self._item_name(item),
+            "change": self._item_change_text(entry, item),
+            "state": self._plain_item_state(item),
+            "action": self._available_action_text(entry, item),
+            "before": before,
+            "after": after,
+        }
+
     def _single_item_detail_text(self, entry: dict, item: dict) -> str:
-        name = self._item_name(item)
-        change = self._item_change_text(entry, item)
-        state = self._plain_item_state(item)
-        action = self._available_action_text(entry, item)
-        return f"{name}: {change}. {state}. {action}"
+        data = self._single_item_detail_data(entry, item)
+        return f"{data['filename']}: {data['change']}. {data['state']}. {data['action']}"
+
+    def _item_before_after_text(self, entry: dict, item: dict) -> tuple[str, str]:
+        action_type = str(entry.get("action_type") or "")
+        if action_type == "metadata":
+            return self._metadata_before_after_text(entry, item)
+        old_path = str(item.get("old_path") or "")
+        new_path = str(item.get("new_path") or "")
+        if action_type in {"move", "copy", "rename"}:
+            return old_path, new_path
+        if action_type == "delete":
+            return old_path, "Deleted"
+        if action_type == "create_folder":
+            return "Folder did not exist", new_path
+        if action_type == "hidden":
+            payload = self._metadata_payload(item)
+            return "hidden" if bool(payload.get("old_hidden")) else "visible", "hidden" if bool(payload.get("new_hidden")) else "visible"
+        if action_type == "rotate":
+            payload = self._metadata_payload(item)
+            degrees = int(payload.get("degrees") or 0)
+            return "Original orientation", f"Rotated {degrees} degrees" if degrees else "Rotated"
+        return "", ""
+
+    def _metadata_before_after_text(self, entry: dict, item: dict) -> tuple[str, str]:
+        payload = self._metadata_payload(item)
+        old = dict(payload.get("old") or {})
+        new = dict(payload.get("new") or {})
+        scope = self._metadata_scope(entry)
+        if scope == "description":
+            old_value, new_value = self._description_values(old, new)
+            return self._format_section_value(old_value), self._format_section_value(new_value)
+        if scope == "tags":
+            return self._format_section_value(old.get("tags")), self._format_section_value(new.get("tags"))
+        if scope == "ocr":
+            old_media = dict(old.get("media") or {})
+            new_media = dict(new.get("media") or {})
+            return self._format_section_value(old_media.get("detected_text")), self._format_section_value(new_media.get("detected_text"))
+        return "", ""
 
     def _item_change_text(self, entry: dict, item: dict) -> str:
         action_type = str(entry.get("action_type") or "")
@@ -873,6 +1058,17 @@ class ActionHistoryDialog(QDialog):
         if len(text) > 140:
             text = f"{text[:137]}..."
         return f'"{text}"'
+
+    @staticmethod
+    def _format_section_value(value) -> str:
+        if value is None or value == "" or value == []:
+            return "blank"
+        if isinstance(value, bool):
+            return "yes" if value else "no"
+        if isinstance(value, list):
+            return ", ".join(str(item) for item in value) if value else "blank"
+        text = str(value).replace("\r\n", "\n").replace("\r", "\n").strip()
+        return text or "blank"
 
     def _plain_entry_state(self, entry: dict, counts: dict[str, int]) -> str:
         undo_state = str(entry.get("undo_state") or "")

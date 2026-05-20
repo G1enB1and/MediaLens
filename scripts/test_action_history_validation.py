@@ -125,13 +125,17 @@ def test_action_history_metadata_details_are_plain_english():
             '"media":{},"tags":[],"ai":{}}}'
         ),
     }
-    entry = {"action_type": "metadata", "undo_state": "undoable"}
+    entry = {"action_type": "metadata", "summary": "Edited description", "undo_state": "undoable"}
 
     detail = dialog._single_item_detail_text(entry, item)
 
     assert 'cat.jpg: Description changed from blank to "sleeping cat".' in detail
     assert "This change is still current." in detail
     assert "This change can be undone" in detail
+    data = dialog._single_item_detail_data(entry, item)
+    assert data["filename"] == "cat.jpg"
+    assert data["before"] == "blank"
+    assert data["after"] == "sleeping cat"
 
 
 def test_action_history_metadata_details_ignore_blank_to_blank_fields():
@@ -226,6 +230,22 @@ def test_action_history_description_scope_uses_visible_description_values():
     phrases = dialog._metadata_change_phrases(old, new, scope="description")
 
     assert phrases == ['Description changed from "old AI fallback" to "new user description"']
+    item = {
+        "old_path": "C:/Pictures/0010.jpg",
+        "new_path": "C:/Pictures/0010.jpg",
+        "current_state": "applied",
+        "metadata_json": (
+            '{"old":{"metadata":{"description":""},"visible":{"description":"old AI fallback"},'
+            '"media":{},"tags":[],"ai":{"description":"old AI fallback"}},'
+            '"new":{"metadata":{"description":"new user description"},'
+            '"visible":{"description":"new user description"},"media":{},"tags":[],'
+            '"ai":{"description":"old AI fallback"}}}'
+        ),
+    }
+    entry = {"action_type": "metadata", "summary": "Edited description", "undo_state": "undoable"}
+    data = dialog._single_item_detail_data(entry, item)
+    assert data["before"] == "old AI fallback"
+    assert data["after"] == "new user description"
 
 
 def test_snapshot_edit_state_records_visible_description(monkeypatch):

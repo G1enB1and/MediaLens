@@ -1,6 +1,35 @@
 # Change Log
 
-## v1.2.12 (Current)
+## v1.2.13 (Current)
+
+### Summary
+
+This release makes review and cleanup workflows easier to trust by improving Action History, scanner feedback, and duplicate comparison layout. MediaLens now gives clearer explanations for recent actions, handles multi-file context actions more consistently, and makes duplicate review controls less cluttered.
+
+### Highlights
+
+- Review recent edits in a clearer Action History window with plain-English details and scoped metadata before-and-after summaries.
+- Delete, cut, or copy multiple selected gallery items from the right-click menu without falling back to only the clicked file.
+- Use duplicate and similar comparison views with less footer clutter while the comparison panel is open.
+
+### Added
+
+- Added a Delete All Action History control with themed warning styling and confirmation.
+- Added clearer Action History details that explain selected actions in plain language instead of exposing internal state labels.
+- Added visible before-and-after description values to new metadata edit history entries, including AI description fallback values before a user overwrites them.
+
+### Changed
+
+- Changed Action History metadata summaries so description, tag, and OCR edits only describe the fields that were actually edited.
+- Changed Action History item tables to use Item, Change, Status, and Action columns with user-facing state labels.
+- Changed Action History undo and redo controls to use clearer labels, tooltips, cursor states, and disabled styling.
+- Changed gallery right-click Delete, Cut, and Copy actions to respect the full multi-selection.
+- Changed the scanner and scan status handling to avoid repeated visible-page scan work and stale scan messages after switching pinned folders.
+- Changed duplicate and similar review views so the gallery footer hides while the comparison panel is open and returns when the panel closes or the view changes.
+
+---
+
+## v1.2.12
 
 ### Summary
 
