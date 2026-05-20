@@ -6,8 +6,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor, QIcon, QPalette, QPainter
+from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtGui import QColor, QIcon, QPalette, QPainter, QPixmap, QTransform
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -196,6 +196,7 @@ class ActionHistoryDialog(QDialog):
         self.items_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.items_table.verticalHeader().setVisible(False)
         self.items_table.verticalHeader().setDefaultSectionSize(42)
+        self.items_table.setMinimumHeight(82)
         item_header = self.items_table.horizontalHeader()
         item_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         item_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -539,6 +540,7 @@ class ActionHistoryDialog(QDialog):
             self.details_meta.setText("")
             self._clear_details_summary()
             self.items_table.setRowCount(0)
+            self._sync_items_table_minimum_height()
             return
         self.details_title.setText(str(entry.get("summary") or "Action"))
         items = list(self.bridge.list_action_history_items(int(entry_id)) or [])
@@ -565,6 +567,7 @@ class ActionHistoryDialog(QDialog):
                 self.items_table.setItem(row_idx, col, cell)
             action_widget = self._item_action_widget(item, entry)
             self.items_table.setCellWidget(row_idx, 3, action_widget)
+        self._sync_items_table_minimum_height()
 
     def _item_action_widget(self, item: dict, entry: dict) -> QWidget:
         box = QWidget()
@@ -601,6 +604,15 @@ class ActionHistoryDialog(QDialog):
             if button.isEnabled()
             else Qt.CursorShape.ForbiddenCursor
         )
+
+    def _sync_items_table_minimum_height(self) -> None:
+        try:
+            header_height = int(self.items_table.horizontalHeader().height() or self.items_table.horizontalHeader().sizeHint().height() or 34)
+            row_height = int(self.items_table.verticalHeader().defaultSectionSize() or 42)
+            frame = int(self.items_table.frameWidth() or 1) * 2
+            self.items_table.setMinimumHeight(header_height + row_height + frame + 10)
+        except Exception:
+            self.items_table.setMinimumHeight(86)
 
     def _item_state_counts(self, items: list[dict]) -> dict[str, int]:
         counts = {"applied": 0, "undone": 0, "unavailable": 0, "failed": 0}
@@ -741,10 +753,10 @@ class ActionHistoryDialog(QDialog):
         button.setObjectName("historySummarySection")
         button.setText(str(title or "Section"))
         button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        button.setArrowType(Qt.ArrowType.DownArrow if checked else Qt.ArrowType.RightArrow)
         button.setCheckable(True)
         button.setChecked(bool(checked))
         button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._configure_summary_section_button(button, bool(checked))
         self.details_summary_layout.addWidget(button)
 
         content = QWidget()
@@ -765,10 +777,10 @@ class ActionHistoryDialog(QDialog):
             nested_button.setObjectName("historySummarySection")
             nested_button.setText(str(nested_title or "Section"))
             nested_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-            nested_button.setArrowType(Qt.ArrowType.DownArrow)
             nested_button.setCheckable(True)
             nested_button.setChecked(True)
             nested_button.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._configure_summary_section_button(nested_button, True)
             nested_layout.addWidget(nested_button)
             nested_content = QWidget()
             nested_content_layout = QVBoxLayout(nested_content)
@@ -789,8 +801,25 @@ class ActionHistoryDialog(QDialog):
         self.details_summary_layout.addWidget(content)
 
     @staticmethod
-    def _set_summary_section_visible(button: QToolButton, content: QWidget, visible: bool) -> None:
-        button.setArrowType(Qt.ArrowType.DownArrow if visible else Qt.ArrowType.RightArrow)
+    def _summary_chevron_icon_path() -> str:
+        icon_dir = Path(__file__).with_name("web") / "icons"
+        is_light = Theme.get_is_light()
+        name = "chevron-down-dark.svg" if is_light else "chevron-down-light.svg"
+        return str(icon_dir / name)
+
+    def _summary_chevron_icon(self, expanded: bool) -> QIcon:
+        pixmap = QPixmap(self._summary_chevron_icon_path())
+        if pixmap.isNull() or expanded:
+            return QIcon(pixmap)
+        return QIcon(pixmap.transformed(QTransform().rotate(-90), Qt.TransformationMode.SmoothTransformation))
+
+    def _configure_summary_section_button(self, button: QToolButton, expanded: bool) -> None:
+        button.setArrowType(Qt.ArrowType.NoArrow)
+        button.setIcon(self._summary_chevron_icon(expanded))
+        button.setIconSize(QSize(12, 12))
+
+    def _set_summary_section_visible(self, button: QToolButton, content: QWidget, visible: bool) -> None:
+        self._configure_summary_section_button(button, bool(visible))
         content.setVisible(bool(visible))
 
     def _entry_detail_text(self, entry: dict, items: list[dict]) -> str:
