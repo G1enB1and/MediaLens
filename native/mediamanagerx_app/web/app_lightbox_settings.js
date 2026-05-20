@@ -431,6 +431,7 @@ function updateGalleryFooterVisibility() {
   const hideFooter = shouldHideGalleryFooterForCompareReview();
   document.querySelectorAll('[data-pager]').forEach((root) => {
     root.hidden = hideFooter;
+    root.style.display = hideFooter ? 'none' : '';
   });
 }
 
@@ -444,6 +445,7 @@ function renderPager() {
 
   document.querySelectorAll('[data-pager]').forEach((root) => {
     root.hidden = hideFooter;
+    root.style.display = hideFooter ? 'none' : '';
     if (hideFooter) return;
     const prev = root.querySelector('[data-prev]');
     const next = root.querySelector('[data-next]');
