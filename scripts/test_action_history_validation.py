@@ -2,6 +2,7 @@ import sqlite3
 
 from app.mediamanager.db import action_history_repo
 from app.mediamanager.db.migrations import _ensure_action_history_tables
+from native.mediamanagerx_app.action_edits import snapshot_edit_state
 from native.mediamanagerx_app.action_history_dialog import ActionHistoryDialog
 from native.mediamanagerx_app.action_history import make_history_item, validate_history_item_availability
 from native.mediamanagerx_app.bridge_file_ops import BridgeFileOpsMixin
@@ -203,3 +204,37 @@ def test_action_history_description_scope_prefers_description_over_ai_parameters
     phrases = dialog._metadata_change_phrases(old, new, scope="description")
 
     assert phrases == ['Description changed from blank to "new description"']
+
+
+def test_action_history_description_scope_uses_visible_description_values():
+    dialog = ActionHistoryDialog.__new__(ActionHistoryDialog)
+    old = {
+        "metadata": {"description": ""},
+        "media": {},
+        "tags": [],
+        "ai": {"description": "old AI fallback"},
+        "visible": {"description": "old AI fallback"},
+    }
+    new = {
+        "metadata": {"description": "new user description", "ai_params": "Source Formats: generic_embedded"},
+        "media": {},
+        "tags": [],
+        "ai": {"description": "old AI fallback"},
+        "visible": {"description": "new user description"},
+    }
+
+    phrases = dialog._metadata_change_phrases(old, new, scope="description")
+
+    assert phrases == ['Description changed from "old AI fallback" to "new user description"']
+
+
+def test_snapshot_edit_state_records_visible_description(monkeypatch):
+    media = {"id": 7, "path": "C:/Pictures/0010.jpg"}
+    monkeypatch.setattr("native.mediamanagerx_app.action_edits.get_media_by_path", lambda _conn, _path: media)
+    monkeypatch.setattr("native.mediamanagerx_app.action_edits.get_media_metadata", lambda _conn, _media_id: {"description": ""})
+    monkeypatch.setattr("native.mediamanagerx_app.action_edits.get_media_ai_metadata", lambda _conn, _media_id: {"description": "AI fallback"})
+    monkeypatch.setattr("native.mediamanagerx_app.action_edits.list_media_tags", lambda _conn, _media_id: [])
+
+    snapshot = snapshot_edit_state(object(), "C:/Pictures/0010.jpg")
+
+    assert snapshot["visible"]["description"] == "AI fallback"

@@ -70,12 +70,17 @@ def snapshot_edit_state(conn, path: str) -> dict:
     if not media:
         return {"path": path, "exists_in_db": False}
     media_id = int(media["id"])
+    metadata = _clean_dict(get_media_metadata(conn, media_id), METADATA_KEYS)
+    ai = _clean_dict(get_media_ai_metadata(conn, media_id), AI_KEYS)
     return {
         "path": path,
         "exists_in_db": True,
         "media": _media_core_snapshot(media),
-        "metadata": _clean_dict(get_media_metadata(conn, media_id), METADATA_KEYS),
-        "ai": _clean_dict(get_media_ai_metadata(conn, media_id), AI_KEYS),
+        "metadata": metadata,
+        "ai": ai,
+        "visible": {
+            "description": metadata.get("description") or ai.get("description") or "",
+        },
         "tags": list_media_tags(conn, media_id),
     }
 

@@ -744,6 +744,10 @@ class ActionHistoryDialog(QDialog):
 
     def _metadata_change_phrases(self, old: dict, new: dict, *, scope: str = "all") -> list[str]:
         phrases: list[str] = []
+        if scope == "description":
+            old_description, new_description = self._description_values(old, new)
+            if self._compare_value(old_description) != self._compare_value(new_description):
+                return [f"Description changed from {self._format_value(old_description)} to {self._format_value(new_description)}"]
         if scope in {"all", "tags"} and self._compare_value(old.get("tags")) != self._compare_value(new.get("tags")):
             phrases.append(f"Tags changed from {self._format_value(old.get('tags'))} to {self._format_value(new.get('tags'))}")
         metadata_labels = (
@@ -788,6 +792,20 @@ class ActionHistoryDialog(QDialog):
         elif scope == "all" and self._compare_value(old.get("ai")) != self._compare_value(new.get("ai")):
             phrases.append("AI metadata changed")
         return phrases
+
+    @staticmethod
+    def _description_values(old: dict, new: dict) -> tuple[object, object]:
+        old_visible = dict(old.get("visible") or {})
+        new_visible = dict(new.get("visible") or {})
+        if "description" in old_visible or "description" in new_visible:
+            return old_visible.get("description"), new_visible.get("description")
+        old_metadata = dict(old.get("metadata") or {})
+        new_metadata = dict(new.get("metadata") or {})
+        if ActionHistoryDialog._compare_value(old_metadata.get("description")) != ActionHistoryDialog._compare_value(new_metadata.get("description")):
+            return old_metadata.get("description"), new_metadata.get("description")
+        old_ai = dict(old.get("ai") or {})
+        new_ai = dict(new.get("ai") or {})
+        return old_ai.get("description"), new_ai.get("description")
 
     def _hidden_change_text(self, item: dict) -> str:
         payload = self._metadata_payload(item)
