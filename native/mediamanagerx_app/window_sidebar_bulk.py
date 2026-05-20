@@ -7,6 +7,7 @@ from native.mediamanagerx_app.theme_dialogs import *
 from native.mediamanagerx_app.widgets import *
 from native.mediamanagerx_app.compare import *
 from native.mediamanagerx_app.metadata_payload import *
+from native.mediamanagerx_app.bulk_sidebar_helpers import *
 from native.mediamanagerx_app.bridge import *
 from native.mediamanagerx_app.gallery import *
 
@@ -1459,8 +1460,7 @@ class WindowSidebarBulkMixin:
 
     @staticmethod
     def _bulk_selected_file_tags_text(tags: list[str]) -> str:
-        clean = [str(tag or "").strip() for tag in list(tags or []) if str(tag or "").strip()]
-        return ", ".join(clean)
+        return bulk_selected_file_tags_text(tags)
 
     def _bulk_selected_file_payloads(self, paths: list[str]) -> dict[str, tuple[list[str], dict]]:
         from app.mediamanager.utils.pathing import normalize_windows_path
@@ -1633,14 +1633,7 @@ class WindowSidebarBulkMixin:
 
     @staticmethod
     def _is_valid_bulk_selected_file_row(row) -> bool:
-        if not isinstance(row, BulkSelectedFileRow):
-            return False
-        try:
-            import shiboken6
-
-            return bool(shiboken6.isValid(row))
-        except Exception:
-            return True
+        return is_valid_bulk_selected_file_row(row, BulkSelectedFileRow)
 
     def _detach_bulk_selected_file_rows(self, list_widget: QListWidget) -> None:
         try:

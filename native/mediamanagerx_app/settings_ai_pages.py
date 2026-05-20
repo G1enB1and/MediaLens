@@ -34,6 +34,11 @@ class AISettingsPage(SettingsPage):
             "bad_words": DEFAULT_BAD_WORDS,
         }
         self._status_refresh_generation = 0
+        self._last_status_refresh_at = 0.0
+        self._status_refresh_queued_force = False
+        self._status_refresh_timer = QTimer(self)
+        self._status_refresh_timer.setSingleShot(True)
+        self._status_refresh_timer.timeout.connect(self._run_queued_ai_model_status_refresh)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
@@ -342,8 +347,8 @@ class AISettingsPage(SettingsPage):
             self.description_write_mode_combo,
         ):
             combo.currentIndexChanged.connect(self._save)
-        self.tag_model_combo.currentIndexChanged.connect(lambda _index: self._refresh_ai_model_statuses())
-        self.caption_model_combo.currentIndexChanged.connect(lambda _index: self._refresh_ai_model_statuses())
+        self.tag_model_combo.currentIndexChanged.connect(lambda _index: self._schedule_ai_model_status_refresh(force=True))
+        self.caption_model_combo.currentIndexChanged.connect(lambda _index: self._schedule_ai_model_status_refresh(force=True))
         if hasattr(self.bridge, "localAiModelInstallStatus"):
             self.bridge.localAiModelInstallStatus.connect(self._on_local_ai_model_install_status)
         if hasattr(self.bridge, "paddleOcrRuntimeInstallStatus"):
@@ -415,7 +420,7 @@ class AISettingsPage(SettingsPage):
         if hasattr(self.bridge, "_sync_selected_gemma_profile_settings"):
             self.bridge._sync_selected_gemma_profile_settings(sync_qsettings=False)
         self.settings.sync()
-        self._refresh_ai_model_statuses()
+        self._schedule_ai_model_status_refresh(force=True)
 
     def _apply_ai_model_status(self, kind: str, status: dict) -> None:
         description_label, status_label, button, submodel_combo, advanced_btn = self._status_widgets(kind)
@@ -454,9 +459,24 @@ class AISettingsPage(SettingsPage):
         button.setEnabled(state in {"not_installed", "error"})
         button.setText("Installing..." if state == "installing" else "Install Model")
 
-    def _refresh_ai_model_statuses(self) -> None:
+    def _schedule_ai_model_status_refresh(self, delay_ms: int = 250, *, force: bool = False) -> None:
         if bool(getattr(self, "_loading", False)):
             return
+        self._status_refresh_queued_force = bool(self._status_refresh_queued_force or force)
+        self._status_refresh_timer.start(max(0, int(delay_ms)))
+
+    def _run_queued_ai_model_status_refresh(self) -> None:
+        force = bool(getattr(self, "_status_refresh_queued_force", False))
+        self._status_refresh_queued_force = False
+        self._refresh_ai_model_statuses(force=force)
+
+    def _refresh_ai_model_statuses(self, *, force: bool = False) -> None:
+        if bool(getattr(self, "_loading", False)):
+            return
+        now = datetime.now().timestamp()
+        if not force and now - float(getattr(self, "_last_status_refresh_at", 0.0) or 0.0) < 10.0:
+            return
+        self._last_status_refresh_at = now
         self._status_refresh_generation += 1
         generation = self._status_refresh_generation
         for kind in ("tagger", "captioner", "ocr"):
@@ -575,8 +595,12 @@ class AISettingsPage(SettingsPage):
         if reply != QMessageBox.StandardButton.Yes:
             return
         started = bool(self.bridge.install_local_ai_model(model_id, status_kind))
-        if not started:
-            self._refresh_ai_model_statuses()
+        if started:
+            install_status = dict(status or {})
+            install_status.update({"state": "installing", "running": True, "message": "Starting model install..."})
+            self._apply_ai_model_status(kind, install_status)
+        else:
+            self._schedule_ai_model_status_refresh(force=True)
 
     def _on_local_ai_model_install_status(self, status_key: str, payload: dict) -> None:
         payload = dict(payload or {})
@@ -652,7 +676,7 @@ class AISettingsPage(SettingsPage):
 
     def refresh(self) -> None:
         self._load_settings_values()
-        self._refresh_ai_model_statuses()
+        self._schedule_ai_model_status_refresh(delay_ms=400)
 
 
 class LocalAiSetupDialog(QDialog):
@@ -1554,8 +1578,11 @@ class LocalAiSetupDialog(QDialog):
         if not hasattr(self.bridge, "install_local_ai_model"):
             self._apply_status(spec.settings_key, {"state": "error", "message": "Model installation is not available in this build."})
             return
-        self.bridge.install_local_ai_model(spec.id, spec.kind)
-        self.refresh_statuses()
+        started = bool(self.bridge.install_local_ai_model(spec.id, spec.kind))
+        if started:
+            self._apply_status(spec.settings_key, {"state": "installing", "running": True, "message": "Starting model install..."})
+        else:
+            self._apply_status(spec.settings_key, {"state": "error", "message": "Model install did not start."})
 
     def _uninstall_model(self, spec) -> None:
         if getattr(spec, "settings_key", "") == "paddle_ocr":

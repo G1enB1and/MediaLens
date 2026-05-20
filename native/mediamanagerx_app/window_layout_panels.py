@@ -7,6 +7,7 @@ from native.mediamanagerx_app.theme_dialogs import *
 from native.mediamanagerx_app.widgets import *
 from native.mediamanagerx_app.compare import *
 from native.mediamanagerx_app.metadata_payload import *
+from native.mediamanagerx_app.layout_panel_helpers import *
 from native.mediamanagerx_app.bridge import *
 from native.mediamanagerx_app.gallery import *
 
@@ -62,12 +63,7 @@ class WindowLayoutPanelsMixin:
         return margins.top() + header_height + margins.bottom() + 5
 
     def _left_section_default_expanded_height(self, key: str) -> int:
-        return {
-            "pinned": 140,
-            "folders": 260,
-            "collections": 150,
-            "smart_collections": 150,
-        }.get(key, 150)
+        return left_section_default_expanded_height(key)
 
     def _left_section_saved_expanded_height(self, key: str, fallback: int) -> int:
         try:
@@ -76,9 +72,7 @@ class WindowLayoutPanelsMixin:
             return fallback
 
     def _left_section_min_expanded_height(self, key: str, collapsed_height: int) -> int:
-        if key == "pinned":
-            return max(collapsed_height + 52, 88)
-        return max(collapsed_height + 40, 72)
+        return left_section_min_expanded_height(key, collapsed_height)
 
     def _left_section_target_height(self, key: str, collapsed_height: int) -> int:
         fallback = max(self._left_section_default_expanded_height(key), self._left_section_min_expanded_height(key, collapsed_height))
