@@ -114,6 +114,7 @@ class SettingsDialog(QDialog):
         old.deleteLater()
         self.pages.insertWidget(index, page)
         self._page_widgets[index] = page
+        apply_pointing_hand_cursors(page)
         return page
 
     def refresh_from_settings(self) -> None:
@@ -228,8 +229,7 @@ class SettingsDialog(QDialog):
                 page.setAutoFillBackground(True)
                 page.setPalette(dialog_palette)
         
-        for btn in self.findChildren(QPushButton):
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        apply_pointing_hand_cursors(self)
             
         self.setStyleSheet(
             f"""

@@ -11,6 +11,7 @@ from pathlib import Path
 from PySide6.QtCore import QMimeData, QPointF, QRect, QSignalBlocker, QSize, Qt, Signal, QTime, QTimer
 from PySide6.QtGui import QColor, QBrush, QCursor, QDrag, QIcon, QPainter, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (
+    QAbstractButton,
     QAbstractScrollArea,
     QAbstractItemView,
     QButtonGroup,
@@ -52,6 +53,16 @@ from PySide6.QtWidgets import (
     QWidget,
     QToolButton,
 )
+
+def apply_pointing_hand_cursors(root: QWidget) -> None:
+    for button in root.findChildren(QAbstractButton):
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+    for tab_bar in root.findChildren(QTabBar):
+        tab_bar.setCursor(Qt.CursorShape.PointingHandCursor)
+    for label in root.findChildren(QLabel):
+        label_text = str(label.text() or "").lower()
+        if label.openExternalLinks() or "href=" in label_text:
+            label.setCursor(Qt.CursorShape.PointingHandCursor)
 
 
 METADATA_SETTINGS_CONFIG: dict[str, dict] = {

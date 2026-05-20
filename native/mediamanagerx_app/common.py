@@ -239,6 +239,7 @@ from PySide6.QtGui import (
     QShortcut,
 )
 from PySide6.QtWidgets import (
+    QAbstractButton,
     QApplication,
     QFileDialog,
     QLabel,
@@ -280,6 +281,7 @@ from PySide6.QtWidgets import (
     QStyledItemDelegate,
     QStyle,
     QProxyStyle,
+    QTabBar,
 )
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -289,6 +291,16 @@ from native.mediamanagerx_app import review_groups
 from native.mediamanagerx_app.video_overlay import LightboxVideoOverlay, VideoRequest
 from native.mediamanagerx_app.settings_dialog import LocalAiSetupDialog, SettingsDialog
 from PySide6.QtCore import QSortFilterProxyModel, QModelIndex
+
+def apply_pointing_hand_cursors(root: QWidget) -> None:
+    for button in root.findChildren(QAbstractButton):
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+    for tab_bar in root.findChildren(QTabBar):
+        tab_bar.setCursor(Qt.CursorShape.PointingHandCursor)
+    for label in root.findChildren(QLabel):
+        label_text = str(label.text() or "").lower()
+        if label.openExternalLinks() or "href=" in label_text:
+            label.setCursor(Qt.CursorShape.PointingHandCursor)
 
 
 import ctypes

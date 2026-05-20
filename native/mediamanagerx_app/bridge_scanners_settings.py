@@ -262,7 +262,7 @@ class BridgeScannersSettingsMixin:
     def _scanner_display_name(scanner_key: str) -> str:
         names = {
             "text_detection": "Text Detection",
-            "ocr_text": "OCR (Optical Character Recognition) - Reads Text in Images",
+            "ocr_text": "OCR (Reads text inside images)",
             "ai_tags": "AI Tags",
             "ai_descriptions": "AI Descriptions",
         }

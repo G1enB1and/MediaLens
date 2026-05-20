@@ -76,6 +76,16 @@
   box-sizing: border-box;
 }
 
+button:not(:disabled),
+a[href],
+[role='button']:not([aria-disabled='true']),
+[role='tab']:not([aria-disabled='true']),
+input[type='button']:not(:disabled),
+input[type='reset']:not(:disabled),
+input[type='submit']:not(:disabled) {
+  cursor: pointer;
+}
+
 html,
 body {
   min-height: 100%;

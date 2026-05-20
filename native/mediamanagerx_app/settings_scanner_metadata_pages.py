@@ -10,9 +10,9 @@ from native.mediamanagerx_app.settings_general_pages import *
 class ScannersSettingsPage(SettingsPage):
     SCANNERS = [
         ("text_detection", "Text Detection", "Finds whether images/videos likely contain visible text."),
-        ("ocr_text", "OCR (Optical Character Recognition) - Reads Text in Images", ""),
+        ("ocr_text", "OCR (Reads text inside images)", ""),
         ("ai_tags", "AI Tags", "Generates searchable tags with the selected local AI tag model."),
-        ("ai_descriptions", "AI Descriptions", "Generates database descriptions with the selected local AI description model."),
+        ("ai_descriptions", "AI Descriptions", "Generates image descriptions with the selected local AI description model."),
     ]
 
     def __init__(self, dialog: "SettingsDialog") -> None:

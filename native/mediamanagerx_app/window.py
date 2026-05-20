@@ -132,6 +132,7 @@ class MainWindow(WindowAppLifecycleMixin, WindowNativeActionsMixin, WindowPrevie
 
         self._build_menu()
         self._build_layout()
+        apply_pointing_hand_cursors(self)
         
         # Monitor top menu interactions to dismiss web context menu
         for m in (self.menuBar().findChildren(QMenu)):
