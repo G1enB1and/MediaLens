@@ -693,7 +693,7 @@ class ActionHistoryDialog(QDialog):
         new_path = str(item.get("new_path") or "")
         name = self._item_name(item)
         if action_type == "metadata":
-            return self._metadata_change_text(item)
+            return self._metadata_change_text(entry, item)
         if action_type == "hidden":
             return self._hidden_change_text(item)
         if action_type == "rotate":
@@ -714,19 +714,37 @@ class ActionHistoryDialog(QDialog):
             return str(entry.get("summary") or "Redid an earlier action")
         return str(item.get("notes") or entry.get("summary") or "Changed")
 
-    def _metadata_change_text(self, item: dict) -> str:
+    def _metadata_change_text(self, entry: dict, item: dict) -> str:
         payload = self._metadata_payload(item)
         old = dict(payload.get("old") or {})
         new = dict(payload.get("new") or {})
-        changes = self._metadata_change_phrases(old, new)
+        scope = self._metadata_scope(entry)
+        changes = self._metadata_change_phrases(old, new, scope=scope)
         if not changes:
+            if scope == "description":
+                return "Description was edited"
+            if scope == "tags":
+                return "Tags were edited"
+            if scope == "ocr":
+                return "OCR text was edited"
             notes = str(item.get("notes") or "").strip()
             return f"Edited {notes}" if notes else "Edited metadata"
         return "; ".join(changes[:3]) + (f"; and {len(changes) - 3} more" if len(changes) > 3 else "")
 
-    def _metadata_change_phrases(self, old: dict, new: dict) -> list[str]:
+    @staticmethod
+    def _metadata_scope(entry: dict) -> str:
+        summary = str(entry.get("summary") or "").strip().casefold()
+        if "description" in summary:
+            return "description"
+        if "tag" in summary:
+            return "tags"
+        if "text ocr" in summary or "ocr text" in summary:
+            return "ocr"
+        return "all"
+
+    def _metadata_change_phrases(self, old: dict, new: dict, *, scope: str = "all") -> list[str]:
         phrases: list[str] = []
-        if self._compare_value(old.get("tags")) != self._compare_value(new.get("tags")):
+        if scope in {"all", "tags"} and self._compare_value(old.get("tags")) != self._compare_value(new.get("tags")):
             phrases.append(f"Tags changed from {self._format_value(old.get('tags'))} to {self._format_value(new.get('tags'))}")
         metadata_labels = (
             ("title", "Title"),
@@ -741,6 +759,10 @@ class ActionHistoryDialog(QDialog):
         old_metadata = dict(old.get("metadata") or {})
         new_metadata = dict(new.get("metadata") or {})
         for key, label in metadata_labels:
+            if scope == "description" and key != "description":
+                continue
+            if scope in {"tags", "ocr"}:
+                continue
             if self._compare_value(old_metadata.get(key)) != self._compare_value(new_metadata.get(key)):
                 phrases.append(f"{label} changed from {self._format_value(old_metadata.get(key))} to {self._format_value(new_metadata.get(key))}")
         media_labels = (
@@ -752,9 +774,18 @@ class ActionHistoryDialog(QDialog):
         old_media = dict(old.get("media") or {})
         new_media = dict(new.get("media") or {})
         for key, label in media_labels:
+            if scope == "ocr" and key != "detected_text":
+                continue
+            if scope in {"description", "tags"}:
+                continue
             if self._compare_value(old_media.get(key)) != self._compare_value(new_media.get(key)):
                 phrases.append(f"{label} changed from {self._format_value(old_media.get(key))} to {self._format_value(new_media.get(key))}")
-        if self._compare_value(old.get("ai")) != self._compare_value(new.get("ai")):
+        if scope == "description":
+            old_ai = dict(old.get("ai") or {})
+            new_ai = dict(new.get("ai") or {})
+            if self._compare_value(old_ai.get("description")) != self._compare_value(new_ai.get("description")):
+                phrases.append(f"Description changed from {self._format_value(old_ai.get('description'))} to {self._format_value(new_ai.get('description'))}")
+        elif scope == "all" and self._compare_value(old.get("ai")) != self._compare_value(new.get("ai")):
             phrases.append("AI metadata changed")
         return phrases
 

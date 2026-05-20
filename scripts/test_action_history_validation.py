@@ -163,3 +163,43 @@ def test_action_history_metadata_details_ignore_blank_to_blank_fields():
     phrases = dialog._metadata_change_phrases(old, new)
 
     assert phrases == ['Description changed from blank to "new description"']
+
+
+def test_action_history_description_scope_ignores_ai_parameters():
+    dialog = ActionHistoryDialog.__new__(ActionHistoryDialog)
+    item = {
+        "old_path": "C:/Pictures/0010.jpg",
+        "new_path": "C:/Pictures/0010.jpg",
+        "current_state": "applied",
+        "metadata_json": (
+            '{"old":{"metadata":{"description":""},"media":{},"tags":[],"ai":{}},'
+            '"new":{"metadata":{"description":""},"media":{},"tags":[],'
+            '"ai":{},"metadata_extra":"ignored"}}'
+        ),
+    }
+    entry = {"action_type": "metadata", "summary": "Edited description", "undo_state": "undoable"}
+
+    detail = dialog._single_item_detail_text(entry, item)
+
+    assert "Description was edited" in detail
+    assert "AI parameters" not in detail
+
+
+def test_action_history_description_scope_prefers_description_over_ai_parameters():
+    dialog = ActionHistoryDialog.__new__(ActionHistoryDialog)
+    old = {
+        "metadata": {"description": ""},
+        "media": {},
+        "tags": [],
+        "ai": {},
+    }
+    new = {
+        "metadata": {"description": "new description", "ai_params": "Source Formats: generic_embedded"},
+        "media": {},
+        "tags": [],
+        "ai": {},
+    }
+
+    phrases = dialog._metadata_change_phrases(old, new, scope="description")
+
+    assert phrases == ['Description changed from blank to "new description"']
