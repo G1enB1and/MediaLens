@@ -365,6 +365,17 @@ function currentSelectedFolderSet() {
   return new Set((Array.isArray(gSelectedFolders) ? gSelectedFolders : []).map(normalizeFolderPath).filter(Boolean));
 }
 
+function scanFolderMatchesCurrentSelection(folder) {
+  const normalizedFolder = normalizeFolderPath(folder || '');
+  const selectedFolders = currentSelectedFolderSet();
+  return !normalizedFolder || selectedFolders.size === 0 || selectedFolders.has(normalizedFolder);
+}
+
+function acceptScanStartedForCurrentSelection(folder) {
+  if (!scanFolderMatchesCurrentSelection(folder || '')) return false;
+  return true;
+}
+
 function currentFullScanKey(folders) {
   return (Array.isArray(folders) ? folders : [])
     .map(normalizeFolderPath)

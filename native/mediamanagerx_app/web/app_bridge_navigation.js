@@ -1206,6 +1206,7 @@ function wireScanIndicator() {
 
   if (gBridge.scanProgress) {
     gBridge.scanProgress.connect((fileName, percent) => {
+      if (!gScanActive) return;
       file.textContent = fileName;
       bar.style.width = `${percent}%`;
       if (gReviewLoadingActive && isDuplicateModeActive()) {
@@ -1219,7 +1220,8 @@ function wireScanIndicator() {
   }
 
   if (gBridge.scanStarted) {
-    gBridge.scanStarted.connect(() => {
+    gBridge.scanStarted.connect((folder) => {
+      if (!acceptScanStartedForCurrentSelection(folder || '')) return;
       gScanToastGeneration += 1;
       gScanManuallyHidden = false;
       gScanActive = true;
@@ -1230,7 +1232,8 @@ function wireScanIndicator() {
   }
 
   if (gBridge.scanFinished) {
-    gBridge.scanFinished.connect(() => {
+    gBridge.scanFinished.connect((folder) => {
+      if (!scanFolderMatchesCurrentSelection(folder || '')) return;
       const finishedGeneration = gScanToastGeneration;
       file.textContent = 'Finished';
       bar.style.width = '100%';

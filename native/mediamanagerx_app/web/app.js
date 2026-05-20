@@ -1169,6 +1169,7 @@ async function main() {
 
     if (bridge.scanStarted) {
       bridge.scanStarted.connect(function (folder) {
+        if (!acceptScanStartedForCurrentSelection(folder || '')) return;
         gScanActive = true;
         gAwaitingScanResults = true;
         // Silent background scan now, non-blocking
@@ -1177,17 +1178,10 @@ async function main() {
 
     if (bridge.scanFinished) {
       bridge.scanFinished.connect(function (folder, count) {
-        const normalizedFinishedFolder = normalizeFolderPath(folder || '');
-        const selectedFolders = currentSelectedFolderSet();
-        const matchesCurrentSelection = !normalizedFinishedFolder || selectedFolders.size === 0 || selectedFolders.has(normalizedFinishedFolder);
+        const matchesCurrentSelection = scanFolderMatchesCurrentSelection(folder || '');
         if (!matchesCurrentSelection) {
-          // Stale-folder scanFinished (e.g. a prior in-flight scan completing
-          // after the user changed scope, or Phase 3 finishing with zero
-          // progress emissions). Clear scan-active so the toast can dismiss —
-          // any newer scan still in flight will re-raise it via its own
-          // scanStarted. Only skip the gallery refresh, not the flag reset.
-          gScanActive = false;
-          gAwaitingScanResults = false;
+          // Stale-folder scanFinished can arrive after the user changes scope.
+          // Ignore it so it cannot clear a newer scan or refresh the old folder.
           if (gRenderScanToast) gRenderScanToast();
           return;
         }
@@ -1388,6 +1382,7 @@ async function main() {
         syncMetadataToBridge();
         gSelectedFolders = folders || [];
         gLastRequestedFullScanKey = '';
+        gScanActive = false;
         clearDismissedReviewPaths();
         gAwaitingScanResults = !!(folders && folders.length);
         gPage = 0;

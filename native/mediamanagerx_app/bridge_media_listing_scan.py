@@ -1096,6 +1096,7 @@ class BridgeMediaListingScanMixin:
         self._disk_cache_by_scope.clear()
         self._disk_cache_scope_meta.clear()
         self._last_full_scan_key = ""
+        self._last_page_scan_signature = ""
         self._warm_scan_keys.clear()
         self._scan_scope_roots_by_key.clear()
         with self._checkpoint_lock:
@@ -1374,11 +1375,23 @@ class BridgeMediaListingScanMixin:
         # its next re-sort tick â€” no need to queue another lock-blocked scan.
         if self._scan_lock.locked():
             return
+        signature_parts: list[str] = []
+        for path in sorted(clean_paths, key=lambda item: str(item).casefold()):
+            try:
+                stat = path.stat()
+                signature_parts.append(f"{str(path)}|{stat.st_mtime_ns}|{stat.st_size}")
+            except Exception:
+                signature_parts.append(f"{str(path)}|missing|0")
+        page_scan_signature = hashlib.sha1("\n".join(signature_parts).encode("utf-8", errors="replace")).hexdigest()
+        if page_scan_signature and self._last_page_scan_signature == page_scan_signature:
+            return
+        self._last_page_scan_signature = page_scan_signature
         def work():
             try:
                 with self._scan_lock:
                     self._do_full_scan(clean_paths, self.conn, emit_progress=False)
             except Exception as exc:
+                self._last_page_scan_signature = ""
                 try:
                     self._log(f"Page scan failed: {exc}")
                 except Exception:
@@ -1386,7 +1399,9 @@ class BridgeMediaListingScanMixin:
         threading.Thread(target=work, daemon=True).start()
 
     def _do_full_scan(self, paths: list[Path], conn, emit_progress: bool = True, scope_key: str = "") -> int:
+        from app.mediamanager.db.ai_metadata_repo import PARSER_VERSION
         from app.mediamanager.db.media_repo import get_media_by_path, upsert_media_item
+        from app.mediamanager.db.metadata_repo import get_media_metadata
         from app.mediamanager.metadata.persistence import inspect_and_persist_if_supported
         from app.mediamanager.utils.hashing import calculate_media_content_hash, calculate_image_phash
         from datetime import datetime, timezone
@@ -1492,7 +1507,15 @@ class BridgeMediaListingScanMixin:
                         duration_ms=d_ms,
                     )
                 if media_id is not None:
-                    inspect_and_persist_if_supported(conn, media_id, str(p), "image" if p.suffix.lower() in IMAGE_EXTS else "video")
+                    metadata_current = False
+                    if skip:
+                        try:
+                            metadata = get_media_metadata(conn, int(media_id)) or {}
+                            metadata_current = str(metadata.get("embedded_metadata_parser_version") or "") == str(PARSER_VERSION)
+                        except Exception:
+                            metadata_current = False
+                    if not skip or not metadata_current:
+                        inspect_and_persist_if_supported(conn, media_id, str(p), "image" if p.suffix.lower() in IMAGE_EXTS else "video")
                 count += 1
                 if scope_key and self._checkpoint_mark(scope_key, str(p)):
                     self._save_scan_checkpoint()

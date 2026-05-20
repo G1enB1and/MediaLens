@@ -239,6 +239,7 @@ class Bridge(BridgeMediaListingScanMixin, BridgeTagsMetadataMixin, BridgeLocalAi
         # Viewport-priority scanning: paths currently visible in gallery jump to front of scan queue.
         self._priority_paths: set[str] = set()
         self._priority_lock = threading.Lock()
+        self._last_page_scan_signature: str = ""
 
         # Scan checkpointing: track which paths have been deep-scanned per scope, persisted to disk.
         self._checkpoint_path = appdata / "scan_checkpoint.json"
