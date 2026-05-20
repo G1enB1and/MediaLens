@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor, QIcon, QPalette
+from PySide6.QtGui import QColor, QIcon, QPalette, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSplitter,
+    QStyledItemDelegate,
+    QStyle,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -26,6 +28,46 @@ from PySide6.QtWidgets import (
 )
 
 from native.mediamanagerx_app.theme_dialogs import Theme
+
+
+class _HistoryFilterComboDelegate(QStyledItemDelegate):
+    def __init__(self, bridge, combo: QComboBox, parent=None):
+        super().__init__(parent)
+        self.bridge = bridge
+        self.combo = combo
+
+    def sizeHint(self, option, index):
+        size = super().sizeHint(option, index)
+        size.setHeight(max(size.height(), option.fontMetrics.height() + 12))
+        return size
+
+    def paint(self, painter: QPainter, option, index) -> None:
+        accent = QColor(str(self.bridge.settings.value("ui/accent_color", Theme.ACCENT_DEFAULT, type=str) or Theme.ACCENT_DEFAULT))
+        is_light = Theme.get_is_light()
+        text_color = QColor(Theme.get_text_color())
+        muted = QColor(Theme.get_text_muted())
+        combo_bg = QColor("#ffffff" if is_light else Theme.mix(Theme.get_control_bg(accent), "#000000", 0.12))
+        hover_bg = QColor(Theme.mix(combo_bg.name(), "#000000" if is_light else "#ffffff", 0.04 if is_light else 0.07))
+        selected_text = QColor(Theme.mix(Theme.get_text_color(), accent, 0.76))
+        is_current = index.row() == self.combo.currentIndex()
+        is_hover = bool(option.state & QStyle.StateFlag.State_MouseOver)
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        painter.fillRect(option.rect, hover_bg if is_hover and not is_current else combo_bg)
+
+        font = option.font
+        font.setBold(is_current)
+        painter.setFont(font)
+        painter.setPen(selected_text if is_current else (text_color if index.flags() & Qt.ItemFlag.ItemIsEnabled else muted))
+        text_rect = option.rect.adjusted(12, 4, -12, -4)
+        text = option.fontMetrics.elidedText(
+            str(index.data(Qt.ItemDataRole.DisplayRole) or ""),
+            Qt.TextElideMode.ElideRight,
+            max(0, text_rect.width()),
+        )
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
+        painter.restore()
 
 
 class ActionHistoryDialog(QDialog):
@@ -59,10 +101,14 @@ class ActionHistoryDialog(QDialog):
         self.filter_combo = QComboBox()
         self.filter_combo.setObjectName("historyFilterCombo")
         self.filter_combo.setMinimumWidth(126)
+        self.filter_combo.setCursor(Qt.CursorShape.PointingHandCursor)
         filter_view = QListView(self.filter_combo)
         filter_view.setObjectName("historyFilterComboPopup")
         filter_view.setUniformItemSizes(True)
+        filter_view.setMouseTracking(True)
+        filter_view.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
         self.filter_combo.setView(filter_view)
+        self.filter_combo.setItemDelegate(_HistoryFilterComboDelegate(self.bridge, self.filter_combo, filter_view))
         for label, value in (
             ("All", "all"),
             ("Delete", "delete"),
@@ -81,6 +127,8 @@ class ActionHistoryDialog(QDialog):
         self.search_edit.setPlaceholderText("Search file or path")
         self.undo_btn = QPushButton("Undo")
         self.redo_btn = QPushButton("Redo")
+        self._sync_button_cursor(self.undo_btn)
+        self._sync_button_cursor(self.redo_btn)
         toolbar.addWidget(self.filter_combo)
         toolbar.addWidget(self.search_edit, 1)
         toolbar.addWidget(self.undo_btn)
@@ -124,7 +172,8 @@ class ActionHistoryDialog(QDialog):
         item_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         item_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         item_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        item_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        item_header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        self.items_table.setColumnWidth(4, 170)
         details_layout.addWidget(self.items_table, 1)
         splitter.addWidget(details)
         splitter.setSizes([340, 240])
@@ -134,6 +183,7 @@ class ActionHistoryDialog(QDialog):
         footer.addStretch(1)
         self.delete_all_btn = QPushButton("Delete All Action History")
         self.delete_all_btn.setObjectName("historyDeleteAllButton")
+        self._sync_button_cursor(self.delete_all_btn)
         trash_icon = Path(__file__).with_name("web") / "icons" / "trash-red.svg"
         if trash_icon.exists():
             self.delete_all_btn.setIcon(QIcon(str(trash_icon)))
@@ -171,6 +221,7 @@ class ActionHistoryDialog(QDialog):
         danger = "#dc2626" if is_light else "#f87171"
         danger_bg = Theme.mix(bg, danger, 0.10 if is_light else 0.18)
         danger_hover = Theme.mix(bg, danger, 0.18 if is_light else 0.26)
+        disabled_bg = Theme.mix(control_bg, "#000000" if is_light else "#ffffff", 0.08 if is_light else 0.06)
         palette = self.palette()
         palette.setColor(QPalette.ColorRole.Window, QColor(bg))
         palette.setColor(QPalette.ColorRole.Base, QColor(control_bg))
@@ -246,7 +297,7 @@ class ActionHistoryDialog(QDialog):
                 padding: 6px 12px;
             }}
             QPushButton:hover {{ background-color: {hover_bg}; border-color: {accent_str}; color: {text}; }}
-            QPushButton:disabled {{ color: {muted}; border-color: {border}; background-color: transparent; }}
+            QPushButton:disabled {{ color: {muted}; border-color: {border}; background-color: {disabled_bg}; }}
             QPushButton#historyDeleteAllButton {{
                 background-color: {danger_bg};
                 color: {danger};
@@ -257,6 +308,11 @@ class ActionHistoryDialog(QDialog):
                 background-color: {danger_hover};
                 border-color: {danger};
                 color: {danger};
+            }}
+            QPushButton#historyDeleteAllButton:disabled {{
+                background-color: {disabled_bg};
+                color: {muted};
+                border-color: {border};
             }}
             QWidget#historyItemActionCell {{
                 background: transparent;
@@ -408,6 +464,9 @@ class ActionHistoryDialog(QDialog):
         self.undo_btn.setEnabled(bool(state.get("can_undo")))
         self.redo_btn.setEnabled(bool(state.get("can_redo")))
         self.delete_all_btn.setEnabled(bool(self._entries))
+        self._sync_button_cursor(self.undo_btn)
+        self._sync_button_cursor(self.redo_btn)
+        self._sync_button_cursor(self.delete_all_btn)
 
     def _on_selection_changed(self) -> None:
         rows = self.entries_table.selectionModel().selectedRows()
@@ -466,11 +525,21 @@ class ActionHistoryDialog(QDialog):
         entry_undo_state = str(entry.get("undo_state") or "")
         undo.setEnabled(state == "applied" and entry_undo_state != "not_undoable")
         redo.setEnabled(state == "undone")
+        self._sync_button_cursor(undo)
+        self._sync_button_cursor(redo)
         undo.clicked.connect(lambda _checked=False, item_id=int(item.get("id") or 0): self._undo_item(item_id))
         redo.clicked.connect(lambda _checked=False, item_id=int(item.get("id") or 0): self._redo_item(item_id))
         layout.addWidget(undo)
         layout.addWidget(redo)
         return box
+
+    @staticmethod
+    def _sync_button_cursor(button: QPushButton) -> None:
+        button.setCursor(
+            Qt.CursorShape.PointingHandCursor
+            if button.isEnabled()
+            else Qt.CursorShape.ForbiddenCursor
+        )
 
     def _item_state_counts(self, items: list[dict]) -> dict[str, int]:
         counts = {"applied": 0, "undone": 0, "unavailable": 0, "failed": 0}
