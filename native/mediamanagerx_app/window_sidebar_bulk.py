@@ -1844,6 +1844,13 @@ class WindowSidebarBulkMixin:
         host_width, stacked = self._bulk_selected_row_editor_width(list_widget, first_row)
         layout_state = (host_width, bool(stacked), list_widget.count())
         if getattr(list_widget, "_bulk_layout_state", None) == layout_state:
+            QTimer.singleShot(
+                0,
+                lambda: self._load_visible_bulk_selected_file_thumbnails(
+                    list_widget,
+                    BulkSelectedFileRow._TAG_CONTENT_HEIGHT,
+                ),
+            )
             return
         list_widget._bulk_layout_state = layout_state
         list_widget.doItemsLayout()
@@ -1898,6 +1905,13 @@ class WindowSidebarBulkMixin:
         host_width, stacked = self._bulk_selected_row_editor_width(list_widget, first_row)
         layout_state = (host_width, bool(stacked), list_widget.count())
         if getattr(list_widget, "_bulk_layout_state", None) == layout_state:
+            QTimer.singleShot(
+                0,
+                lambda: self._load_visible_bulk_selected_file_thumbnails(
+                    list_widget,
+                    BulkSelectedFileRow._CAPTION_CONTENT_HEIGHT,
+                ),
+            )
             return
         list_widget._bulk_layout_state = layout_state
         list_widget.doItemsLayout()
@@ -1952,6 +1966,13 @@ class WindowSidebarBulkMixin:
         host_width, stacked = self._bulk_selected_row_editor_width(list_widget, first_row)
         layout_state = (host_width, bool(stacked), list_widget.count())
         if getattr(list_widget, "_bulk_layout_state", None) == layout_state:
+            QTimer.singleShot(
+                0,
+                lambda: self._load_visible_bulk_selected_file_thumbnails(
+                    list_widget,
+                    BulkSelectedFileRow._CAPTION_CONTENT_HEIGHT,
+                ),
+            )
             return
         list_widget._bulk_layout_state = layout_state
         list_widget.doItemsLayout()
