@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -179,11 +180,15 @@ class ActionHistoryDialog(QDialog):
         self.details_meta = QLabel("")
         self.details_meta.setObjectName("historyDetailsMeta")
         self.details_meta.setWordWrap(True)
+        self.details_summary = QLabel("")
+        self.details_summary.setObjectName("historyDetailsSummary")
+        self.details_summary.setWordWrap(True)
         details_layout.addWidget(self.details_title)
         details_layout.addWidget(self.details_meta)
+        details_layout.addWidget(self.details_summary)
 
-        self.items_table = QTableWidget(0, 5)
-        self.items_table.setHorizontalHeaderLabels(["Item", "From", "To", "State", "Action"])
+        self.items_table = QTableWidget(0, 4)
+        self.items_table.setHorizontalHeaderLabels(["Item", "Change", "Status", "Action"])
         self.items_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.items_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.items_table.verticalHeader().setVisible(False)
@@ -191,10 +196,9 @@ class ActionHistoryDialog(QDialog):
         item_header = self.items_table.horizontalHeader()
         item_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         item_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        item_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        item_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        item_header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        self.items_table.setColumnWidth(4, 180)
+        item_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        item_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        self.items_table.setColumnWidth(3, 180)
         details_layout.addWidget(self.items_table, 1)
         splitter.addWidget(details)
         splitter.setSizes([340, 240])
@@ -262,6 +266,13 @@ class ActionHistoryDialog(QDialog):
             QLabel {{ color: {text}; background: transparent; }}
             QLabel#historyDetailsTitle {{ font-size: 16px; font-weight: bold; }}
             QLabel#historyDetailsMeta {{ color: {muted}; }}
+            QLabel#historyDetailsSummary {{
+                color: {text};
+                background-color: {input_bg};
+                border: 1px solid {border};
+                border-radius: 6px;
+                padding: 8px 10px;
+            }}
             QLineEdit {{
                 background-color: {input_bg};
                 color: {text};
@@ -504,6 +515,7 @@ class ActionHistoryDialog(QDialog):
         if not entry:
             self.details_title.setText("Select an action")
             self.details_meta.setText("")
+            self.details_summary.setText("")
             self.items_table.setRowCount(0)
             return
         self.details_title.setText(str(entry.get("summary") or "Action"))
@@ -511,11 +523,11 @@ class ActionHistoryDialog(QDialog):
         counts = self._item_state_counts(items)
         detail_parts = [
             self._format_time(str(entry.get("timestamp_utc") or ""), long=True),
-            f"Status: {self._status_text(entry)}",
+            self._status_text(entry),
             self._counts_text(counts),
-            f"Transaction: {entry.get('transaction_id')}",
         ]
         self.details_meta.setText(" | ".join(part for part in detail_parts if part))
+        self.details_summary.setText(self._entry_detail_text(entry, items))
         self.items_table.setRowCount(0)
         for row_idx, item in enumerate(items):
             self.items_table.insertRow(row_idx)
@@ -523,15 +535,14 @@ class ActionHistoryDialog(QDialog):
             name = Path(str(item.get("new_path") or item.get("old_path") or "")).name
             values = [
                 name,
-                str(item.get("old_path") or ""),
-                str(item.get("new_path") or ""),
+                self._item_change_text(entry, item),
                 self._item_state_text(item),
             ]
             for col, value in enumerate(values):
                 cell = QTableWidgetItem(value)
                 self.items_table.setItem(row_idx, col, cell)
             action_widget = self._item_action_widget(item, entry)
-            self.items_table.setCellWidget(row_idx, 4, action_widget)
+            self.items_table.setCellWidget(row_idx, 3, action_widget)
 
     def _item_action_widget(self, item: dict, entry: dict) -> QWidget:
         box = QWidget()
@@ -580,7 +591,7 @@ class ActionHistoryDialog(QDialog):
     def _counts_text(self, counts: dict[str, int]) -> str:
         parts = []
         for key, label in (
-            ("applied", "active"),
+            ("applied", "current"),
             ("undone", "undone"),
             ("unavailable", "unavailable"),
             ("failed", "failed"),
@@ -642,37 +653,221 @@ class ActionHistoryDialog(QDialog):
             return f"{Path(old_path).parent} -> {Path(new_path).parent}"
         return old_path or new_path
 
+    def _entry_detail_text(self, entry: dict, items: list[dict]) -> str:
+        action_type = str(entry.get("action_type") or "")
+        if not items:
+            return "This history entry records a system action and does not contain individual file changes."
+        if len(items) == 1:
+            return self._single_item_detail_text(entry, items[0])
+        counts = self._item_state_counts(items)
+        item_label = "item" if len(items) == 1 else "items"
+        status = self._plain_entry_state(entry, counts)
+        sample_changes = [self._item_change_text(entry, item) for item in items[:3]]
+        change_text = "; ".join(change for change in sample_changes if change)
+        if len(items) > 3:
+            change_text = f"{change_text}; and {len(items) - 3} more" if change_text else f"{len(items) - 3} more changes"
+        action_label = {
+            "delete": "deleted",
+            "move": "moved",
+            "copy": "copied",
+            "rename": "renamed",
+            "create_folder": "created",
+            "metadata": "edited",
+            "hidden": "changed visibility for",
+            "rotate": "rotated",
+            "undo": "undid",
+            "redo": "redid",
+        }.get(action_type, "changed")
+        return f"This action {action_label} {len(items)} {item_label}. {status}. {change_text}"
+
+    def _single_item_detail_text(self, entry: dict, item: dict) -> str:
+        name = self._item_name(item)
+        change = self._item_change_text(entry, item)
+        state = self._plain_item_state(item)
+        action = self._available_action_text(entry, item)
+        return f"{name}: {change}. {state}. {action}"
+
+    def _item_change_text(self, entry: dict, item: dict) -> str:
+        action_type = str(entry.get("action_type") or "")
+        old_path = str(item.get("old_path") or "")
+        new_path = str(item.get("new_path") or "")
+        name = self._item_name(item)
+        if action_type == "metadata":
+            return self._metadata_change_text(item)
+        if action_type == "hidden":
+            return self._hidden_change_text(item)
+        if action_type == "rotate":
+            return self._rotate_change_text(item)
+        if action_type == "delete":
+            return f"Deleted from {self._parent_text(old_path)}"
+        if action_type == "move":
+            return f"Moved from {self._parent_text(old_path)} to {self._parent_text(new_path)}"
+        if action_type == "copy":
+            return f"Copied from {self._parent_text(old_path)} to {self._parent_text(new_path)}"
+        if action_type == "rename":
+            return f"Renamed from {Path(old_path).name or old_path} to {Path(new_path).name or new_path}"
+        if action_type == "create_folder":
+            return f"Created folder at {new_path or name}"
+        if action_type == "undo":
+            return str(entry.get("summary") or "Undid an earlier action")
+        if action_type == "redo":
+            return str(entry.get("summary") or "Redid an earlier action")
+        return str(item.get("notes") or entry.get("summary") or "Changed")
+
+    def _metadata_change_text(self, item: dict) -> str:
+        payload = self._metadata_payload(item)
+        old = dict(payload.get("old") or {})
+        new = dict(payload.get("new") or {})
+        changes = self._metadata_change_phrases(old, new)
+        if not changes:
+            notes = str(item.get("notes") or "").strip()
+            return f"Edited {notes}" if notes else "Edited metadata"
+        return "; ".join(changes[:3]) + (f"; and {len(changes) - 3} more" if len(changes) > 3 else "")
+
+    def _metadata_change_phrases(self, old: dict, new: dict) -> list[str]:
+        phrases: list[str] = []
+        if (old.get("tags") or []) != (new.get("tags") or []):
+            phrases.append(f"Tags changed from {self._format_value(old.get('tags'))} to {self._format_value(new.get('tags'))}")
+        metadata_labels = (
+            ("title", "Title"),
+            ("description", "Description"),
+            ("notes", "Notes"),
+            ("embedded_tags", "Embedded tags"),
+            ("embedded_comments", "Embedded comments"),
+            ("ai_prompt", "AI prompt"),
+            ("ai_negative_prompt", "Negative prompt"),
+            ("ai_params", "AI parameters"),
+        )
+        old_metadata = dict(old.get("metadata") or {})
+        new_metadata = dict(new.get("metadata") or {})
+        for key, label in metadata_labels:
+            if old_metadata.get(key) != new_metadata.get(key):
+                phrases.append(f"{label} changed from {self._format_value(old_metadata.get(key))} to {self._format_value(new_metadata.get(key))}")
+        media_labels = (
+            ("detected_text", "OCR text"),
+            ("user_confirmed_text_detected", "Text detected"),
+            ("exif_date_taken", "EXIF date"),
+            ("metadata_date", "Metadata date"),
+        )
+        old_media = dict(old.get("media") or {})
+        new_media = dict(new.get("media") or {})
+        for key, label in media_labels:
+            if old_media.get(key) != new_media.get(key):
+                phrases.append(f"{label} changed from {self._format_value(old_media.get(key))} to {self._format_value(new_media.get(key))}")
+        if (old.get("ai") or {}) != (new.get("ai") or {}):
+            phrases.append("AI metadata changed")
+        return phrases
+
+    def _hidden_change_text(self, item: dict) -> str:
+        payload = self._metadata_payload(item)
+        old_hidden = bool(payload.get("old_hidden"))
+        new_hidden = bool(payload.get("new_hidden"))
+        if old_hidden == new_hidden:
+            return "Visibility was checked"
+        return "Changed visibility from hidden to visible" if old_hidden else "Changed visibility from visible to hidden"
+
+    def _rotate_change_text(self, item: dict) -> str:
+        payload = self._metadata_payload(item)
+        degrees = int(payload.get("degrees") or 0)
+        return f"Rotated {degrees} degrees" if degrees else "Rotated media"
+
+    @staticmethod
+    def _metadata_payload(item: dict) -> dict:
+        try:
+            payload = json.loads(str(item.get("metadata_json") or "{}"))
+            return dict(payload or {})
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _item_name(item: dict) -> str:
+        path = str(item.get("new_path") or item.get("old_path") or "")
+        return Path(path).name or path or "Item"
+
+    @staticmethod
+    def _parent_text(path: str) -> str:
+        if not path:
+            return "unknown location"
+        try:
+            return str(Path(path).parent)
+        except Exception:
+            return path
+
+    @staticmethod
+    def _format_value(value) -> str:
+        if value is None or value == "" or value == []:
+            return "blank"
+        if isinstance(value, bool):
+            return "yes" if value else "no"
+        if isinstance(value, list):
+            return ", ".join(str(item) for item in value) if value else "blank"
+        text = str(value).replace("\r\n", "\n").replace("\r", "\n").strip()
+        if not text:
+            return "blank"
+        text = " ".join(text.split())
+        if len(text) > 140:
+            text = f"{text[:137]}..."
+        return f'"{text}"'
+
+    def _plain_entry_state(self, entry: dict, counts: dict[str, int]) -> str:
+        undo_state = str(entry.get("undo_state") or "")
+        if undo_state == "redoable":
+            return "This action is currently undone and can be redone"
+        if undo_state == "partially_undone":
+            return "Some items are still current and some have already been undone"
+        if undo_state == "undoable":
+            return "This action is still current and can be undone"
+        if int(counts.get("failed") or 0):
+            return "This action has failed items"
+        return "This action cannot be undone"
+
+    def _plain_item_state(self, item: dict) -> str:
+        state = str(item.get("current_state") or "")
+        if state == "applied":
+            return "This change is still current"
+        if state == "undone":
+            return "This change has been undone"
+        if state == "unavailable":
+            note = str(item.get("notes") or "").strip()
+            return note or "This change cannot currently be undone or redone"
+        if state == "failed":
+            note = str(item.get("notes") or "").strip()
+            return note or "This change failed"
+        return state.replace("_", " ").title() or "State unknown"
+
+    def _available_action_text(self, entry: dict, item: dict) -> str:
+        state = str(item.get("current_state") or "")
+        entry_undo_state = str(entry.get("undo_state") or "")
+        if state == "applied" and entry_undo_state != "not_undoable":
+            return "This change can be undone"
+        if state == "undone":
+            return "This change can be redone"
+        return "No item action is currently available"
+
     def _status_text(self, entry: dict) -> str:
         status = str(entry.get("status") or "success").replace("_", " ").title()
         undo_state_raw = str(entry.get("undo_state") or "")
         undo_state = {
-            "undoable": "Undoable",
-            "redoable": "Redoable",
-            "partially_undone": "Partially Undoable",
-            "not_undoable": "Not Undoable",
+            "undoable": "Can undo",
+            "redoable": "Can redo",
+            "partially_undone": "Partially undone",
+            "not_undoable": "Cannot undo",
         }.get(undo_state_raw, undo_state_raw.replace("_", " ").title())
         return f"{status} | {undo_state}" if undo_state else status
 
     def _item_state_text(self, item: dict) -> str:
         state_raw = str(item.get("current_state") or "")
-        source_raw = str(item.get("last_change_source") or "")
-        state = {
-            "applied": "Active",
+        note = str(item.get("notes") or "").strip()
+        if state_raw == "unavailable" and note:
+            return "Unavailable"
+        if state_raw == "failed" and note:
+            return "Failed"
+        return {
+            "applied": "Current",
             "undone": "Undone",
             "unavailable": "Unavailable",
             "failed": "Failed",
         }.get(state_raw, state_raw.replace("_", " ").title())
-        source = {
-            "original_action": "Original action",
-            "group_undo": "Group undo",
-            "group_redo": "Group redo",
-            "individual_undo": "Individual undo",
-            "individual_redo": "Individual redo",
-            "external_change": "External change",
-        }.get(source_raw, source_raw.replace("_", " ").title())
-        notes = str(item.get("notes") or "").strip()
-        label = f"{state} | {source}" if source else state
-        return f"{label} | {notes}" if notes else label
 
     def _format_time(self, value: str, *, long: bool = False) -> str:
         try:

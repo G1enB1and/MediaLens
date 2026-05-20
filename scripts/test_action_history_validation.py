@@ -2,6 +2,7 @@ import sqlite3
 
 from app.mediamanager.db import action_history_repo
 from app.mediamanager.db.migrations import _ensure_action_history_tables
+from native.mediamanagerx_app.action_history_dialog import ActionHistoryDialog
 from native.mediamanagerx_app.action_history import make_history_item, validate_history_item_availability
 from native.mediamanagerx_app.bridge_file_ops import BridgeFileOpsMixin
 
@@ -108,3 +109,25 @@ def test_group_result_summary_reports_skipped_items():
     summary = BridgeFileOpsMixin._history_group_result_summary("Undid action", 8, 10)
 
     assert summary == "Undid action for 8 of 10 items; 2 items skipped"
+
+
+def test_action_history_metadata_details_are_plain_english():
+    dialog = ActionHistoryDialog.__new__(ActionHistoryDialog)
+    item = {
+        "old_path": "C:/Pictures/cat.jpg",
+        "new_path": "C:/Pictures/cat.jpg",
+        "current_state": "applied",
+        "metadata_json": (
+            '{"old":{"path":"C:/Pictures/cat.jpg","metadata":{"description":""},'
+            '"media":{},"tags":[],"ai":{}},'
+            '"new":{"path":"C:/Pictures/cat.jpg","metadata":{"description":"sleeping cat"},'
+            '"media":{},"tags":[],"ai":{}}}'
+        ),
+    }
+    entry = {"action_type": "metadata", "undo_state": "undoable"}
+
+    detail = dialog._single_item_detail_text(entry, item)
+
+    assert 'cat.jpg: Description changed from blank to "sleeping cat".' in detail
+    assert "This change is still current." in detail
+    assert "This change can be undone" in detail
