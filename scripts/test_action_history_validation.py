@@ -131,3 +131,35 @@ def test_action_history_metadata_details_are_plain_english():
     assert 'cat.jpg: Description changed from blank to "sleeping cat".' in detail
     assert "This change is still current." in detail
     assert "This change can be undone" in detail
+
+
+def test_action_history_metadata_details_ignore_blank_to_blank_fields():
+    dialog = ActionHistoryDialog.__new__(ActionHistoryDialog)
+    old = {
+        "metadata": {
+            "title": None,
+            "description": "",
+            "notes": None,
+            "embedded_tags": None,
+            "embedded_comments": None,
+        },
+        "media": {},
+        "tags": [],
+        "ai": {},
+    }
+    new = {
+        "metadata": {
+            "title": "",
+            "description": "new description",
+            "notes": "",
+            "embedded_tags": "",
+            "embedded_comments": "",
+        },
+        "media": {},
+        "tags": [],
+        "ai": {},
+    }
+
+    phrases = dialog._metadata_change_phrases(old, new)
+
+    assert phrases == ['Description changed from blank to "new description"']

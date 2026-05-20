@@ -726,7 +726,7 @@ class ActionHistoryDialog(QDialog):
 
     def _metadata_change_phrases(self, old: dict, new: dict) -> list[str]:
         phrases: list[str] = []
-        if (old.get("tags") or []) != (new.get("tags") or []):
+        if self._compare_value(old.get("tags")) != self._compare_value(new.get("tags")):
             phrases.append(f"Tags changed from {self._format_value(old.get('tags'))} to {self._format_value(new.get('tags'))}")
         metadata_labels = (
             ("title", "Title"),
@@ -741,7 +741,7 @@ class ActionHistoryDialog(QDialog):
         old_metadata = dict(old.get("metadata") or {})
         new_metadata = dict(new.get("metadata") or {})
         for key, label in metadata_labels:
-            if old_metadata.get(key) != new_metadata.get(key):
+            if self._compare_value(old_metadata.get(key)) != self._compare_value(new_metadata.get(key)):
                 phrases.append(f"{label} changed from {self._format_value(old_metadata.get(key))} to {self._format_value(new_metadata.get(key))}")
         media_labels = (
             ("detected_text", "OCR text"),
@@ -752,9 +752,9 @@ class ActionHistoryDialog(QDialog):
         old_media = dict(old.get("media") or {})
         new_media = dict(new.get("media") or {})
         for key, label in media_labels:
-            if old_media.get(key) != new_media.get(key):
+            if self._compare_value(old_media.get(key)) != self._compare_value(new_media.get(key)):
                 phrases.append(f"{label} changed from {self._format_value(old_media.get(key))} to {self._format_value(new_media.get(key))}")
-        if (old.get("ai") or {}) != (new.get("ai") or {}):
+        if self._compare_value(old.get("ai")) != self._compare_value(new.get("ai")):
             phrases.append("AI metadata changed")
         return phrases
 
@@ -792,6 +792,22 @@ class ActionHistoryDialog(QDialog):
             return str(Path(path).parent)
         except Exception:
             return path
+
+    @staticmethod
+    def _compare_value(value):
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, list):
+            return [ActionHistoryDialog._compare_value(item) for item in value if ActionHistoryDialog._compare_value(item) != ""]
+        if isinstance(value, dict):
+            return {
+                str(key): normalized
+                for key, item in value.items()
+                if (normalized := ActionHistoryDialog._compare_value(item)) != ""
+            }
+        return value
 
     @staticmethod
     def _format_value(value) -> str:
