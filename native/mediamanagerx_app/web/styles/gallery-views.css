@@ -1,3 +1,4 @@
+.masonry {
   /* Responsive columns: browser chooses column-count based on available width */
   column-width: 240px;
   column-gap: 12px;
@@ -283,19 +284,19 @@
 }
 
 .review-single-close-icon {
-  background-image: url('./icons/close-gray.svg');
+  background-image: url('../icons/close-gray.svg');
 }
 
 .review-single-trash-icon {
-  background-image: url('./icons/trashcan-gray.svg');
+  background-image: url('../icons/trashcan-gray.svg');
 }
 
 .review-single-icon-btn:hover .review-single-close-icon {
-  background-image: url('./icons/close-red.svg');
+  background-image: url('../icons/close-red.svg');
 }
 
 .review-single-icon-btn:hover .review-single-trash-icon {
-  background-image: url('./icons/trashcan-red.svg');
+  background-image: url('../icons/trashcan-red.svg');
 }
 
 .duplicate-summary {
@@ -1159,12 +1160,12 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 .duplicate-trash-icon {
   width: 16px;
   height: 16px;
-  background: center / contain no-repeat url('./icons/trashcan-white.svg');
+  background: center / contain no-repeat url('../icons/trashcan-white.svg');
   pointer-events: none;
 }
 
 .light-mode .duplicate-trash-icon {
-  background-image: url('./icons/trashcan.svg');
+  background-image: url('../icons/trashcan.svg');
 }
 
 .duplicate-trash-btn:hover {
@@ -1174,7 +1175,7 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 }
 
 .duplicate-trash-btn:hover .duplicate-trash-icon {
-  background-image: url('./icons/trashcan-red.svg');
+  background-image: url('../icons/trashcan-red.svg');
 }
 
 .gallery-duplicates .entry-name,

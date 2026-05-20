@@ -235,11 +235,11 @@
   width: 16px;
   height: 16px;
   flex: 0 0 16px;
-  background: center / 16px 16px no-repeat url('./icons/computer-svgrepo-com-white.svg');
+  background: center / 16px 16px no-repeat url('../icons/computer-svgrepo-com-white.svg');
 }
 
 .light-mode .folder-address-this-pc-icon {
-  background-image: url('./icons/computer-svgrepo-com.svg');
+  background-image: url('../icons/computer-svgrepo-com.svg');
 }
 
 .folder-address-segment:hover {
@@ -283,12 +283,12 @@
   content: '';
   width: 10px;
   height: 10px;
-  background: center / 10px 10px no-repeat url('./icons/right-thin-chevron-svgrepo-com-white.svg');
+  background: center / 10px 10px no-repeat url('../icons/right-thin-chevron-svgrepo-com-white.svg');
 }
 
 .light-mode .folder-address-chevron::before,
 .light-mode .folder-crumb-menu-item-arrow::before {
-  background-image: url('./icons/right-thin-chevron-svgrepo-com.svg');
+  background-image: url('../icons/right-thin-chevron-svgrepo-com.svg');
 }
 
 .folder-address-overflow {
