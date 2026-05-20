@@ -1,19 +1,16 @@
-## MediaLens v1.2.13
+## MediaLens v1.2.14
 
-### Summary
+### ✨ Summary
+This release improves the Background Processes experience by adding tabbed controls for text detection, OCR, and AI metadata workers. MediaLens gallery and bulk editor performance has also been heavily optimized to feel faster and more responsive during routine use.
 
-This release improves confidence during cleanup and review. Action History is easier to read, multi-file context actions behave more predictably, and duplicate comparison views keep the gallery footer out of the way when the comparison panel is open.
+### 🔥 Highlights
+- Schedule background text detection, OCR, and AI metadata worker passes directly from the Background Processes settings.
+- Enjoy faster gallery rendering and bulk editor scrolling with new short-lived caching and smarter thumbnail loading.
 
-### Highlights
+### 🛠 Notes
+- Web and native clickable controls now use pointing-hand cursors, and the gallery stylesheet loading has been refactored for more reliable parsing.
 
-- Action History now explains recent edits in plain English, including scoped description before-and-after details for new edits.
-- Right-click Delete, Cut, and Copy now work with multiple files selected.
-- Duplicate and similar comparison views now hide the gallery footer while the comparison panel is open.
+---
 
-### Notes
-
-- This release focuses on review workflow polish, clearer history details, scanner status stability, and duplicate comparison layout behavior.
-- This release does not include installer or runtime packaging changes.
-
-Full Changelog:
-<https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md>
+📄 Full Changelog:
+https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md

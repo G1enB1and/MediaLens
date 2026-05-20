@@ -1,6 +1,38 @@
 # Change Log
 
-## v1.2.13 (Current)
+## v1.2.14 (Current)
+
+### Summary
+
+This release improves the Background Processes experience by adding tabbed controls for text detection, OCR, and AI metadata workers. MediaLens gallery and bulk editor performance has also been heavily optimized to feel faster and more responsive during routine use.
+
+### Highlights
+
+- Schedule background text detection, OCR, and AI metadata worker passes directly from the Background Processes settings.
+- Enjoy faster gallery rendering and bulk editor scrolling with new short-lived caching and smarter thumbnail loading.
+- Filter out unsupported text and non-media files automatically during bulk actions.
+
+### Added
+
+- Added tabbed worker settings for Text Detection, OCR, AI Tags, and AI Descriptions under Background Processes.
+- Added scheduled and run-now controls for AI metadata workers.
+- Added short-lived caching for gallery entry results and counts to speed up UI refreshes.
+- Added focused performance logging for gallery entries.
+- Added automatic queueing of remaining hash backfills for duplicate and similar review loading.
+
+### Changed
+
+- Changed the scanner settings page name to Background Processes.
+- Changed scanner progress to use a shared footer status with a toast fallback.
+- Changed the bulk editor to automatically filter out text and non-media files from selections.
+- Changed bulk editor row input layout sync and thumbnail loading to work correctly while scrolling.
+- Changed gallery stylesheet loading to use direct ordered links for more reliable parsing.
+- Changed settings AI runtime status refreshes to debounce routine checks.
+- Changed web and native clickable controls to use pointing-hand cursors.
+
+---
+
+## v1.2.13
 
 ### Summary
 
