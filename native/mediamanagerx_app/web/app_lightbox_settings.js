@@ -1007,7 +1007,7 @@ function wireSettings() {
       gAutoplayGalleryAnimatedGifs = !!toggleAutoplayGalleryAnimatedGifs.checked;
       gBridge.set_setting_bool('player.autoplay_gallery_animated_gifs', gAutoplayGalleryAnimatedGifs, function () {
         gPage = 0;
-        refreshFromBridge(gBridge);
+        refreshFromBridge(gBridge, true, { skipScanRefresh: true, preserveCount: true });
       });
     });
   }
@@ -1085,7 +1085,7 @@ function wireSettings() {
       if (!gBridge || !gBridge.set_setting_bool) return;
       gBridge.set_setting_bool('gallery.randomize', !!toggle.checked, function () {
         gPage = 0;
-        refreshFromBridge(gBridge);
+        refreshFromBridge(gBridge, true, { skipScanRefresh: true, preserveCount: true });
       });
     });
   }

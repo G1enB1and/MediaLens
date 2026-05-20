@@ -2413,6 +2413,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   setupGroupedFilterSelect('filterSelect', (val) => {
     gFilter = val;
+    const scanSensitiveFilter = isTextFilterActive() || isDuplicateModeActive();
     if (gBridge && gBridge.set_current_gallery_scope_state) {
       gBridge.set_current_gallery_scope_state(gFilter || 'all', gSearchQuery || '');
     }
@@ -2431,7 +2432,7 @@ document.addEventListener('DOMContentLoaded', () => {
       gRenderTextProcessingToast();
     }
     gPage = 0; // Reset page on filter change
-    if (gBridge) refreshFromBridge(gBridge, true);
+    if (gBridge) refreshFromBridge(gBridge, true, { skipScanRefresh: !scanSensitiveFilter });
   });
 
   setupCustomSelect('groupBySelect', (val) => {

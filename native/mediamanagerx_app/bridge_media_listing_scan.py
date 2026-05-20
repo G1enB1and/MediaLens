@@ -70,6 +70,88 @@ class BridgeMediaListingScanMixin:
             self._gallery_count_cache.clear()
         except Exception:
             pass
+        try:
+            self._gallery_entries_cache.clear()
+        except Exception:
+            pass
+
+    def _gallery_entries_cache_key(self, folders: list, sort_by: str, filter_type: str, search_query: str) -> tuple:
+        try:
+            from app.mediamanager.db.scope_query import normalize_roots
+
+            normalized_folders = tuple(normalize_roots(str(folder or "") for folder in folders if str(folder or "").strip()))
+        except Exception:
+            normalized_folders = tuple(str(folder or "").strip().casefold() for folder in folders if str(folder or "").strip())
+        return (
+            normalized_folders,
+            int(getattr(self, "_active_collection_id", 0) or 0),
+            str(getattr(self, "_active_smart_collection_key", "") or ""),
+            str(sort_by or "none"),
+            str(filter_type or "all"),
+            str(search_query or ""),
+            bool(self._show_hidden_enabled()),
+            bool(self._gallery_include_nested_files_enabled()),
+            bool(self._gallery_should_show_all_file_types()),
+            bool(self._gallery_show_folders_enabled()),
+            str(self._gallery_view_mode()),
+            str(self._review_group_mode() or ""),
+            int(getattr(self, "_session_shuffle_seed", 0) or 0),
+        )
+
+    def _read_gallery_entries_cache(self, key: tuple) -> list[dict] | None:
+        try:
+            cached = getattr(self, "_gallery_entries_cache", {}).get(key)
+            if not cached:
+                return None
+            cached_at, entries = cached
+            ttl = float(getattr(self, "_gallery_entries_cache_ttl_seconds", 2.0) or 2.0)
+            if (time.monotonic() - float(cached_at)) > ttl:
+                getattr(self, "_gallery_entries_cache", {}).pop(key, None)
+                return None
+            return list(entries or [])
+        except Exception:
+            return None
+
+    def _write_gallery_entries_cache(self, key: tuple, entries: list[dict]) -> None:
+        try:
+            cache = getattr(self, "_gallery_entries_cache", None)
+            if cache is None:
+                self._gallery_entries_cache = {}
+                cache = self._gallery_entries_cache
+            cache[key] = (time.monotonic(), list(entries or []))
+            if len(cache) > 64:
+                oldest = sorted(cache.items(), key=lambda item: item[1][0])[:16]
+                for old_key, _old_value in oldest:
+                    cache.pop(old_key, None)
+        except Exception:
+            pass
+
+    def _get_gallery_entries_cached(self, folders: list[str], sort_by: str = "none", filter_type: str = "all", search_query: str = "") -> list[dict]:
+        started_at = time.perf_counter()
+        cache_key = self._gallery_entries_cache_key(list(folders or []), sort_by, filter_type, search_query)
+        cached = self._read_gallery_entries_cache(cache_key)
+        if cached is not None:
+            self._perf_log_elapsed(
+                "gallery_entries_cache",
+                started_at,
+                threshold_ms=40,
+                hit=1,
+                entries=len(cached),
+                sort=str(sort_by or "none"),
+                filter=str(filter_type or "all"),
+            )
+            return cached
+        entries = self._get_gallery_entries(folders, sort_by, filter_type, search_query)
+        self._write_gallery_entries_cache(cache_key, entries)
+        self._perf_log_elapsed(
+            "gallery_entries",
+            started_at,
+            entries=len(entries),
+            sort=str(sort_by or "none"),
+            filter=str(filter_type or "all"),
+            search=1 if str(search_query or "").strip() else 0,
+        )
+        return entries
 
     @staticmethod
     def _is_supported_media_path(path: Path | str) -> bool:
@@ -154,7 +236,15 @@ class BridgeMediaListingScanMixin:
                 self.conn.commit()
             except Exception:
                 pass
-            candidates = self._get_gallery_entries(folders, sort_by, filter_type, search_query)
+            candidates = self._get_gallery_entries_cached(folders, sort_by, filter_type, search_query)
+            self._write_gallery_count_cache(
+                self._gallery_count_cache_key(list(folders or []), filter_type, search_query, files_only=False),
+                len(candidates),
+            )
+            self._write_gallery_count_cache(
+                self._gallery_count_cache_key(list(folders or []), filter_type, search_query, files_only=True),
+                sum(1 for entry in candidates if not entry.get("is_folder")),
+            )
             start, end = max(0, int(offset)), max(0, int(offset)) + max(0, int(limit))
             out = []
             for r in candidates[start:end]:
@@ -233,11 +323,10 @@ class BridgeMediaListingScanMixin:
                 if not is_supported_media:
                     media_error = ""
                 elif r.get("media_type") == "image" and p.suffix.lower() != ".svg":
-                    display_size = _image_size_with_svg_support(p)
-                    if display_size.isValid():
-                        next_width, next_height = int(display_size.width()), int(display_size.height())
-                        if int(display_width or 0) != next_width or int(display_height or 0) != next_height:
-                            display_width, display_height = next_width, next_height
+                    if int(display_width or 0) <= 0 or int(display_height or 0) <= 0:
+                        display_size = _image_size_with_svg_support(p)
+                        if display_size.isValid():
+                            display_width, display_height = int(display_size.width()), int(display_size.height())
                             try:
                                 self.conn.execute(
                                     "UPDATE media_items SET width = ?, height = ? WHERE path = ?",
@@ -246,8 +335,8 @@ class BridgeMediaListingScanMixin:
                                 self.conn.commit()
                             except Exception:
                                 pass
-                    elif p.suffix.lower() in {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif"}:
-                        media_error = "Unsupported or corrupt image"
+                        elif p.suffix.lower() in {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif"}:
+                            media_error = "Unsupported or corrupt image"
                 elif r.get("media_type") == "video":
                     if int(display_width or 0) <= 16 or int(display_height or 0) <= 16:
                         next_width, next_height, _ = self._probe_video_size(str(p))
@@ -357,7 +446,7 @@ class BridgeMediaListingScanMixin:
                 self.conn.commit()
             except Exception:
                 pass
-            count = len(self._get_gallery_entries(folders, "none", filter_type, search_query))
+            count = len(self._get_gallery_entries_cached(folders, "none", filter_type, search_query))
             self._write_gallery_count_cache(cache_key, count)
             return count
         except Exception: return 0
@@ -376,7 +465,7 @@ class BridgeMediaListingScanMixin:
                 self.conn.commit()
             except Exception:
                 pass
-            count = sum(1 for entry in self._get_gallery_entries(folders, "none", filter_type, search_query) if not entry.get("is_folder"))
+            count = sum(1 for entry in self._get_gallery_entries_cached(folders, "none", filter_type, search_query) if not entry.get("is_folder"))
             self._write_gallery_count_cache(cache_key, count)
             return count
         except Exception:

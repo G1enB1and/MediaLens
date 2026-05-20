@@ -538,7 +538,7 @@ function setAdvancedSearchQuery(query, skipSync = false) {
   }
   if (!skipSync) syncAdvancedSearchControlsFromQuery(nextQuery);
   gPage = 0;
-  refreshFromBridge(gBridge);
+  refreshFromBridge(gBridge, true, { skipScanRefresh: !isDuplicateModeActive() });
 }
 
 function normalizeAdvancedSearchSavedQueries(items) {
@@ -945,7 +945,7 @@ window.__mmx_setSearchQuery = function (query) {
 window.__mmx_applyTagScope = function (query) {
   gActiveTagScopeQuery = String(query || '').trim();
   gPage = 0;
-  refreshFromBridge(gBridge, true);
+  refreshFromBridge(gBridge, true, { skipScanRefresh: !isDuplicateModeActive() });
   const scopeQuery = gActiveTagScopeQuery || '';
   window.setTimeout(function () {
     if (gBridge && gBridge.set_current_gallery_tag_scope_state) {
@@ -958,7 +958,7 @@ window.__mmx_applyTagScopeAndSelectAll = function (query) {
   gActiveTagScopeQuery = String(query || '').trim();
   gSelectAllAfterRefresh = true;
   gPage = 0;
-  refreshFromBridge(gBridge, true);
+  refreshFromBridge(gBridge, true, { skipScanRefresh: !isDuplicateModeActive() });
   const scopeQuery = gActiveTagScopeQuery || '';
   window.setTimeout(function () {
     if (gBridge && gBridge.set_current_gallery_tag_scope_state) {
@@ -974,7 +974,7 @@ window.__mmx_clearTagScope = function () {
     gBridge.set_current_gallery_tag_scope_state('');
   }
   gPage = 0;
-  refreshFromBridge(gBridge, true);
+  refreshFromBridge(gBridge, true, { skipScanRefresh: !isDuplicateModeActive() });
 };
 
 window.addEventListener('resize', () => {
