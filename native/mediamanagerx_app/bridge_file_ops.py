@@ -12,6 +12,7 @@ class BridgeFileOpsMixin:
     @Slot(str, bool, result=bool)
     def set_setting_bool(self, key: str, value: bool) -> bool:
         try:
+            worker_keys = getattr(self, "BACKGROUND_WORKER_KEYS", ("text_detection", "ocr_text", "ai_tags", "ai_descriptions"))
             allowed = (
                 "gallery.randomize", 
                 "gallery.restore_last", 
@@ -32,8 +33,7 @@ class BridgeFileOpsMixin:
                 "ui.advanced_search_expanded",
                 "ui.preview_above_details",
                 "updates.check_on_launch",
-                "scanners.text_detection.enabled",
-                "scanners.ocr_text.enabled",
+                *(f"scanners.{scanner_key}.enabled" for scanner_key in worker_keys),
                 "scanners.ocr_text.run_fast",
                 "scanners.ocr_text.run_ai",
                 "scanners.ocr_text.all_files",
@@ -54,7 +54,7 @@ class BridgeFileOpsMixin:
                 self.uiFlagChanged.emit(key, bool(value))
             elif key.startswith("scanners."):
                 self.settings.sync()
-                scanner_key = "ocr_text" if "ocr_text" in key else "text_detection"
+                scanner_key = next((item for item in worker_keys if f".{item}." in key), "text_detection")
                 self.scannerStatusChanged.emit(scanner_key, self._scanner_status_payload(scanner_key))
             elif key.startswith("updates."):
                 self.settings.sync()
@@ -67,19 +67,18 @@ class BridgeFileOpsMixin:
     @Slot(str, str, result=bool)
     def set_setting_str(self, key: str, value: str) -> bool:
         try:
+            worker_keys = getattr(self, "BACKGROUND_WORKER_KEYS", ("text_detection", "ocr_text", "ai_tags", "ai_descriptions"))
             scanner_schedule_keys = {
-                "scanners.text_detection.interval_hours",
-                "scanners.ocr_text.interval_hours",
-                "scanners.text_detection.source_folders",
-                "scanners.ocr_text.source_folders",
-                "scanners.text_detection.schedule_mode",
-                "scanners.ocr_text.schedule_mode",
-                "scanners.text_detection.schedule_time",
-                "scanners.ocr_text.schedule_time",
-                "scanners.text_detection.schedule_days",
-                "scanners.ocr_text.schedule_days",
-                "scanners.text_detection.schedule_month_day",
-                "scanners.ocr_text.schedule_month_day",
+                f"scanners.{scanner_key}.{field}"
+                for scanner_key in worker_keys
+                for field in (
+                    "interval_hours",
+                    "source_folders",
+                    "schedule_mode",
+                    "schedule_time",
+                    "schedule_days",
+                    "schedule_month_day",
+                )
             }
             if key not in ("gallery.startup_mode", "gallery.start_folder", "gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "gallery.similarity_threshold", "gallery.medialens_retention_days", "ui.accent_color", "ui.theme_mode", "ui.advanced_search_saved_queries", "metadata.display.order", "duplicate.settings.active_tab", "player.video_loop_mode", "player.video_loop_cutoff_seconds") and key not in scanner_schedule_keys and not key.startswith("metadata.layout.") and not key.startswith("duplicate.rules.") and key != "duplicate.priorities.order":
                 return False
@@ -116,21 +115,21 @@ class BridgeFileOpsMixin:
                     value = str(max(1, min(3650, int(str(value or "30").strip()))))
                 except Exception:
                     return False
-            elif key in {"scanners.text_detection.interval_hours", "scanners.ocr_text.interval_hours"}:
+            elif key.startswith("scanners.") and key.endswith(".interval_hours"):
                 try:
                     value = str(max(1, int(str(value or "24").strip())))
                 except Exception:
                     return False
-            elif key in {"scanners.text_detection.schedule_mode", "scanners.ocr_text.schedule_mode"}:
+            elif key.startswith("scanners.") and key.endswith(".schedule_mode"):
                 value = str(value or "weekly").strip().lower()
                 if value not in {"hours", "daily", "weekly", "monthly"}:
                     return False
-            elif key in {"scanners.text_detection.schedule_time", "scanners.ocr_text.schedule_time"}:
+            elif key.startswith("scanners.") and key.endswith(".schedule_time"):
                 match = re.match(r"^([01]?\d|2[0-3]):([0-5]\d)$", str(value or "02:00").strip())
                 if not match:
                     return False
                 value = f"{int(match.group(1)):02d}:{int(match.group(2)):02d}"
-            elif key in {"scanners.text_detection.schedule_days", "scanners.ocr_text.schedule_days"}:
+            elif key.startswith("scanners.") and key.endswith(".schedule_days"):
                 try:
                     parsed = json.loads(str(value or "[]"))
                 except Exception:
@@ -146,12 +145,12 @@ class BridgeFileOpsMixin:
                     if 0 <= day <= 6 and day not in clean_days:
                         clean_days.append(day)
                 value = json.dumps(sorted(clean_days))
-            elif key in {"scanners.text_detection.schedule_month_day", "scanners.ocr_text.schedule_month_day"}:
+            elif key.startswith("scanners.") and key.endswith(".schedule_month_day"):
                 try:
                     value = str(max(1, min(31, int(str(value or "1").strip()))))
                 except Exception:
                     return False
-            elif key in {"scanners.text_detection.source_folders", "scanners.ocr_text.source_folders"}:
+            elif key.startswith("scanners.") and key.endswith(".source_folders"):
                 try:
                     parsed = json.loads(str(value or "[]"))
                 except Exception:
@@ -192,7 +191,7 @@ class BridgeFileOpsMixin:
                 self.uiFlagChanged.emit(key, True)
             elif key.startswith("scanners."):
                 self.settings.sync()
-                scanner_key = "ocr_text" if "ocr_text" in key else "text_detection"
+                scanner_key = next((item for item in worker_keys if f".{item}." in key), "text_detection")
                 self.scannerStatusChanged.emit(scanner_key, self._scanner_status_payload(scanner_key))
             return True
         except Exception:

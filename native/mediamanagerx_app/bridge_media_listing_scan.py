@@ -1085,8 +1085,29 @@ class BridgeMediaListingScanMixin:
         review_mode = self._review_group_mode()
         if review_mode in {"similar", "similar_only"}:
             entries = [entry for entry in entries if not entry.get("is_folder") and self._is_supported_media_path(entry.get("_real_path") or entry.get("path") or "")]
-            self._backfill_scope_content_hashes(entries)
-            self._backfill_scope_phashes(entries)
+            missing_review_data = [
+                str(entry.get("_real_path") or entry.get("path") or "")
+                for entry in entries
+                if not str(entry.get("content_hash") or "").strip()
+                or (str(entry.get("media_type") or "") == "image" and not str(entry.get("phash") or "").strip())
+            ]
+            if len(missing_review_data) > 60:
+                inline_paths = set(missing_review_data[:60])
+                inline_entries = [
+                    entry for entry in entries
+                    if str(entry.get("_real_path") or entry.get("path") or "") in inline_paths
+                ]
+                self._backfill_scope_content_hashes(inline_entries)
+                self._backfill_scope_phashes(inline_entries)
+                self.start_scan_paths(missing_review_data[60:])
+                entries = [
+                    entry for entry in entries
+                    if str(entry.get("content_hash") or "").strip()
+                    and (str(entry.get("media_type") or "") != "image" or str(entry.get("phash") or "").strip())
+                ]
+            else:
+                self._backfill_scope_content_hashes(entries)
+                self._backfill_scope_phashes(entries)
             threshold, bucket_prefix = self._similarity_config()
             return self._build_similar_entries(
                 entries,
@@ -1097,7 +1118,22 @@ class BridgeMediaListingScanMixin:
             )
         if review_mode == "duplicates":
             entries = [entry for entry in entries if not entry.get("is_folder")]
-            self._backfill_scope_content_hashes(entries)
+            missing_hashes = [
+                str(entry.get("_real_path") or entry.get("path") or "")
+                for entry in entries
+                if not str(entry.get("content_hash") or "").strip()
+            ]
+            if len(missing_hashes) > 60:
+                inline_paths = set(missing_hashes[:60])
+                inline_entries = [
+                    entry for entry in entries
+                    if str(entry.get("_real_path") or entry.get("path") or "") in inline_paths
+                ]
+                self._backfill_scope_content_hashes(inline_entries)
+                self.start_scan_paths(missing_hashes[60:])
+                entries = [entry for entry in entries if str(entry.get("content_hash") or "").strip()]
+            else:
+                self._backfill_scope_content_hashes(entries)
             return self._build_duplicate_entries(entries, sort_by)
         return self._sort_gallery_entries(entries, sort_by)
 
@@ -1461,7 +1497,7 @@ class BridgeMediaListingScanMixin:
         with self._priority_lock:
             self._priority_paths = {str(p) for p in clean_paths}
         # If a full scan is already running it will pick up the new priority on
-        # its next re-sort tick â€” no need to queue another lock-blocked scan.
+        # its next re-sort tick, so there is no need to queue another lock-blocked scan.
         if self._scan_lock.locked():
             return
         signature_parts: list[str] = []
@@ -1478,7 +1514,9 @@ class BridgeMediaListingScanMixin:
         def work():
             try:
                 with self._scan_lock:
-                    self._do_full_scan(clean_paths, self.conn, emit_progress=False)
+                    processed = self._do_full_scan(clean_paths, self.conn, emit_progress=False)
+                if processed:
+                    self._safe_emit(self.galleryFilterSensitiveMetadataChanged)
             except Exception as exc:
                 self._last_page_scan_signature = ""
                 try:
@@ -1496,8 +1534,8 @@ class BridgeMediaListingScanMixin:
         from datetime import datetime, timezone
 
         # Priority + checkpoint-aware ordering: visible paths first, then
-        # unfinished, then already-checkpointed (the per-file skip block below
-        # remains authoritative â€” checkpoint only changes iteration order).
+        # unfinished, then already-checkpointed. The per-file skip block below
+        # remains authoritative; checkpoint only changes iteration order.
         with self._priority_lock:
             priority = set(self._priority_paths)
         done = self._checkpoint_done_paths(scope_key)

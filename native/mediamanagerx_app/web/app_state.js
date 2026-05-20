@@ -95,6 +95,7 @@ let gTextProcessingTotal = 0;
 let gRenderTextProcessingToast = null;
 let gRenderScanToast = null;
 let gScanToastGeneration = 0;
+let gFooterProgressOwner = '';
 let gGalleryFilterMetadataRefreshTimer = 0;
 let gCompareState = { visible: false, left: {}, right: {}, best_path: '', keep_paths: [], delete_paths: [] };
 

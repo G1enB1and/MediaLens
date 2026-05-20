@@ -118,6 +118,7 @@ class Bridge(BridgeMediaListingScanMixin, BridgeTagsMetadataMixin, BridgeLocalAi
         self._local_ai_processes: set[subprocess.Popen] = set()
         self._local_ai_shutting_down = False
         self._local_ai_model_installs: set[str] = set()
+        self._ai_worker_scanner_key: str = ""
         self._local_ai_runtime_status_cache: dict[str, tuple[float, dict]] = {}
         self._paddle_ocr_runtime_installing = False
         

@@ -11,6 +11,8 @@ from native.mediamanagerx_app.compare import *
 from native.mediamanagerx_app.metadata_payload import *
 
 class BridgeScannersSettingsMixin:
+    BACKGROUND_WORKER_KEYS = ("text_detection", "ocr_text", "ai_tags", "ai_descriptions")
+
     def _randomize_enabled(self) -> bool:
         return bool(self.settings.value("gallery/randomize", False, type=bool))
 
@@ -258,10 +260,16 @@ class BridgeScannersSettingsMixin:
 
     @staticmethod
     def _scanner_display_name(scanner_key: str) -> str:
-        return "OCR (Optical Character Recognition) - Reads Text in Images" if scanner_key == "ocr_text" else "Text Detection"
+        names = {
+            "text_detection": "Text Detection",
+            "ocr_text": "OCR (Optical Character Recognition) - Reads Text in Images",
+            "ai_tags": "AI Tags",
+            "ai_descriptions": "AI Descriptions",
+        }
+        return names.get(str(scanner_key or ""), "Background Worker")
 
     def _scanner_enabled(self, scanner_key: str) -> bool:
-        default_enabled = scanner_key != "ocr_text"
+        default_enabled = scanner_key == "text_detection"
         return bool(self.settings.value(self._scanner_setting_key(scanner_key, "enabled"), default_enabled, type=bool))
 
     def _scanner_interval_hours(self, scanner_key: str) -> int:
@@ -431,7 +439,11 @@ class BridgeScannersSettingsMixin:
     def _scanner_status_payload(self, scanner_key: str) -> dict:
         enabled = self._scanner_enabled(scanner_key)
         status = str(self.settings.value(self._scanner_setting_key(scanner_key, "status"), "Idle", type=str) or "Idle")
-        running = bool(scanner_key == "ocr_text" and getattr(self, "_ocr_text_processing_active", False))
+        running = bool(
+            (scanner_key == "ocr_text" and getattr(self, "_ocr_text_processing_active", False))
+            or (scanner_key in {"ai_tags", "ai_descriptions"} and getattr(self, "_ai_worker_scanner_key", "") == scanner_key)
+            or (scanner_key == "text_detection" and getattr(self, "_text_processing_active", False))
+        )
         if not enabled:
             status = "Disabled"
         elif not running and status in {"", "Idle", "Disabled"}:
@@ -496,18 +508,19 @@ class BridgeScannersSettingsMixin:
         return False
 
     def _check_scanner_schedules(self) -> None:
-        if self._scanner_due("text_detection"):
-            folders = self._scanner_source_folders("text_detection")
-            if folders:
+        for scanner_key in self.BACKGROUND_WORKER_KEYS:
+            if not self._scanner_due(scanner_key):
+                continue
+            folders = self._scanner_source_folders(scanner_key)
+            if not folders:
+                self._set_scanner_status(scanner_key, "Idle (no scheduled source folders)", mark_run=True)
+                continue
+            if scanner_key == "text_detection":
                 self._ensure_background_text_processing(folders=folders, force=True)
-            else:
-                self._set_scanner_status("text_detection", "Idle (no scheduled source folders)", mark_run=True)
-        if self._scanner_due("ocr_text"):
-            folders = self._scanner_source_folders("ocr_text")
-            if folders:
+            elif scanner_key == "ocr_text":
                 self._run_ocr_text_scanner(folders=folders, force=True)
-            else:
-                self._set_scanner_status("ocr_text", "Idle (no scheduled source folders)", mark_run=True)
+            elif scanner_key in {"ai_tags", "ai_descriptions"}:
+                self._run_ai_metadata_scanner(scanner_key, folders=folders, force=True)
 
     @staticmethod
     def _text_stage_label(stage_key: str) -> str:
@@ -1049,12 +1062,104 @@ class BridgeScannersSettingsMixin:
         threading.Thread(target=work, daemon=True, name="ocr-text-scanner").start()
         return True
 
+    def _run_ai_metadata_scanner(self, scanner_key: str, folders: list[str] | None = None, *, force: bool = False) -> bool:
+        key = str(scanner_key or "").strip()
+        if key not in {"ai_tags", "ai_descriptions"}:
+            return False
+        if getattr(self, "_ai_worker_scanner_key", ""):
+            self._set_scanner_status(key, "Already running")
+            return False
+        if not force and not self._scanner_enabled(key):
+            self._set_scanner_status(key, "Disabled")
+            return False
+        entries = self._collect_text_scope_entries(folders=folders)
+        eligible: list[str] = []
+        for entry in entries:
+            if entry.get("is_folder") or not self._is_supported_media_path(entry.get("_real_path") or entry.get("path") or ""):
+                continue
+            path = str(entry.get("_real_path") or entry.get("path") or "").strip()
+            if not path:
+                continue
+            if key == "ai_tags" and str(entry.get("tags") or "").strip():
+                continue
+            if key == "ai_descriptions" and str(entry.get("description") or "").strip():
+                continue
+            eligible.append(path)
+        if not eligible:
+            self._set_scanner_status(key, "Idle (no eligible files)", mark_run=True)
+            return False
+        if not self._try_start_local_ai():
+            self._set_scanner_status(key, "Already running")
+            return False
+
+        def work() -> None:
+            completed = 0
+            error = ""
+            self._ai_worker_scanner_key = key
+            self._set_scanner_status(key, f"Running 0 / {len(eligible)}")
+            self._emit_local_ai_signal(self.localAiCaptioningStarted, len(eligible))
+            try:
+                from app.mediamanager.ai_captioning.local_captioning import apply_description_to_database, apply_tags_to_database
+                from app.mediamanager.db.tags_repo import list_media_tags
+
+                ai_settings = self._local_ai_caption_settings()
+                ai_settings.models_dir.mkdir(parents=True, exist_ok=True)
+                for index, raw_path in enumerate(eligible, start=1):
+                    if self._local_ai_cancel.is_set():
+                        error = "Local AI scan was canceled."
+                        self._set_scanner_status(key, f"Canceled ({completed} / {len(eligible)} saved)", mark_run=True)
+                        return
+                    self._set_scanner_status(key, f"Running {index} / {len(eligible)}")
+                    self._emit_local_ai_signal(self.localAiCaptioningProgress, raw_path, index, len(eligible))
+                    try:
+                        media = self._ensure_media_record_for_tag_write(raw_path)
+                        if not media:
+                            raise FileNotFoundError("Media record could not be created.")
+                        source_path = self._local_ai_source_path(Path(raw_path))
+                        if key == "ai_tags":
+                            result = self._run_local_ai_worker_process("tags", source_path, ai_settings)
+                            tags = [str(tag) for tag in (result.get("tags") or []) if str(tag).strip()]
+                            if not tags:
+                                raise RuntimeError("Local AI generated no tags.")
+                            apply_tags_to_database(self.conn, raw_path, tags, ai_settings)
+                            self._emit_local_ai_signal(self.localAiCaptioningItemFinished, raw_path, tags, "", "")
+                        else:
+                            existing_tags = list_media_tags(self.conn, int(media["id"]))
+                            result = self._run_local_ai_worker_process("description", source_path, ai_settings, existing_tags)
+                            description = str(result.get("description") or "").strip()
+                            if not description:
+                                raise RuntimeError("Local AI generated no description.")
+                            apply_description_to_database(self.conn, raw_path, description, ai_settings)
+                            self._emit_local_ai_signal(self.localAiCaptioningItemFinished, raw_path, [], description, "")
+                        completed += 1
+                    except Exception as item_exc:
+                        item_error = str(item_exc) or "Local AI worker failed."
+                        self._log(f"{self._scanner_display_name(key)} failed for {raw_path}: {item_error}")
+                        self._emit_local_ai_signal(self.localAiCaptioningItemFinished, raw_path, [], "", item_error)
+                self._set_scanner_status(key, f"Idle ({completed} saved)", mark_run=True)
+                self._emit_local_ai_signal(self.galleryScopeChanged)
+            except Exception as exc:
+                error = str(exc) or "Local AI worker failed."
+                self._set_scanner_status(key, f"Error: {error}")
+            finally:
+                self._ai_worker_scanner_key = ""
+                self._finish_local_ai()
+                self._emit_local_ai_signal(self.localAiCaptioningFinished, completed, error)
+                self.scannerStatusChanged.emit(key, self._scanner_status_payload(key))
+
+        threading.Thread(target=work, daemon=True, name=f"{key}-scanner").start()
+        return True
+
     @Slot(str, result=bool)
     def cancel_scanner(self, scanner_key: str) -> bool:
         key = str(scanner_key or "").strip()
         if key == "ocr_text" and self._ocr_text_processing_active:
             self._ocr_text_cancel.set()
             self._set_scanner_status("ocr_text", "Canceling...")
+            return True
+        if key in {"ai_tags", "ai_descriptions"} and getattr(self, "_ai_worker_scanner_key", "") == key:
+            self.cancel_local_ai_captioning()
+            self._set_scanner_status(key, "Canceling...")
             return True
         return False
 
@@ -1286,7 +1391,7 @@ class BridgeScannersSettingsMixin:
                 "metadata.display.order": self.settings.value("metadata/display/order", "[]", type=str),
                 "updates.check_on_launch": bool(self.settings.value("updates/check_on_launch", True, type=bool)),
             }
-            for scanner_key in ("text_detection", "ocr_text"):
+            for scanner_key in self.BACKGROUND_WORKER_KEYS:
                 payload = self._scanner_status_payload(scanner_key)
                 data[f"scanners.{scanner_key}.enabled"] = payload["enabled"]
                 data[f"scanners.{scanner_key}.interval_hours"] = payload["interval_hours"]

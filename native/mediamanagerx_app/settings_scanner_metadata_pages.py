@@ -11,6 +11,8 @@ class ScannersSettingsPage(SettingsPage):
     SCANNERS = [
         ("text_detection", "Text Detection", "Finds whether images/videos likely contain visible text."),
         ("ocr_text", "OCR (Optical Character Recognition) - Reads Text in Images", ""),
+        ("ai_tags", "AI Tags", "Generates searchable tags with the selected local AI tag model."),
+        ("ai_descriptions", "AI Descriptions", "Generates database descriptions with the selected local AI description model."),
     ]
 
     def __init__(self, dialog: "SettingsDialog") -> None:
@@ -32,11 +34,19 @@ class ScannersSettingsPage(SettingsPage):
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 8, 0)
         content_layout.setSpacing(14)
-        content_layout.addWidget(_section_title("Scanners"))
-        content_layout.addWidget(_description("Control optional background scanners. The main file scanner is intentionally not configurable here."))
+        content_layout.addWidget(_section_title("Background Processes"))
+        content_layout.addWidget(_description("Control optional background workers. The main file scanner is intentionally not configurable here."))
+
+        tabs = QTabWidget()
+        tabs.setObjectName("backgroundProcessesTabs")
+        content_layout.addWidget(tabs)
 
         for key, title, description in self.SCANNERS:
-            group = QGroupBox(title)
+            tab_page = QWidget()
+            tab_layout = QVBoxLayout(tab_page)
+            tab_layout.setContentsMargins(0, 10, 0, 0)
+            tab_layout.setSpacing(10)
+            group = QGroupBox("Worker Options")
             group_layout = QVBoxLayout(group)
             group_layout.setSpacing(10)
 
@@ -210,7 +220,7 @@ class ScannersSettingsPage(SettingsPage):
             action_row.setContentsMargins(0, 0, 0, 0)
             run_btn = QPushButton("Run Now")
             cancel_btn = QPushButton("Cancel")
-            cancel_btn.setVisible(key == "ocr_text")
+            cancel_btn.setVisible(key in {"ocr_text", "ai_tags", "ai_descriptions"})
             cancel_btn.setEnabled(False)
             status_label = QLabel("Status: Idle")
             status_label.setWordWrap(True)
@@ -235,7 +245,9 @@ class ScannersSettingsPage(SettingsPage):
             group_layout.addWidget(review_btn)
             group_layout.addWidget(last_run_label)
             group_layout.addWidget(next_run_label)
-            content_layout.addWidget(group)
+            tab_layout.addWidget(group)
+            tab_layout.addStretch(1)
+            tabs.addTab(tab_page, title)
 
             self._widgets[key] = {
                 "enable": enable_toggle,
@@ -603,7 +615,7 @@ class ScannersSettingsPage(SettingsPage):
         for scanner_key, _title, _description in self.SCANNERS:
             payload = dict((status or {}).get(scanner_key) or {})
             if not payload:
-                default_enabled = scanner_key != "ocr_text"
+                default_enabled = scanner_key == "text_detection"
                 payload = {
                     "enabled": bool(self.settings.value(f"scanners/{scanner_key}/enabled", default_enabled, type=bool)),
                     "interval_hours": int(self.settings.value(f"scanners/{scanner_key}/interval_hours", 24, type=int) or 24),

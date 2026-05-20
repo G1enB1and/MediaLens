@@ -60,7 +60,7 @@ class SettingsDialog(QDialog):
             ("General", GeneralSettingsPage),
             ("Appearance", AppearanceSettingsPage),
             ("Player", PlayerSettingsPage),
-            ("Scanners", ScannersSettingsPage),
+            ("Background Processes", ScannersSettingsPage),
             ("Metadata", MetadataSettingsPage),
             ("Similar File Rules", DuplicateSettingsPage),
             ("AI", AISettingsPage),

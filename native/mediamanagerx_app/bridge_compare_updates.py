@@ -467,8 +467,8 @@ class BridgeCompareUpdatesMixin:
     @Slot(result=dict)
     def get_scanner_status(self) -> dict:
         return {
-            "text_detection": self._scanner_status_payload("text_detection"),
-            "ocr_text": self._scanner_status_payload("ocr_text"),
+            scanner_key: self._scanner_status_payload(scanner_key)
+            for scanner_key in self.BACKGROUND_WORKER_KEYS
         }
 
     @Slot(str, result=bool)
@@ -485,6 +485,8 @@ class BridgeCompareUpdatesMixin:
             return True
         if key == "ocr_text":
             return self._run_ocr_text_scanner(folders=folders or None, force=True)
+        if key in {"ai_tags", "ai_descriptions"}:
+            return self._run_ai_metadata_scanner(key, folders=folders or None, force=True)
         return False
 
     @staticmethod

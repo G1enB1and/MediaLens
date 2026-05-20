@@ -1180,35 +1180,71 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-function wireScanIndicator() {
+function footerProgressElements() {
   const el = document.getElementById('scanIndicator');
+  const label = document.getElementById('scanLabel');
   const file = document.getElementById('scanFile');
   const bar = document.getElementById('scanBar');
+  if (!el || !label || !file || !bar) return null;
+  return { el, label, file, bar };
+}
+
+function setFooterProgress(owner, labelText, detailText, percent) {
+  const parts = footerProgressElements();
+  if (!parts) return false;
+  gFooterProgressOwner = owner || '';
+  parts.label.textContent = labelText || '';
+  parts.file.textContent = detailText || '';
+  parts.bar.style.width = `${Math.max(0, Math.min(100, Math.round(Number(percent || 0))))}%`;
+  parts.el.hidden = false;
+  return true;
+}
+
+function clearFooterProgress(owner) {
+  const parts = footerProgressElements();
+  if (!parts) return;
+  if (owner && gFooterProgressOwner !== owner) return;
+  gFooterProgressOwner = '';
+  parts.el.hidden = true;
+}
+
+function wireScanIndicator() {
+  const parts = footerProgressElements();
+  if (!parts) return;
+  const { el, file, bar } = parts;
   if (!el || !file || !bar) return;
 
   function render() {
     if (!gScanActive) {
-      el.hidden = true;
+      clearFooterProgress('scan');
       return;
     }
     if (gScanManuallyHidden) {
-      el.hidden = true;
+      clearFooterProgress('scan');
       return;
     }
-    el.hidden = false;
+    setFooterProgress('scan', 'Scanning:', file.textContent || '...', parseFloat(bar.style.width) || 0);
   }
   gRenderScanToast = render;
 
   el.onclick = () => {
-    gScanManuallyHidden = true;
-    render();
+    if (gFooterProgressOwner === 'text') {
+      gTextProcessingDismissed = true;
+      gTextProcessingForceVisible = false;
+      if (gRenderTextProcessingToast) gRenderTextProcessingToast();
+      return;
+    }
+    if (gFooterProgressOwner === 'scan') {
+      gScanManuallyHidden = true;
+      render();
+      if (gRenderTextProcessingToast) gRenderTextProcessingToast();
+    }
   };
 
   if (gBridge.scanProgress) {
     gBridge.scanProgress.connect((fileName, percent) => {
       if (!gScanActive) return;
-      file.textContent = fileName;
-      bar.style.width = `${percent}%`;
+      setFooterProgress('scan', 'Scanning:', fileName, percent);
       if (gReviewLoadingActive && isDuplicateModeActive()) {
         updateReviewLoadingProgress(
           10 + Math.round((Math.max(0, Math.min(100, Number(percent) || 0)) * 0.6)),
@@ -1225,9 +1261,9 @@ function wireScanIndicator() {
       gScanToastGeneration += 1;
       gScanManuallyHidden = false;
       gScanActive = true;
-      bar.style.width = '0%';
-      file.textContent = 'Initializing...';
+      setFooterProgress('scan', 'Scanning:', 'Initializing...', 0);
       render();
+      if (gRenderTextProcessingToast) gRenderTextProcessingToast();
     });
   }
 
@@ -1235,8 +1271,7 @@ function wireScanIndicator() {
     gBridge.scanFinished.connect((folder) => {
       if (!scanFolderMatchesCurrentSelection(folder || '')) return;
       const finishedGeneration = gScanToastGeneration;
-      file.textContent = 'Finished';
-      bar.style.width = '100%';
+      setFooterProgress('scan', 'Scanning:', 'Finished', 100);
       render();
       setTimeout(() => {
         if (finishedGeneration !== gScanToastGeneration) {
@@ -1246,6 +1281,7 @@ function wireScanIndicator() {
         gScanActive = false;
         gAwaitingScanResults = false;
         if (gRenderScanToast) gRenderScanToast();
+        if (gRenderTextProcessingToast) gRenderTextProcessingToast();
       }, 2000);
     });
   }
@@ -1293,26 +1329,39 @@ function wireTextProcessingIndicator() {
 
   function render() {
     if (!gTextProcessingActive) {
+      clearFooterProgress('text');
       el.hidden = true;
       return;
     }
     const allowVisible = isTextFilterActive() || gTextProcessingForceVisible;
     if (!allowVisible || gTextProcessingDismissed) {
+      clearFooterProgress('text');
       el.hidden = true;
       return;
     }
-    el.hidden = false;
-    label.textContent = gTextProcessingWaiting
+    const displayLabel = gTextProcessingWaiting
       ? (gTextProcessingStage || 'Detecting Text')
       : gTextProcessingPaused
       ? `${gTextProcessingStage || 'Detecting Text'} (Paused)`
       : (gTextProcessingStage || 'Detecting Text');
+    label.textContent = displayLabel;
+    let detailText = 'Starting...';
+    let progressPercent = 0;
     if (gTextProcessingTotal > 0) {
-      file.textContent = `${gTextProcessingCurrent} / ${gTextProcessingTotal}`;
-      bar.style.width = `${Math.max(0, Math.min(100, Math.round((gTextProcessingCurrent / gTextProcessingTotal) * 100)))}%`;
+      detailText = `${gTextProcessingCurrent} / ${gTextProcessingTotal}`;
+      progressPercent = Math.max(0, Math.min(100, Math.round((gTextProcessingCurrent / gTextProcessingTotal) * 100)));
     } else {
-      file.textContent = 'Starting...';
-      bar.style.width = '0%';
+      detailText = 'Starting...';
+      progressPercent = 0;
+    }
+    file.textContent = detailText;
+    bar.style.width = `${progressPercent}%`;
+    const useFooter = !gScanActive && !gScanManuallyHidden;
+    if (useFooter && setFooterProgress('text', `${displayLabel}:`, detailText, progressPercent)) {
+      el.hidden = true;
+    } else {
+      el.hidden = false;
+      if (gFooterProgressOwner === 'text') clearFooterProgress('text');
     }
     if (pauseBtn) {
       pauseBtn.textContent = gTextProcessingPaused ? 'Resume' : 'Pause';
