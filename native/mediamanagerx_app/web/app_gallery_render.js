@@ -1927,18 +1927,27 @@ function wireCtxMenu() {
         }
         break;
       case 'ctxDelete':
-        if (item && item.path && gBridge) {
-          deletePathFromUi(item.path, (ok) => { if (ok) refreshFromBridge(gBridge, false); });
+        if (gBridge) {
+          const paths = getTargetPaths().filter(Boolean);
+          if (paths.length > 1) {
+            deletePathsSequential(paths, () => {
+              refreshFromBridge(gBridge, false);
+            });
+          } else if (paths.length === 1) {
+            deletePathFromUi(paths[0], (ok) => { if (ok) refreshFromBridge(gBridge, false); });
+          }
         }
         break;
       case 'ctxCut':
-        if (item && item.path && gBridge && gBridge.cut_to_clipboard) {
-          gBridge.cut_to_clipboard([item.path]);
+        if (gBridge && gBridge.cut_to_clipboard) {
+          const paths = getTargetPaths().filter(Boolean);
+          if (paths.length) gBridge.cut_to_clipboard(paths);
         }
         break;
       case 'ctxCopy':
-        if (item && item.path && gBridge && gBridge.copy_to_clipboard) {
-          gBridge.copy_to_clipboard([item.path]);
+        if (gBridge && gBridge.copy_to_clipboard) {
+          const paths = getTargetPaths().filter(Boolean);
+          if (paths.length) gBridge.copy_to_clipboard(paths);
         }
         break;
       case 'ctxPaste':

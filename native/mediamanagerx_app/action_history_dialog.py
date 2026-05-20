@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSplitter,
+    QFrame,
     QStyledItemDelegate,
     QStyle,
     QTableWidget,
@@ -101,12 +102,29 @@ class ActionHistoryDialog(QDialog):
         self.filter_combo = QComboBox()
         self.filter_combo.setObjectName("historyFilterCombo")
         self.filter_combo.setMinimumWidth(126)
+        self.filter_combo.setToolTip("Filter action history by action type")
         self.filter_combo.setCursor(Qt.CursorShape.PointingHandCursor)
         filter_view = QListView(self.filter_combo)
         filter_view.setObjectName("historyFilterComboPopup")
+        filter_view.setFrameShape(QFrame.Shape.NoFrame)
+        filter_view.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         filter_view.setUniformItemSizes(True)
         filter_view.setMouseTracking(True)
         filter_view.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+        filter_view.setStyleSheet("""
+            QListView#historyFilterComboPopup {
+                outline: 0;
+                border: none;
+            }
+            QListView#historyFilterComboPopup::item,
+            QListView#historyFilterComboPopup::item:selected,
+            QListView#historyFilterComboPopup::item:hover,
+            QListView#historyFilterComboPopup::item:focus {
+                border: none;
+                outline: 0;
+                background: transparent;
+            }
+        """)
         self.filter_combo.setView(filter_view)
         self.filter_combo.setItemDelegate(_HistoryFilterComboDelegate(self.bridge, self.filter_combo, filter_view))
         for label, value in (
@@ -125,8 +143,11 @@ class ActionHistoryDialog(QDialog):
             self.filter_combo.addItem(label, value)
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("Search file or path")
-        self.undo_btn = QPushButton("Undo")
-        self.redo_btn = QPushButton("Redo")
+        self.search_edit.setToolTip("Search action history by file name or path")
+        self.undo_btn = QPushButton("Undo Latest")
+        self.undo_btn.setToolTip("Undo the most recent undoable action in history")
+        self.redo_btn = QPushButton("Redo Latest")
+        self.redo_btn.setToolTip("Redo the most recent action that was undone")
         self._sync_button_cursor(self.undo_btn)
         self._sync_button_cursor(self.redo_btn)
         toolbar.addWidget(self.filter_combo)
@@ -166,14 +187,14 @@ class ActionHistoryDialog(QDialog):
         self.items_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.items_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.items_table.verticalHeader().setVisible(False)
-        self.items_table.verticalHeader().setDefaultSectionSize(36)
+        self.items_table.verticalHeader().setDefaultSectionSize(42)
         item_header = self.items_table.horizontalHeader()
         item_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         item_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         item_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         item_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         item_header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        self.items_table.setColumnWidth(4, 170)
+        self.items_table.setColumnWidth(4, 180)
         details_layout.addWidget(self.items_table, 1)
         splitter.addWidget(details)
         splitter.setSizes([340, 240])
@@ -183,6 +204,7 @@ class ActionHistoryDialog(QDialog):
         footer.addStretch(1)
         self.delete_all_btn = QPushButton("Delete All Action History")
         self.delete_all_btn.setObjectName("historyDeleteAllButton")
+        self.delete_all_btn.setToolTip("Permanently remove all action history entries")
         self._sync_button_cursor(self.delete_all_btn)
         trash_icon = Path(__file__).with_name("web") / "icons" / "trash-red.svg"
         if trash_icon.exists():
@@ -497,7 +519,7 @@ class ActionHistoryDialog(QDialog):
         self.items_table.setRowCount(0)
         for row_idx, item in enumerate(items):
             self.items_table.insertRow(row_idx)
-            self.items_table.setRowHeight(row_idx, 36)
+            self.items_table.setRowHeight(row_idx, 42)
             name = Path(str(item.get("new_path") or item.get("old_path") or "")).name
             values = [
                 name,
@@ -515,13 +537,19 @@ class ActionHistoryDialog(QDialog):
         box = QWidget()
         box.setObjectName("historyItemActionCell")
         layout = QHBoxLayout(box)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, 4, 0, 4)
         layout.setSpacing(4)
         state = str(item.get("current_state") or "")
         undo = QPushButton("Undo")
         redo = QPushButton("Redo")
         undo.setObjectName("historyItemActionButton")
         redo.setObjectName("historyItemActionButton")
+        undo.setFixedHeight(30)
+        redo.setFixedHeight(30)
+        undo.setMinimumWidth(74)
+        redo.setMinimumWidth(74)
+        undo.setToolTip("Undo this item from the selected action")
+        redo.setToolTip("Redo this item from the selected action")
         entry_undo_state = str(entry.get("undo_state") or "")
         undo.setEnabled(state == "applied" and entry_undo_state != "not_undoable")
         redo.setEnabled(state == "undone")
