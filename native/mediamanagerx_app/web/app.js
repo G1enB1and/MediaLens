@@ -1032,6 +1032,7 @@ async function main() {
         if (Number.isFinite(selectionRevision) && selectionRevision !== gLastCompareSelectionRevision) {
           gLastCompareSelectionRevision = selectionRevision;
         }
+        updateGalleryFooterVisibility();
         const nextSingleMode = isComparePanelReviewSingleMode();
         if (!previousSingleMode && nextSingleMode && previousFullViewGroupKey) {
           focusReviewGroup(previousFullViewGroupKey);
@@ -1070,6 +1071,7 @@ async function main() {
         if (Number.isFinite(selectionRevision)) {
           gLastCompareSelectionRevision = selectionRevision;
         }
+        updateGalleryFooterVisibility();
         maybeSeedCompareStateFromReview();
       });
     }
@@ -1299,6 +1301,7 @@ async function main() {
       setCustomSelectValue('dateGranularitySelect', gGroupDateGranularity);
       setCustomSelectValue('similarityThresholdSelect', gSimilarityThreshold);
       syncGroupByUi();
+      updateGalleryFooterVisibility();
       if (gRenderScanToast) gRenderScanToast();
       if (gRenderTextProcessingToast) gRenderTextProcessingToast();
       if (viewModeChanged && gBridge) {
@@ -1536,6 +1539,7 @@ async function main() {
           const previousGroupKey = compareReviewGroupKeyFromState() || String(gReviewSingleGroupKey || '');
           const previousFullViewGroupKey = !previousSingleMode ? (String(gPendingReviewGroupOpenKey || '').trim() || getVisibleReviewGroupKeyFromDom()) : '';
           gCompareState = Object.assign({}, gCompareState || {}, { visible: !!value });
+          updateGalleryFooterVisibility();
           updateSidebarButtonIcons('bottom', !!value);
           if (isDuplicateModeActive() && previousSingleMode !== isComparePanelReviewSingleMode()) {
             if (previousSingleMode && !isComparePanelReviewSingleMode()) {
@@ -1596,6 +1600,7 @@ async function main() {
               setCustomSelectValue('dateGranularitySelect', gGroupDateGranularity);
               setCustomSelectValue('similarityThresholdSelect', gSimilarityThreshold);
               syncGroupByUi();
+              updateGalleryFooterVisibility();
               updateCtxViewState();
               refreshFromBridge(bridge, false);
             });
@@ -1615,6 +1620,7 @@ async function main() {
               setCustomSelectValue('dateGranularitySelect', gGroupDateGranularity);
               setCustomSelectValue('similarityThresholdSelect', gSimilarityThreshold);
               syncGroupByUi();
+              updateGalleryFooterVisibility();
               if (key === 'gallery.group_date_granularity' || key === 'gallery.similarity_threshold' || prevGroupBy !== gGroupBy || prevGranularity !== gGroupDateGranularity || prevSimilarity !== gSimilarityThreshold) {
                 rerenderCurrentMediaPreservingScroll();
               }

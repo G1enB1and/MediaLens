@@ -792,10 +792,14 @@ function applyGalleryViewMode(mode) {
   }
   gGalleryViewMode = nextMode;
   const el = document.getElementById('mediaList');
-  if (!el) return;
-  applyGalleryClasses(el, nextMode);
-  if (gGroupBy === 'date' && !REVIEW_VIEW_MODES.has(nextMode)) {
-    el.classList.add('gallery-grouped');
+  if (el) {
+    applyGalleryClasses(el, nextMode);
+    if (gGroupBy === 'date' && !REVIEW_VIEW_MODES.has(nextMode)) {
+      el.classList.add('gallery-grouped');
+    }
+  }
+  if (typeof updateGalleryFooterVisibility === 'function') {
+    updateGalleryFooterVisibility();
   }
 }
 

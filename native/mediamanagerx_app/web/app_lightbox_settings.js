@@ -423,15 +423,28 @@ function pagerPagesToShow() {
   return Array.from(set).sort((a, b) => a - b);
 }
 
+function shouldHideGalleryFooterForCompareReview() {
+  return !!(gCompareState && gCompareState.visible && isDuplicateModeActive());
+}
+
+function updateGalleryFooterVisibility() {
+  const hideFooter = shouldHideGalleryFooterForCompareReview();
+  document.querySelectorAll('[data-pager]').forEach((root) => {
+    root.hidden = hideFooter;
+  });
+}
+
 function renderPager() {
   const infiniteMode = shouldUseInfiniteScrollMode() || isDuplicateModeActive();
   const tp = totalPages();
   const cur = gPage + 1;
 
   const pages = pagerPagesToShow();
+  const hideFooter = shouldHideGalleryFooterForCompareReview();
 
   document.querySelectorAll('[data-pager]').forEach((root) => {
-    root.hidden = false;
+    root.hidden = hideFooter;
+    if (hideFooter) return;
     const prev = root.querySelector('[data-prev]');
     const next = root.querySelector('[data-next]');
     const links = root.querySelector('[data-links]');
