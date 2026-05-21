@@ -1054,7 +1054,7 @@ class WindowNativeActionsMixin:
                 }}
                 QLabel#compareSlotThumb {{
                     background-color: {Theme.get_control_bg(accent)};
-                    border: 1px solid {Theme.get_border(accent)};
+                    border: none;
                     border-radius: 10px;
                     color: {text_muted};
                     padding: 12px;
