@@ -401,16 +401,23 @@ def _rounded_preview_pixmap(source: QPixmap, target: QSize, border_color: str, r
     )
     if scaled.isNull():
         return scaled
-    result = QPixmap(scaled.size())
+    dpr = max(1.0, float(source.devicePixelRatioF() or 1.0))
+    logical_size = scaled.size()
+    pixel_size = QSize(
+        max(1, int(round(logical_size.width() * dpr))),
+        max(1, int(round(logical_size.height() * dpr))),
+    )
+    result = QPixmap(pixel_size)
+    result.setDevicePixelRatio(dpr)
     result.fill(Qt.GlobalColor.transparent)
     painter = QPainter(result)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-    draw_rect = QRectF(0.5, 0.5, max(0.0, result.width() - 1.0), max(0.0, result.height() - 1.0))
+    draw_rect = QRectF(0.5, 0.5, max(0.0, logical_size.width() - 1.0), max(0.0, logical_size.height() - 1.0))
     path = QPainterPath()
     path.addRoundedRect(draw_rect, radius, radius)
     painter.setClipPath(path)
-    painter.drawPixmap(0, 0, scaled)
+    painter.drawPixmap(QRectF(0.0, 0.0, logical_size.width(), logical_size.height()), scaled, QRectF(0.0, 0.0, scaled.width(), scaled.height()))
     painter.setClipping(False)
     border_qcolor = QColor(border_color)
     if border_qcolor.isValid() and border_qcolor.alpha() > 0:

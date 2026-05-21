@@ -749,7 +749,7 @@ class CompareSlotCard(QFrame):
         self.meta_dot_label.setPixmap(QIcon(str(dot_svg)).pixmap(QSize(4, 4)))
         self.reasons_label.setStyleSheet(f"color: {accent_hex}; font-weight: 700;")
         self.best_label.setStyleSheet(f"color: {accent_hex}; font-weight: 700;")
-        self._thumb_border_color = "transparent"
+        self._thumb_border_color = border
         self.thumb_frame.set_frame_style(thumb_bg, border)
         self.thumb_frame.setStyleSheet("background: transparent; border: none;")
         self.thumb_body.setStyleSheet("background: transparent; border: none;")
