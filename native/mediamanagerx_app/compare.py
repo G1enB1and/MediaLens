@@ -490,7 +490,7 @@ class CompareSlotCard(QFrame):
 
         self.reasons_label = QLabel("")
         self.reasons_label.setObjectName("compareSlotReasons")
-        self.reasons_label.setWordWrap(True)
+        self.reasons_label.setWordWrap(False)
         self.reasons_label.setMinimumHeight(0)
         self.reasons_label.setMinimumWidth(0)
         self.reasons_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
@@ -499,7 +499,7 @@ class CompareSlotCard(QFrame):
 
         self.best_label = QLabel("")
         self.best_label.setObjectName("compareSlotBest")
-        self.best_label.setWordWrap(True)
+        self.best_label.setWordWrap(False)
         self.best_label.setMinimumHeight(0)
         self.best_label.setMinimumWidth(0)
         self.best_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
@@ -569,6 +569,20 @@ class CompareSlotCard(QFrame):
     def _set_name_text(self, text: str) -> None:
         self._full_name_text = str(text or "")
         self._update_name_elision()
+
+    def _set_elided_label_text(self, label: QLabel, text: str) -> None:
+        clean = str(text or "")
+        label.setProperty("fullText", clean)
+        width = max(24, label.contentsRect().width())
+        if width <= 24 and self._uses_portrait_layout:
+            width = max(24, self.meta_stack.maximumWidth() - 8)
+        metrics = QFontMetrics(label.font())
+        lines = clean.splitlines() or [""]
+        display = "\n".join(metrics.elidedText(line, Qt.TextElideMode.ElideRight, width) for line in lines[:2])
+        if len(lines) > 2 and display:
+            display = f"{display}\n..."
+        label.setText(display)
+        label.setToolTip(clean if clean and display != clean else "")
 
     def apply_theme_styles(self, text: str, text_muted: str, accent_hex: str, accent_raw: str, thumb_bg: str, border: str) -> None:
         accent_color = QColor(accent_raw)
@@ -796,13 +810,15 @@ class CompareSlotCard(QFrame):
         if portrait:
             self.setMinimumWidth(0)
             self.meta_stack_layout.setContentsMargins(0, 0, 8, 0)
-            self.meta_stack.setMaximumWidth(124)
-            self.meta_stack.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+            self.meta_stack.setMinimumWidth(112)
+            self.meta_stack.setMaximumWidth(132)
+            self.meta_stack.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
             self.meta_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
             self.meta_detail_row.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         else:
             self.setMinimumWidth(0)
             self.meta_stack_layout.setContentsMargins(0, 0, 0, 0)
+            self.meta_stack.setMinimumWidth(0)
             self.meta_stack.setMaximumWidth(16777215)
             self.meta_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             self.meta_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -877,7 +893,7 @@ class CompareSlotCard(QFrame):
         self.meta_dot_label.setVisible(False)
         self.meta_detail_row.setVisible(bool(file_size_text or modified_date_text or modified_clock_text))
         reasons = list(self._entry.get("duplicate_category_reasons") or [])[:5]
-        self.reasons_label.setText("\n".join(reasons))
+        self._set_elided_label_text(self.reasons_label, "\n".join(reasons))
         compare_best_in_pair = bool(self._entry.get("compare_best_in_pair"))
         compare_marked_best = bool(self._entry.get("compare_marked_best"))
         compare_best_reason = str(self._entry.get("compare_best_reason") or "").strip()
@@ -885,15 +901,15 @@ class CompareSlotCard(QFrame):
         self.best_toggle.setVisible(not is_identical_pair)
         self.identical_label.setVisible(is_identical_pair)
         if is_identical_pair:
-            self.best_label.setText("")
+            self._set_elided_label_text(self.best_label, "")
         elif compare_best_in_pair and compare_marked_best:
-            self.best_label.setText("\u2605 Best Overall")
+            self._set_elided_label_text(self.best_label, "\u2605 Best Overall")
         elif compare_best_in_pair:
-            self.best_label.setText(f"\u2605 Wins this comparison: {compare_best_reason}" if compare_best_reason else "\u2605 Best in Comparison")
+            self._set_elided_label_text(self.best_label, f"\u2605 Wins this comparison: {compare_best_reason}" if compare_best_reason else "\u2605 Best in Comparison")
         elif compare_marked_best:
-            self.best_label.setText("\u2605 Best Overall")
+            self._set_elided_label_text(self.best_label, "\u2605 Best Overall")
         else:
-            self.best_label.setText("")
+            self._set_elided_label_text(self.best_label, "")
         self.keep_toggle.blockSignals(True)
         self.keep_toggle.setChecked(bool(self._entry.get("compare_keep_checked")))
         self.keep_toggle.blockSignals(False)
@@ -971,6 +987,8 @@ class CompareSlotCard(QFrame):
     def resizeEvent(self, event) -> None:
         self._update_thumb_pixmap()
         self._update_name_elision()
+        self._set_elided_label_text(self.reasons_label, str(self.reasons_label.property("fullText") or self.reasons_label.text() or ""))
+        self._set_elided_label_text(self.best_label, str(self.best_label.property("fullText") or self.best_label.text() or ""))
         super().resizeEvent(event)
 
 
