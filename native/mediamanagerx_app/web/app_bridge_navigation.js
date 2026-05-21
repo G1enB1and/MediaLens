@@ -393,6 +393,27 @@ function fetchMediaList(folders, limit, offset, sortBy, filterType, searchQuery)
   });
 }
 
+function cancelPendingGalleryRequests() {
+  gPendingMediaListRequests.forEach((resolve) => {
+    try {
+      resolve([]);
+    } catch (e) {}
+  });
+  gPendingMediaListRequests.clear();
+  gPendingMediaCountRequests.forEach((resolve) => {
+    try {
+      resolve(0);
+    } catch (e) {}
+  });
+  gPendingMediaCountRequests.clear();
+  gPendingMediaFileCountRequests.forEach((resolve) => {
+    try {
+      resolve(0);
+    } catch (e) {}
+  });
+  gPendingMediaFileCountRequests.clear();
+}
+
 function refreshCurrentFolderChildren() {
   const currentPath = normalizeFolderPath(gNavState.currentPath);
   const token = ++gFolderChildrenToken;

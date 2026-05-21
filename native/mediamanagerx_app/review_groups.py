@@ -653,11 +653,14 @@ def build_duplicate_entries(
     rank_duplicate_group_fn: Callable[[list[dict], list[dict[str, Any]] | None], list[dict]],
     preferred_date_ns: Callable[[dict], int],
     file_type_sort_key: Callable[[dict], str],
+    should_cancel: Callable[[], bool] | None = None,
 ) -> list[dict]:
     media_entries = [dict(entry) for entry in entries if not entry.get("is_folder")]
     excluded_pairs = load_review_pair_exclusions(conn, media_entries, "duplicates")
     duplicate_groups: dict[str, list[dict]] = {}
     for entry in media_entries:
+        if callable(should_cancel) and should_cancel():
+            return []
         group_key = str(entry.get("content_hash") or "").strip()
         if not group_key:
             continue
@@ -665,6 +668,8 @@ def build_duplicate_entries(
 
     split_duplicate_groups: dict[str, list[dict]] = {}
     for content_hash, group_entries in duplicate_groups.items():
+        if callable(should_cancel) and should_cancel():
+            return []
         if len(group_entries) < 2:
             continue
         for component_index, component_entries in enumerate(
@@ -678,6 +683,8 @@ def build_duplicate_entries(
 
     group_rows: list[tuple[tuple, list[dict]]] = []
     for group_key, group_entries in split_duplicate_groups.items():
+        if callable(should_cancel) and should_cancel():
+            return []
         sorted_group = rank_duplicate_group_fn(group_entries, None)
         kept_size = int(sorted_group[0].get("file_size") or 0) if sorted_group else 0
         total_size = sum(int(entry.get("file_size") or 0) for entry in sorted_group)
@@ -724,6 +731,7 @@ def build_similar_entries(
     conn,
     rank_duplicate_group_fn: Callable[[list[dict], list[dict[str, Any]] | None], list[dict]],
     file_type_sort_key: Callable[[dict], str],
+    should_cancel: Callable[[], bool] | None = None,
 ) -> list[dict]:
     from app.mediamanager.utils.hashing import phash_distance
 
@@ -736,12 +744,16 @@ def build_similar_entries(
         unique_candidates: list[dict] = []
         exact_groups: dict[str, list[dict]] = {}
         for entry in candidates:
+            if callable(should_cancel) and should_cancel():
+                return []
             content_hash = str(entry.get("content_hash") or "").strip()
             if content_hash:
                 exact_groups.setdefault(content_hash, []).append(entry)
             else:
                 unique_candidates.append(entry)
         for grouped_entries in exact_groups.values():
+            if callable(should_cancel) and should_cancel():
+                return []
             if len(grouped_entries) == 1:
                 unique_candidates.append(grouped_entries[0])
             else:
@@ -768,6 +780,8 @@ def build_similar_entries(
     buckets: dict[str, list[int]] = {}
     hash_groups: dict[str, list[int]] = {}
     for index, entry in enumerate(candidates):
+        if callable(should_cancel) and should_cancel():
+            return []
         phash = str(entry.get("phash") or "")
         bucket = phash[:bucket_prefix] if bucket_prefix > 0 else "*"
         buckets.setdefault(bucket, []).append(index)
@@ -776,6 +790,8 @@ def build_similar_entries(
             hash_groups.setdefault(content_hash, []).append(index)
 
     for group_items in hash_groups.values():
+        if callable(should_cancel) and should_cancel():
+            return []
         if len(group_items) < 2:
             continue
         for pos, left_idx in enumerate(group_items):
@@ -789,13 +805,19 @@ def build_similar_entries(
                 union(left_idx, right_idx)
 
     for bucket_items in buckets.values():
+        if callable(should_cancel) and should_cancel():
+            return []
         for pos, left_idx in enumerate(bucket_items):
+            if callable(should_cancel) and should_cancel():
+                return []
             if candidates[left_idx].get("media_type") != "image":
                 continue
             left_hash = candidates[left_idx].get("phash") or ""
             if not left_hash:
                 continue
             for right_idx in bucket_items[pos + 1:]:
+                if callable(should_cancel) and should_cancel():
+                    return []
                 if candidates[right_idx].get("media_type") != "image":
                     continue
                 right_hash = candidates[right_idx].get("phash") or ""
@@ -813,6 +835,8 @@ def build_similar_entries(
 
     groups: dict[int, list[dict]] = {}
     for index, entry in enumerate(candidates):
+        if callable(should_cancel) and should_cancel():
+            return []
         groups.setdefault(find(index), []).append(entry)
 
     similar_groups = [group for group in groups.values() if len(group) > 1]
@@ -821,6 +845,8 @@ def build_similar_entries(
 
     group_rows: list[tuple[tuple, list[dict]]] = []
     for group_index, group_entries in enumerate(similar_groups, start=1):
+        if callable(should_cancel) and should_cancel():
+            return []
         sorted_group = rank_duplicate_group_fn(
             group_entries,
             [

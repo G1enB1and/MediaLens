@@ -175,7 +175,7 @@ class BridgeScannersSettingsMixin:
             extra_positive_categories=extra_positive_categories,
         )
 
-    def _build_duplicate_entries(self, entries: list[dict], sort_by: str) -> list[dict]:
+    def _build_duplicate_entries(self, entries: list[dict], sort_by: str, request_generation: int | None = None) -> list[dict]:
         return review_groups.build_duplicate_entries(
             entries,
             sort_by,
@@ -183,9 +183,10 @@ class BridgeScannersSettingsMixin:
             rank_duplicate_group_fn=lambda group_entries, extras=None: self._rank_duplicate_group(group_entries, extras),
             preferred_date_ns=self._preferred_date_ns,
             file_type_sort_key=self._file_type_sort_key,
+            should_cancel=lambda: self._is_media_request_canceled(request_generation),
         )
 
-    def _build_similar_entries(self, entries: list[dict], sort_by: str, *, include_exact: bool, threshold: int, bucket_prefix: int) -> list[dict]:
+    def _build_similar_entries(self, entries: list[dict], sort_by: str, *, include_exact: bool, threshold: int, bucket_prefix: int, request_generation: int | None = None) -> list[dict]:
         return review_groups.build_similar_entries(
             entries,
             sort_by,
@@ -195,6 +196,7 @@ class BridgeScannersSettingsMixin:
             conn=self.conn,
             rank_duplicate_group_fn=lambda group_entries, extras=None: self._rank_duplicate_group(group_entries, extras),
             file_type_sort_key=self._file_type_sort_key,
+            should_cancel=lambda: self._is_media_request_canceled(request_generation),
         )
 
     def _annotate_group_color_variants(self, entries: list[dict]) -> None:
@@ -222,11 +224,12 @@ class BridgeScannersSettingsMixin:
             if cached:
                 entry["color_variant"] = cached
 
-    def _backfill_scope_phashes(self, entries: list[dict]) -> None:
+    def _backfill_scope_phashes(self, entries: list[dict], request_generation: int | None = None) -> None:
         from app.mediamanager.utils.hashing import calculate_image_phash
 
         updates: list[tuple[str, str]] = []
         for entry in entries:
+            self._raise_if_media_request_canceled(request_generation)
             if entry.get("is_folder") or entry.get("media_type") != "image" or str(entry.get("phash") or "").strip():
                 continue
             path = str(entry.get("path") or "").strip()
@@ -1163,7 +1166,7 @@ class BridgeScannersSettingsMixin:
             return True
         return False
 
-    def _backfill_scope_content_hashes(self, entries: list[dict]) -> None:
+    def _backfill_scope_content_hashes(self, entries: list[dict], request_generation: int | None = None) -> None:
         from app.mediamanager.utils.hashing import calculate_media_content_hash
 
         updates: list[tuple[str, str]] = []
@@ -1172,6 +1175,7 @@ class BridgeScannersSettingsMixin:
             cache = {}
             setattr(self, "_filesystem_hash_cache", cache)
         for entry in entries:
+            self._raise_if_media_request_canceled(request_generation)
             if entry.get("is_folder"):
                 continue
             path = str(entry.get("path") or "").strip()

@@ -9,6 +9,9 @@ from native.mediamanagerx_app.compare import *
 from native.mediamanagerx_app.metadata_payload import *
 
 class BridgeMediaListingScanMixin:
+    class _MediaRequestCanceled(RuntimeError):
+        pass
+
     def _perf_log_elapsed(self, label: str, started_at: float, threshold_ms: int = 120, **fields) -> None:
         try:
             elapsed_ms = int((time.perf_counter() - float(started_at)) * 1000)
@@ -18,6 +21,30 @@ class BridgeMediaListingScanMixin:
             self._log(f"Perf {label}: {elapsed_ms}ms{(' ' + detail) if detail else ''}")
         except Exception:
             pass
+
+    def _next_media_request_generation(self) -> int:
+        with self._media_request_generation_lock:
+            self._media_request_generation += 1
+            return int(self._media_request_generation)
+
+    def _current_media_request_generation(self) -> int:
+        with self._media_request_generation_lock:
+            return int(self._media_request_generation)
+
+    def _is_media_request_canceled(self, request_generation: int | None) -> bool:
+        if request_generation is None:
+            return False
+        if getattr(self, "_shutting_down", False):
+            return True
+        return int(request_generation) != self._current_media_request_generation()
+
+    def _raise_if_media_request_canceled(self, request_generation: int | None) -> None:
+        if self._is_media_request_canceled(request_generation):
+            raise self._MediaRequestCanceled()
+
+    @Slot(result=int)
+    def cancel_media_requests(self) -> int:
+        return self._next_media_request_generation()
 
     def _gallery_count_cache_key(self, folders: list, filter_type: str, search_query: str, *, files_only: bool) -> tuple:
         try:
@@ -126,8 +153,9 @@ class BridgeMediaListingScanMixin:
         except Exception:
             pass
 
-    def _get_gallery_entries_cached(self, folders: list[str], sort_by: str = "none", filter_type: str = "all", search_query: str = "") -> list[dict]:
+    def _get_gallery_entries_cached(self, folders: list[str], sort_by: str = "none", filter_type: str = "all", search_query: str = "", request_generation: int | None = None) -> list[dict]:
         started_at = time.perf_counter()
+        self._raise_if_media_request_canceled(request_generation)
         cache_key = self._gallery_entries_cache_key(list(folders or []), sort_by, filter_type, search_query)
         cached = self._read_gallery_entries_cache(cache_key)
         if cached is not None:
@@ -141,7 +169,8 @@ class BridgeMediaListingScanMixin:
                 filter=str(filter_type or "all"),
             )
             return cached
-        entries = self._get_gallery_entries(folders, sort_by, filter_type, search_query)
+        entries = self._get_gallery_entries(folders, sort_by, filter_type, search_query, request_generation=request_generation)
+        self._raise_if_media_request_canceled(request_generation)
         self._write_gallery_entries_cache(cache_key, entries)
         self._perf_log_elapsed(
             "gallery_entries",
@@ -229,14 +258,23 @@ class BridgeMediaListingScanMixin:
         return normalized
 
     @Slot(list, int, int, str, str, str, result=list)
-    def list_media(self, folders, limit=100, offset=0, sort_by="none", filter_type="all", search_query="") -> list:
+    def list_media(self, folders, limit=100, offset=0, sort_by="none", filter_type="all", search_query="", request_generation: int | None = None) -> list:
         started_at = time.perf_counter()
         try:
             try:
                 self.conn.commit()
             except Exception:
                 pass
-            candidates = self._get_gallery_entries_cached(folders, sort_by, filter_type, search_query)
+            if request_generation is None:
+                request_generation = self._current_media_request_generation()
+            candidates = self._get_gallery_entries_cached(
+                folders,
+                sort_by,
+                filter_type,
+                search_query,
+                request_generation=request_generation,
+            )
+            self._raise_if_media_request_canceled(request_generation)
             self._write_gallery_count_cache(
                 self._gallery_count_cache_key(list(folders or []), filter_type, search_query, files_only=False),
                 len(candidates),
@@ -248,6 +286,7 @@ class BridgeMediaListingScanMixin:
             start, end = max(0, int(offset)), max(0, int(offset)) + max(0, int(limit))
             out = []
             for r in candidates[start:end]:
+                self._raise_if_media_request_canceled(request_generation)
                 if r.get("is_folder"):
                     created_time = int(r.get("file_created_time") or 0)
                     modified_time = int(r.get("modified_time") or 0)
@@ -404,7 +443,10 @@ class BridgeMediaListingScanMixin:
                     "text_verification_score": float(r.get("text_verification_score") or 0.0),
                     "text_verification_version": int(r.get("text_verification_version") or 0),
                 })
+            self._raise_if_media_request_canceled(request_generation)
             return out
+        except self._MediaRequestCanceled:
+            return []
         except Exception: return []
         finally:
             self._perf_log_elapsed(
@@ -427,15 +469,20 @@ class BridgeMediaListingScanMixin:
         sort = str(sort_by or "none")
         ftype = str(filter_type or "all")
         query = str(search_query or "")
+        request_generation = self._current_media_request_generation()
 
         def work() -> None:
-            items = self.list_media(folder_list, lim, off, sort, ftype, query)
+            if self._is_media_request_canceled(request_generation):
+                return
+            items = self.list_media(folder_list, lim, off, sort, ftype, query, request_generation=request_generation)
+            if self._is_media_request_canceled(request_generation):
+                return
             self._safe_emit(self.mediaListed, req, items or [])
 
         threading.Thread(target=work, daemon=True).start()
 
     @Slot(list, str, str, result=int)
-    def count_media(self, folders: list, filter_type: str = "all", search_query: str = "") -> int:
+    def count_media(self, folders: list, filter_type: str = "all", search_query: str = "", request_generation: int | None = None) -> int:
         cache_key = self._gallery_count_cache_key(list(folders or []), filter_type, search_query, files_only=False)
         cached = self._read_gallery_count_cache(cache_key)
         if cached is not None:
@@ -446,15 +493,20 @@ class BridgeMediaListingScanMixin:
                 self.conn.commit()
             except Exception:
                 pass
-            count = len(self._get_gallery_entries_cached(folders, "none", filter_type, search_query))
+            if request_generation is None:
+                request_generation = self._current_media_request_generation()
+            count = len(self._get_gallery_entries_cached(folders, "none", filter_type, search_query, request_generation=request_generation))
+            self._raise_if_media_request_canceled(request_generation)
             self._write_gallery_count_cache(cache_key, count)
             return count
+        except self._MediaRequestCanceled:
+            return 0
         except Exception: return 0
         finally:
             self._perf_log_elapsed("count_media", started_at, folders=len(list(folders or [])), filter=str(filter_type or "all"), search=1 if str(search_query or "").strip() else 0)
 
     @Slot(list, str, str, result=int)
-    def count_media_files(self, folders: list, filter_type: str = "all", search_query: str = "") -> int:
+    def count_media_files(self, folders: list, filter_type: str = "all", search_query: str = "", request_generation: int | None = None) -> int:
         cache_key = self._gallery_count_cache_key(list(folders or []), filter_type, search_query, files_only=True)
         cached = self._read_gallery_count_cache(cache_key)
         if cached is not None:
@@ -465,9 +517,22 @@ class BridgeMediaListingScanMixin:
                 self.conn.commit()
             except Exception:
                 pass
-            count = sum(1 for entry in self._get_gallery_entries_cached(folders, "none", filter_type, search_query) if not entry.get("is_folder"))
+            if request_generation is None:
+                request_generation = self._current_media_request_generation()
+            count = sum(
+                1 for entry in self._get_gallery_entries_cached(
+                    folders,
+                    "none",
+                    filter_type,
+                    search_query,
+                    request_generation=request_generation,
+                ) if not entry.get("is_folder")
+            )
+            self._raise_if_media_request_canceled(request_generation)
             self._write_gallery_count_cache(cache_key, count)
             return count
+        except self._MediaRequestCanceled:
+            return 0
         except Exception:
             return 0
         finally:
@@ -479,9 +544,14 @@ class BridgeMediaListingScanMixin:
         folder_list = list(folders or [])
         ftype = str(filter_type or "all")
         query = str(search_query or "")
+        request_generation = self._current_media_request_generation()
 
         def work() -> None:
-            count = self.count_media(folder_list, ftype, query)
+            if self._is_media_request_canceled(request_generation):
+                return
+            count = self.count_media(folder_list, ftype, query, request_generation=request_generation)
+            if self._is_media_request_canceled(request_generation):
+                return
             self._safe_emit(self.mediaCounted, req, int(count or 0))
 
         threading.Thread(target=work, daemon=True).start()
@@ -492,14 +562,19 @@ class BridgeMediaListingScanMixin:
         folder_list = list(folders or [])
         ftype = str(filter_type or "all")
         query = str(search_query or "")
+        request_generation = self._current_media_request_generation()
 
         def work() -> None:
-            count = self.count_media_files(folder_list, ftype, query)
+            if self._is_media_request_canceled(request_generation):
+                return
+            count = self.count_media_files(folder_list, ftype, query, request_generation=request_generation)
+            if self._is_media_request_canceled(request_generation):
+                return
             self._safe_emit(self.mediaFileCounted, req, int(count or 0))
 
         threading.Thread(target=work, daemon=True).start()
 
-    def _get_reconciled_candidates(self, folders: list, filter_type: str = "all", search_query: str = "") -> list[dict]:
+    def _get_reconciled_candidates(self, folders: list, filter_type: str = "all", search_query: str = "", request_generation: int | None = None) -> list[dict]:
         started_at = time.perf_counter()
         from app.mediamanager.db.media_repo import list_media_in_scope
         from app.mediamanager.utils.pathing import normalize_windows_path
@@ -508,6 +583,7 @@ class BridgeMediaListingScanMixin:
         image_exts = IMAGE_EXTS
         media_filter, _, tags_filter, desc_filter, ai_filter = self._parse_filter_groups(filter_type)
         if not folders: return []
+        self._raise_if_media_request_canceled(request_generation)
         show_hidden = self._show_hidden_enabled()
         include_nested = self._gallery_include_nested_files_enabled()
         show_all_file_types = self._gallery_should_show_all_file_types()
@@ -531,11 +607,13 @@ class BridgeMediaListingScanMixin:
         else:
             disk_files = {}
             for folder in folders:
+                self._raise_if_media_request_canceled(request_generation)
                 folder_path = Path(folder)
                 if not folder_path.is_dir(): continue
                 try:
                     if include_nested:
                         for root_dir, dir_names, files in os.walk(str(folder_path), followlinks=True):
+                            self._raise_if_media_request_canceled(request_generation)
                             curr_root = Path(root_dir)
                             if not show_hidden:
                                 dir_names[:] = [
@@ -543,6 +621,7 @@ class BridgeMediaListingScanMixin:
                                     if not self.repo.is_path_hidden(str(curr_root / name))
                                 ]
                             for f in files:
+                                self._raise_if_media_request_canceled(request_generation)
                                 p = curr_root / f
                                 if not show_hidden and self.repo.is_path_hidden(str(p)):
                                     continue
@@ -550,6 +629,7 @@ class BridgeMediaListingScanMixin:
                                     disk_files[normalize_windows_path(str(p))] = p
                     else:
                         for child in folder_path.iterdir():
+                            self._raise_if_media_request_canceled(request_generation)
                             if not child.is_file():
                                 continue
                             if not show_hidden and self.repo.is_path_hidden(str(child)):
@@ -569,6 +649,7 @@ class BridgeMediaListingScanMixin:
         surviving, covered = [], set()
         
         for r in db_candidates:
+            self._raise_if_media_request_canceled(request_generation)
             norm = normalize_windows_path(r["path"])
             covered.add(norm)
             if not show_hidden and r.get("is_hidden"):
@@ -586,6 +667,7 @@ class BridgeMediaListingScanMixin:
                 surviving.append(normalized_row)
         
         for norm, p_obj in disk_files.items():
+            self._raise_if_media_request_canceled(request_generation)
             if norm not in covered:
                 if not show_hidden and self.repo.is_path_hidden(str(p_obj)):
                     continue
@@ -623,7 +705,7 @@ class BridgeMediaListingScanMixin:
         )
         return candidates
 
-    def _get_collection_candidates(self, collection_id: int, filter_type: str = "all", search_query: str = "") -> list[dict]:
+    def _get_collection_candidates(self, collection_id: int, filter_type: str = "all", search_query: str = "", request_generation: int | None = None) -> list[dict]:
         from app.mediamanager.db.collections_repo import list_collection_folders
         from app.mediamanager.db.media_repo import list_explicit_media_in_collection
         image_exts = IMAGE_EXTS
@@ -631,7 +713,7 @@ class BridgeMediaListingScanMixin:
         media_filter, _, tags_filter, desc_filter, ai_filter = self._parse_filter_groups(filter_type)
         
         folder_sources = list_collection_folders(self.conn, int(collection_id))
-        candidates = self._get_reconciled_candidates(folder_sources, filter_type, search_query) if folder_sources else []
+        candidates = self._get_reconciled_candidates(folder_sources, filter_type, search_query, request_generation=request_generation) if folder_sources else []
         raw_candidates = list_explicit_media_in_collection(
             self.conn,
             int(collection_id),
@@ -1055,14 +1137,14 @@ class BridgeMediaListingScanMixin:
         media_type = str(row.get("media_type") or "").strip().lower()
         return media_type or ""
 
-    def _get_gallery_entries(self, folders: list[str], sort_by: str = "none", filter_type: str = "all", search_query: str = "") -> list[dict]:
+    def _get_gallery_entries(self, folders: list[str], sort_by: str = "none", filter_type: str = "all", search_query: str = "", request_generation: int | None = None) -> list[dict]:
         _, text_filter, _, _, _ = self._parse_filter_groups(filter_type)
         if folders:
-            entries = self._get_reconciled_candidates(folders, filter_type, search_query)
+            entries = self._get_reconciled_candidates(folders, filter_type, search_query, request_generation=request_generation)
             if self._gallery_show_folders_enabled() and self._gallery_view_mode() != "masonry" and self._review_group_mode() is None:
                 entries = self._list_folder_entries(folders, search_query) + entries
         elif self._active_collection_id is not None:
-            entries = self._get_collection_candidates(self._active_collection_id, filter_type, search_query)
+            entries = self._get_collection_candidates(self._active_collection_id, filter_type, search_query, request_generation=request_generation)
             if self._gallery_show_folders_enabled() and self._gallery_view_mode() != "masonry" and self._review_group_mode() is None:
                 entries = self._list_collection_folder_entries(self._active_collection_id, search_query) + entries
         elif self._active_smart_collection_key:
@@ -1084,6 +1166,7 @@ class BridgeMediaListingScanMixin:
                 ]
         review_mode = self._review_group_mode()
         if review_mode in {"similar", "similar_only"}:
+            self._raise_if_media_request_canceled(request_generation)
             entries = [entry for entry in entries if not entry.get("is_folder") and self._is_supported_media_path(entry.get("_real_path") or entry.get("path") or "")]
             missing_review_data = [
                 str(entry.get("_real_path") or entry.get("path") or "")
@@ -1097,8 +1180,8 @@ class BridgeMediaListingScanMixin:
                     entry for entry in entries
                     if str(entry.get("_real_path") or entry.get("path") or "") in inline_paths
                 ]
-                self._backfill_scope_content_hashes(inline_entries)
-                self._backfill_scope_phashes(inline_entries)
+                self._backfill_scope_content_hashes(inline_entries, request_generation=request_generation)
+                self._backfill_scope_phashes(inline_entries, request_generation=request_generation)
                 self.start_scan_paths(missing_review_data[60:])
                 entries = [
                     entry for entry in entries
@@ -1106,8 +1189,8 @@ class BridgeMediaListingScanMixin:
                     and (str(entry.get("media_type") or "") != "image" or str(entry.get("phash") or "").strip())
                 ]
             else:
-                self._backfill_scope_content_hashes(entries)
-                self._backfill_scope_phashes(entries)
+                self._backfill_scope_content_hashes(entries, request_generation=request_generation)
+                self._backfill_scope_phashes(entries, request_generation=request_generation)
             threshold, bucket_prefix = self._similarity_config()
             return self._build_similar_entries(
                 entries,
@@ -1115,8 +1198,10 @@ class BridgeMediaListingScanMixin:
                 include_exact=(review_mode == "similar"),
                 threshold=threshold,
                 bucket_prefix=bucket_prefix,
+                request_generation=request_generation,
             )
         if review_mode == "duplicates":
+            self._raise_if_media_request_canceled(request_generation)
             entries = [entry for entry in entries if not entry.get("is_folder")]
             missing_hashes = [
                 str(entry.get("_real_path") or entry.get("path") or "")
@@ -1129,12 +1214,12 @@ class BridgeMediaListingScanMixin:
                     entry for entry in entries
                     if str(entry.get("_real_path") or entry.get("path") or "") in inline_paths
                 ]
-                self._backfill_scope_content_hashes(inline_entries)
+                self._backfill_scope_content_hashes(inline_entries, request_generation=request_generation)
                 self.start_scan_paths(missing_hashes[60:])
                 entries = [entry for entry in entries if str(entry.get("content_hash") or "").strip()]
             else:
-                self._backfill_scope_content_hashes(entries)
-            return self._build_duplicate_entries(entries, sort_by)
+                self._backfill_scope_content_hashes(entries, request_generation=request_generation)
+            return self._build_duplicate_entries(entries, sort_by, request_generation=request_generation)
         return self._sort_gallery_entries(entries, sort_by)
 
     def _evaluate_scan_scope(

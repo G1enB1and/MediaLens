@@ -102,6 +102,8 @@ class Bridge(BridgeMediaListingScanMixin, BridgeTagsMetadataMixin, BridgeLocalAi
         self._active_smart_collection_name: str = ""
         self._scan_abort = False
         self._scan_lock = threading.Lock()
+        self._media_request_generation = 0
+        self._media_request_generation_lock = threading.Lock()
         self.drag_paths: list[str] = []
         self.drag_target_folder: str = ""
         self._last_dlg_res = None

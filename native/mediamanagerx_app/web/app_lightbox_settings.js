@@ -524,6 +524,10 @@ function refreshFromBridge(bridge, resetPage = false, options = {}) {
   const preserveCount = !!(options && options.preserveCount);
   const preserveScroll = prepareGalleryScrollPreservationForRefresh(resetPage);
   const refreshToken = ++gRefreshGeneration;
+  cancelPendingGalleryRequests();
+  if (bridge.cancel_media_requests) {
+    bridge.cancel_media_requests();
+  }
   const consumeSelectAllAfterRefresh = function () {
     if (!gSelectAllAfterRefresh) return;
     gSelectAllAfterRefresh = false;
