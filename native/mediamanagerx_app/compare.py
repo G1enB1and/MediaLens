@@ -384,7 +384,7 @@ class CompareSlotCard(QFrame):
         self._modified_time_text = ""
 
         self.slot_layout = QVBoxLayout(self)
-        self.slot_layout.setContentsMargins(0, 0, 0, 10)
+        self.slot_layout.setContentsMargins(0, 0, 0, 0)
         self.slot_layout.setSpacing(8)
 
         self.header_row = QWidget()
@@ -414,7 +414,7 @@ class CompareSlotCard(QFrame):
         self.thumb_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         self.thumb_frame.setCursor(Qt.CursorShape.ArrowCursor)
         self.thumb_layout = QVBoxLayout(self.thumb_frame)
-        self.thumb_layout.setContentsMargins(6, 4, 6, 4)
+        self.thumb_layout.setContentsMargins(7, 7, 7, 7)
         self.thumb_layout.setSpacing(0)
 
         self.thumb_layout.addWidget(self.header_row)
@@ -432,7 +432,7 @@ class CompareSlotCard(QFrame):
         self.thumb_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         self.thumb_wrap.setCursor(Qt.CursorShape.ArrowCursor)
         self.thumb_wrap_layout = QVBoxLayout(self.thumb_wrap)
-        self.thumb_wrap_layout.setContentsMargins(0, 5, 0, 5)
+        self.thumb_wrap_layout.setContentsMargins(0, 5, 0,0)
         self.thumb_wrap_layout.setSpacing(0)
 
         self.thumb_label = QLabel()
@@ -929,9 +929,9 @@ class CompareSlotCard(QFrame):
         self.thumb_body_layout.setSpacing(8 if portrait else 0)
         if portrait:
             self.slot_layout.setSpacing(8)
-            self.slot_layout.setContentsMargins(0, 0, 0, 10)
-            self.thumb_layout.setContentsMargins(6, 4, 6, 4)
-            self.thumb_wrap_layout.setContentsMargins(0, 0, 0, 10)
+            self.slot_layout.setContentsMargins(0, 0, 0, 0)
+            self.thumb_layout.setContentsMargins(6, 6, 6, 6)
+            self.thumb_wrap_layout.setContentsMargins(0, 0, 0, 0)
             self.thumb_wrap.setMaximumHeight(16777215)
             self.thumb_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
             self.thumb_body_layout.setStretchFactor(self.thumb_wrap, 1)
@@ -952,9 +952,9 @@ class CompareSlotCard(QFrame):
             self.meta_detail_row.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         else:
             self.slot_layout.setSpacing(4)
-            self.slot_layout.setContentsMargins(0, 0, 0, 4)
-            self.thumb_layout.setContentsMargins(6, 4, 6, 2)
-            self.thumb_wrap_layout.setContentsMargins(0, 0, 0, 1)
+            self.slot_layout.setContentsMargins(0, 0, 0, 0)
+            self.thumb_layout.setContentsMargins(6, 4, 6, 0)
+            self.thumb_wrap_layout.setContentsMargins(0, 0, 0, 0)
             self.thumb_body_layout.setStretchFactor(self.thumb_wrap, 0)
             self.thumb_body_layout.setStretchFactor(self.meta_scroll, 0)
             self.thumb_body_layout.setAlignment(self.meta_scroll, Qt.AlignmentFlag(0))
