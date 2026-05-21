@@ -581,6 +581,10 @@ class CompareSlotCard(QFrame):
     def _set_elided_label_text(self, label: QLabel, text: str) -> None:
         clean = str(text or "")
         label.setProperty("fullText", clean)
+        if not self._uses_portrait_layout:
+            label.setText(clean)
+            label.setToolTip("")
+            return
         width = max(24, label.contentsRect().width())
         if width <= 24 and self._uses_portrait_layout:
             width = max(24, self.meta_stack.maximumWidth() - 8)
@@ -850,6 +854,8 @@ class CompareSlotCard(QFrame):
             self.meta_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
             self.meta_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.meta_detail_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            self.reasons_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+            self.best_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.thumb_body.updateGeometry()
         self.thumb_frame.updateGeometry()
         QTimer.singleShot(0, self._sync_meta_scrollbar)
@@ -912,12 +918,21 @@ class CompareSlotCard(QFrame):
         modified_clock_text = modified_parts[1] if len(modified_parts) > 1 else ""
         self.meta_label.setText(resolution_text)
         self.meta_label.setVisible(bool(resolution_text))
-        self.meta_size_label.setText(file_size_text)
-        self.meta_date_label.setText(modified_date_text)
-        self.meta_time_label.setText(modified_clock_text)
-        self.meta_size_label.setVisible(bool(file_size_text))
-        self.meta_date_label.setVisible(bool(modified_date_text))
-        self.meta_time_label.setVisible(bool(modified_clock_text))
+        if self._uses_portrait_layout:
+            self.meta_size_label.setText(file_size_text)
+            self.meta_date_label.setText(modified_date_text)
+            self.meta_time_label.setText(modified_clock_text)
+            self.meta_size_label.setVisible(bool(file_size_text))
+            self.meta_date_label.setVisible(bool(modified_date_text))
+            self.meta_time_label.setVisible(bool(modified_clock_text))
+        else:
+            detail_parts = [part for part in (file_size_text, modified_time_text) if part]
+            self.meta_size_label.setText(" \u2022 ".join(detail_parts))
+            self.meta_size_label.setVisible(bool(detail_parts))
+            self.meta_date_label.setText("")
+            self.meta_time_label.setText("")
+            self.meta_date_label.setVisible(False)
+            self.meta_time_label.setVisible(False)
         self.meta_dot_label.setVisible(False)
         self.meta_detail_row.setVisible(bool(file_size_text or modified_date_text or modified_clock_text))
         reasons = list(self._entry.get("duplicate_category_reasons") or [])[:5]
