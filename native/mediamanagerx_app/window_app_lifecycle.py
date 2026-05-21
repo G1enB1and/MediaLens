@@ -521,8 +521,9 @@ class WindowAppLifecycleMixin:
             QScrollBar::handle:vertical {{
                 background: {thumb_bg};
                 min-height: 20px;
-                border-radius: 10px;
-                border: 2px solid {track};
+                margin: 2px;
+                border-radius: 4px;
+                border: none;
             }}
             QScrollBar::handle:vertical:hover, QScrollBar::handle:vertical:pressed {{
                 background: {thumb_hover_bg};
@@ -558,8 +559,9 @@ class WindowAppLifecycleMixin:
             QScrollBar::handle:horizontal {{
                 background: {thumb_bg};
                 min-width: 20px;
-                border-radius: 10px;
-                border: 2px solid {track};
+                margin: 2px;
+                border-radius: 4px;
+                border: none;
             }}
             QScrollBar::handle:horizontal:hover, QScrollBar::handle:horizontal:pressed {{
                 background: {thumb_hover_bg};

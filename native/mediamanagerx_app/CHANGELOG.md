@@ -1,6 +1,32 @@
 # Change Log
 
-## v1.2.14 (Current)
+## v1.2.15 (Current)
+
+### Summary
+
+This release makes duplicate and similar review less disruptive by keeping large review loads interruptible when you switch folders or views. MediaLens also sharpens and cleans up the image comparison panel so the before-and-after workspace looks tighter and reads more clearly.
+
+### Highlights
+
+- Switch away from large duplicate or similar folders without waiting for the current review build to finish.
+- Use a cleaner image comparison slider with a thinner handle and a proper horizontal resize cursor.
+- See sharper comparison slot image edges and tighter spacing around the left and right comparison previews.
+
+### Added
+
+- Added interruptible duplicate and similar gallery request handling so stale review loads stop when you change folders or views.
+- Added explicit cancellation checks across duplicate and similar hash backfill and grouping work to keep long review passes from monopolizing the active request.
+
+### Changed
+
+- Changed duplicate and similar review refreshes to clear stale pending gallery and count requests before starting a new load.
+- Changed the image comparison reveal slider to use a thinner, shorter handle and a horizontal resize cursor while hovering and dragging.
+- Changed the left and right comparison slot image layouts to remove extra bottom padding and margin.
+- Changed comparison slot borders and rounded thumbnail overlay rendering to produce sharper visible edges in the comparison panel.
+
+---
+
+## v1.2.14
 
 ### Summary
 

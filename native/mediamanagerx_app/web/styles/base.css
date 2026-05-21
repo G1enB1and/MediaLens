@@ -99,73 +99,110 @@ body {
 }
 
 /* Custom Scrollbars */
-::-webkit-scrollbar {
+::-webkit-scrollbar,
+main::-webkit-scrollbar {
   width: 12px;
   height: 12px;
 }
 
-::-webkit-scrollbar-track {
+::-webkit-scrollbar-track,
+main::-webkit-scrollbar-track {
   background: var(--scrollbar-track);
 }
 
-::-webkit-scrollbar-thumb {
+::-webkit-scrollbar-thumb,
+main::-webkit-scrollbar-thumb {
   background: var(--scrollbar-thumb);
   border-radius: 10px;
   border: 2px solid var(--scrollbar-track);
 }
 
-::-webkit-scrollbar-thumb:hover {
+::-webkit-scrollbar-thumb:hover,
+main::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-thumb-hover);
 }
 
-::-webkit-scrollbar-button {
+::-webkit-scrollbar-button,
+main::-webkit-scrollbar-button {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
   background-color: var(--scrollbar-track);
   background-repeat: no-repeat;
   background-position: center;
+  background-size: 11px 11px;
   height: 12px;
   width: 12px;
 }
 
-/* Up Arrow */
-::-webkit-scrollbar-button:vertical:decrement {
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' fill='none'><path d='M50 35L25 65H75L50 35Z' fill='%23999'/></svg>");
+::-webkit-scrollbar-button:vertical:start:increment,
+::-webkit-scrollbar-button:vertical:end:decrement,
+main::-webkit-scrollbar-button:vertical:start:increment,
+main::-webkit-scrollbar-button:vertical:end:decrement {
+  display: none;
+  height: 0;
+  width: 0;
 }
 
-.light-mode ::-webkit-scrollbar-button:vertical:decrement {
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' fill='none'><path d='M50 35L25 65H75L50 35Z' fill='%23666'/></svg>");
+::-webkit-scrollbar-button:horizontal:start:increment,
+::-webkit-scrollbar-button:horizontal:end:decrement,
+main::-webkit-scrollbar-button:horizontal:start:increment,
+main::-webkit-scrollbar-button:horizontal:end:decrement {
+  display: none;
+  height: 0;
+  width: 0;
+}
+
+/* Up Arrow */
+::-webkit-scrollbar-button:vertical:start:decrement,
+main::-webkit-scrollbar-button:vertical:start:decrement {
+  background-image: url("../scrollbar_arrows/dark_up.svg");
+}
+
+.light-mode ::-webkit-scrollbar-button:vertical:start:decrement,
+.light-mode main::-webkit-scrollbar-button:vertical:start:decrement {
+  background-image: url("../scrollbar_arrows/light_up.svg");
 }
 
 /* Down Arrow */
-::-webkit-scrollbar-button:vertical:increment {
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' fill='none'><path d='M50 65L75 35H25L50 65Z' fill='%23999'/></svg>");
+::-webkit-scrollbar-button:vertical:end:increment,
+main::-webkit-scrollbar-button:vertical:end:increment {
+  background-image: url("../scrollbar_arrows/dark_down.svg");
 }
 
-.light-mode ::-webkit-scrollbar-button:vertical:increment {
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' fill='none'><path d='M50 65L75 35H25L50 65Z' fill='%23666'/></svg>");
+.light-mode ::-webkit-scrollbar-button:vertical:end:increment,
+.light-mode main::-webkit-scrollbar-button:vertical:end:increment {
+  background-image: url("../scrollbar_arrows/light_down.svg");
 }
 
 /* Left Arrow */
-::-webkit-scrollbar-button:horizontal:decrement {
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' fill='none'><path d='M35 50L65 25V75L35 50Z' fill='%23999'/></svg>");
+::-webkit-scrollbar-button:horizontal:start:decrement,
+main::-webkit-scrollbar-button:horizontal:start:decrement {
+  background-image: url("../scrollbar_arrows/dark_left.svg");
 }
 
-.light-mode ::-webkit-scrollbar-button:horizontal:decrement {
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' fill='none'><path d='M35 50L65 25V75L35 50Z' fill='%23666'/></svg>");
+.light-mode ::-webkit-scrollbar-button:horizontal:start:decrement,
+.light-mode main::-webkit-scrollbar-button:horizontal:start:decrement {
+  background-image: url("../scrollbar_arrows/light_left.svg");
 }
 
 /* Right Arrow */
-::-webkit-scrollbar-button:horizontal:increment {
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' fill='none'><path d='M65 50L35 75V25L65 50Z' fill='%23999'/></svg>");
+::-webkit-scrollbar-button:horizontal:end:increment,
+main::-webkit-scrollbar-button:horizontal:end:increment {
+  background-image: url("../scrollbar_arrows/dark_right.svg");
 }
 
-.light-mode ::-webkit-scrollbar-button:horizontal:increment {
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' fill='none'><path d='M65 50L35 75V25L65 50Z' fill='%23666'/></svg>");
+.light-mode ::-webkit-scrollbar-button:horizontal:end:increment,
+.light-mode main::-webkit-scrollbar-button:horizontal:end:increment {
+  background-image: url("../scrollbar_arrows/light_right.svg");
 }
 
-/* Firefox support (arrows not supported in standard CSS properties) */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+/* Firefox support. Keep standard scrollbar sizing out of Chromium/QWebEngine. */
+@-moz-document url-prefix() {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  }
 }
 
 /* Prevent a white flash while the page/app initializes */
