@@ -412,12 +412,14 @@ def _rounded_preview_pixmap(source: QPixmap, target: QSize, border_color: str, r
     painter.setClipPath(path)
     painter.drawPixmap(0, 0, scaled)
     painter.setClipping(False)
-    pen = QPen(QColor(border_color))
-    pen.setWidth(1)
-    pen.setCosmetic(True)
-    painter.setPen(pen)
-    painter.setBrush(Qt.BrushStyle.NoBrush)
-    painter.drawRoundedRect(draw_rect, radius, radius)
+    border_qcolor = QColor(border_color)
+    if border_qcolor.isValid() and border_qcolor.alpha() > 0:
+        pen = QPen(border_qcolor)
+        pen.setWidth(1)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(draw_rect, radius, radius)
     painter.end()
     return result
 
