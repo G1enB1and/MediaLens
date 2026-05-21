@@ -383,9 +383,9 @@ class CompareSlotCard(QFrame):
         self._file_size_text = ""
         self._modified_time_text = ""
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 10)
-        layout.setSpacing(8)
+        self.slot_layout = QVBoxLayout(self)
+        self.slot_layout.setContentsMargins(0, 0, 0, 10)
+        self.slot_layout.setSpacing(8)
 
         self.header_row = QWidget()
         self.header_row.setObjectName("compareSlotHeader")
@@ -413,11 +413,11 @@ class CompareSlotCard(QFrame):
         self.thumb_frame.setMinimumHeight(0)
         self.thumb_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         self.thumb_frame.setCursor(Qt.CursorShape.ArrowCursor)
-        thumb_layout = QVBoxLayout(self.thumb_frame)
-        thumb_layout.setContentsMargins(6, 4, 6, 4)
-        thumb_layout.setSpacing(0)
+        self.thumb_layout = QVBoxLayout(self.thumb_frame)
+        self.thumb_layout.setContentsMargins(6, 4, 6, 4)
+        self.thumb_layout.setSpacing(0)
 
-        thumb_layout.addWidget(self.header_row)
+        self.thumb_layout.addWidget(self.header_row)
 
         self.thumb_body = QWidget()
         self.thumb_body.setObjectName("compareSlotThumbBody")
@@ -431,9 +431,9 @@ class CompareSlotCard(QFrame):
         self.thumb_wrap.setMinimumHeight(0)
         self.thumb_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         self.thumb_wrap.setCursor(Qt.CursorShape.ArrowCursor)
-        thumb_wrap_layout = QVBoxLayout(self.thumb_wrap)
-        thumb_wrap_layout.setContentsMargins(0, 5, 0, 5)
-        thumb_wrap_layout.setSpacing(0)
+        self.thumb_wrap_layout = QVBoxLayout(self.thumb_wrap)
+        self.thumb_wrap_layout.setContentsMargins(0, 5, 0, 5)
+        self.thumb_wrap_layout.setSpacing(0)
 
         self.thumb_label = QLabel()
         self.thumb_label.setObjectName("compareSlotThumb")
@@ -441,7 +441,7 @@ class CompareSlotCard(QFrame):
         self.thumb_label.setMinimumSize(0, 50)
         self.thumb_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.thumb_label.setCursor(Qt.CursorShape.ArrowCursor)
-        thumb_wrap_layout.addWidget(self.thumb_label, 1)
+        self.thumb_wrap_layout.addWidget(self.thumb_label, 1)
         self.thumb_body_layout.addWidget(self.thumb_wrap, 1)
 
         self.meta_stack = QWidget()
@@ -519,8 +519,8 @@ class CompareSlotCard(QFrame):
         self.meta_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         self.meta_scroll.setWidget(self.meta_stack)
         self.thumb_body_layout.addWidget(self.meta_scroll, 0)
-        thumb_layout.addWidget(self.thumb_body, 1)
-        layout.addWidget(self.thumb_frame, 1)
+        self.thumb_layout.addWidget(self.thumb_body, 1)
+        self.slot_layout.addWidget(self.thumb_frame, 1)
 
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
@@ -545,7 +545,7 @@ class CompareSlotCard(QFrame):
         self.identical_label.setVisible(False)
         controls.addWidget(self.identical_label)
 
-        layout.addLayout(controls)
+        self.slot_layout.addLayout(controls)
 
         actions = QHBoxLayout()
         actions.setContentsMargins(0, 0, 0, 0)
@@ -565,7 +565,7 @@ class CompareSlotCard(QFrame):
         self.delete_btn.clicked.connect(self._emit_delete_clicked)
         actions.addWidget(self.delete_btn, 0, Qt.AlignmentFlag.AlignRight)
 
-        layout.addLayout(actions)
+        self.slot_layout.addLayout(actions)
 
         self._render_entry({})
 
@@ -584,6 +584,7 @@ class CompareSlotCard(QFrame):
     def _set_elided_label_text(self, label: QLabel, text: str) -> None:
         clean = str(text or "")
         label.setProperty("fullText", clean)
+        label.setVisible(bool(clean))
         if not self._uses_portrait_layout:
             label.setText(clean)
             label.setToolTip("")
@@ -847,23 +848,35 @@ class CompareSlotCard(QFrame):
             self.thumb_wrap.setMaximumHeight(16777215)
             self.thumb_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
             return
-        if self._thumb_source_pixmap is None or self._thumb_source_pixmap.isNull():
+        thumb_width = 0
+        thumb_height = 0
+        if self._thumb_source_pixmap is not None and not self._thumb_source_pixmap.isNull():
+            thumb_width = self._thumb_source_pixmap.width()
+            thumb_height = self._thumb_source_pixmap.height()
+        if thumb_width <= 0 or thumb_height <= 0:
+            thumb_width = int(self._entry.get("width") or 0)
+            thumb_height = int(self._entry.get("height") or 0)
+        if thumb_width <= 0 or thumb_height <= 0:
             self.thumb_wrap.setMaximumHeight(16777215)
             self.thumb_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
             return
         available_width = max(1, self.thumb_body.contentsRect().width())
-        target_height = int(round(available_width * (self._thumb_source_pixmap.height() / max(1, self._thumb_source_pixmap.width())))) + 10
+        target_height = int(round(available_width * (thumb_height / max(1, thumb_width)))) + 10
         self.thumb_wrap.setMaximumHeight(max(50, target_height))
         self.thumb_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
 
     def _sync_meta_scrollbar(self) -> None:
         self._apply_landscape_metadata_lines()
         self._sync_landscape_thumb_height()
-        viewport_height = max(0, self.meta_scroll.viewport().height())
-        self.meta_stack.adjustSize()
         content_height = max(0, self.meta_stack.minimumSizeHint().height())
         if not self._uses_portrait_layout:
+            viewport_width = max(24, self.meta_scroll.viewport().width() or self.meta_scroll.width())
+            self.meta_stack.setFixedWidth(viewport_width)
+            self.meta_stack.adjustSize()
+            content_height = max(0, self.meta_stack.minimumSizeHint().height())
+            self.meta_stack.setFixedHeight(content_height)
             max_metadata_height = max(44, min(content_height + 2, int(max(1, self.thumb_body.height()) * 0.28)))
+            self.meta_scroll.setMinimumHeight(max_metadata_height)
             self.meta_scroll.setMaximumHeight(max_metadata_height)
             policy = (
                 Qt.ScrollBarPolicy.ScrollBarAsNeeded
@@ -874,7 +887,13 @@ class CompareSlotCard(QFrame):
             if policy == Qt.ScrollBarPolicy.ScrollBarAlwaysOff:
                 self.meta_scroll.verticalScrollBar().setValue(0)
             return
+        viewport_height = max(0, self.meta_scroll.viewport().height())
+        self.meta_scroll.setMinimumHeight(0)
         self.meta_scroll.setMaximumHeight(16777215)
+        self.meta_stack.setMinimumHeight(0)
+        self.meta_stack.setMaximumHeight(16777215)
+        self.meta_stack.setMinimumWidth(112)
+        self.meta_stack.setMaximumWidth(132)
         policy = (
             Qt.ScrollBarPolicy.ScrollBarAsNeeded
             if viewport_height > 0 and content_height > viewport_height + 2
@@ -904,24 +923,32 @@ class CompareSlotCard(QFrame):
         if portrait:
             self.thumb_wrap.setMaximumHeight(16777215)
             self.thumb_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
+            self.thumb_body_layout.setStretchFactor(self.thumb_wrap, 1)
+            self.thumb_body_layout.setStretchFactor(self.meta_scroll, 0)
             self.thumb_body_layout.setAlignment(self.meta_scroll, Qt.AlignmentFlag.AlignLeft)
             self.setMinimumWidth(0)
             self.meta_stack_layout.setContentsMargins(0, 0, 8, 0)
             self.meta_stack.setMinimumWidth(112)
             self.meta_stack.setMaximumWidth(132)
             self.meta_stack.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            self.meta_scroll.setWidgetResizable(True)
+            self.meta_scroll.setMinimumHeight(0)
             self.meta_scroll.setMinimumWidth(112)
             self.meta_scroll.setMaximumWidth(132)
             self.meta_scroll.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Ignored)
             self.meta_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
             self.meta_detail_row.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         else:
+            self.thumb_body_layout.setStretchFactor(self.thumb_wrap, 0)
+            self.thumb_body_layout.setStretchFactor(self.meta_scroll, 0)
             self.thumb_body_layout.setAlignment(self.meta_scroll, Qt.AlignmentFlag(0))
             self.setMinimumWidth(0)
             self.meta_stack_layout.setContentsMargins(0, 0, 0, 0)
             self.meta_stack.setMinimumWidth(0)
             self.meta_stack.setMaximumWidth(16777215)
             self.meta_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            self.meta_scroll.setWidgetResizable(False)
+            self.meta_scroll.setMinimumHeight(0)
             self.meta_scroll.setMinimumWidth(0)
             self.meta_scroll.setMaximumWidth(16777215)
             self.meta_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
