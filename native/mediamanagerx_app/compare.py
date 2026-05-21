@@ -379,6 +379,9 @@ class CompareSlotCard(QFrame):
         self._thumb_source_pixmap: QPixmap | None = None
         self._thumb_border_color: str = Theme.get_border(QColor(Theme.ACCENT_DEFAULT))
         self._uses_portrait_layout = False
+        self._resolution_text = ""
+        self._file_size_text = ""
+        self._modified_time_text = ""
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 10)
@@ -596,6 +599,48 @@ class CompareSlotCard(QFrame):
         label.setText(display)
         label.setToolTip(clean if clean and display != clean else "")
 
+    def _apply_landscape_metadata_lines(self) -> None:
+        if self._uses_portrait_layout:
+            return
+        resolution_text = self._resolution_text
+        file_size_text = self._file_size_text
+        modified_time_text = self._modified_time_text
+        detail_parts = [part for part in (file_size_text, modified_time_text) if part]
+        detail_text = " \u2022 ".join(detail_parts)
+        full_text = " \u2022 ".join(part for part in (resolution_text, file_size_text, modified_time_text) if part)
+        metrics = QFontMetrics(self.meta_label.font())
+        available_width = max(24, self.meta_scroll.viewport().width() or self.meta_scroll.width())
+        if full_text and metrics.horizontalAdvance(full_text) <= available_width:
+            self.meta_label.setText(full_text)
+            self.meta_size_label.setText("")
+            self.meta_date_label.setText("")
+            self.meta_time_label.setText("")
+            self.meta_size_label.setVisible(False)
+            self.meta_date_label.setVisible(False)
+            self.meta_time_label.setVisible(False)
+        elif detail_text and metrics.horizontalAdvance(detail_text) <= available_width:
+            self.meta_label.setText(resolution_text)
+            self.meta_size_label.setText(detail_text)
+            self.meta_date_label.setText("")
+            self.meta_time_label.setText("")
+            self.meta_size_label.setVisible(bool(detail_text))
+            self.meta_date_label.setVisible(False)
+            self.meta_time_label.setVisible(False)
+        else:
+            self.meta_label.setText(resolution_text)
+            self.meta_size_label.setText(file_size_text)
+            self.meta_date_label.setText(modified_time_text)
+            self.meta_time_label.setText("")
+            self.meta_size_label.setVisible(bool(file_size_text))
+            self.meta_date_label.setVisible(bool(modified_time_text))
+            self.meta_time_label.setVisible(False)
+        self.meta_label.setVisible(bool(self.meta_label.text()))
+        self.meta_detail_row.setVisible(
+            self.meta_size_label.isVisible()
+            or self.meta_date_label.isVisible()
+            or self.meta_time_label.isVisible()
+        )
+
     def apply_theme_styles(self, text: str, text_muted: str, accent_hex: str, accent_raw: str, thumb_bg: str, border: str) -> None:
         accent_color = QColor(accent_raw)
         pure_accent = accent_color.name()
@@ -802,8 +847,20 @@ class CompareSlotCard(QFrame):
         )
 
     def _sync_meta_scrollbar(self) -> None:
+        self._apply_landscape_metadata_lines()
         viewport_height = max(0, self.meta_scroll.viewport().height())
         content_height = max(0, self.meta_stack.sizeHint().height())
+        if not self._uses_portrait_layout:
+            max_metadata_height = max(44, min(content_height + 2, int(max(1, self.thumb_body.height()) * 0.28)))
+            self.meta_scroll.setMaximumHeight(max_metadata_height)
+            policy = (
+                Qt.ScrollBarPolicy.ScrollBarAsNeeded
+                if content_height > max_metadata_height + 2
+                else Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            )
+            self.meta_scroll.setVerticalScrollBarPolicy(policy)
+            return
+        self.meta_scroll.setMaximumHeight(16777215)
         policy = (
             Qt.ScrollBarPolicy.ScrollBarAsNeeded
             if viewport_height > 0 and content_height > viewport_height + 2
@@ -831,8 +888,8 @@ class CompareSlotCard(QFrame):
         )
         self.thumb_body_layout.setSpacing(8 if portrait else 0)
         self.thumb_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
-        self.thumb_body_layout.setAlignment(self.meta_scroll, Qt.AlignmentFlag.AlignLeft)
         if portrait:
+            self.thumb_body_layout.setAlignment(self.meta_scroll, Qt.AlignmentFlag.AlignLeft)
             self.setMinimumWidth(0)
             self.meta_stack_layout.setContentsMargins(0, 0, 8, 0)
             self.meta_stack.setMinimumWidth(112)
@@ -844,6 +901,7 @@ class CompareSlotCard(QFrame):
             self.meta_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
             self.meta_detail_row.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         else:
+            self.thumb_body_layout.setAlignment(self.meta_scroll, Qt.AlignmentFlag(0))
             self.setMinimumWidth(0)
             self.meta_stack_layout.setContentsMargins(0, 0, 0, 0)
             self.meta_stack.setMinimumWidth(0)
@@ -913,12 +971,15 @@ class CompareSlotCard(QFrame):
         resolution_text = str(self._entry.get("resolution_text") or "")
         file_size_text = str(self._entry.get("file_size_text") or "")
         modified_time_text = str(self._entry.get("modified_time_text") or "")
+        self._resolution_text = resolution_text
+        self._file_size_text = file_size_text
+        self._modified_time_text = modified_time_text
         modified_parts = modified_time_text.split(" ", 1)
         modified_date_text = modified_parts[0] if modified_parts else ""
         modified_clock_text = modified_parts[1] if len(modified_parts) > 1 else ""
-        self.meta_label.setText(resolution_text)
-        self.meta_label.setVisible(bool(resolution_text))
         if self._uses_portrait_layout:
+            self.meta_label.setText(resolution_text)
+            self.meta_label.setVisible(bool(resolution_text))
             self.meta_size_label.setText(file_size_text)
             self.meta_date_label.setText(modified_date_text)
             self.meta_time_label.setText(modified_clock_text)
@@ -926,15 +987,10 @@ class CompareSlotCard(QFrame):
             self.meta_date_label.setVisible(bool(modified_date_text))
             self.meta_time_label.setVisible(bool(modified_clock_text))
         else:
-            detail_parts = [part for part in (file_size_text, modified_time_text) if part]
-            self.meta_size_label.setText(" \u2022 ".join(detail_parts))
-            self.meta_size_label.setVisible(bool(detail_parts))
-            self.meta_date_label.setText("")
-            self.meta_time_label.setText("")
-            self.meta_date_label.setVisible(False)
-            self.meta_time_label.setVisible(False)
+            self._apply_landscape_metadata_lines()
         self.meta_dot_label.setVisible(False)
-        self.meta_detail_row.setVisible(bool(file_size_text or modified_date_text or modified_clock_text))
+        if self._uses_portrait_layout:
+            self.meta_detail_row.setVisible(bool(file_size_text or modified_date_text or modified_clock_text))
         reasons = list(self._entry.get("duplicate_category_reasons") or [])[:5]
         self._set_elided_label_text(self.reasons_label, "\n".join(reasons))
         compare_best_in_pair = bool(self._entry.get("compare_best_in_pair"))
@@ -1033,6 +1089,7 @@ class CompareSlotCard(QFrame):
         self._update_name_elision()
         self._set_elided_label_text(self.reasons_label, str(self.reasons_label.property("fullText") or self.reasons_label.text() or ""))
         self._set_elided_label_text(self.best_label, str(self.best_label.property("fullText") or self.best_label.text() or ""))
+        self._apply_landscape_metadata_lines()
         self._sync_meta_scrollbar()
         super().resizeEvent(event)
 
