@@ -192,10 +192,10 @@ class CompareRevealViewer(QWidget):
 
     def _sync_hover_cursor(self, point: QPoint | None = None) -> None:
         if self._drag_mode == "slider":
-            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
             return
         target_point = point if point is not None else self.mapFromGlobal(QCursor.pos())
-        self.setCursor(Qt.CursorShape.PointingHandCursor if self._slider_hit_test(target_point) else Qt.CursorShape.ArrowCursor)
+        self.setCursor(Qt.CursorShape.SizeHorCursor if self._slider_hit_test(target_point) else Qt.CursorShape.ArrowCursor)
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
@@ -255,12 +255,12 @@ class CompareRevealViewer(QWidget):
 
         if not isolate_left and not isolate_right and available_left and available_right:
             painter.save()
-            painter.setPen(QPen(QColor("#ffffff"), 2))
+            painter.setPen(QPen(QColor("#ffffff"), 1))
             painter.drawLine(slider_x, content_rect.top(), slider_x, content_rect.bottom())
-            handle_rect = QRect(slider_x - 8, round(content_rect.center().y() - 28), 16, 56)
+            handle_rect = QRect(slider_x - 4, round(content_rect.center().y() - 22), 8, 44)
             painter.setBrush(QColor("#ffffff"))
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRoundedRect(handle_rect, 8, 8)
+            painter.drawRoundedRect(handle_rect, 4, 4)
             painter.restore()
 
         border_pen = QPen(self._frame_border)
@@ -306,7 +306,7 @@ class CompareRevealViewer(QWidget):
             content_rect = self._content_rect()
             slider_x = content_rect.left() + round(content_rect.width() * self._slider_ratio)
             self._slider_drag_offset_x = int(round(event.position().x() - slider_x))
-            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
         elif self._zoom > 1.0:
             self._drag_mode = "pan"
             self._drag_start_pos = event.position().toPoint()
@@ -322,7 +322,7 @@ class CompareRevealViewer(QWidget):
                 drag_x = event.position().x() - float(self._slider_drag_offset_x)
                 self._slider_ratio = max(0.0, min(1.0, (drag_x - content_rect.left()) / content_rect.width()))
                 self.update()
-            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
             event.accept()
             return
         if self._drag_mode == "pan":
