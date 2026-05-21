@@ -454,7 +454,8 @@ class CompareSlotCard(QFrame):
         self.meta_label.setWordWrap(True)
         self.meta_label.setContentsMargins(0, 0, 0, 0)
         self.meta_label.setMinimumHeight(0)
-        self.meta_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.meta_label.setMinimumWidth(0)
+        self.meta_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.meta_stack_layout.addWidget(self.meta_label)
 
         self.meta_detail_row = QWidget()
@@ -465,10 +466,16 @@ class CompareSlotCard(QFrame):
         meta_detail_layout.setSpacing(1)
         self.meta_size_label = QLabel("")
         self.meta_size_label.setObjectName("compareSlotMeta")
+        self.meta_size_label.setMinimumWidth(0)
+        self.meta_size_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.meta_date_label = QLabel("")
         self.meta_date_label.setObjectName("compareSlotMeta")
+        self.meta_date_label.setMinimumWidth(0)
+        self.meta_date_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.meta_time_label = QLabel("")
         self.meta_time_label.setObjectName("compareSlotMeta")
+        self.meta_time_label.setMinimumWidth(0)
+        self.meta_time_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.meta_dot_label = QLabel("")
         self.meta_dot_label.setObjectName("compareSlotMetaDot")
         self.meta_dot_label.setFixedSize(6, 14)
@@ -485,16 +492,18 @@ class CompareSlotCard(QFrame):
         self.reasons_label.setObjectName("compareSlotReasons")
         self.reasons_label.setWordWrap(True)
         self.reasons_label.setMinimumHeight(0)
+        self.reasons_label.setMinimumWidth(0)
         self.reasons_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        self.reasons_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.reasons_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.meta_stack_layout.addWidget(self.reasons_label)
 
         self.best_label = QLabel("")
         self.best_label.setObjectName("compareSlotBest")
         self.best_label.setWordWrap(True)
         self.best_label.setMinimumHeight(0)
+        self.best_label.setMinimumWidth(0)
         self.best_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        self.best_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.best_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.meta_stack_layout.addWidget(self.best_label)
 
         self.meta_stack_layout.addStretch(1)
@@ -785,7 +794,7 @@ class CompareSlotCard(QFrame):
         self.thumb_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         self.thumb_body_layout.setAlignment(self.meta_stack, Qt.AlignmentFlag.AlignLeft | (Qt.AlignmentFlag.AlignVCenter if portrait else Qt.AlignmentFlag.AlignTop))
         if portrait:
-            self.setMinimumWidth(395)
+            self.setMinimumWidth(0)
             self.meta_stack_layout.setContentsMargins(0, 0, 8, 0)
             self.meta_stack.setMaximumWidth(124)
             self.meta_stack.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
@@ -1144,13 +1153,11 @@ class ComparePanel(QWidget):
         return False
 
     def _apply_column_widths(self, left_entry: dict, right_entry: dict) -> None:
-        for scroll, entry in ((self.left_scroll, left_entry), (self.right_scroll, right_entry)):
-            has_entry = bool(str((entry or {}).get("path") or "").strip())
-            min_width = 260 if has_entry else 180
-            scroll.setMinimumWidth(min_width)
+        for scroll in (self.left_scroll, self.right_scroll):
+            scroll.setMinimumWidth(0)
             scroll.setMaximumWidth(16777215)
             scroll.updateGeometry()
-        self.viewer_wrap.setMinimumWidth(260)
+        self.viewer_wrap.setMinimumWidth(0)
         self.viewer_wrap.setMaximumWidth(16777215)
         self.viewer_wrap.updateGeometry()
 
