@@ -531,7 +531,12 @@ function createStructuredCard(item, idx) {
   if (duplicateMode && !isFolder) {
     const duplicateStats = document.createElement('div');
     duplicateStats.className = 'entry-detail duplicate-stats';
-    duplicateStats.textContent = [formatFileSize(item.file_size), formatModifiedTime(item.modified_time)].filter(Boolean).join(' • ');
+    const duplicateStatsParts = [formatFileSize(item.file_size), formatModifiedTime(item.modified_time)].filter(Boolean);
+    const duplicateWidth = Number(item.width) || 0;
+    const duplicateHeight = Number(item.height) || 0;
+    const stackDuplicateStats = duplicateWidth > 0 && duplicateHeight > 0 && duplicateHeight >= duplicateWidth;
+    if (stackDuplicateStats) duplicateStats.classList.add('duplicate-stats-stacked');
+    duplicateStats.textContent = duplicateStatsParts.join(stackDuplicateStats ? '\n' : ' • ');
     content.appendChild(duplicateStats);
 
     const controls = document.createElement('div');

@@ -451,6 +451,7 @@ class CompareSlotCard(QFrame):
         self.meta_stack_layout = QVBoxLayout(self.meta_stack)
         self.meta_stack_layout.setContentsMargins(0, 0, 0, 0)
         self.meta_stack_layout.setSpacing(2)
+        self.meta_stack_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         self.meta_label = QLabel("Browse or drag an image from the gallery")
         self.meta_label.setObjectName("compareSlotMeta")
@@ -460,6 +461,7 @@ class CompareSlotCard(QFrame):
         self.meta_label.setMinimumWidth(0)
         self.meta_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.meta_stack_layout.addWidget(self.meta_label)
+        self.meta_stack_layout.setAlignment(self.meta_label, Qt.AlignmentFlag.AlignTop)
 
         self.meta_detail_row = QWidget()
         self.meta_detail_row.setObjectName("compareSlotMetaDetailRow")
@@ -489,6 +491,7 @@ class CompareSlotCard(QFrame):
         meta_detail_layout.addWidget(self.meta_time_label, 0, Qt.AlignmentFlag.AlignLeft)
         self.meta_detail_row.setVisible(False)
         self.meta_stack_layout.addWidget(self.meta_detail_row)
+        self.meta_stack_layout.setAlignment(self.meta_detail_row, Qt.AlignmentFlag.AlignTop)
 
         self.reasons_label = QLabel("")
         self.reasons_label.setObjectName("compareSlotReasons")
@@ -498,6 +501,7 @@ class CompareSlotCard(QFrame):
         self.reasons_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.reasons_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.meta_stack_layout.addWidget(self.reasons_label)
+        self.meta_stack_layout.setAlignment(self.reasons_label, Qt.AlignmentFlag.AlignTop)
 
         self.best_label = QLabel("")
         self.best_label.setObjectName("compareSlotBest")
@@ -507,6 +511,7 @@ class CompareSlotCard(QFrame):
         self.best_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.best_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.meta_stack_layout.addWidget(self.best_label)
+        self.meta_stack_layout.setAlignment(self.best_label, Qt.AlignmentFlag.AlignTop)
 
         self.meta_scroll = QScrollArea()
         self.meta_scroll.setObjectName("compareSlotMetaScroll")
@@ -895,17 +900,14 @@ class CompareSlotCard(QFrame):
         viewport_height = max(0, self.meta_scroll.viewport().height())
         self.meta_scroll.setMinimumHeight(0)
         self.meta_scroll.setMaximumHeight(16777215)
-        self.meta_stack.setMinimumHeight(0)
-        self.meta_stack.setMaximumHeight(16777215)
-        self.meta_stack.setMinimumWidth(112)
-        self.meta_stack.setMaximumWidth(132)
-        policy = (
-            Qt.ScrollBarPolicy.ScrollBarAsNeeded
-            if viewport_height > 0 and content_height > viewport_height + 2
-            else Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
-        if self.meta_scroll.verticalScrollBarPolicy() != policy:
-            self.meta_scroll.setVerticalScrollBarPolicy(policy)
+        portrait_width = max(112, min(132, self.meta_scroll.viewport().width() or self.meta_scroll.width() or 132))
+        self.meta_stack.setFixedWidth(portrait_width)
+        self.meta_stack.adjustSize()
+        content_height = max(0, self.meta_stack.sizeHint().height())
+        self.meta_stack.setFixedHeight(content_height)
+        self.meta_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        if viewport_height > 0 and content_height <= viewport_height + 2:
+            self.meta_scroll.verticalScrollBar().setValue(0)
 
     def _is_portrait_entry(self) -> bool:
         width = int(self._entry.get("width") or 0)
@@ -928,7 +930,7 @@ class CompareSlotCard(QFrame):
             self.slot_layout.setSpacing(8)
             self.slot_layout.setContentsMargins(0, 0, 0, 10)
             self.thumb_layout.setContentsMargins(6, 4, 6, 4)
-            self.thumb_wrap_layout.setContentsMargins(0, 5, 0, 5)
+            self.thumb_wrap_layout.setContentsMargins(0, 0, 0, 10)
             self.thumb_wrap.setMaximumHeight(16777215)
             self.thumb_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
             self.thumb_body_layout.setStretchFactor(self.thumb_wrap, 1)
@@ -939,11 +941,12 @@ class CompareSlotCard(QFrame):
             self.meta_stack.setMinimumWidth(112)
             self.meta_stack.setMaximumWidth(132)
             self.meta_stack.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-            self.meta_scroll.setWidgetResizable(True)
+            self.meta_scroll.setWidgetResizable(False)
             self.meta_scroll.setMinimumHeight(0)
             self.meta_scroll.setMinimumWidth(112)
             self.meta_scroll.setMaximumWidth(132)
             self.meta_scroll.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Ignored)
+            self.thumb_label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
             self.meta_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
             self.meta_detail_row.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         else:
@@ -964,6 +967,7 @@ class CompareSlotCard(QFrame):
             self.meta_scroll.setMinimumWidth(0)
             self.meta_scroll.setMaximumWidth(16777215)
             self.meta_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+            self.thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.meta_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
             self.meta_detail_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             self.reasons_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
