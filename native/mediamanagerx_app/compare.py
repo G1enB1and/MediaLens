@@ -352,6 +352,35 @@ class CompareRevealViewer(QWidget):
         super().leaveEvent(event)
 
 
+class CompareSlotThumbFrame(QFrame):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._frame_bg = QColor("#121212")
+        self._frame_border = QColor(Theme.get_border(QColor(Theme.ACCENT_DEFAULT)))
+        self._frame_radius = 10.0
+
+    def set_frame_style(self, bg_color: str, border_color: str) -> None:
+        self._frame_bg = QColor(str(bg_color or "#121212"))
+        self._frame_border = QColor(str(border_color or Theme.get_border(QColor(Theme.ACCENT_DEFAULT))))
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        frame_rect = QRectF(0.5, 0.5, max(0.0, self.width() - 1.0), max(0.0, self.height() - 1.0))
+        frame_path = QPainterPath()
+        frame_path.addRoundedRect(frame_rect, self._frame_radius, self._frame_radius)
+        painter.fillPath(frame_path, self._frame_bg)
+        border_pen = QPen(self._frame_border)
+        border_pen.setWidth(1)
+        border_pen.setCosmetic(True)
+        painter.setPen(border_pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(frame_rect, self._frame_radius, self._frame_radius)
+        super().paintEvent(event)
+
+
 class CompareSlotCard(QFrame):
     slotPathDropped = Signal(str, str)
     slotSwapRequested = Signal(str, str)
@@ -408,7 +437,7 @@ class CompareSlotCard(QFrame):
         self.clear_btn.clicked.connect(lambda: self.clearRequested.emit(self.slot_name))
         header_layout.addWidget(self.clear_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
-        self.thumb_frame = QFrame()
+        self.thumb_frame = CompareSlotThumbFrame()
         self.thumb_frame.setObjectName("compareSlotThumbCard")
         self.thumb_frame.setMinimumHeight(0)
         self.thumb_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
@@ -721,9 +750,8 @@ class CompareSlotCard(QFrame):
         self.reasons_label.setStyleSheet(f"color: {accent_hex}; font-weight: 700;")
         self.best_label.setStyleSheet(f"color: {accent_hex}; font-weight: 700;")
         self._thumb_border_color = "transparent"
-        self.thumb_frame.setStyleSheet(
-            f"background-color: {thumb_bg}; border: 1px solid {border}; border-radius: 10px;"
-        )
+        self.thumb_frame.set_frame_style(thumb_bg, border)
+        self.thumb_frame.setStyleSheet("background: transparent; border: none;")
         self.thumb_body.setStyleSheet("background: transparent; border: none;")
         self.thumb_wrap.setStyleSheet("background: transparent; border: none;")
         self.thumb_label.setStyleSheet(
