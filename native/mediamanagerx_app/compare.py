@@ -445,9 +445,9 @@ class CompareSlotCard(QFrame):
         self.meta_stack.setObjectName("compareSlotMetaStack")
         self.meta_stack.setMinimumWidth(0)
         self.meta_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        meta_stack_layout = QVBoxLayout(self.meta_stack)
-        meta_stack_layout.setContentsMargins(0, 0, 0, 0)
-        meta_stack_layout.setSpacing(2)
+        self.meta_stack_layout = QVBoxLayout(self.meta_stack)
+        self.meta_stack_layout.setContentsMargins(0, 0, 0, 0)
+        self.meta_stack_layout.setSpacing(2)
 
         self.meta_label = QLabel("Browse or drag an image from the gallery")
         self.meta_label.setObjectName("compareSlotMeta")
@@ -455,7 +455,7 @@ class CompareSlotCard(QFrame):
         self.meta_label.setContentsMargins(0, 0, 0, 0)
         self.meta_label.setMinimumHeight(0)
         self.meta_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        meta_stack_layout.addWidget(self.meta_label)
+        self.meta_stack_layout.addWidget(self.meta_label)
 
         self.meta_detail_row = QWidget()
         self.meta_detail_row.setObjectName("compareSlotMetaDetailRow")
@@ -479,7 +479,7 @@ class CompareSlotCard(QFrame):
         meta_detail_layout.addWidget(self.meta_time_label, 0, Qt.AlignmentFlag.AlignLeft)
         meta_detail_layout.addStretch(1)
         self.meta_detail_row.setVisible(False)
-        meta_stack_layout.addWidget(self.meta_detail_row)
+        self.meta_stack_layout.addWidget(self.meta_detail_row)
 
         self.reasons_label = QLabel("")
         self.reasons_label.setObjectName("compareSlotReasons")
@@ -487,7 +487,7 @@ class CompareSlotCard(QFrame):
         self.reasons_label.setMinimumHeight(0)
         self.reasons_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.reasons_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        meta_stack_layout.addWidget(self.reasons_label)
+        self.meta_stack_layout.addWidget(self.reasons_label)
 
         self.best_label = QLabel("")
         self.best_label.setObjectName("compareSlotBest")
@@ -495,9 +495,9 @@ class CompareSlotCard(QFrame):
         self.best_label.setMinimumHeight(0)
         self.best_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.best_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        meta_stack_layout.addWidget(self.best_label)
+        self.meta_stack_layout.addWidget(self.best_label)
 
-        meta_stack_layout.addStretch(1)
+        self.meta_stack_layout.addStretch(1)
         self.thumb_body_layout.addWidget(self.meta_stack, 0)
         thumb_layout.addWidget(self.thumb_body, 1)
         layout.addWidget(self.thumb_frame, 1)
@@ -785,13 +785,15 @@ class CompareSlotCard(QFrame):
         self.thumb_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         self.thumb_body_layout.setAlignment(self.meta_stack, Qt.AlignmentFlag.AlignLeft | (Qt.AlignmentFlag.AlignVCenter if portrait else Qt.AlignmentFlag.AlignTop))
         if portrait:
-            self.setMinimumWidth(320)
-            self.meta_stack.setMaximumWidth(116)
+            self.setMinimumWidth(395)
+            self.meta_stack_layout.setContentsMargins(0, 0, 8, 0)
+            self.meta_stack.setMaximumWidth(124)
             self.meta_stack.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
             self.meta_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
             self.meta_detail_row.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         else:
             self.setMinimumWidth(0)
+            self.meta_stack_layout.setContentsMargins(0, 0, 0, 0)
             self.meta_stack.setMaximumWidth(16777215)
             self.meta_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             self.meta_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -1146,7 +1148,7 @@ class ComparePanel(QWidget):
             has_entry = bool(str((entry or {}).get("path") or "").strip())
             tall_or_square = has_entry and self._is_tall_or_square_entry(dict(entry or {}))
             if tall_or_square:
-                min_width, max_width = 330, 430
+                min_width, max_width = 405, 505
             elif has_entry:
                 min_width, max_width = 220, 320
             else:
