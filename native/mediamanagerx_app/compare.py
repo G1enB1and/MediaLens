@@ -1075,9 +1075,9 @@ class ComparePanel(QWidget):
         self.viewer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         self.viewer_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
 
-        layout.addWidget(self.left_scroll, 0)
+        layout.addWidget(self.left_scroll, 1)
         layout.addWidget(self.viewer_wrap, 1)
-        layout.addWidget(self.right_scroll, 0)
+        layout.addWidget(self.right_scroll, 1)
 
         for slot in (self.left_slot, self.right_slot):
             slot.slotPathDropped.connect(self.bridge.set_compare_path)
@@ -1143,19 +1143,16 @@ class ComparePanel(QWidget):
                 return True
         return False
 
-    def _apply_side_panel_widths(self, left_entry: dict, right_entry: dict) -> None:
+    def _apply_column_widths(self, left_entry: dict, right_entry: dict) -> None:
         for scroll, entry in ((self.left_scroll, left_entry), (self.right_scroll, right_entry)):
             has_entry = bool(str((entry or {}).get("path") or "").strip())
-            tall_or_square = has_entry and self._is_tall_or_square_entry(dict(entry or {}))
-            if tall_or_square:
-                min_width, max_width = 405, 505
-            elif has_entry:
-                min_width, max_width = 220, 320
-            else:
-                min_width, max_width = 180, 280
+            min_width = 260 if has_entry else 180
             scroll.setMinimumWidth(min_width)
-            scroll.setMaximumWidth(max_width)
+            scroll.setMaximumWidth(16777215)
             scroll.updateGeometry()
+        self.viewer_wrap.setMinimumWidth(260)
+        self.viewer_wrap.setMaximumWidth(16777215)
+        self.viewer_wrap.updateGeometry()
 
     def _update_viewer_footer_labels(self) -> None:
         self.viewer_hint.setText(self._viewer_hint_text)
@@ -1280,7 +1277,7 @@ class ComparePanel(QWidget):
         self._viewer_upscale_text = self._compare_upscale_message_from_entries(left_entry, right_entry)
         self._viewer_aspect_text = "Different Aspect Ratios" if self._has_different_aspect_ratios_from_entries(left_entry, right_entry) else ""
         has_tall_or_square_image = self._has_tall_or_square_entry(left_entry, right_entry)
-        self._apply_side_panel_widths(left_entry, right_entry)
+        self._apply_column_widths(left_entry, right_entry)
         try:
             self.bridge._log(
                 "Compare warnings: "
