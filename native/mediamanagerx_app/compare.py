@@ -378,6 +378,7 @@ class CompareSlotCard(QFrame):
         self._drag_start_pos: QPoint | None = None
         self._thumb_source_pixmap: QPixmap | None = None
         self._thumb_border_color: str = Theme.get_border(QColor(Theme.ACCENT_DEFAULT))
+        self._uses_portrait_layout = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 10)
@@ -415,6 +416,14 @@ class CompareSlotCard(QFrame):
 
         thumb_layout.addWidget(self.header_row)
 
+        self.thumb_body = QWidget()
+        self.thumb_body.setObjectName("compareSlotThumbBody")
+        self.thumb_body.setMinimumHeight(0)
+        self.thumb_body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
+        self.thumb_body_layout = QBoxLayout(QBoxLayout.Direction.TopToBottom, self.thumb_body)
+        self.thumb_body_layout.setContentsMargins(0, 0, 0, 0)
+        self.thumb_body_layout.setSpacing(0)
+
         self.thumb_wrap = QWidget()
         self.thumb_wrap.setMinimumHeight(0)
         self.thumb_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
@@ -430,7 +439,15 @@ class CompareSlotCard(QFrame):
         self.thumb_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.thumb_label.setCursor(Qt.CursorShape.ArrowCursor)
         thumb_wrap_layout.addWidget(self.thumb_label, 1)
-        thumb_layout.addWidget(self.thumb_wrap, 1)
+        self.thumb_body_layout.addWidget(self.thumb_wrap, 1)
+
+        self.meta_stack = QWidget()
+        self.meta_stack.setObjectName("compareSlotMetaStack")
+        self.meta_stack.setMinimumWidth(0)
+        self.meta_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        meta_stack_layout = QVBoxLayout(self.meta_stack)
+        meta_stack_layout.setContentsMargins(0, 0, 0, 0)
+        meta_stack_layout.setSpacing(2)
 
         self.meta_label = QLabel("Browse or drag an image from the gallery")
         self.meta_label.setObjectName("compareSlotMeta")
@@ -438,7 +455,7 @@ class CompareSlotCard(QFrame):
         self.meta_label.setContentsMargins(0, 0, 0, 0)
         self.meta_label.setMinimumHeight(0)
         self.meta_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        thumb_layout.addWidget(self.meta_label)
+        meta_stack_layout.addWidget(self.meta_label)
 
         self.meta_detail_row = QWidget()
         self.meta_detail_row.setObjectName("compareSlotMetaDetailRow")
@@ -459,7 +476,10 @@ class CompareSlotCard(QFrame):
         meta_detail_layout.addWidget(self.meta_time_label, 0, Qt.AlignmentFlag.AlignVCenter)
         meta_detail_layout.addStretch(1)
         self.meta_detail_row.setVisible(False)
-        thumb_layout.addWidget(self.meta_detail_row)
+        meta_stack_layout.addWidget(self.meta_detail_row)
+        meta_stack_layout.addStretch(1)
+        self.thumb_body_layout.addWidget(self.meta_stack, 0)
+        thumb_layout.addWidget(self.thumb_body, 1)
         layout.addWidget(self.thumb_frame, 1)
 
         self.reasons_label = QLabel("")
@@ -596,6 +616,7 @@ class CompareSlotCard(QFrame):
         self.meta_label.setStyleSheet(
             f"color: {text_muted}; margin: 0px; padding: 0px; border: none; background: transparent;"
         )
+        self.meta_stack.setStyleSheet("margin: 0px; padding: 0px; border: none; background: transparent;")
         self.meta_detail_row.setStyleSheet("margin: 0px; padding: 0px; border: none; background: transparent;")
         self.meta_size_label.setStyleSheet(
             f"color: {text_muted}; margin: 0px; padding: 0px; border: none; background: transparent;"
@@ -663,6 +684,7 @@ class CompareSlotCard(QFrame):
         for widget in (
             self.name_label,
             self.meta_label,
+            self.meta_stack,
             self.meta_detail_row,
             self.meta_size_label,
             self.meta_dot_label,
@@ -672,6 +694,7 @@ class CompareSlotCard(QFrame):
             self.clear_btn,
             self.delete_btn,
             self.thumb_frame,
+            self.thumb_body,
             self.thumb_label,
             self.keep_toggle,
             self.delete_toggle,
@@ -731,6 +754,38 @@ class CompareSlotCard(QFrame):
             _rounded_preview_pixmap(self._thumb_source_pixmap, available, self._thumb_border_color)
         )
 
+    def _is_portrait_entry(self) -> bool:
+        width = int(self._entry.get("width") or 0)
+        height = int(self._entry.get("height") or 0)
+        if width > 0 and height > 0:
+            return height > width
+        if self._thumb_source_pixmap is not None and not self._thumb_source_pixmap.isNull():
+            return self._thumb_source_pixmap.height() > self._thumb_source_pixmap.width()
+        return False
+
+    def _apply_orientation_layout(self) -> None:
+        portrait = bool(str(self._entry.get("path") or "").strip()) and self._is_portrait_entry()
+        if portrait == self._uses_portrait_layout:
+            return
+        self._uses_portrait_layout = portrait
+        self.thumb_body_layout.setDirection(
+            QBoxLayout.Direction.LeftToRight if portrait else QBoxLayout.Direction.TopToBottom
+        )
+        self.thumb_body_layout.setSpacing(8 if portrait else 0)
+        self.thumb_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
+        if portrait:
+            self.meta_stack.setMaximumWidth(180)
+            self.meta_stack.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Ignored)
+            self.meta_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+            self.meta_detail_row.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        else:
+            self.meta_stack.setMaximumWidth(16777215)
+            self.meta_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            self.meta_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            self.meta_detail_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.thumb_body.updateGeometry()
+        self.thumb_frame.updateGeometry()
+
     def _render_entry(self, entry: dict) -> None:
         self._entry = dict(entry or {})
         path = str(self._entry.get("path") or "")
@@ -755,6 +810,7 @@ class CompareSlotCard(QFrame):
             self.meta_time_label.setText("")
             self.meta_dot_label.setVisible(False)
             self.meta_detail_row.setVisible(False)
+            self._apply_orientation_layout()
             self.reasons_label.setText("")
             self.best_label.setText("")
             self.keep_toggle.blockSignals(True)
@@ -773,6 +829,7 @@ class CompareSlotCard(QFrame):
 
         self._set_name_text(str(self._entry.get("name") or Path(path).name))
         self._thumb_source_pixmap = self._load_thumb(path)
+        self._apply_orientation_layout()
         self.thumb_label.setText("")
         self._update_thumb_pixmap()
         resolution_text = str(self._entry.get("resolution_text") or "")
@@ -1050,6 +1107,13 @@ class ComparePanel(QWidget):
             or abs(right_w - scaled_left_width) <= tolerance_px
         )
 
+    def _has_portrait_entry(self, *entries: dict) -> bool:
+        for entry in entries:
+            width, height = self._entry_dims(dict(entry or {}))
+            if width > 0 and height > width:
+                return True
+        return False
+
     def _update_viewer_footer_labels(self) -> None:
         self.viewer_hint.setText(self._viewer_hint_text)
         self.viewer_upscale_warning.setText(self._viewer_upscale_text)
@@ -1172,6 +1236,7 @@ class ComparePanel(QWidget):
         self.viewer.set_images(str(left_entry.get("path") or ""), str(right_entry.get("path") or ""))
         self._viewer_upscale_text = self._compare_upscale_message_from_entries(left_entry, right_entry)
         self._viewer_aspect_text = "Different Aspect Ratios" if self._has_different_aspect_ratios_from_entries(left_entry, right_entry) else ""
+        has_portrait_image = self._has_portrait_entry(left_entry, right_entry)
         try:
             self.bridge._log(
                 "Compare warnings: "
@@ -1181,16 +1246,17 @@ class ComparePanel(QWidget):
                 f"right={right_entry.get('width')}x{right_entry.get('height')} "
                 f"upscale='{self._viewer_upscale_text}' "
                 f"aspect='{self._viewer_aspect_text}' "
+                f"portrait={has_portrait_image} "
                 f"has_viewer_image={has_viewer_image}"
             )
         except Exception:
             pass
         self._update_viewer_footer_labels()
-        self.viewer_hint.setVisible(has_viewer_image)
+        self.viewer_hint.setVisible(has_viewer_image and not has_portrait_image)
         self.viewer_upscale_warning.setVisible(bool(self._viewer_upscale_text))
         self.viewer_aspect_warning.setVisible(bool(self._viewer_aspect_text))
         self.viewer_footer.setVisible(
-            bool(has_viewer_image)
+            bool(has_viewer_image and not has_portrait_image)
             or bool(self._viewer_upscale_text)
             or bool(self._viewer_aspect_text)
         )
