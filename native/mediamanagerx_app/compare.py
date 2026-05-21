@@ -506,7 +506,6 @@ class CompareSlotCard(QFrame):
         self.best_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.meta_stack_layout.addWidget(self.best_label)
 
-        self.meta_stack_layout.addStretch(1)
         self.meta_scroll = QScrollArea()
         self.meta_scroll.setObjectName("compareSlotMetaScroll")
         self.meta_scroll.setWidgetResizable(True)
@@ -798,6 +797,17 @@ class CompareSlotCard(QFrame):
             _rounded_preview_pixmap(self._thumb_source_pixmap, available, self._thumb_border_color)
         )
 
+    def _sync_meta_scrollbar(self) -> None:
+        viewport_height = max(0, self.meta_scroll.viewport().height())
+        content_height = max(0, self.meta_stack.sizeHint().height())
+        policy = (
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+            if viewport_height > 0 and content_height > viewport_height + 2
+            else Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        if self.meta_scroll.verticalScrollBarPolicy() != policy:
+            self.meta_scroll.setVerticalScrollBarPolicy(policy)
+
     def _is_portrait_entry(self) -> bool:
         width = int(self._entry.get("width") or 0)
         height = int(self._entry.get("height") or 0)
@@ -817,7 +827,7 @@ class CompareSlotCard(QFrame):
         )
         self.thumb_body_layout.setSpacing(8 if portrait else 0)
         self.thumb_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
-        self.thumb_body_layout.setAlignment(self.meta_scroll, Qt.AlignmentFlag.AlignLeft | (Qt.AlignmentFlag.AlignVCenter if portrait else Qt.AlignmentFlag.AlignTop))
+        self.thumb_body_layout.setAlignment(self.meta_scroll, Qt.AlignmentFlag.AlignLeft)
         if portrait:
             self.setMinimumWidth(0)
             self.meta_stack_layout.setContentsMargins(0, 0, 8, 0)
@@ -842,6 +852,7 @@ class CompareSlotCard(QFrame):
             self.meta_detail_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.thumb_body.updateGeometry()
         self.thumb_frame.updateGeometry()
+        QTimer.singleShot(0, self._sync_meta_scrollbar)
 
     def _render_entry(self, entry: dict) -> None:
         self._entry = dict(entry or {})
@@ -937,6 +948,7 @@ class CompareSlotCard(QFrame):
         self.best_toggle.setChecked(bool(self._entry.get("compare_marked_best")))
         self.best_toggle.blockSignals(False)
         self.delete_btn.setEnabled(True)
+        QTimer.singleShot(0, self._sync_meta_scrollbar)
 
     def set_entry(self, entry: dict) -> None:
         self._render_entry(entry)
@@ -1006,6 +1018,7 @@ class CompareSlotCard(QFrame):
         self._update_name_elision()
         self._set_elided_label_text(self.reasons_label, str(self.reasons_label.property("fullText") or self.reasons_label.text() or ""))
         self._set_elided_label_text(self.best_label, str(self.best_label.property("fullText") or self.best_label.text() or ""))
+        self._sync_meta_scrollbar()
         super().resizeEvent(event)
 
 
