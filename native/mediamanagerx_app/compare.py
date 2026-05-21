@@ -487,7 +487,6 @@ class CompareSlotCard(QFrame):
         meta_detail_layout.addWidget(self.meta_size_label, 0, Qt.AlignmentFlag.AlignLeft)
         meta_detail_layout.addWidget(self.meta_date_label, 0, Qt.AlignmentFlag.AlignLeft)
         meta_detail_layout.addWidget(self.meta_time_label, 0, Qt.AlignmentFlag.AlignLeft)
-        meta_detail_layout.addStretch(1)
         self.meta_detail_row.setVisible(False)
         self.meta_stack_layout.addWidget(self.meta_detail_row)
 
@@ -512,6 +511,7 @@ class CompareSlotCard(QFrame):
         self.meta_scroll = QScrollArea()
         self.meta_scroll.setObjectName("compareSlotMetaScroll")
         self.meta_scroll.setWidgetResizable(True)
+        self.meta_scroll.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.meta_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.meta_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.meta_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -610,36 +610,32 @@ class CompareSlotCard(QFrame):
         full_text = " \u2022 ".join(part for part in (resolution_text, file_size_text, modified_time_text) if part)
         metrics = QFontMetrics(self.meta_label.font())
         available_width = max(24, self.meta_scroll.viewport().width() or self.meta_scroll.width())
+        show_size = False
+        show_date = False
+        show_time = False
         if full_text and metrics.horizontalAdvance(full_text) <= available_width:
             self.meta_label.setText(full_text)
             self.meta_size_label.setText("")
             self.meta_date_label.setText("")
             self.meta_time_label.setText("")
-            self.meta_size_label.setVisible(False)
-            self.meta_date_label.setVisible(False)
-            self.meta_time_label.setVisible(False)
         elif detail_text and metrics.horizontalAdvance(detail_text) <= available_width:
             self.meta_label.setText(resolution_text)
             self.meta_size_label.setText(detail_text)
             self.meta_date_label.setText("")
             self.meta_time_label.setText("")
-            self.meta_size_label.setVisible(bool(detail_text))
-            self.meta_date_label.setVisible(False)
-            self.meta_time_label.setVisible(False)
+            show_size = bool(detail_text)
         else:
             self.meta_label.setText(resolution_text)
             self.meta_size_label.setText(file_size_text)
             self.meta_date_label.setText(modified_time_text)
             self.meta_time_label.setText("")
-            self.meta_size_label.setVisible(bool(file_size_text))
-            self.meta_date_label.setVisible(bool(modified_time_text))
-            self.meta_time_label.setVisible(False)
+            show_size = bool(file_size_text)
+            show_date = bool(modified_time_text)
+        self.meta_size_label.setVisible(show_size)
+        self.meta_date_label.setVisible(show_date)
+        self.meta_time_label.setVisible(show_time)
         self.meta_label.setVisible(bool(self.meta_label.text()))
-        self.meta_detail_row.setVisible(
-            self.meta_size_label.isVisible()
-            or self.meta_date_label.isVisible()
-            or self.meta_time_label.isVisible()
-        )
+        self.meta_detail_row.setVisible(show_size or show_date or show_time)
 
     def apply_theme_styles(self, text: str, text_muted: str, accent_hex: str, accent_raw: str, thumb_bg: str, border: str) -> None:
         accent_color = QColor(accent_raw)
@@ -846,10 +842,26 @@ class CompareSlotCard(QFrame):
             _rounded_preview_pixmap(self._thumb_source_pixmap, available, self._thumb_border_color)
         )
 
+    def _sync_landscape_thumb_height(self) -> None:
+        if self._uses_portrait_layout:
+            self.thumb_wrap.setMaximumHeight(16777215)
+            self.thumb_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
+            return
+        if self._thumb_source_pixmap is None or self._thumb_source_pixmap.isNull():
+            self.thumb_wrap.setMaximumHeight(16777215)
+            self.thumb_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
+            return
+        available_width = max(1, self.thumb_body.contentsRect().width())
+        target_height = int(round(available_width * (self._thumb_source_pixmap.height() / max(1, self._thumb_source_pixmap.width())))) + 10
+        self.thumb_wrap.setMaximumHeight(max(50, target_height))
+        self.thumb_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+
     def _sync_meta_scrollbar(self) -> None:
         self._apply_landscape_metadata_lines()
+        self._sync_landscape_thumb_height()
         viewport_height = max(0, self.meta_scroll.viewport().height())
-        content_height = max(0, self.meta_stack.sizeHint().height())
+        self.meta_stack.adjustSize()
+        content_height = max(0, self.meta_stack.minimumSizeHint().height())
         if not self._uses_portrait_layout:
             max_metadata_height = max(44, min(content_height + 2, int(max(1, self.thumb_body.height()) * 0.28)))
             self.meta_scroll.setMaximumHeight(max_metadata_height)
@@ -859,6 +871,8 @@ class CompareSlotCard(QFrame):
                 else Qt.ScrollBarPolicy.ScrollBarAlwaysOff
             )
             self.meta_scroll.setVerticalScrollBarPolicy(policy)
+            if policy == Qt.ScrollBarPolicy.ScrollBarAlwaysOff:
+                self.meta_scroll.verticalScrollBar().setValue(0)
             return
         self.meta_scroll.setMaximumHeight(16777215)
         policy = (
@@ -887,8 +901,9 @@ class CompareSlotCard(QFrame):
             QBoxLayout.Direction.LeftToRight if portrait else QBoxLayout.Direction.TopToBottom
         )
         self.thumb_body_layout.setSpacing(8 if portrait else 0)
-        self.thumb_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         if portrait:
+            self.thumb_wrap.setMaximumHeight(16777215)
+            self.thumb_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
             self.thumb_body_layout.setAlignment(self.meta_scroll, Qt.AlignmentFlag.AlignLeft)
             self.setMinimumWidth(0)
             self.meta_stack_layout.setContentsMargins(0, 0, 8, 0)
@@ -910,10 +925,11 @@ class CompareSlotCard(QFrame):
             self.meta_scroll.setMinimumWidth(0)
             self.meta_scroll.setMaximumWidth(16777215)
             self.meta_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
-            self.meta_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            self.meta_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
             self.meta_detail_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             self.reasons_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
             self.best_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+            self._sync_landscape_thumb_height()
         self.thumb_body.updateGeometry()
         self.thumb_frame.updateGeometry()
         QTimer.singleShot(0, self._sync_meta_scrollbar)
