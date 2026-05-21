@@ -507,7 +507,16 @@ class CompareSlotCard(QFrame):
         self.meta_stack_layout.addWidget(self.best_label)
 
         self.meta_stack_layout.addStretch(1)
-        self.thumb_body_layout.addWidget(self.meta_stack, 0)
+        self.meta_scroll = QScrollArea()
+        self.meta_scroll.setObjectName("compareSlotMetaScroll")
+        self.meta_scroll.setWidgetResizable(True)
+        self.meta_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.meta_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.meta_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.meta_scroll.setMinimumSize(0, 0)
+        self.meta_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
+        self.meta_scroll.setWidget(self.meta_stack)
+        self.thumb_body_layout.addWidget(self.meta_scroll, 0)
         thumb_layout.addWidget(self.thumb_body, 1)
         layout.addWidget(self.thumb_frame, 1)
 
@@ -646,6 +655,7 @@ class CompareSlotCard(QFrame):
             f"color: {text_muted}; margin: 0px; padding: 0px; border: none; background: transparent;"
         )
         self.meta_stack.setStyleSheet("margin: 0px; padding: 0px; border: none; background: transparent;")
+        self.meta_scroll.setStyleSheet("QScrollArea#compareSlotMetaScroll { margin: 0px; padding: 0px; border: none; background: transparent; } QScrollArea#compareSlotMetaScroll > QWidget > QWidget { background: transparent; }")
         self.meta_detail_row.setStyleSheet("margin: 0px; padding: 0px; border: none; background: transparent;")
         self.meta_size_label.setStyleSheet(
             f"color: {text_muted}; margin: 0px; padding: 0px; border: none; background: transparent;"
@@ -717,6 +727,7 @@ class CompareSlotCard(QFrame):
             self.name_label,
             self.meta_label,
             self.meta_stack,
+            self.meta_scroll,
             self.meta_detail_row,
             self.meta_size_label,
             self.meta_date_label,
@@ -806,13 +817,16 @@ class CompareSlotCard(QFrame):
         )
         self.thumb_body_layout.setSpacing(8 if portrait else 0)
         self.thumb_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
-        self.thumb_body_layout.setAlignment(self.meta_stack, Qt.AlignmentFlag.AlignLeft | (Qt.AlignmentFlag.AlignVCenter if portrait else Qt.AlignmentFlag.AlignTop))
+        self.thumb_body_layout.setAlignment(self.meta_scroll, Qt.AlignmentFlag.AlignLeft | (Qt.AlignmentFlag.AlignVCenter if portrait else Qt.AlignmentFlag.AlignTop))
         if portrait:
             self.setMinimumWidth(0)
             self.meta_stack_layout.setContentsMargins(0, 0, 8, 0)
             self.meta_stack.setMinimumWidth(112)
             self.meta_stack.setMaximumWidth(132)
             self.meta_stack.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            self.meta_scroll.setMinimumWidth(112)
+            self.meta_scroll.setMaximumWidth(132)
+            self.meta_scroll.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Ignored)
             self.meta_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
             self.meta_detail_row.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         else:
@@ -821,6 +835,9 @@ class CompareSlotCard(QFrame):
             self.meta_stack.setMinimumWidth(0)
             self.meta_stack.setMaximumWidth(16777215)
             self.meta_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            self.meta_scroll.setMinimumWidth(0)
+            self.meta_scroll.setMaximumWidth(16777215)
+            self.meta_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
             self.meta_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.meta_detail_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.thumb_body.updateGeometry()
@@ -1095,7 +1112,7 @@ class ComparePanel(QWidget):
             scroll.setWidgetResizable(True)
             scroll.setFrameShape(QFrame.Shape.NoFrame)
             scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             scroll.setMinimumHeight(0)
             scroll.setMinimumWidth(0)
             scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
