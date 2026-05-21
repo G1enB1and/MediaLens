@@ -460,20 +460,23 @@ class CompareSlotCard(QFrame):
         self.meta_detail_row = QWidget()
         self.meta_detail_row.setObjectName("compareSlotMetaDetailRow")
         self.meta_detail_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        meta_detail_layout = QHBoxLayout(self.meta_detail_row)
+        meta_detail_layout = QVBoxLayout(self.meta_detail_row)
         meta_detail_layout.setContentsMargins(0, 0, 0, 0)
-        meta_detail_layout.setSpacing(6)
+        meta_detail_layout.setSpacing(1)
         self.meta_size_label = QLabel("")
         self.meta_size_label.setObjectName("compareSlotMeta")
+        self.meta_date_label = QLabel("")
+        self.meta_date_label.setObjectName("compareSlotMeta")
         self.meta_time_label = QLabel("")
         self.meta_time_label.setObjectName("compareSlotMeta")
         self.meta_dot_label = QLabel("")
         self.meta_dot_label.setObjectName("compareSlotMetaDot")
         self.meta_dot_label.setFixedSize(6, 14)
         self.meta_dot_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        meta_detail_layout.addWidget(self.meta_size_label, 0, Qt.AlignmentFlag.AlignVCenter)
-        meta_detail_layout.addWidget(self.meta_dot_label, 0, Qt.AlignmentFlag.AlignVCenter)
-        meta_detail_layout.addWidget(self.meta_time_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.meta_dot_label.setVisible(False)
+        meta_detail_layout.addWidget(self.meta_size_label, 0, Qt.AlignmentFlag.AlignLeft)
+        meta_detail_layout.addWidget(self.meta_date_label, 0, Qt.AlignmentFlag.AlignLeft)
+        meta_detail_layout.addWidget(self.meta_time_label, 0, Qt.AlignmentFlag.AlignLeft)
         meta_detail_layout.addStretch(1)
         self.meta_detail_row.setVisible(False)
         meta_stack_layout.addWidget(self.meta_detail_row)
@@ -621,6 +624,9 @@ class CompareSlotCard(QFrame):
         self.meta_size_label.setStyleSheet(
             f"color: {text_muted}; margin: 0px; padding: 0px; border: none; background: transparent;"
         )
+        self.meta_date_label.setStyleSheet(
+            f"color: {text_muted}; margin: 0px; padding: 0px; border: none; background: transparent;"
+        )
         self.meta_time_label.setStyleSheet(
             f"color: {text_muted}; margin: 0px; padding: 0px; border: none; background: transparent;"
         )
@@ -687,6 +693,7 @@ class CompareSlotCard(QFrame):
             self.meta_stack,
             self.meta_detail_row,
             self.meta_size_label,
+            self.meta_date_label,
             self.meta_dot_label,
             self.meta_time_label,
             self.reasons_label,
@@ -758,9 +765,9 @@ class CompareSlotCard(QFrame):
         width = int(self._entry.get("width") or 0)
         height = int(self._entry.get("height") or 0)
         if width > 0 and height > 0:
-            return height > width
+            return height >= width
         if self._thumb_source_pixmap is not None and not self._thumb_source_pixmap.isNull():
-            return self._thumb_source_pixmap.height() > self._thumb_source_pixmap.width()
+            return self._thumb_source_pixmap.height() >= self._thumb_source_pixmap.width()
         return False
 
     def _apply_orientation_layout(self) -> None:
@@ -774,11 +781,13 @@ class CompareSlotCard(QFrame):
         self.thumb_body_layout.setSpacing(8 if portrait else 0)
         self.thumb_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         if portrait:
-            self.meta_stack.setMaximumWidth(180)
+            self.setMinimumWidth(320)
+            self.meta_stack.setMaximumWidth(116)
             self.meta_stack.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Ignored)
             self.meta_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
             self.meta_detail_row.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         else:
+            self.setMinimumWidth(0)
             self.meta_stack.setMaximumWidth(16777215)
             self.meta_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             self.meta_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -807,7 +816,11 @@ class CompareSlotCard(QFrame):
             self.meta_label.setText("Browse or drag an image from the gallery")
             self.meta_label.setVisible(True)
             self.meta_size_label.setText("")
+            self.meta_date_label.setText("")
             self.meta_time_label.setText("")
+            self.meta_size_label.setVisible(False)
+            self.meta_date_label.setVisible(False)
+            self.meta_time_label.setVisible(False)
             self.meta_dot_label.setVisible(False)
             self.meta_detail_row.setVisible(False)
             self._apply_orientation_layout()
@@ -835,14 +848,19 @@ class CompareSlotCard(QFrame):
         resolution_text = str(self._entry.get("resolution_text") or "")
         file_size_text = str(self._entry.get("file_size_text") or "")
         modified_time_text = str(self._entry.get("modified_time_text") or "")
+        modified_parts = modified_time_text.split(" ", 1)
+        modified_date_text = modified_parts[0] if modified_parts else ""
+        modified_clock_text = modified_parts[1] if len(modified_parts) > 1 else ""
         self.meta_label.setText(resolution_text)
         self.meta_label.setVisible(bool(resolution_text))
         self.meta_size_label.setText(file_size_text)
-        self.meta_time_label.setText(modified_time_text)
+        self.meta_date_label.setText(modified_date_text)
+        self.meta_time_label.setText(modified_clock_text)
         self.meta_size_label.setVisible(bool(file_size_text))
-        self.meta_time_label.setVisible(bool(modified_time_text))
-        self.meta_dot_label.setVisible(bool(file_size_text and modified_time_text))
-        self.meta_detail_row.setVisible(bool(file_size_text or modified_time_text))
+        self.meta_date_label.setVisible(bool(modified_date_text))
+        self.meta_time_label.setVisible(bool(modified_clock_text))
+        self.meta_dot_label.setVisible(False)
+        self.meta_detail_row.setVisible(bool(file_size_text or modified_date_text or modified_clock_text))
         reasons = list(self._entry.get("duplicate_category_reasons") or [])[:5]
         self.reasons_label.setText("\n".join(reasons))
         compare_best_in_pair = bool(self._entry.get("compare_best_in_pair"))
@@ -1107,12 +1125,31 @@ class ComparePanel(QWidget):
             or abs(right_w - scaled_left_width) <= tolerance_px
         )
 
-    def _has_portrait_entry(self, *entries: dict) -> bool:
+    @staticmethod
+    def _is_tall_or_square_entry(entry: dict) -> bool:
+        width = int((entry or {}).get("width") or 0)
+        height = int((entry or {}).get("height") or 0)
+        return width > 0 and height >= width
+
+    def _has_tall_or_square_entry(self, *entries: dict) -> bool:
         for entry in entries:
-            width, height = self._entry_dims(dict(entry or {}))
-            if width > 0 and height > width:
+            if self._is_tall_or_square_entry(dict(entry or {})):
                 return True
         return False
+
+    def _apply_side_panel_widths(self, left_entry: dict, right_entry: dict) -> None:
+        for scroll, entry in ((self.left_scroll, left_entry), (self.right_scroll, right_entry)):
+            has_entry = bool(str((entry or {}).get("path") or "").strip())
+            tall_or_square = has_entry and self._is_tall_or_square_entry(dict(entry or {}))
+            if tall_or_square:
+                min_width, max_width = 330, 430
+            elif has_entry:
+                min_width, max_width = 220, 320
+            else:
+                min_width, max_width = 180, 280
+            scroll.setMinimumWidth(min_width)
+            scroll.setMaximumWidth(max_width)
+            scroll.updateGeometry()
 
     def _update_viewer_footer_labels(self) -> None:
         self.viewer_hint.setText(self._viewer_hint_text)
@@ -1236,7 +1273,8 @@ class ComparePanel(QWidget):
         self.viewer.set_images(str(left_entry.get("path") or ""), str(right_entry.get("path") or ""))
         self._viewer_upscale_text = self._compare_upscale_message_from_entries(left_entry, right_entry)
         self._viewer_aspect_text = "Different Aspect Ratios" if self._has_different_aspect_ratios_from_entries(left_entry, right_entry) else ""
-        has_portrait_image = self._has_portrait_entry(left_entry, right_entry)
+        has_tall_or_square_image = self._has_tall_or_square_entry(left_entry, right_entry)
+        self._apply_side_panel_widths(left_entry, right_entry)
         try:
             self.bridge._log(
                 "Compare warnings: "
@@ -1246,17 +1284,17 @@ class ComparePanel(QWidget):
                 f"right={right_entry.get('width')}x{right_entry.get('height')} "
                 f"upscale='{self._viewer_upscale_text}' "
                 f"aspect='{self._viewer_aspect_text}' "
-                f"portrait={has_portrait_image} "
+                f"tall_or_square={has_tall_or_square_image} "
                 f"has_viewer_image={has_viewer_image}"
             )
         except Exception:
             pass
         self._update_viewer_footer_labels()
-        self.viewer_hint.setVisible(has_viewer_image and not has_portrait_image)
+        self.viewer_hint.setVisible(has_viewer_image and not has_tall_or_square_image)
         self.viewer_upscale_warning.setVisible(bool(self._viewer_upscale_text))
         self.viewer_aspect_warning.setVisible(bool(self._viewer_aspect_text))
         self.viewer_footer.setVisible(
-            bool(has_viewer_image and not has_portrait_image)
+            bool(has_viewer_image and not has_tall_or_square_image)
             or bool(self._viewer_upscale_text)
             or bool(self._viewer_aspect_text)
         )
