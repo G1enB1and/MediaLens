@@ -724,6 +724,7 @@ class CompareSlotCard(QFrame):
         self.thumb_frame.setStyleSheet(
             f"background-color: {thumb_bg}; border: 1px solid {border}; border-radius: 10px;"
         )
+        self.thumb_body.setStyleSheet("background: transparent; border: none;")
         self.thumb_wrap.setStyleSheet("background: transparent; border: none;")
         self.thumb_label.setStyleSheet(
             f"background: transparent; color: {text_muted}; border: none; padding: 0px; margin: 0px;"

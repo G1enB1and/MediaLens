@@ -1061,6 +1061,10 @@ class WindowNativeActionsMixin:
                     margin-top: 2px;
                     margin-bottom: 2px;
                 }}
+                QWidget#compareSlotThumbBody {{
+                    background: transparent;
+                    border: none;
+                }}
                 QLabel#compareSlotMeta {{
                     color: {text_muted};
                 }}
