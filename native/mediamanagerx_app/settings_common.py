@@ -57,6 +57,16 @@ from PySide6.QtWidgets import (
 def apply_pointing_hand_cursors(root: QWidget) -> None:
     for button in root.findChildren(QAbstractButton):
         button.setCursor(Qt.CursorShape.PointingHandCursor)
+    for combo in root.findChildren(QComboBox):
+        combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        if combo.view() is not None:
+            combo.view().setCursor(Qt.CursorShape.PointingHandCursor)
+            combo.view().viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+    for item_view in root.findChildren(QAbstractItemView):
+        item_view.setCursor(Qt.CursorShape.PointingHandCursor)
+        item_view.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+    for tab_widget in root.findChildren(QTabWidget):
+        tab_widget.tabBar().setCursor(Qt.CursorShape.PointingHandCursor)
     for tab_bar in root.findChildren(QTabBar):
         tab_bar.setCursor(Qt.CursorShape.PointingHandCursor)
     for label in root.findChildren(QLabel):
