@@ -2680,6 +2680,14 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   setupCustomSelect('peopleSelect', (val) => {
+    if (val === 'none') {
+      gPeopleMode = '';
+      gPeopleCards = [];
+      gPeopleReviewPerson = null;
+      gPage = 0;
+      if (gBridge) refreshFromBridge(gBridge, true, { skipScanRefresh: true });
+      return;
+    }
     if (val === 'scan') {
       if (gBridge && gBridge.scan_faces_async) {
         const paths = Array.isArray(gMedia) ? gMedia.map(item => item && item.path).filter(Boolean) : [];
