@@ -74,10 +74,19 @@ if (-not $bundledWorkerRegistry) {
     throw "PyInstaller bundle is missing local AI worker source files. Check MediaLens.spec datas."
 }
 
+$bundledPeopleWorker = @(
+    (Join-Path $distDir "_internal\app\mediamanager\people\insightface_worker.py"),
+    (Join-Path $distDir "app\mediamanager\people\insightface_worker.py")
+) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+if (-not $bundledPeopleWorker) {
+    throw "PyInstaller bundle is missing People provider worker source files. Check MediaLens.spec datas."
+}
+
 $bundledRequirements = @(
     "requirements-local-ai-wd-swinv2.txt",
     "requirements-local-ai-internlm-xcomposer2.txt",
-    "requirements-local-ai-gemma.txt"
+    "requirements-local-ai-gemma.txt",
+    "requirements-local-ai-insightface.txt"
 )
 foreach ($requirementsFile in $bundledRequirements) {
     $matches = @(
@@ -92,6 +101,7 @@ foreach ($requirementsFile in $bundledRequirements) {
 $forbiddenLocalAiPackages = @(
     "accelerate",
     "huggingface_hub",
+    "insightface",
     "onnxruntime",
     "safetensors",
     "sentencepiece",

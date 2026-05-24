@@ -181,9 +181,25 @@ def _probe_onnx(requested_device: str) -> dict[str, object]:
     return result
 
 
+def _probe_insightface(requested_device: str) -> dict[str, object]:
+    result = _probe_onnx(requested_device)
+    result["backend"] = "insightface"
+    result["insightface_version"] = ""
+    if not result.get("ok"):
+        return result
+    try:
+        import insightface
+    except Exception as exc:
+        result["ok"] = False
+        result["reason"] = f"insightface import failed: {exc}"
+        return result
+    result["insightface_version"] = str(getattr(insightface, "__version__", "") or _package_version("insightface"))
+    return result
+
+
 def _main() -> int:
     parser = argparse.ArgumentParser(description="Probe MediaLens local AI runtime health.")
-    parser.add_argument("--backend", choices=("torch", "onnx"), required=True)
+    parser.add_argument("--backend", choices=("torch", "onnx", "insightface"), required=True)
     parser.add_argument("--requested-device", default="gpu")
     parser.add_argument("--gpu-index", type=int, default=0)
     args = parser.parse_args()
@@ -191,8 +207,10 @@ def _main() -> int:
     requested_device = str(args.requested_device or "gpu").strip().lower() or "gpu"
     if args.backend == "torch":
         payload = _probe_torch(requested_device, int(args.gpu_index or 0))
-    else:
+    elif args.backend == "onnx":
         payload = _probe_onnx(requested_device)
+    else:
+        payload = _probe_insightface(requested_device)
     print(json.dumps(payload, ensure_ascii=False), flush=True)
     return 0
 

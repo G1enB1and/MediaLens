@@ -795,7 +795,7 @@ class LocalAiSetupDialog(QDialog):
             ),
             "kinds": {"ocr"},
         }
-        order = {"gemma4": 0, "paddle_ocr": 1, "wd_swinv2": 2, "internlm_xcomposer2": 3}
+        order = {"gemma4": 0, "paddle_ocr": 1, "insightface": 2, "wd_swinv2": 3, "internlm_xcomposer2": 4}
         return dict(sorted(rows.items(), key=lambda item: (order.get(item[0], 99), str(item[0]))))
 
     @staticmethod
@@ -807,6 +807,8 @@ class LocalAiSetupDialog(QDialog):
             labels.append("descriptions")
         if "ocr" in kinds:
             labels.append("OCR")
+        if "faces" in kinds:
+            labels.append("People")
         return ", ".join(labels) if labels else "local AI"
 
     def _build_rows(self) -> None:
@@ -1219,7 +1221,7 @@ class LocalAiSetupDialog(QDialog):
         selected_device = str(probe.get("selected_device") or "").strip().lower()
         if backend == "gguf":
             return "Enabled ✓" if selected_device == "gpu" else "Unavailable ✕"
-        if backend == "onnx":
+        if backend in {"onnx", "insightface"}:
             active_provider = str(probe.get("active_provider") or "").strip().lower()
             providers = [str(name).strip().lower() for name in list(probe.get("available_providers") or []) if str(name).strip()]
             onnx_gpu_ready = (

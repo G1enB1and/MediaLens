@@ -207,7 +207,7 @@ class BridgeLocalAiMixin:
             return {"path": str(Path(path)), "exists": False}
 
     def _local_ai_model_marker_signatures(self, models_dir: Path, spec) -> list[dict]:
-        from app.mediamanager.ai_captioning.model_registry import CAPTION_MODEL_ID, GEMMA4_MODEL_ID, TAG_MODEL_ID
+        from app.mediamanager.ai_captioning.model_registry import CAPTION_MODEL_ID, GEMMA4_MODEL_ID, INSIGHTFACE_MODEL_ID, TAG_MODEL_ID
 
         local_dir = Path(models_dir) / spec.id
         markers: list[Path] = []
@@ -239,6 +239,12 @@ class BridgeLocalAiMixin:
             except Exception:
                 pass
             markers.extend([local_dir / "config.json", Path(models_dir) / "gemma_gguf", Path(models_dir) / "gemma4_runtime"])
+        elif spec.id == INSIGHTFACE_MODEL_ID:
+            insightface_dir = Path(models_dir) / "insightface" / "models" / "buffalo_l"
+            markers = [
+                insightface_dir / "det_10g.onnx",
+                insightface_dir / "w600k_r50.onnx",
+            ]
         else:
             markers = [local_dir / "config.json"]
         return [self._local_ai_file_signature(marker) for marker in markers]
@@ -401,6 +407,8 @@ class BridgeLocalAiMixin:
         if spec.id == "google/gemma-4-E2B-it":
             targets.append(Path(models_dir) / "gemma_gguf")
             targets.append(Path(models_dir) / "gemma4_runtime")
+        if spec.id == "insightface/buffalo_l":
+            targets.append(Path(models_dir) / "insightface")
         return targets
 
     def _local_ai_gemma_downloaded_profile_ids(self, models_dir: Path) -> list[str]:
@@ -416,7 +424,7 @@ class BridgeLocalAiMixin:
         return downloaded
 
     def _local_ai_model_files_installed(self, models_dir: Path, model_id: str) -> bool:
-        from app.mediamanager.ai_captioning.model_registry import CAPTION_MODEL_ID, GEMMA4_MODEL_ID, TAG_MODEL_ID
+        from app.mediamanager.ai_captioning.model_registry import CAPTION_MODEL_ID, GEMMA4_MODEL_ID, INSIGHTFACE_MODEL_ID, TAG_MODEL_ID
         from app.mediamanager.ai_captioning.gemma_gguf import gemma_profile_by_id, gemma_profile_is_installed
 
         local_dir = Path(models_dir) / model_id
@@ -433,6 +441,9 @@ class BridgeLocalAiMixin:
                 return True
             hf_home = Path(models_dir) / "gemma4_runtime" / "hf_home"
             return any((snapshot / "config.json").is_file() and any(snapshot.glob("*.safetensors")) for snapshot in hf_home.glob("hub/models--google--gemma-4-E2B-it/snapshots/*"))
+        if model_id == INSIGHTFACE_MODEL_ID:
+            insightface_dir = Path(models_dir) / "insightface" / "models" / "buffalo_l"
+            return (insightface_dir / "det_10g.onnx").is_file() and (insightface_dir / "w600k_r50.onnx").is_file()
         return (local_dir / "config.json").is_file()
 
     @staticmethod
@@ -994,6 +1005,8 @@ class BridgeLocalAiMixin:
     def _local_ai_runtime_backend(self, spec) -> str:
         if str(getattr(spec, "settings_key", "") or "") == "wd_swinv2":
             return "onnx"
+        if str(getattr(spec, "settings_key", "") or "") == "insightface":
+            return "insightface"
         if str(getattr(spec, "settings_key", "") or "") == "gemma4":
             from app.mediamanager.ai_captioning.gemma_gguf import GEMMA_GGUF_BACKEND_ID
 
@@ -1152,13 +1165,16 @@ class BridgeLocalAiMixin:
             if probe.get("reason") and selected_device == "cpu":
                 parts.append(str(probe.get("reason")))
             return " | ".join(parts)
-        if backend == "onnx":
+        if backend in {"onnx", "insightface"}:
             active_provider = str(probe.get("active_provider") or "CPUExecutionProvider")
+            runtime_label = "InsightFace" if backend == "insightface" else "ONNX Runtime"
             parts = [
                 f"Runtime: {status_label}",
-                f"ONNX Runtime {probe.get('onnxruntime_version') or '?'}",
+                f"{runtime_label} {probe.get('insightface_version') or probe.get('onnxruntime_version') or '?'}",
                 active_provider,
             ]
+            if backend == "insightface" and probe.get("onnxruntime_version"):
+                parts.append(f"ONNX Runtime {probe.get('onnxruntime_version')}")
             if probe.get("reason") and status_label == "CPU":
                 parts.append(str(probe.get("reason")))
             return " | ".join(parts)
@@ -1202,7 +1218,9 @@ class BridgeLocalAiMixin:
             gpu_names = [str(name).strip() for name in list(probe.get("gpu_names") or []) if str(name).strip()]
             if gpu_names:
                 lines.append(f"<b>GPUs:</b> {html.escape(', '.join(gpu_names[:3]))}")
-        elif backend == "onnx":
+        elif backend in {"onnx", "insightface"}:
+            if probe.get("insightface_version"):
+                lines.append(f"<b>InsightFace:</b> {html.escape(str(probe.get('insightface_version')))}")
             if probe.get("onnxruntime_version"):
                 lines.append(f"<b>ONNX Runtime:</b> {html.escape(str(probe.get('onnxruntime_version')))}")
             providers = [str(name).strip() for name in list(probe.get("available_providers") or []) if str(name).strip()]
@@ -1370,7 +1388,7 @@ class BridgeLocalAiMixin:
                     "Repairing CUDA Torch packages...",
                 ),
             ]
-        if backend == "onnx":
+        if backend in {"onnx", "insightface"}:
             return [
                 (
                     [
@@ -1896,6 +1914,8 @@ class BridgeLocalAiMixin:
         payload = self._local_ai_settings_payload(self._local_ai_caption_settings())
         if spec.kind == "tagger":
             payload["tag_model_id"] = spec.id
+        elif spec.kind == "faces":
+            payload["face_model_id"] = spec.id
         else:
             payload["caption_model_id"] = spec.id
         return payload

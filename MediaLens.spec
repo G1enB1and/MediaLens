@@ -11,6 +11,7 @@ scipy_special_hiddenimports = collect_submodules(
 local_ai_runtime_excludes = [
     'accelerate',
     'huggingface_hub',
+    'insightface',
     'onnxruntime',
     'safetensors',
     'sentencepiece',
@@ -33,8 +34,10 @@ a = Analysis(
         ('requirements-local-ai-wd-swinv2.txt', '.'),
         ('requirements-local-ai-internlm-xcomposer2.txt', '.'),
         ('requirements-local-ai-gemma.txt', '.'),
+        ('requirements-local-ai-insightface.txt', '.'),
         ('requirements-local-ocr-paddle.txt', '.'),
         ('app/mediamanager/ai_captioning', 'app/mediamanager/ai_captioning'),
+        ('app/mediamanager/people', 'app/mediamanager/people'),
         ('app/mediamanager/ocr', 'app/mediamanager/ocr'),
         ('native/mediamanagerx_app/TOS.md', '.'),
         ('native/mediamanagerx_app/CHANGELOG.md', '.'),

@@ -119,7 +119,17 @@ class BridgePeopleMixin:
     @Slot(list, result=bool)
     def scan_faces_async(self, paths: list | None = None) -> bool:
         try:
-            self._log("People scan requested. InsightFace runtime wiring is not installed in this build yet.")
+            engine = str(self.settings.value("people/recognition_engine", "none", type=str) or "none").strip().lower()
+            if engine != "insightface":
+                self._log("People scan requested, but People recognition engine is disabled.")
+                return False
+            from app.mediamanager.ai_captioning.model_registry import INSIGHTFACE_MODEL_ID, model_spec
+
+            status = self._local_ai_status_payload_for_spec(model_spec(INSIGHTFACE_MODEL_ID, "faces"))
+            if not bool(status.get("installed")):
+                self._log("People scan requested, but InsightFace is not installed.")
+                return False
+            self._log("People scan requested. InsightFace runtime is installed, but face extraction is not implemented yet.")
         except Exception:
             pass
         return False

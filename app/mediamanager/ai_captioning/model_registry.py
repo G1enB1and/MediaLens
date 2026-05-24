@@ -10,6 +10,7 @@ from pathlib import Path
 TAG_MODEL_ID = "SmilingWolf/wd-swinv2-tagger-v3"
 CAPTION_MODEL_ID = "internlm/internlm-xcomposer2-vl-1_8b"
 GEMMA4_MODEL_ID = "google/gemma-4-E2B-it"
+INSIGHTFACE_MODEL_ID = "insightface/buffalo_l"
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,18 @@ MODEL_SPECS: tuple[LocalAiModelSpec, ...] = (
         requirements_file="requirements-local-ai-gemma.txt",
         description="Instruction-tuned multimodal Gemma 4 model from Google DeepMind for local image understanding and text generation.",
         estimated_size="Approx. 3-62 GB (depends on selected profile)",
+    ),
+    LocalAiModelSpec(
+        id=INSIGHTFACE_MODEL_ID,
+        kind="faces",
+        label="InsightFace Buffalo_L",
+        worker_module="app.mediamanager.people.insightface_worker",
+        venv_dir=".venv-insightface",
+        settings_key="insightface",
+        install_label="InsightFace",
+        requirements_file="requirements-local-ai-insightface.txt",
+        description="Experimental local People face detection and recognition provider. The InsightFace code is MIT; distributed pretrained models may require separate licensing for commercial use.",
+        estimated_size="Approx. 0.4-1.0 GB",
     ),
 )
 
