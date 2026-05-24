@@ -2693,11 +2693,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const paths = Array.isArray(gMedia) ? gMedia.map(item => item && item.path).filter(Boolean) : [];
         gBridge.scan_faces_async(paths, function (ok) {
           setGlobalLoading(false);
-          if (ok) return;
+          if (ok) {
+            const el = document.getElementById('mediaList');
+            if (el) {
+              el.className = 'people-gallery';
+              el.innerHTML = '<div class="empty">Scanning faces. People Gallery will refresh when the scan finishes.</div>';
+            }
+            return;
+          }
           const el = document.getElementById('mediaList');
           if (el) {
             el.className = 'people-gallery';
-            el.innerHTML = '<div class="empty">People scan is wired for InsightFace, but the runtime is not installed yet.</div>';
+            el.innerHTML = '<div class="empty">People scan could not start. Check Settings > People and AI Models Status.</div>';
           }
         });
       }

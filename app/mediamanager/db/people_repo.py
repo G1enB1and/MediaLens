@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sqlite3
+import json
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
@@ -197,6 +199,142 @@ def list_faces_for_person(conn: sqlite3.Connection, person_id: int) -> list[dict
         }
         for row in rows
     ]
+
+
+def _embedding_from_json(raw: str | None) -> list[float]:
+    try:
+        values = json.loads(str(raw or "[]"))
+        return [float(value) for value in values]
+    except Exception:
+        return []
+
+
+def _cosine_similarity(left: list[float], right: list[float]) -> float:
+    if not left or not right or len(left) != len(right):
+        return 0.0
+    dot = sum(a * b for a, b in zip(left, right))
+    left_norm = math.sqrt(sum(a * a for a in left))
+    right_norm = math.sqrt(sum(b * b for b in right))
+    if left_norm <= 0.0 or right_norm <= 0.0:
+        return 0.0
+    return float(dot / (left_norm * right_norm))
+
+
+def _best_person_match(conn: sqlite3.Connection, embedding: list[float], threshold: float) -> tuple[int | None, float]:
+    rows = conn.execute(
+        """
+        SELECT person_id, embedding_json
+        FROM media_faces
+        WHERE person_id IS NOT NULL
+          AND embedding_json IS NOT NULL
+          AND embedding_json != ''
+          AND COALESCE(ignored, 0) = 0
+          AND status IN ('unreviewed', 'suggested', 'confirmed')
+        """
+    ).fetchall()
+    best_person_id: int | None = None
+    best_score = 0.0
+    scores: dict[int, list[float]] = {}
+    for person_id, raw_embedding in rows:
+        candidate = _embedding_from_json(raw_embedding)
+        score = _cosine_similarity(embedding, candidate)
+        if score <= 0.0:
+            continue
+        scores.setdefault(int(person_id), []).append(score)
+    for person_id, person_scores in scores.items():
+        strongest = max(person_scores)
+        top_scores = sorted(person_scores, reverse=True)[:5]
+        averaged = sum(top_scores) / max(1, len(top_scores))
+        score = max(strongest, averaged)
+        if score > best_score:
+            best_score = score
+            best_person_id = person_id
+    if best_person_id is None or best_score < threshold:
+        return None, best_score
+    return best_person_id, best_score
+
+
+def _create_unnamed_person(conn: sqlite3.Connection) -> int:
+    now = _utc_now_iso()
+    row = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM people").fetchone()
+    next_id = int(row[0] or 1)
+    cur = conn.execute(
+        """
+        INSERT INTO people(name, display_name, is_confirmed, created_at_utc, updated_at_utc)
+        VALUES (NULL, ?, 0, ?, ?)
+        """,
+        (f"Unnamed {next_id}", now, now),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def replace_detected_faces(
+    conn: sqlite3.Connection,
+    path: str,
+    faces: list[dict],
+    *,
+    detection_engine: str = "insightface",
+    recognition_model: str = "buffalo_l",
+    match_threshold: float = 0.45,
+) -> int:
+    ensure_people_tables(conn)
+    from app.mediamanager.db.media_repo import get_media_by_path
+
+    media = get_media_by_path(conn, path)
+    if not media:
+        raise ValueError("media item not found")
+    media_id = int(media["id"])
+    now = _utc_now_iso()
+    conn.execute(
+        """
+        DELETE FROM media_faces
+        WHERE media_id = ?
+          AND detection_engine = ?
+          AND status IN ('unreviewed', 'suggested', 'rejected')
+        """,
+        (media_id, detection_engine),
+    )
+    inserted = 0
+    for face in faces:
+        embedding = [float(value) for value in list(face.get("embedding") or [])]
+        bbox = [float(value) for value in list(face.get("bbox") or [])[:4]]
+        if len(bbox) != 4 or not embedding:
+            continue
+        person_id, match_confidence = _best_person_match(conn, embedding, float(match_threshold))
+        if person_id is None:
+            person_id = _create_unnamed_person(conn)
+            match_confidence = None
+        status = "suggested" if match_confidence is not None else "unreviewed"
+        conn.execute(
+            """
+            INSERT INTO media_faces(
+                media_id, person_id, detection_engine, recognition_model, embedding_json,
+                bbox_left, bbox_top, bbox_width, bbox_height, confidence, match_confidence,
+                status, ignored, created_at_utc, updated_at_utc
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+            """,
+            (
+                media_id,
+                int(person_id),
+                detection_engine,
+                recognition_model,
+                json.dumps(embedding, separators=(",", ":")),
+                bbox[0],
+                bbox[1],
+                bbox[2],
+                bbox[3],
+                float(face.get("confidence") or 0.0),
+                match_confidence,
+                status,
+                now,
+                now,
+            ),
+        )
+        inserted += 1
+    conn.commit()
+    return inserted
 
 
 def add_manual_face_assignment(

@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -22,7 +21,7 @@ def _provider_names(requested_device: str) -> list[str]:
     return ["CPUExecutionProvider"]
 
 
-def _preload(settings: dict) -> dict:
+def _load_app(settings: dict):
     try:
         import insightface
         import onnxruntime as ort
@@ -42,6 +41,11 @@ def _preload(settings: dict) -> dict:
 
     app = FaceAnalysis(name="buffalo_l", root=str(models_root), providers=active_providers)
     app.prepare(ctx_id=ctx_id, det_size=(640, 640))
+    return app, insightface, ort, active_providers, available, models_root
+
+
+def _preload(settings: dict) -> dict:
+    app, insightface, ort, active_providers, available, models_root = _load_app(settings)
     model_dir = models_root / "models" / "buffalo_l"
     return {
         "ok": True,
@@ -55,9 +59,57 @@ def _preload(settings: dict) -> dict:
     }
 
 
+def _detect(source: Path, settings: dict) -> dict:
+    try:
+        import cv2
+    except Exception as exc:
+        raise RuntimeError(f"OpenCV runtime import failed: {exc}") from exc
+
+    app, insightface, ort, active_providers, _available, _models_root = _load_app(settings)
+    image = cv2.imread(str(source))
+    if image is None:
+        raise RuntimeError("InsightFace could not read the source image.")
+    height, width = image.shape[:2]
+    faces = app.get(image)
+    detections: list[dict] = []
+    for face in faces:
+        bbox = [float(value) for value in list(getattr(face, "bbox", []) or [])[:4]]
+        if len(bbox) != 4:
+            continue
+        left, top, right, bottom = bbox
+        embedding = getattr(face, "normed_embedding", None)
+        if embedding is None:
+            embedding = getattr(face, "embedding", None)
+        embedding_list = [float(value) for value in list(embedding)] if embedding is not None else []
+        detections.append(
+            {
+                "bbox": [
+                    max(0.0, left),
+                    max(0.0, top),
+                    max(0.0, right - left),
+                    max(0.0, bottom - top),
+                ],
+                "confidence": float(getattr(face, "det_score", 0.0) or 0.0),
+                "embedding": embedding_list,
+            }
+        )
+    return {
+        "ok": True,
+        "backend": "insightface",
+        "model": "buffalo_l",
+        "source": str(source),
+        "image_width": int(width or 0),
+        "image_height": int(height or 0),
+        "active_providers": active_providers,
+        "insightface_version": str(getattr(insightface, "__version__", "") or ""),
+        "onnxruntime_version": str(getattr(ort, "__version__", "") or ""),
+        "faces": detections,
+    }
+
+
 def _run_cli() -> int:
     parser = argparse.ArgumentParser(description="Run one isolated MediaLens InsightFace People task.")
-    parser.add_argument("--operation", choices=("preload",), required=True)
+    parser.add_argument("--operation", choices=("preload", "detect"), required=True)
     parser.add_argument("--source", required=True)
     parser.add_argument("--settings-json", required=True)
     args = parser.parse_args()
@@ -65,7 +117,10 @@ def _run_cli() -> int:
     try:
         settings = _settings_from_json(args.settings_json)
         with contextlib.redirect_stdout(sys.stderr):
-            payload = _preload(settings)
+            if args.operation == "detect":
+                payload = _detect(Path(args.source), settings)
+            else:
+                payload = _preload(settings)
             print(
                 f"InsightFace ready with providers: {', '.join(payload.get('active_providers') or [])}",
                 file=sys.stderr,

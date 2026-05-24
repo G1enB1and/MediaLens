@@ -666,6 +666,10 @@ function scheduleFilterSensitiveMetadataRefresh() {
   }
   gGalleryFilterMetadataRefreshTimer = window.setTimeout(() => {
     gGalleryFilterMetadataRefreshTimer = 0;
+    if (gPeopleMode) {
+      openPeopleGallery(gPeopleMode);
+      return;
+    }
     refreshFromBridge(gBridge, false);
   }, 60);
 }
