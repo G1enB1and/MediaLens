@@ -23,6 +23,7 @@ This release makes duplicate and similar review less disruptive by keeping large
 - Changed the image comparison reveal slider to use a thinner, shorter handle and a horizontal resize cursor while hovering and dragging.
 - Changed the left and right comparison slot image layouts to remove extra bottom padding and margin.
 - Changed comparison slot borders and rounded thumbnail overlay rendering to produce sharper visible edges in the comparison panel.
+- Normalized scrollbars with matching size, color, and style for a more consistent modern look.
 
 ---
 

@@ -170,6 +170,14 @@
   background-image: url('../icons/group-list-svgrepo-com.svg');
 }
 
+#peopleSelect.header-icon-select .select-trigger {
+  background-image: url('../icons/people-svgrepo-com-white.svg');
+}
+
+.light-mode #peopleSelect.header-icon-select .select-trigger {
+  background-image: url('../icons/people-svgrepo-com.svg');
+}
+
 #dateGranularitySelect.header-icon-select .select-trigger {
   background-image: url('../icons/calendar-svgrepo-com-white.svg');
 }

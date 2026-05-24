@@ -424,6 +424,48 @@ class WindowPreviewMetadataMixin:
         except Exception:
             pass
 
+    def _open_people_review_for_current_file(self) -> None:
+        path = str(getattr(self, "_current_path", "") or "").strip()
+        if not path:
+            return
+        people = []
+        try:
+            people = list(self.bridge.list_media_people(path) or [])
+        except Exception:
+            people = []
+        current = ", ".join(
+            str(person.get("display_name") or "").strip()
+            for person in people
+            if str(person.get("display_name") or "").strip()
+        )
+        name, ok = QInputDialog.getText(
+            self,
+            "Review Faces",
+            "Name the person in this file:",
+            text=current.split(",")[0].strip() if current else "",
+        )
+        if not ok:
+            return
+        clean_name = " ".join(str(name or "").strip().split())
+        if not clean_name:
+            return
+        if self.bridge.assign_media_person(path, clean_name):
+            self.meta_people_lbl.setText(clean_name)
+            self.meta_status_lbl.setText("Person saved")
+            QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
+
+    def _scan_people_for_current_file(self) -> None:
+        path = str(getattr(self, "_current_path", "") or "").strip()
+        if not path:
+            return
+        ok = False
+        try:
+            ok = bool(self.bridge.scan_faces_async([path]))
+        except Exception:
+            ok = False
+        self.meta_status_lbl.setText("People scan runtime is not installed yet" if not ok else "People scan started")
+        QTimer.singleShot(3000, lambda: self.meta_status_lbl.setText(""))
+
     def _save_native_metadata(self) -> None:
         """Save rename (if changed) + description/tags/notes, then show confirmation."""
         # Use paths list if available, else fallback to current_path
@@ -1838,10 +1880,13 @@ class WindowPreviewMetadataMixin:
         show_ai_provenance = "aiprovenance" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aiprovenance", False)
         show_ai_character_cards = "aicharcards" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "aicharcards", False)
         show_ai_raw_paths = "airawpaths" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "airawpaths", False)
+        show_people = "people" in active_fields and self._is_metadata_enabled_for_kind(metadata_kind, "people", True)
         visible_groups = visible_group_keys
         self.lbl_group_general.setVisible(not is_bulk and "general" in visible_groups)
         self.lbl_group_camera.setVisible(not is_bulk and "camera" in visible_groups)
         self.lbl_group_ai.setVisible(not is_bulk and "ai" in visible_groups)
+        if hasattr(self, "lbl_group_people"):
+            self.lbl_group_people.setVisible(not is_bulk and "people" in visible_groups)
 
         self.meta_res_lbl.setVisible(not is_bulk and show_res)
         self.meta_size_lbl.setVisible(not is_bulk and show_size)
@@ -1937,6 +1982,10 @@ class WindowPreviewMetadataMixin:
         self.lbl_ai_character_cards_cap.setVisible(not is_bulk and show_ai_character_cards)
         self.meta_ai_raw_paths_edit.setVisible(not is_bulk and show_ai_raw_paths)
         self.lbl_ai_raw_paths_cap.setVisible(not is_bulk and show_ai_raw_paths)
+        if hasattr(self, "lbl_people_cap"):
+            self.lbl_people_cap.setVisible(not is_bulk and show_people)
+            self.meta_people_lbl.setVisible(not is_bulk and show_people)
+            self.people_button_row.setVisible(not is_bulk and show_people)
         self.meta_sep1.setVisible(not is_bulk and len(visible_groups) > 1)
         self.meta_sep2.setVisible(not is_bulk and len(visible_groups) > 2)
         self.meta_sep3.setVisible(False)
@@ -1995,6 +2044,8 @@ class WindowPreviewMetadataMixin:
         self.meta_ai_provenance_edit.setPlainText("")
         self.meta_ai_character_cards_edit.setPlainText("")
         self.meta_ai_raw_paths_edit.setPlainText("")
+        if hasattr(self, "meta_people_lbl"):
+            self.meta_people_lbl.setText("No people detected")
 
         self.lbl_desc_cap.setVisible(not is_bulk and show_description)
         self.meta_desc.setVisible(not is_bulk and show_description)
@@ -2095,6 +2146,10 @@ class WindowPreviewMetadataMixin:
                 self.meta_ai_character_cards_edit.setPlainText(data.get("ai_character_cards_summary", ""))
                 self.meta_ai_raw_paths_edit.setPlainText(data.get("ai_raw_paths_summary", ""))
                 self.meta_embedded_metadata_edit.setPlainText(data.get("embedded_metadata_summary", ""))
+                if hasattr(self, "meta_people_lbl"):
+                    people = list(data.get("people") or [])
+                    labels = [str(person.get("display_name") or "").strip() for person in people if str(person.get("display_name") or "").strip()]
+                    self.meta_people_lbl.setText(", ".join(labels) if labels else "No people detected")
                 
                 self._set_tag_editor_text(", ".join(data.get("tags", [])), self.meta_tags)
                 exif_date_taken = self._format_editable_datetime(data.get("exif_date_taken"))
@@ -2359,21 +2414,24 @@ class WindowPreviewMetadataMixin:
             "aisampler", "aischeduler", "aicfg", "aisteps", "aiseed", "aiupscaler", "aidenoise",
             "aiprompt", "ainegprompt", "aiparams", "aiworkflows", "aiprovenance", "aicharcards", "airawpaths",
         ]
+        people = ["people"]
         if kind == "video":
             return {
                 "general": ["res", "size", "exifdatetaken", "metadatadate", "originalfiledate", "filecreateddate", "filemodifieddate", "textdetected", "duration", "fps", "codec", "audio", "description", "tags", "notes", "embeddedmetadata"],
                 "ai": image_ai,
+                "people": people,
             }
         if kind == "gif":
             return {
                 "general": ["res", "size", "exifdatetaken", "metadatadate", "originalfiledate", "filecreateddate", "filemodifieddate", "textdetected", "duration", "fps", "description", "tags", "notes", "embeddedtags", "embeddedcomments", "embeddedmetadata"],
                 "ai": image_ai,
+                "people": people,
             }
         if kind == "svg":
             return {
                 "general": ["res", "size", "metadatadate", "originalfiledate", "filecreateddate", "filemodifieddate", "textdetected", "description", "tags", "notes", "embeddedmetadata"],
             }
-        return {"general": image_general, "camera": image_camera, "ai": image_ai}
+        return {"general": image_general, "camera": image_camera, "ai": image_ai, "people": people}
 
     def _ocr_buttons(self) -> list:
         return [
@@ -3073,6 +3131,7 @@ class WindowPreviewMetadataMixin:
             "aiprovenance": [self.lbl_ai_provenance_cap, self.meta_ai_provenance_edit],
             "aicharcards": [self.lbl_ai_character_cards_cap, self.meta_ai_character_cards_edit],
             "airawpaths": [self.lbl_ai_raw_paths_cap, self.meta_ai_raw_paths_edit],
+            "people": [self.lbl_people_cap, self.meta_people_lbl, self.people_button_row],
             "sep1": [self.meta_sep1],
             "sep2": [self.meta_sep2],
             "sep3": [self.meta_sep3],
@@ -3089,7 +3148,8 @@ class WindowPreviewMetadataMixin:
         group_labels = {
             "general": self.lbl_group_general,
             "camera": self.lbl_group_camera,
-            "ai": self.lbl_group_ai
+            "ai": self.lbl_group_ai,
+            "people": self.lbl_group_people,
         }
         sep_widgets = [self.meta_sep1, self.meta_sep2]
         sep_index = 0

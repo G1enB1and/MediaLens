@@ -145,6 +145,15 @@ def _ensure_media_ai_columns(conn: sqlite3.Connection) -> None:
         conn.commit()
 
 
+def _ensure_people_tables(conn: sqlite3.Connection) -> None:
+    try:
+        from app.mediamanager.db.people_repo import ensure_people_tables
+
+        ensure_people_tables(conn)
+    except Exception:
+        pass
+
+
 def _ensure_review_pair_exclusions_table(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -702,6 +711,7 @@ def _list_media_with_where(
 ) -> list[dict]:
     _ensure_media_items_scan_columns(conn)
     _ensure_media_ai_columns(conn)
+    _ensure_people_tables(conn)
     if media_only:
         where_sql, params = _media_only_where(where_sql, params)
     if limit is not None:
@@ -781,7 +791,13 @@ def _list_media_with_where(
                 FROM collections c
                 JOIN collection_items ci ON c.id = ci.collection_id
                 WHERE ci.media_id = m.id
-            ) as collection_names
+            ) as collection_names,
+            (
+                SELECT GROUP_CONCAT(p.display_name, ', ')
+                FROM media_faces f
+                JOIN people p ON p.id = f.person_id
+                WHERE f.media_id = m.id AND COALESCE(f.ignored, 0) = 0
+            ) as people_names
         FROM media_items m
         LEFT JOIN media_metadata meta ON m.id = meta.media_id
         LEFT JOIN media_ai_metadata ai ON m.id = ai.media_id
@@ -846,6 +862,7 @@ def _media_row_to_dict(row) -> dict:
         "ai_loras": row[45],
         "tags": row[46],
         "collection_names": row[47],
+        "people_names": row[48],
     }
 
 

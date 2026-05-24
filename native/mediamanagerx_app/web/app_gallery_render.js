@@ -58,6 +58,11 @@ function updateHeaderIconSelectState(el) {
   if (el.id === 'similarityThresholdSelect') {
     el.title = `Similarity threshold: ${label}`;
     el.setAttribute('aria-label', el.title);
+    return;
+  }
+  if (el.id === 'peopleSelect') {
+    el.title = label === 'Scan for Faces' ? 'Scan for faces' : label;
+    el.setAttribute('aria-label', el.title);
   }
 }
 
@@ -1992,6 +1997,197 @@ function wireCtxMenu() {
 
 // applySearch is no longer used for local filtering.
 
+function openPeopleGallery(mode = 'gallery') {
+  gPeopleMode = mode === 'unnamed' ? 'unnamed' : 'gallery';
+  gPeopleReviewPerson = null;
+  gMedia = [];
+  gTotal = 0;
+  gPage = 0;
+  updateGalleryCountChip(0);
+  renderPager();
+  renderTimelineRail([]);
+  const el = document.getElementById('mediaList');
+  if (!el) return;
+  el.className = 'people-gallery';
+  el.innerHTML = '<div class="empty">Loading people...</div>';
+  if (!gBridge || !gBridge.list_people) {
+    el.innerHTML = '<div class="empty">People is not available in this build.</div>';
+    return;
+  }
+  gBridge.list_people(function (items) {
+    const allPeople = Array.isArray(items) ? items : [];
+    const people = gPeopleMode === 'unnamed'
+      ? allPeople.filter(person => !person.is_confirmed)
+      : allPeople;
+    gPeopleCards = people;
+    renderPeopleCards(people);
+  });
+}
+
+function renderPeopleCards(people) {
+  const el = document.getElementById('mediaList');
+  if (!el) return;
+  el.className = 'people-gallery';
+  el.innerHTML = '';
+  const list = Array.isArray(people) ? people : [];
+  if (!list.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = gPeopleMode === 'unnamed' ? 'No unnamed face groups yet.' : 'No people found yet.';
+    el.appendChild(empty);
+    return;
+  }
+  list.forEach((person) => {
+    const card = document.createElement('div');
+    card.className = 'person-card';
+    card.tabIndex = 0;
+    const name = String(person.display_name || '').trim() || `Unnamed ${person.id || ''}`.trim();
+    const thumb = document.createElement('div');
+    thumb.className = 'person-thumb';
+    if (person.preview_path) {
+      const img = document.createElement('img');
+      img.alt = '';
+      img.src = `file:///${String(person.preview_path).replace(/\\/g, '/')}?people=${person.preview_face_id || 0}`;
+      thumb.appendChild(img);
+    } else {
+      const placeholder = document.createElement('div');
+      placeholder.className = 'person-thumb-placeholder';
+      thumb.appendChild(placeholder);
+    }
+    const title = document.createElement('div');
+    title.className = 'person-name';
+    title.textContent = name;
+    title.title = name;
+    const count = document.createElement('div');
+    count.className = 'person-count';
+    const fileCount = Number(person.file_count || 0);
+    const faceCount = Number(person.face_count || 0);
+    count.textContent = `${fileCount} file${fileCount === 1 ? '' : 's'} | ${faceCount} face${faceCount === 1 ? '' : 's'}`;
+    const actions = document.createElement('div');
+    actions.className = 'person-actions';
+    const reviewBtn = document.createElement('button');
+    reviewBtn.type = 'button';
+    reviewBtn.className = 'tb-btn';
+    reviewBtn.textContent = person.is_confirmed ? 'Review' : 'Name';
+    reviewBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openPersonReview(person);
+    });
+    actions.appendChild(reviewBtn);
+    card.appendChild(thumb);
+    card.appendChild(title);
+    card.appendChild(count);
+    card.appendChild(actions);
+    card.addEventListener('click', () => {
+      setAdvancedSearchQuery(`person:${quoteSearchValue(name)}`);
+    });
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        setAdvancedSearchQuery(`person:${quoteSearchValue(name)}`);
+      }
+    });
+    el.appendChild(card);
+  });
+}
+
+function openPersonReview(person) {
+  if (!person || !gBridge || !gBridge.list_person_faces) return;
+  gPeopleReviewPerson = person;
+  const el = document.getElementById('mediaList');
+  if (!el) return;
+  el.className = 'people-gallery';
+  el.innerHTML = '<div class="empty">Loading faces...</div>';
+  gBridge.list_person_faces(Number(person.id || 0), function (faces) {
+    renderPersonReview(person, Array.isArray(faces) ? faces : []);
+  });
+}
+
+function renderPersonReview(person, faces) {
+  const el = document.getElementById('mediaList');
+  if (!el) return;
+  el.className = 'people-gallery';
+  el.innerHTML = '';
+  const head = document.createElement('div');
+  head.className = 'person-review-head';
+  head.style.gridColumn = '1 / -1';
+  const title = document.createElement('div');
+  title.className = 'advanced-search-section-title';
+  title.textContent = String(person.display_name || '').trim() || `Unnamed ${person.id || ''}`.trim();
+  const back = document.createElement('button');
+  back.type = 'button';
+  back.className = 'tb-btn';
+  back.textContent = 'Back to People';
+  back.addEventListener('click', () => openPeopleGallery(gPeopleMode));
+  head.appendChild(title);
+  head.appendChild(back);
+  el.appendChild(head);
+  if (!faces.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = 'No face records for this person yet.';
+    el.appendChild(empty);
+    return;
+  }
+  faces.forEach((face) => {
+    const card = document.createElement('div');
+    card.className = 'person-card';
+    const thumb = document.createElement('div');
+    thumb.className = 'person-thumb';
+    const img = document.createElement('img');
+    img.alt = '';
+    img.src = `file:///${String(face.path || '').replace(/\\/g, '/')}?face=${face.face_id || 0}`;
+    thumb.appendChild(img);
+    const pathLabel = document.createElement('div');
+    pathLabel.className = 'person-name';
+    pathLabel.textContent = getItemName({ path: face.path || '' });
+    pathLabel.title = face.path || '';
+    const actions = document.createElement('div');
+    actions.className = 'person-actions';
+    const nameBtn = document.createElement('button');
+    nameBtn.type = 'button';
+    nameBtn.className = 'tb-btn';
+    nameBtn.textContent = 'Name';
+    nameBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const nextName = window.prompt('Name this person', person.display_name || '');
+      if (!nextName || !gBridge.assign_face_person) return;
+      gBridge.assign_face_person(Number(face.face_id || 0), String(nextName).trim(), function () {
+        openPersonReview(person);
+      });
+    });
+    const notBtn = document.createElement('button');
+    notBtn.type = 'button';
+    notBtn.className = 'tb-btn';
+    notBtn.textContent = `Not ${String(person.display_name || 'Person').trim()}`;
+    notBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!gBridge.reject_face_person) return;
+      gBridge.reject_face_person(Number(face.face_id || 0), function () {
+        openPersonReview(person);
+      });
+    });
+    const ignoreBtn = document.createElement('button');
+    ignoreBtn.type = 'button';
+    ignoreBtn.className = 'tb-btn';
+    ignoreBtn.textContent = 'Ignore';
+    ignoreBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!gBridge.ignore_face) return;
+      gBridge.ignore_face(Number(face.face_id || 0), function () {
+        openPersonReview(person);
+      });
+    });
+    actions.appendChild(nameBtn);
+    actions.appendChild(notBtn);
+    actions.appendChild(ignoreBtn);
+    card.appendChild(thumb);
+    card.appendChild(pathLabel);
+    card.appendChild(actions);
+    el.appendChild(card);
+  });
+}
+
 function renderMediaList(items, scrollToTop = true) {
   items = asArray(items);
   if (gIsRenderingGallery) {
@@ -2481,6 +2677,26 @@ document.addEventListener('DOMContentLoaded', () => {
     } else if (gBridge) {
       refreshFromBridge(gBridge, true);
     }
+  });
+
+  setupCustomSelect('peopleSelect', (val) => {
+    if (val === 'scan') {
+      if (gBridge && gBridge.scan_faces_async) {
+        const paths = Array.isArray(gMedia) ? gMedia.map(item => item && item.path).filter(Boolean) : [];
+        gBridge.scan_faces_async(paths, function (ok) {
+          setGlobalLoading(false);
+          if (ok) return;
+          const el = document.getElementById('mediaList');
+          if (el) {
+            el.className = 'people-gallery';
+            el.innerHTML = '<div class="empty">People scan is wired for InsightFace, but the runtime is not installed yet.</div>';
+          }
+        });
+      }
+      setCustomSelectValue('peopleSelect', 'gallery');
+      return;
+    }
+    openPeopleGallery(val === 'unnamed' ? 'unnamed' : 'gallery');
   });
 });
 

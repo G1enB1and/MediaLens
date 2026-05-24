@@ -1180,6 +1180,10 @@ class WindowLayoutPanelsMixin:
         self.lbl_group_ai.setObjectName("metaGroupLabel")
         self.lbl_group_ai.hide()
 
+        self.lbl_group_people = QLabel("People")
+        self.lbl_group_people.setObjectName("metaGroupLabel")
+        self.lbl_group_people.hide()
+
         self.meta_camera_lbl = QLabel("")
         self.meta_camera_lbl.setObjectName("metaCameraLabel")
 
@@ -1360,6 +1364,32 @@ class WindowLayoutPanelsMixin:
         self.meta_ai_denoise_edit.setObjectName("metaAIDenoiseEdit")
         self.meta_ai_denoise_edit.setReadOnly(False)
         self.meta_ai_denoise_edit.setPlaceholderText("Denoise strength...")
+
+        self.lbl_people_cap = QLabel("People:")
+        self.lbl_people_cap.setObjectName("metaPeopleCaption")
+        self.meta_people_lbl = QLabel("No people detected")
+        self.meta_people_lbl.setObjectName("metaPeopleLabel")
+        self.meta_people_lbl.setWordWrap(True)
+        self.people_button_row = QWidget()
+        self.people_button_row.setObjectName("peopleButtonRow")
+        self.people_button_row.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        people_button_layout = QHBoxLayout(self.people_button_row)
+        people_button_layout.setContentsMargins(0, 0, 0, 0)
+        people_button_layout.setSpacing(8)
+        self.btn_review_faces = QPushButton("Review Faces")
+        self.btn_review_faces.setObjectName("btnReviewFaces")
+        self.btn_review_faces.setProperty("baseText", "Review Faces")
+        self.btn_review_faces.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_review_faces.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.btn_review_faces.clicked.connect(self._open_people_review_for_current_file)
+        self.btn_scan_people = QPushButton("Scan for People")
+        self.btn_scan_people.setObjectName("btnScanPeople")
+        self.btn_scan_people.setProperty("baseText", "Scan for People")
+        self.btn_scan_people.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_scan_people.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.btn_scan_people.clicked.connect(self._scan_people_for_current_file)
+        people_button_layout.addWidget(self.btn_review_faces)
+        people_button_layout.addWidget(self.btn_scan_people)
 
         # --- Separators ---
         self.meta_sep1 = self._add_sep("meta_sep1_line")

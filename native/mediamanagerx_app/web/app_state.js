@@ -152,6 +152,7 @@ const ADVANCED_SEARCH_FIELD_DEFS = [
   { key: 'file', label: 'Filename', kind: 'text' },
   { key: 'folder', label: 'Folder', kind: 'text' },
   { key: 'tag', label: 'Tags', kind: 'text' },
+  { key: 'person', label: 'Person', kind: 'text' },
   { key: 'collection', label: 'Collection', kind: 'text' },
   { key: 'description', label: 'Description', kind: 'text' },
   { key: 'notes', label: 'Notes', kind: 'text' },
@@ -216,6 +217,8 @@ const ADVANCED_SEARCH_FIELD_ALIASES = {
   textfound: 'detected_text',
   tags: 'tags',
   tag: 'tags',
+  person: 'people_names',
+  people: 'people_names',
   collection: 'collection_names',
   collections: 'collection_names',
   prompt: 'ai_prompt',
@@ -261,7 +264,7 @@ const ADVANCED_SEARCH_FIELD_ALIASES = {
   modified: 'modified_time',
 };
 const ADVANCED_SEARCH_TEXT_FIELD_KEYS = new Set([
-  'path', 'filename', 'folder', 'title', 'description', 'notes', 'detected_text', 'tags', 'collection_names',
+  'path', 'filename', 'folder', 'title', 'description', 'notes', 'detected_text', 'tags', 'collection_names', 'people_names',
   'ai_prompt', 'ai_negative_prompt', 'tool_name', 'model_name', 'checkpoint_name', 'sampler',
   'scheduler', 'source_formats', 'metadata_families', 'ai_loras', 'media_type', 'ext',
 ]);
@@ -280,6 +283,7 @@ const ADVANCED_SEARCH_PREFERRED_ALIASES = {
   notes: 'notes',
   detected_text: 'ocr',
   tags: 'tag',
+  people_names: 'person',
   collection_names: 'collection',
   ai_prompt: 'prompt',
   ai_negative_prompt: 'negative',
@@ -325,6 +329,9 @@ let gShowHidden = false;
 let gIncludeNestedFiles = true;
 let gShowFoldersInGallery = true;
 let gShowAllFileTypes = false;
+let gPeopleMode = 'gallery';
+let gPeopleCards = [];
+let gPeopleReviewPerson = null;
 
 function normalizedVideoLoopCutoffSeconds() {
   const parsed = Number(gVideoLoopCutoffSeconds);
@@ -932,8 +939,14 @@ const METADATA_SETTINGS_CONFIG = {
           ['aiprovenance', 'AI Provenance', false], ['aicharcards', 'AI Character Cards', false], ['airawpaths', 'AI Metadata Paths', false],
         ],
       },
+      people: {
+        label: 'People',
+        fields: [
+          ['people', 'Detected People', true],
+        ],
+      },
     },
-    groupOrder: ['general', 'camera', 'ai'],
+    groupOrder: ['general', 'camera', 'people', 'ai'],
   },
   svg: {
     groups: {
@@ -958,8 +971,14 @@ const METADATA_SETTINGS_CONFIG = {
           ['aicharcards', 'AI Character Cards', false], ['airawpaths', 'AI Metadata Paths', false],
         ],
       },
+      people: {
+        label: 'People',
+        fields: [
+          ['people', 'Detected People', true],
+        ],
+      },
     },
-    groupOrder: ['general', 'ai'],
+    groupOrder: ['general', 'people', 'ai'],
   },
   video: {
     groups: {
@@ -983,8 +1002,14 @@ const METADATA_SETTINGS_CONFIG = {
           ['aiworkflows', 'AI Workflows', false], ['aiprovenance', 'AI Provenance', false], ['airawpaths', 'AI Metadata Paths', false],
         ],
       },
+      people: {
+        label: 'People',
+        fields: [
+          ['people', 'Detected People', true],
+        ],
+      },
     },
-    groupOrder: ['general', 'ai'],
+    groupOrder: ['general', 'people', 'ai'],
   },
   gif: {
     groups: {
@@ -1011,8 +1036,14 @@ const METADATA_SETTINGS_CONFIG = {
           ['aicharcards', 'AI Character Cards', false], ['airawpaths', 'AI Metadata Paths', false],
         ],
       },
+      people: {
+        label: 'People',
+        fields: [
+          ['people', 'Detected People', true],
+        ],
+      },
     },
-    groupOrder: ['general', 'ai'],
+    groupOrder: ['general', 'people', 'ai'],
   },
 };
 

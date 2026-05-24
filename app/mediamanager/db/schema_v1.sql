@@ -230,6 +230,44 @@ CREATE TABLE IF NOT EXISTS media_ai_provenance (
 
 CREATE INDEX IF NOT EXISTS idx_media_ai_provenance_media ON media_ai_provenance(media_id);
 
+CREATE TABLE IF NOT EXISTS people (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT,
+  display_name TEXT NOT NULL,
+  is_confirmed INTEGER NOT NULL DEFAULT 0,
+  preview_face_id INTEGER,
+  created_at_utc TEXT NOT NULL,
+  updated_at_utc TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_people_name ON people(name);
+CREATE INDEX IF NOT EXISTS idx_people_confirmed ON people(is_confirmed);
+
+CREATE TABLE IF NOT EXISTS media_faces (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  media_id INTEGER NOT NULL,
+  person_id INTEGER,
+  detection_engine TEXT NOT NULL DEFAULT 'insightface',
+  recognition_model TEXT,
+  embedding_json TEXT,
+  bbox_left REAL NOT NULL DEFAULT 0,
+  bbox_top REAL NOT NULL DEFAULT 0,
+  bbox_width REAL NOT NULL DEFAULT 0,
+  bbox_height REAL NOT NULL DEFAULT 0,
+  confidence REAL,
+  match_confidence REAL,
+  status TEXT NOT NULL DEFAULT 'unreviewed',
+  ignored INTEGER NOT NULL DEFAULT 0,
+  created_at_utc TEXT NOT NULL,
+  updated_at_utc TEXT NOT NULL,
+  FOREIGN KEY(media_id) REFERENCES media_items(id) ON DELETE CASCADE,
+  FOREIGN KEY(person_id) REFERENCES people(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_faces_media ON media_faces(media_id);
+CREATE INDEX IF NOT EXISTS idx_media_faces_person ON media_faces(person_id);
+CREATE INDEX IF NOT EXISTS idx_media_faces_status ON media_faces(status, ignored);
+
 CREATE TABLE IF NOT EXISTS media_character_cards (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   media_id INTEGER NOT NULL,

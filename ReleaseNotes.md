@@ -9,6 +9,7 @@ This release makes duplicate and similar review easier to escape when a large fo
 - Large duplicate and similar review loads now stop when you switch folders or views.
 - The image comparison slider is slimmer and uses a proper horizontal resize cursor.
 - Comparison slot image borders and rounded edges render more cleanly.
+- Normalized scrollbars with matching size, color, and style for a more consistent modern look.
 
 ### Notes
 

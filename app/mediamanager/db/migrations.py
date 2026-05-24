@@ -134,6 +134,12 @@ def _ensure_ocr_tables(conn: sqlite3.Connection) -> None:
     ensure_ocr_tables(conn)
 
 
+def _ensure_people_tables(conn: sqlite3.Connection) -> None:
+    from app.mediamanager.db.people_repo import ensure_people_tables
+
+    ensure_people_tables(conn)
+
+
 def _ensure_collection_folder_tables(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -234,6 +240,7 @@ def init_db(db_path: str) -> None:
         _ensure_is_hidden_columns(conn)
         _ensure_media_item_date_columns(conn)
         _ensure_ocr_tables(conn)
+        _ensure_people_tables(conn)
         _ensure_collection_folder_tables(conn)
         _ensure_local_ai_status_cache_table(conn)
         _ensure_action_history_tables(conn)

@@ -137,8 +137,12 @@ METADATA_SETTINGS_CONFIG: dict[str, dict] = {
                     ("airawpaths", "AI Metadata Paths", False),
                 ],
             },
+            "people": {
+                "label": "People",
+                "fields": [("people", "Detected People", True)],
+            },
         },
-        "group_order": ["general", "camera", "ai"],
+        "group_order": ["general", "camera", "people", "ai"],
     },
     "svg": {
         "groups": {
@@ -206,8 +210,12 @@ METADATA_SETTINGS_CONFIG: dict[str, dict] = {
                     ("airawpaths", "AI Metadata Paths", False),
                 ],
             },
+            "people": {
+                "label": "People",
+                "fields": [("people", "Detected People", True)],
+            },
         },
-        "group_order": ["general", "ai"],
+        "group_order": ["general", "people", "ai"],
     },
     "gif": {
         "groups": {
@@ -259,8 +267,12 @@ METADATA_SETTINGS_CONFIG: dict[str, dict] = {
                     ("airawpaths", "AI Metadata Paths", False),
                 ],
             },
+            "people": {
+                "label": "People",
+                "fields": [("people", "Detected People", True)],
+            },
         },
-        "group_order": ["general", "ai"],
+        "group_order": ["general", "people", "ai"],
     },
 }
 

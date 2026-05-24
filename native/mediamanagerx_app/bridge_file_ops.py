@@ -38,7 +38,7 @@ class BridgeFileOpsMixin:
                 "scanners.ocr_text.run_ai",
                 "scanners.ocr_text.all_files",
             )
-            if key not in allowed and key not in {"duplicate.rules.merge_before_delete", "duplicate.rules.preferred_folders_enabled"} and not key.startswith("metadata.display.") and not key.startswith("duplicate.rules.merge"):
+            if key not in allowed and key not in {"duplicate.rules.merge_before_delete", "duplicate.rules.preferred_folders_enabled"} and not key.startswith("metadata.display.") and not key.startswith("duplicate.rules.merge") and not key.startswith("people."):
                 return False
             qkey = key.replace(".", "/")
             self.settings.setValue(qkey, bool(value))
@@ -49,7 +49,7 @@ class BridgeFileOpsMixin:
                 self.uiFlagChanged.emit(key, bool(value))
                 if key in {"gallery.show_hidden", "gallery.include_nested_files", "gallery.show_all_file_types"}:
                     self.galleryScopeChanged.emit()
-            elif key in {"duplicate.rules.merge_before_delete", "duplicate.rules.preferred_folders_enabled"} or key.startswith("duplicate.rules.merge"):
+            elif key in {"duplicate.rules.merge_before_delete", "duplicate.rules.preferred_folders_enabled"} or key.startswith("duplicate.rules.merge") or key.startswith("people."):
                 self.settings.sync()
                 self.uiFlagChanged.emit(key, bool(value))
             elif key.startswith("scanners."):
@@ -80,7 +80,7 @@ class BridgeFileOpsMixin:
                     "schedule_month_day",
                 )
             }
-            if key not in ("gallery.startup_mode", "gallery.start_folder", "gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "gallery.similarity_threshold", "gallery.medialens_retention_days", "ui.accent_color", "ui.theme_mode", "ui.advanced_search_saved_queries", "metadata.display.order", "duplicate.settings.active_tab", "player.video_loop_mode", "player.video_loop_cutoff_seconds") and key not in scanner_schedule_keys and not key.startswith("metadata.layout.") and not key.startswith("duplicate.rules.") and key != "duplicate.priorities.order":
+            if key not in ("gallery.startup_mode", "gallery.start_folder", "gallery.view_mode", "gallery.group_by", "gallery.group_date_granularity", "gallery.similarity_threshold", "gallery.medialens_retention_days", "ui.accent_color", "ui.theme_mode", "ui.advanced_search_saved_queries", "metadata.display.order", "duplicate.settings.active_tab", "player.video_loop_mode", "player.video_loop_cutoff_seconds", "people.match_threshold") and key not in scanner_schedule_keys and not key.startswith("metadata.layout.") and not key.startswith("duplicate.rules.") and key != "duplicate.priorities.order":
                 return False
             if key == "gallery.startup_mode":
                 value = str(value or "none").strip().lower()
@@ -109,6 +109,9 @@ class BridgeFileOpsMixin:
                 try:
                     value = str(max(1, int(str(value or "90").strip())))
                 except Exception:
+                    return False
+            elif key == "people.match_threshold":
+                if value not in {"conservative", "balanced", "loose"}:
                     return False
             elif key == "gallery.medialens_retention_days":
                 try:

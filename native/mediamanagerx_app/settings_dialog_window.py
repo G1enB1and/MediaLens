@@ -5,6 +5,7 @@ from native.mediamanagerx_app.settings_general_pages import *
 from native.mediamanagerx_app.settings_scanner_metadata_pages import *
 from native.mediamanagerx_app.settings_duplicate_pages import *
 from native.mediamanagerx_app.settings_ai_pages import *
+from native.mediamanagerx_app.settings_people_page import *
 
 
 class SettingsDialog(QDialog):
@@ -62,6 +63,7 @@ class SettingsDialog(QDialog):
             ("Player", PlayerSettingsPage),
             ("Background Processes", ScannersSettingsPage),
             ("Metadata", MetadataSettingsPage),
+            ("People", PeopleSettingsPage),
             ("Similar File Rules", DuplicateSettingsPage),
             ("AI", AISettingsPage),
         ]

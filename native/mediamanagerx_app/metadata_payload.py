@@ -15,6 +15,7 @@ def _load_media_metadata_payload(conn, path: str, log_fn=None) -> dict:
         summarize_media_ai_tool_metadata,
     )
     from app.mediamanager.db.metadata_repo import get_media_metadata
+    from app.mediamanager.db.people_repo import list_people_for_media
     from app.mediamanager.metadata.persistence import inspect_and_persist_if_supported
     from app.mediamanager.db.tags_repo import list_media_tags
 
@@ -83,6 +84,7 @@ def _load_media_metadata_payload(conn, path: str, log_fn=None) -> dict:
             "ai_params": "",
             "ai_tool_summary": "",
             "tags": [],
+            "people": [],
             "has_metadata": False,
             "media_type": media.get("media_type") or "",
             "width": media.get("width"),
@@ -144,6 +146,11 @@ def _load_media_metadata_payload(conn, path: str, log_fn=None) -> dict:
             payload["tags"] = list_media_tags(conn, media["id"])
         except Exception as exc:
             _log(f"Bridge.get_media_metadata tag load failed for {path}: {exc!r}")
+
+        try:
+            payload["people"] = list_people_for_media(conn, path)
+        except Exception as exc:
+            _log(f"Bridge.get_media_metadata people load failed for {path}: {exc!r}")
 
         payload.update(ai_ui)
         return payload

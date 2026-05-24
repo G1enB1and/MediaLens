@@ -10,6 +10,7 @@ from app.mediamanager.db.migrations import (
     _ensure_local_ai_status_cache_table,
     _ensure_media_item_date_columns,
     _ensure_media_metadata_columns,
+    _ensure_people_tables,
     init_db,
 )
 
@@ -139,6 +140,7 @@ def connect_db(db_path: str) -> ThreadLocalConnection:
     _ensure_media_metadata_columns(main_conn)
     _ensure_is_hidden_columns(main_conn)
     _ensure_media_item_date_columns(main_conn)
+    _ensure_people_tables(main_conn)
     _ensure_local_ai_status_cache_table(main_conn)
     _ensure_action_history_tables(main_conn)
     main_conn.commit()

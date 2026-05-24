@@ -55,6 +55,8 @@ MediaLens_Setup.exe
 pybuild.log
 
 # Tests and Logs
-/tests/
+/tests/*
+!/tests/test_people_repo.py
+.pytest_cache/
 .tmp-tests*
 *.log

@@ -17,8 +17,9 @@ from native.mediamanagerx_app.bridge_video_metadata import BridgeVideoMetadataMi
 from native.mediamanagerx_app.bridge_local_ai import BridgeLocalAiMixin
 from native.mediamanagerx_app.bridge_tags_metadata import BridgeTagsMetadataMixin
 from native.mediamanagerx_app.bridge_media_listing_scan import BridgeMediaListingScanMixin
+from native.mediamanagerx_app.bridge_people import BridgePeopleMixin
 
-class Bridge(BridgeMediaListingScanMixin, BridgeTagsMetadataMixin, BridgeLocalAiMixin, BridgeVideoMetadataMixin, BridgeFileOpsMixin, BridgeCompareUpdatesMixin, BridgeScannersSettingsMixin, BridgeNavigationCollectionsMixin, BridgeMediaToolsMixin, QObject):
+class Bridge(BridgeMediaListingScanMixin, BridgePeopleMixin, BridgeTagsMetadataMixin, BridgeLocalAiMixin, BridgeVideoMetadataMixin, BridgeFileOpsMixin, BridgeCompareUpdatesMixin, BridgeScannersSettingsMixin, BridgeNavigationCollectionsMixin, BridgeMediaToolsMixin, QObject):
     selectedFolderChanged = Signal(str)
     openVideoRequested = Signal(str, bool, bool, bool, int, int)  # path, autoplay, loop, muted, w, h
     openVideoInPlaceRequested = Signal(str, int, int, int, int, bool, bool, bool, int, int) # path, x, y, w, h, autoplay, loop, muted, pw, ph

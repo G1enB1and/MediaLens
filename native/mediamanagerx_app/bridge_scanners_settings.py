@@ -1392,6 +1392,10 @@ class BridgeScannersSettingsMixin:
                 "metadata.display.aiprovenance": bool(self.settings.value("metadata/display/aiprovenance", False, type=bool)),
                 "metadata.display.aicharcards": bool(self.settings.value("metadata/display/aicharcards", False, type=bool)),
                 "metadata.display.airawpaths": bool(self.settings.value("metadata/display/airawpaths", False, type=bool)),
+                "metadata.display.people": bool(self.settings.value("metadata/display/people", True, type=bool)),
+                "people.bootstrap_tags": bool(self.settings.value("people/bootstrap_tags", True, type=bool)),
+                "people.sync_confirmed_to_tags": bool(self.settings.value("people/sync_confirmed_to_tags", False, type=bool)),
+                "people.match_threshold": str(self.settings.value("people/match_threshold", "balanced", type=str) or "balanced"),
                 "metadata.display.order": self.settings.value("metadata/display/order", "[]", type=str),
                 "updates.check_on_launch": bool(self.settings.value("updates/check_on_launch", True, type=bool)),
             }
@@ -1407,7 +1411,7 @@ class BridgeScannersSettingsMixin:
                 data[f"scanners.{scanner_key}.next_run_utc"] = payload["next_run_utc"]
                 data[f"scanners.{scanner_key}.status"] = payload["status"]
             for qkey in self.settings.allKeys():
-                if qkey.startswith("metadata/display/") or qkey.startswith("metadata/layout/") or qkey.startswith("duplicate/"):
+                if qkey.startswith("metadata/display/") or qkey.startswith("metadata/layout/") or qkey.startswith("duplicate/") or qkey.startswith("people/"):
                     data[qkey.replace("/", ".")] = self._coerce_setting_value(self.settings.value(qkey))
             return data
         except Exception:
