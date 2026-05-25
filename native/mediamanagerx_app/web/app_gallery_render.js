@@ -1979,11 +1979,12 @@ function wireCtxMenu() {
         hideCtx();
         break;
       case 'ctxToggleFavoritePerson':
-        if (personCardContext) {
+        if (item && item.__personCardContext) {
+          const targetPersonCardContext = item.__personCardContext;
           updatePersonFavorite({
-            id: Number(personCardContext.personId || 0),
-            display_name: String(personCardContext.personName || '').trim(),
-          }, !personCardContext.isFavorite);
+            id: Number(targetPersonCardContext.personId || 0),
+            display_name: String(targetPersonCardContext.personName || '').trim(),
+          }, !targetPersonCardContext.isFavorite);
         }
         hideCtx();
         break;
