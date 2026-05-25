@@ -938,6 +938,38 @@ function wireGalleryBackground() {
   syncScrollTopState();
 }
 
+let gPeopleProfileToastTimer = 0;
+let gPeopleProfileFooterTimer = 0;
+
+function showPeopleProfileUpdatedStatus(personName) {
+  const cleanName = String(personName || '').trim() || 'Person';
+  const message = `${cleanName}'s Profile Image Updated.`;
+  if (!gFooterProgressOwner) {
+    if (gPeopleProfileFooterTimer) {
+      window.clearTimeout(gPeopleProfileFooterTimer);
+      gPeopleProfileFooterTimer = 0;
+    }
+    setFooterProgress('people_profile', 'People:', message, 100);
+    gPeopleProfileFooterTimer = window.setTimeout(() => {
+      clearFooterProgress('people_profile');
+      gPeopleProfileFooterTimer = 0;
+    }, 5000);
+    return;
+  }
+  const toast = document.getElementById('peopleProfileToast');
+  const text = document.getElementById('peopleProfileToastText');
+  if (!toast || !text) return;
+  text.textContent = message;
+  toast.hidden = false;
+  if (gPeopleProfileToastTimer) {
+    window.clearTimeout(gPeopleProfileToastTimer);
+  }
+  gPeopleProfileToastTimer = window.setTimeout(() => {
+    toast.hidden = true;
+    gPeopleProfileToastTimer = 0;
+  }, 5000);
+}
+
 window.__mmx_setSearchQuery = function (query) {
   setAdvancedSearchQuery(String(query || ''));
 };

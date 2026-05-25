@@ -1958,8 +1958,14 @@ function wireCtxMenu() {
           const targetName = String((targetContext && targetContext.personName) || getSinglePersonContextName() || '').trim();
           if (targetContext && gBridge.set_person_preview_face && Number(targetContext.personId || 0) > 0 && Number(targetContext.faceId || 0) > 0) {
             gBridge.set_person_preview_face(Number(targetContext.personId || 0), Number(targetContext.faceId || 0));
+            if (typeof showPeopleProfileUpdatedStatus === 'function' && targetName) {
+              showPeopleProfileUpdatedStatus(targetName);
+            }
           } else if (targetName && gBridge.set_person_preview_for_media) {
             gBridge.set_person_preview_for_media(targetName, item.path);
+            if (typeof showPeopleProfileUpdatedStatus === 'function') {
+              showPeopleProfileUpdatedStatus(targetName);
+            }
           }
         }
         hideCtx();
