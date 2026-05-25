@@ -50,10 +50,10 @@ def ensure_people_tables(conn: sqlite3.Connection) -> None:
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_people_name ON people(name)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_people_confirmed ON people(is_confirmed)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_people_favorite ON people(is_favorite)")
     people_cols = {str(row[1] or "") for row in conn.execute("PRAGMA table_info(people)").fetchall()}
     if "is_favorite" not in people_cols:
         conn.execute("ALTER TABLE people ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_people_favorite ON people(is_favorite)")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS media_faces (
