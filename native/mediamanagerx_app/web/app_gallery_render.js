@@ -2087,6 +2087,30 @@ function updatePeopleFaceCardStatus(card, nextStatus, personName) {
   }
 }
 
+function removePeopleFaceReviewCard(card, fallbackRefresh = null) {
+  if (!card) {
+    if (typeof fallbackRefresh === 'function') fallbackRefresh();
+    return;
+  }
+  const parent = card.parentElement;
+  card.remove();
+  clearPeopleCardSelection();
+  if (!parent) {
+    if (typeof fallbackRefresh === 'function') fallbackRefresh();
+    return;
+  }
+  const remainingCards = parent.querySelectorAll('.person-face-card[data-face-id]');
+  if (remainingCards.length) return;
+  if (typeof fallbackRefresh === 'function') {
+    fallbackRefresh();
+    return;
+  }
+  const empty = document.createElement('div');
+  empty.className = 'empty';
+  empty.textContent = 'No face records for this person yet.';
+  parent.appendChild(empty);
+}
+
 function attachPeopleFaceBox(thumb, img, bbox) {
   if (!peopleFaceBoxesEnabled() || !thumb || !img || !Array.isArray(bbox) || bbox.length < 4) return;
   if (thumb._peopleFaceBoxResizeObserver && typeof thumb._peopleFaceBoxResizeObserver.disconnect === 'function') {
@@ -2629,7 +2653,7 @@ function createPersonFaceReviewCard(face, person, refresh) {
     e.stopPropagation();
     if (!gBridge.ignore_face) return;
     gBridge.ignore_face(Number(face.face_id || 0), function () {
-      if (typeof refresh === 'function') refresh(Number(face.face_id || 0));
+      removePeopleFaceReviewCard(card, typeof refresh === 'function' ? () => refresh(Number(face.face_id || 0)) : null);
     });
   });
   actions.appendChild(confirmBtn);
