@@ -113,10 +113,17 @@ def _preload(settings: dict) -> dict:
 def _detect_with_app(source: Path, app, insightface, ort, active_providers: list[str]) -> dict:
     try:
         import cv2
+        import numpy as np
+        from PIL import Image, ImageOps
     except Exception as exc:
-        raise RuntimeError(f"OpenCV runtime import failed: {exc}") from exc
+        raise RuntimeError(f"Face image runtime import failed: {exc}") from exc
 
-    image = cv2.imread(str(source))
+    try:
+        with Image.open(source) as pil_image:
+            oriented = ImageOps.exif_transpose(pil_image).convert("RGB")
+            image = cv2.cvtColor(np.array(oriented), cv2.COLOR_RGB2BGR)
+    except Exception:
+        image = cv2.imread(str(source))
     if image is None:
         raise RuntimeError("InsightFace could not read the source image.")
     height, width = image.shape[:2]

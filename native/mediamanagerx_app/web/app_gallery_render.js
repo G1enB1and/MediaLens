@@ -2009,7 +2009,9 @@ function attachPeopleFaceBox(thumb, img, bbox) {
   box.className = 'person-face-box';
   thumb.appendChild(box);
 
+  let rafId = 0;
   const positionBox = () => {
+    rafId = 0;
     const naturalW = Number(img.naturalWidth || 0);
     const naturalH = Number(img.naturalHeight || 0);
     const containerW = Number(thumb.clientWidth || 0);
@@ -2028,10 +2030,22 @@ function attachPeopleFaceBox(thumb, img, bbox) {
     box.style.width = `${w * scale}px`;
     box.style.height = `${h * scale}px`;
   };
+  const schedulePositionBox = () => {
+    if (rafId) return;
+    rafId = window.requestAnimationFrame(positionBox);
+  };
 
-  if (img.complete) positionBox();
-  img.addEventListener('load', positionBox, { once: true });
-  window.setTimeout(positionBox, 0);
+  if (img.complete) schedulePositionBox();
+  img.addEventListener('load', schedulePositionBox, { once: true });
+  if (typeof ResizeObserver !== 'undefined') {
+    const observer = new ResizeObserver(schedulePositionBox);
+    observer.observe(thumb);
+    observer.observe(img);
+  } else {
+    window.addEventListener('resize', schedulePositionBox);
+  }
+  window.setTimeout(schedulePositionBox, 0);
+  window.setTimeout(schedulePositionBox, 80);
 }
 
 function openPeopleGallery(mode = 'gallery') {
