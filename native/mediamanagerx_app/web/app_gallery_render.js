@@ -2291,6 +2291,23 @@ function openPersonSearch(name) {
   setAdvancedSearchQuery(`person:${quoteSearchValue(cleanName)}`);
 }
 
+function stripPeopleFiltersFromSearchQuery(query) {
+  const tokens = tokenizeSearchQuery(query).filter(Boolean);
+  const filtered = [];
+  for (const token of tokens) {
+    if (String(token || '').toUpperCase() === 'OR' || token === '|') {
+      filtered.push(token);
+      continue;
+    }
+    const parsed = parseSearchFieldTerm(token);
+    if (parsed && parsed.fieldKey === 'people_names') {
+      continue;
+    }
+    filtered.push(token);
+  }
+  return filtered.join(' ').replace(/\s+(OR|\|)\s*$/i, '').trim();
+}
+
 function ignorePersonGroup(person) {
   if (!person || !gBridge || !gBridge.ignore_person_group) return;
   const name = String(person.display_name || '').trim() || `Unnamed ${person.id || ''}`.trim();
@@ -3090,7 +3107,13 @@ document.addEventListener('DOMContentLoaded', () => {
       gPeopleCards = [];
       gPeopleReviewPerson = null;
       gPage = 0;
-      if (gBridge) refreshFromBridge(gBridge, true, { skipScanRefresh: true });
+      const nextQuery = stripPeopleFiltersFromSearchQuery(gSearchQuery || '');
+      clearGalleryForPendingRefresh('Loading gallery...');
+      if (nextQuery !== (gSearchQuery || '').trim()) {
+        setAdvancedSearchQuery(nextQuery);
+      } else if (gBridge) {
+        refreshFromBridge(gBridge, true, { skipScanRefresh: true });
+      }
       return;
     }
     if (val === 'pause') {
