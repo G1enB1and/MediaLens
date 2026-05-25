@@ -82,6 +82,9 @@ class BridgePeopleMixin:
             "loose": 0.36,
         }.get(value, 0.45)
 
+    def _people_skip_existing_scans_enabled(self) -> bool:
+        return bool(self.settings.value("people/skip_existing_scans", True, type=bool))
+
     def _run_insightface_detection(self, python_path: Path, spec, source_path: Path, settings_payload: dict) -> dict:
         launcher, worker_cwd, worker_pythonpath = self._local_ai_worker_launcher(python_path, spec.worker_module)
         command = [
@@ -481,6 +484,7 @@ class BridgePeopleMixin:
     @Slot(list, result=bool)
     def scan_faces_async(self, paths: list | None = None) -> bool:
         try:
+            from app.mediamanager.db.people_repo import list_prescanned_people_paths
             self._ensure_people_scan_state()
             if bool(self._people_scan_running):
                 self._people_scan_debug("scan requested while another People scan is running")
@@ -517,9 +521,30 @@ class BridgePeopleMixin:
                 else:
                     self._emit_people_scan_status("error", "No media files were selected or found in the current gallery scope.")
                 return False
+            skipped_existing = 0
+            if self._people_skip_existing_scans_enabled():
+                prescanned = list_prescanned_people_paths(self.conn, clean_paths, detection_engine="insightface")
+                if prescanned:
+                    before_existing_filter = len(clean_paths)
+                    clean_paths = [path for path in clean_paths if str(path or "").strip() not in prescanned]
+                    skipped_existing = before_existing_filter - len(clean_paths)
+                    if skipped_existing:
+                        self._people_scan_debug(f"skipped {skipped_existing} previously scanned files before People scan")
+            if not clean_paths:
+                message = "All supported files in the current People scope were already scanned. Uncheck Settings > People > Rescans skip prescanned files to force a rescan."
+                if skipped_unsupported:
+                    message = f"{message} Also skipped {skipped_unsupported} unsupported files."
+                self._people_scan_debug(message)
+                self._emit_people_scan_status("finished", message, current=0, total=0, detected=0, errors=0)
+                return True
             if skipped_unsupported:
                 self._people_scan_debug(f"skipped {skipped_unsupported} unsupported files before scan")
-            self._emit_people_scan_status("starting", f"Starting People scan for {len(clean_paths)} files...", current=0, total=len(clean_paths))
+            starting_message = f"Starting People scan for {len(clean_paths)} files..."
+            if skipped_existing:
+                starting_message += f" Skipped {skipped_existing} previously scanned."
+            if skipped_unsupported:
+                starting_message += f" Skipped {skipped_unsupported} unsupported."
+            self._emit_people_scan_status("starting", starting_message, current=0, total=len(clean_paths))
             self._people_scan_running = True
             threading.Thread(
                 target=self._scan_faces_worker,

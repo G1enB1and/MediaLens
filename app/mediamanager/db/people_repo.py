@@ -76,6 +76,19 @@ def ensure_people_tables(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_media_faces_media ON media_faces(media_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_media_faces_person ON media_faces(person_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_media_faces_status ON media_faces(status, ignored)")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS people_scan_state (
+          media_id INTEGER NOT NULL,
+          detection_engine TEXT NOT NULL DEFAULT 'insightface',
+          face_count INTEGER NOT NULL DEFAULT 0,
+          scanned_at_utc TEXT NOT NULL,
+          PRIMARY KEY(media_id, detection_engine),
+          FOREIGN KEY(media_id) REFERENCES media_items(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_people_scan_state_engine ON people_scan_state(detection_engine, scanned_at_utc)")
 
 
 def normalize_person_name(name: str) -> str:
@@ -400,6 +413,37 @@ def list_unconfirmed_faces(conn: sqlite3.Connection) -> list[dict]:
     return faces
 
 
+def list_prescanned_people_paths(
+    conn: sqlite3.Connection,
+    paths: Iterable[str],
+    *,
+    detection_engine: str = "insightface",
+) -> set[str]:
+    ensure_people_tables(conn)
+    normalized_paths = [normalize_windows_path(path) for path in paths if str(path or "").strip()]
+    if not normalized_paths:
+        return set()
+    placeholders = ", ".join("?" for _ in normalized_paths)
+    params = [str(detection_engine or "insightface"), str(detection_engine or "insightface"), *normalized_paths]
+    rows = conn.execute(
+        f"""
+        SELECT DISTINCT m.path
+        FROM media_items m
+        LEFT JOIN people_scan_state s
+          ON s.media_id = m.id
+         AND s.detection_engine = ?
+        LEFT JOIN media_faces f
+          ON f.media_id = m.id
+         AND f.detection_engine = ?
+        WHERE m.path IN ({placeholders})
+          AND (s.media_id IS NOT NULL OR f.id IS NOT NULL)
+        """
+        ,
+        params,
+    ).fetchall()
+    return {str(row[0] or "") for row in rows if str(row[0] or "").strip()}
+
+
 def _embedding_from_json(raw: str | None) -> list[float]:
     try:
         values = json.loads(str(raw or "[]"))
@@ -540,6 +584,15 @@ def replace_detected_faces(
             ),
         )
         inserted += 1
+    conn.execute(
+        """
+        INSERT INTO people_scan_state(media_id, detection_engine, face_count, scanned_at_utc)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(media_id, detection_engine)
+        DO UPDATE SET face_count = excluded.face_count, scanned_at_utc = excluded.scanned_at_utc
+        """,
+        (media_id, detection_engine, inserted, now),
+    )
     conn.commit()
     return inserted
 
