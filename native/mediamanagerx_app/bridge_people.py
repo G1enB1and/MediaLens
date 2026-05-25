@@ -338,10 +338,7 @@ class BridgePeopleMixin:
         from app.mediamanager.db.people_repo import set_person_preview_face
 
         try:
-            ok = bool(set_person_preview_face(self.conn, int(person_id or 0), int(face_id or 0)))
-            if ok:
-                self.galleryScopeChanged.emit()
-            return ok
+            return bool(set_person_preview_face(self.conn, int(person_id or 0), int(face_id or 0)))
         except Exception as exc:
             try:
                 self._log(f"Set person preview face failed: {exc}")
@@ -354,10 +351,7 @@ class BridgePeopleMixin:
         from app.mediamanager.db.people_repo import set_person_preview_for_media
 
         try:
-            ok = bool(set_person_preview_for_media(self.conn, person_name, path))
-            if ok:
-                self.galleryScopeChanged.emit()
-            return ok
+            return bool(set_person_preview_for_media(self.conn, person_name, path))
         except Exception as exc:
             try:
                 self._log(f"Set person preview for media failed: {exc}")

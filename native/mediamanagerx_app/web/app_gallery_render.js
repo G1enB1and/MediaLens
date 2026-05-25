@@ -1956,18 +1956,10 @@ function wireCtxMenu() {
         if (item && item.path && gBridge) {
           const targetContext = item.__peopleContext || null;
           const targetName = String((targetContext && targetContext.personName) || getSinglePersonContextName() || '').trim();
-          let ok = false;
           if (targetContext && gBridge.set_person_preview_face && Number(targetContext.personId || 0) > 0 && Number(targetContext.faceId || 0) > 0) {
-            ok = !!gBridge.set_person_preview_face(Number(targetContext.personId || 0), Number(targetContext.faceId || 0));
+            gBridge.set_person_preview_face(Number(targetContext.personId || 0), Number(targetContext.faceId || 0));
           } else if (targetName && gBridge.set_person_preview_for_media) {
-            ok = !!gBridge.set_person_preview_for_media(targetName, item.path);
-          }
-          if (ok && targetContext && gPeopleMode) {
-            if (gPeopleMode === 'unconfirmed' && typeof openUnconfirmedPeopleReview === 'function') {
-              openUnconfirmedPeopleReview();
-            } else if (gPeopleReviewPerson && typeof openPersonReview === 'function') {
-              openPersonReview(gPeopleReviewPerson);
-            }
+            gBridge.set_person_preview_for_media(targetName, item.path);
           }
         }
         hideCtx();

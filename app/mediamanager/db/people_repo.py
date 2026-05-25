@@ -218,16 +218,30 @@ def confirm_face(conn: sqlite3.Connection, face_id: int) -> bool:
 
 
 def _preview_face_for_person(conn: sqlite3.Connection, person_id: int) -> dict:
-    rows = conn.execute(
+    explicit_row = conn.execute(
         """
         SELECT f.id, m.path, f.bbox_left, f.bbox_top, f.bbox_width, f.bbox_height, f.landmarks_json
-        FROM media_faces f
+        FROM people p
+        JOIN media_faces f ON f.id = p.preview_face_id
         JOIN media_items m ON m.id = f.media_id
-        WHERE f.person_id = ? AND COALESCE(f.ignored, 0) = 0
-        ORDER BY f.match_confidence DESC, f.id
+        WHERE p.id = ?
+          AND f.person_id = p.id
+          AND COALESCE(f.ignored, 0) = 0
         """,
         (int(person_id or 0),),
-    ).fetchall()
+    ).fetchone()
+    rows = [explicit_row] if explicit_row else []
+    if not rows:
+        rows = conn.execute(
+            """
+            SELECT f.id, m.path, f.bbox_left, f.bbox_top, f.bbox_width, f.bbox_height, f.landmarks_json
+            FROM media_faces f
+            JOIN media_items m ON m.id = f.media_id
+            WHERE f.person_id = ? AND COALESCE(f.ignored, 0) = 0
+            ORDER BY f.match_confidence DESC, f.id
+            """,
+            (int(person_id or 0),),
+        ).fetchall()
     for row in rows:
         path = row[1] or ""
         if not _is_people_supported_image_path(path):
