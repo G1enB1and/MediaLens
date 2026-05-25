@@ -2640,7 +2640,8 @@ function createPersonFaceReviewCard(face, person, refresh) {
   card.appendChild(pathLabel);
   card.appendChild(statusLabel);
   card.appendChild(actions);
-  card.addEventListener('click', () => {
+  card.addEventListener('click', (e) => {
+    e.stopPropagation();
     showPeopleMetadata(face.path || '', card);
   });
   card.addEventListener('keydown', (e) => {
