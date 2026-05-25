@@ -1696,7 +1696,7 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   flex-wrap: wrap;
   gap: 12px;
   position: sticky;
-  top: 0;
+  top: -16px;
   z-index: 4;
   padding: 10px 12px;
   border: 1px solid var(--border);
