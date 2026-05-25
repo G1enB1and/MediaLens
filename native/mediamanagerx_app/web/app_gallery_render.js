@@ -2265,20 +2265,52 @@ function updatePeoplePauseOption() {
   option.setAttribute('aria-hidden', gPeopleScanActive ? 'false' : 'true');
 }
 
+function openPeopleTextInput(title, label, text, callback) {
+  if (gBridge && gBridge.themed_text_input) {
+    gBridge.themed_text_input(String(title || ''), String(label || ''), String(text || ''), function (value) {
+      const nextValue = String(value || '').trim();
+      if (!nextValue) return;
+      if (typeof callback === 'function') callback(nextValue);
+    });
+    return;
+  }
+  const fallback = window.prompt(String(label || ''), String(text || ''));
+  const nextValue = String(fallback || '').trim();
+  if (!nextValue) return;
+  if (typeof callback === 'function') callback(nextValue);
+}
+
+function openPeopleConfirm(title, message, callback) {
+  if (gBridge && gBridge.themed_confirm) {
+    gBridge.themed_confirm(String(title || ''), String(message || ''), function (confirmed) {
+      if (!confirmed) return;
+      if (typeof callback === 'function') callback();
+    });
+    return;
+  }
+  if (!window.confirm(String(message || ''))) return;
+  if (typeof callback === 'function') callback();
+}
+
 function namePersonGroup(person, afterName) {
   if (!person || !gBridge || !gBridge.name_person_group) return;
   const currentName = person && person.is_confirmed ? String(person.display_name || '').trim() : '';
-  const nextName = window.prompt('Name this person group', currentName);
-  if (!nextName || !String(nextName).trim()) return;
-  gBridge.name_person_group(Number(person.id || 0), String(nextName).trim(), function (nextId) {
-    const updated = Object.assign({}, person, {
-      id: Number(nextId || person.id || 0),
-      display_name: String(nextName).trim(),
-      is_confirmed: true,
-    });
-    if (typeof afterName === 'function') afterName(updated);
-    else openPeopleGallery(gPeopleMode || 'gallery');
-  });
+  openPeopleTextInput(
+    person && person.is_confirmed ? 'Rename Person Group' : 'Name Person Group',
+    'Name this person group',
+    currentName,
+    function (nextName) {
+      gBridge.name_person_group(Number(person.id || 0), nextName, function (nextId) {
+        const updated = Object.assign({}, person, {
+          id: Number(nextId || person.id || 0),
+          display_name: nextName,
+          is_confirmed: true,
+        });
+        if (typeof afterName === 'function') afterName(updated);
+        else openPeopleGallery(gPeopleMode || 'gallery');
+      });
+    }
+  );
 }
 
 function openPersonSearch(name) {
@@ -2311,10 +2343,10 @@ function stripPeopleFiltersFromSearchQuery(query) {
 function ignorePersonGroup(person) {
   if (!person || !gBridge || !gBridge.ignore_person_group) return;
   const name = String(person.display_name || '').trim() || `Unnamed ${person.id || ''}`.trim();
-  const ok = window.confirm(`Ignore all faces in ${name}?`);
-  if (!ok) return;
-  gBridge.ignore_person_group(Number(person.id || 0), function () {
-    openPeopleGallery(gPeopleMode || 'gallery');
+  openPeopleConfirm('Ignore Person Group', `Ignore all faces in ${name}?`, function () {
+    gBridge.ignore_person_group(Number(person.id || 0), function () {
+      openPeopleGallery(gPeopleMode || 'gallery');
+    });
   });
 }
 
@@ -2534,10 +2566,11 @@ function createPersonFaceReviewCard(face, person, refresh) {
   nameBtn.textContent = 'Move / Rename';
   nameBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    const nextName = window.prompt('Name this person', personName);
-    if (!nextName || !gBridge.assign_face_person) return;
-    gBridge.assign_face_person(Number(face.face_id || 0), String(nextName).trim(), function () {
-      if (typeof refresh === 'function') refresh(Number(face.face_id || 0));
+    openPeopleTextInput('Move or Rename Face', 'Name this person', personName, function (nextName) {
+      if (!gBridge.assign_face_person) return;
+      gBridge.assign_face_person(Number(face.face_id || 0), nextName, function () {
+        if (typeof refresh === 'function') refresh(Number(face.face_id || 0));
+      });
     });
   });
   const notBtn = document.createElement('button');
@@ -3130,8 +3163,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (val === 'scan') {
       if (gBridge && gBridge.scan_faces_async) {
-        const paths = Array.isArray(gMedia) ? gMedia.map(item => item && item.path).filter(Boolean) : [];
-        gBridge.scan_faces_async(paths, function (ok) {
+        gBridge.scan_faces_async(function (ok) {
           setGlobalLoading(false);
           if (ok) return;
           const el = document.getElementById('mediaList');
