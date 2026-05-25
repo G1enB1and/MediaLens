@@ -1591,7 +1591,7 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 
 .people-gallery {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
   gap: 14px;
   padding: 14px;
 }
@@ -1650,19 +1650,40 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 
 .person-actions {
   display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 
 .person-actions .tb-btn {
+  width: 100%;
   min-width: 0;
-  flex: 1;
+  justify-content: center;
+  white-space: nowrap;
 }
 
 .person-review-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
+  flex-wrap: wrap;
   gap: 12px;
   padding: 14px 14px 0;
+}
+
+.person-review-head .advanced-search-section-title {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.person-confirm-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.person-confirm-btn img {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
 }
 

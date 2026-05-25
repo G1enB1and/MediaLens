@@ -231,6 +231,41 @@ class BridgePeopleMixin:
                 pass
             return False
 
+    @Slot(int, str, result=int)
+    def name_person_group(self, person_id: int, person_name: str) -> int:
+        from app.mediamanager.db.people_repo import name_person_group
+
+        try:
+            next_id = name_person_group(self.conn, int(person_id or 0), person_name)
+            self._clear_gallery_count_cache()
+            self.galleryFilterSensitiveMetadataChanged.emit()
+            self.galleryScopeChanged.emit()
+            return int(next_id or 0)
+        except Exception as exc:
+            try:
+                self._log(f"Name person group failed: {exc}")
+            except Exception:
+                pass
+            return 0
+
+    @Slot(int, result=bool)
+    def confirm_person_group(self, person_id: int) -> bool:
+        from app.mediamanager.db.people_repo import confirm_person_group
+
+        try:
+            ok = confirm_person_group(self.conn, int(person_id or 0))
+            if ok:
+                self._clear_gallery_count_cache()
+                self.galleryFilterSensitiveMetadataChanged.emit()
+                self.galleryScopeChanged.emit()
+            return bool(ok)
+        except Exception as exc:
+            try:
+                self._log(f"Confirm person group failed: {exc}")
+            except Exception:
+                pass
+            return False
+
     @Slot(int, str, result=bool)
     def assign_face_person(self, face_id: int, person_name: str) -> bool:
         from app.mediamanager.db.people_repo import assign_face_to_person

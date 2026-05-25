@@ -97,6 +97,57 @@ def upsert_person(conn: sqlite3.Connection, name: str, *, confirmed: bool = True
     return int(cur.lastrowid)
 
 
+def name_person_group(conn: sqlite3.Connection, person_id: int, name: str) -> int:
+    ensure_people_tables(conn)
+    display_name = normalize_person_name(name)
+    if not display_name:
+        raise ValueError("person name is required")
+    source_id = int(person_id or 0)
+    slug = _person_slug(display_name)
+    now = _utc_now_iso()
+    existing = conn.execute("SELECT id FROM people WHERE name = ? AND id != ?", (slug, source_id)).fetchone()
+    if existing:
+        target_id = int(existing[0])
+        conn.execute(
+            "UPDATE media_faces SET person_id = ?, status = CASE WHEN status = 'unreviewed' THEN 'suggested' ELSE status END, updated_at_utc = ? WHERE person_id = ?",
+            (target_id, now, source_id),
+        )
+        conn.execute("UPDATE people SET is_confirmed = 1, updated_at_utc = ? WHERE id = ?", (now, target_id))
+        conn.execute("DELETE FROM people WHERE id = ? AND is_confirmed = 0", (source_id,))
+        conn.commit()
+        return target_id
+    conn.execute(
+        """
+        UPDATE people
+        SET name = ?, display_name = ?, is_confirmed = 1, updated_at_utc = ?
+        WHERE id = ?
+        """,
+        (slug, display_name, now, source_id),
+    )
+    conn.execute(
+        "UPDATE media_faces SET status = CASE WHEN status = 'unreviewed' THEN 'suggested' ELSE status END, updated_at_utc = ? WHERE person_id = ?",
+        (now, source_id),
+    )
+    conn.commit()
+    return source_id
+
+
+def confirm_person_group(conn: sqlite3.Connection, person_id: int) -> bool:
+    ensure_people_tables(conn)
+    now = _utc_now_iso()
+    cur = conn.execute(
+        """
+        UPDATE media_faces
+        SET status = 'confirmed', match_confidence = COALESCE(match_confidence, 1), ignored = 0, updated_at_utc = ?
+        WHERE person_id = ? AND COALESCE(ignored, 0) = 0
+        """,
+        (now, int(person_id or 0)),
+    )
+    conn.execute("UPDATE people SET is_confirmed = 1, updated_at_utc = ? WHERE id = ?", (now, int(person_id or 0)))
+    conn.commit()
+    return int(cur.rowcount or 0) > 0
+
+
 def list_people(conn: sqlite3.Connection, *, include_unnamed: bool = True) -> list[dict]:
     ensure_people_tables(conn)
     where = "" if include_unnamed else "WHERE p.is_confirmed != 0"

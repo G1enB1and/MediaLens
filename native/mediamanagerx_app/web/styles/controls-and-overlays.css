@@ -387,6 +387,10 @@
   transition: background 0.1s;
 }
 
+.select-options div[hidden] {
+  display: none;
+}
+
 .select-options .select-group-label {
   padding: 8px 12px 4px;
   cursor: default;

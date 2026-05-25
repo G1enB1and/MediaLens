@@ -2029,7 +2029,24 @@ function updatePeoplePauseOption() {
   const option = select && select.querySelector('[data-value="pause"]');
   if (!option) return;
   option.textContent = gPeopleScanPaused ? 'Resume Scan' : 'Pause Scan';
-  option.classList.toggle('disabled', !gPeopleScanActive);
+  option.hidden = !gPeopleScanActive;
+  option.setAttribute('aria-hidden', gPeopleScanActive ? 'false' : 'true');
+}
+
+function namePersonGroup(person, afterName) {
+  if (!person || !gBridge || !gBridge.name_person_group) return;
+  const currentName = person && person.is_confirmed ? String(person.display_name || '').trim() : '';
+  const nextName = window.prompt('Name this person group', currentName);
+  if (!nextName || !String(nextName).trim()) return;
+  gBridge.name_person_group(Number(person.id || 0), String(nextName).trim(), function (nextId) {
+    const updated = Object.assign({}, person, {
+      id: Number(nextId || person.id || 0),
+      display_name: String(nextName).trim(),
+      is_confirmed: true,
+    });
+    if (typeof afterName === 'function') afterName(updated);
+    else openPeopleGallery(gPeopleMode || 'gallery');
+  });
 }
 
 function renderPeopleCards(people) {
@@ -2073,14 +2090,23 @@ function renderPeopleCards(people) {
     count.textContent = `${fileCount} file${fileCount === 1 ? '' : 's'} | ${faceCount} face${faceCount === 1 ? '' : 's'}`;
     const actions = document.createElement('div');
     actions.className = 'person-actions';
+    const nameBtn = document.createElement('button');
+    nameBtn.type = 'button';
+    nameBtn.className = 'tb-btn';
+    nameBtn.textContent = person.is_confirmed ? 'Rename' : 'Name';
+    nameBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      namePersonGroup(person);
+    });
     const reviewBtn = document.createElement('button');
     reviewBtn.type = 'button';
     reviewBtn.className = 'tb-btn';
-    reviewBtn.textContent = person.is_confirmed ? 'Review' : 'Name';
+    reviewBtn.textContent = 'Review';
     reviewBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       openPersonReview(person);
     });
+    actions.appendChild(nameBtn);
     actions.appendChild(reviewBtn);
     card.appendChild(thumb);
     card.appendChild(title);
@@ -2127,7 +2153,25 @@ function renderPersonReview(person, faces) {
   back.className = 'tb-btn';
   back.textContent = 'Back to People';
   back.addEventListener('click', () => openPeopleGallery(gPeopleMode));
+  const nameGroupBtn = document.createElement('button');
+  nameGroupBtn.type = 'button';
+  nameGroupBtn.className = 'tb-btn';
+  nameGroupBtn.textContent = person.is_confirmed ? 'Rename Group' : 'Name Group';
+  nameGroupBtn.addEventListener('click', () => namePersonGroup(person, (updated) => openPersonReview(updated)));
+  const confirmGroupBtn = document.createElement('button');
+  confirmGroupBtn.type = 'button';
+  confirmGroupBtn.className = 'tb-btn person-confirm-btn';
+  confirmGroupBtn.innerHTML = '<img src="icons/check-green.svg" alt="" /> <span>Confirm Name</span>';
+  confirmGroupBtn.disabled = !person.is_confirmed;
+  confirmGroupBtn.addEventListener('click', () => {
+    if (!gBridge || !gBridge.confirm_person_group) return;
+    gBridge.confirm_person_group(Number(person.id || 0), function () {
+      openPersonReview(Object.assign({}, person, { is_confirmed: true }));
+    });
+  });
   head.appendChild(title);
+  head.appendChild(nameGroupBtn);
+  head.appendChild(confirmGroupBtn);
   head.appendChild(back);
   el.appendChild(head);
   if (!faces.length) {
@@ -2155,7 +2199,7 @@ function renderPersonReview(person, faces) {
     const nameBtn = document.createElement('button');
     nameBtn.type = 'button';
     nameBtn.className = 'tb-btn';
-    nameBtn.textContent = 'Name';
+    nameBtn.textContent = 'Move / Rename';
     nameBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       const nextName = window.prompt('Name this person', person.display_name || '');
@@ -2494,7 +2538,7 @@ document.addEventListener('DOMContentLoaded', () => {
     options.addEventListener('click', (e) => {
       e.stopPropagation();
       const opt = e.target.closest('[data-value]');
-      if (!opt) return;
+      if (!opt || opt.hidden) return;
 
       const val = opt.getAttribute('data-value');
       const text = opt.textContent;
@@ -2726,6 +2770,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     openPeopleGallery(val === 'unnamed' ? 'unnamed' : 'gallery');
   });
+  updatePeoplePauseOption();
 });
 
 // Lazy poster loading for videos
