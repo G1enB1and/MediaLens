@@ -1528,6 +1528,7 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
   const unpinFolderBtn = document.getElementById('ctxUnpinFolder');
   const renameBtn = document.getElementById('ctxRename');
   const addToCollectionBtn = document.getElementById('ctxAddToCollection');
+  const toggleFavoritePersonBtn = document.getElementById('ctxToggleFavoritePerson');
   const setPersonProfileBtn = document.getElementById('ctxSetPersonProfile');
 
   if (gBridge && gBridge.debug_log) {
@@ -1546,6 +1547,7 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
   const hasItem = !!item;
   const isFolder = hasItem && !!item.is_folder;
   const isSupportedMedia = hasItem && isSupportedMediaItem(item);
+  const personCardContext = item && item.__personCardContext ? item.__personCardContext : null;
   const peopleContext = item && item.__peopleContext ? item.__peopleContext : null;
   const searchPersonName = getSinglePersonContextName();
   const canSetPersonProfile = Boolean(
@@ -1564,6 +1566,12 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
   if (unpinFolderBtn) unpinFolderBtn.style.display = hasItem && isFolder && isPinnedFolder(item && item.path) ? 'block' : 'none';
   const metaBtn = document.getElementById('ctxMeta');
   if (metaBtn) metaBtn.style.display = isSupportedMedia ? 'block' : 'none';
+  if (toggleFavoritePersonBtn) {
+    toggleFavoritePersonBtn.style.display = personCardContext ? 'block' : 'none';
+    toggleFavoritePersonBtn.textContent = personCardContext && personCardContext.isFavorite
+      ? 'Remove from Favorite People'
+      : 'Add to Favorite People';
+  }
   if (setPersonProfileBtn) {
     const personName = String((peopleContext && peopleContext.personName) || searchPersonName || '').trim();
     setPersonProfileBtn.style.display = canSetPersonProfile ? 'block' : 'none';
@@ -1967,6 +1975,15 @@ function wireCtxMenu() {
               showPeopleProfileUpdatedStatus(targetName);
             }
           }
+        }
+        hideCtx();
+        break;
+      case 'ctxToggleFavoritePerson':
+        if (personCardContext) {
+          updatePersonFavorite({
+            id: Number(personCardContext.personId || 0),
+            display_name: String(personCardContext.personName || '').trim(),
+          }, !personCardContext.isFavorite);
         }
         hideCtx();
         break;
@@ -2492,6 +2509,23 @@ function ignorePersonGroup(person) {
   });
 }
 
+function updatePersonFavorite(person, favorite) {
+  if (!person || !gBridge || !gBridge.set_person_favorite) return;
+  const nextFavorite = !!favorite;
+    gBridge.set_person_favorite(Number(person.id || 0), nextFavorite, function (ok) {
+      if (!ok) return;
+      const message = nextFavorite
+        ? `${String(person.display_name || '').trim() || 'Person'} Added to Favorite People.`
+        : `${String(person.display_name || '').trim() || 'Person'} Removed from Favorite People.`;
+      if (typeof showPeopleTransientStatus === 'function') {
+        showPeopleTransientStatus(message);
+      }
+      if (gPeopleMode === 'gallery') {
+        openPeopleGallery('gallery');
+      }
+  });
+}
+
 function clearPeopleCardSelection() {
   document.querySelectorAll('.person-card.selected').forEach((card) => card.classList.remove('selected'));
 }
@@ -2541,7 +2575,29 @@ function renderPeopleCards(people) {
     el.appendChild(empty);
     return;
   }
-  list.forEach((person) => {
+  const favorites = list.filter((person) => !!person.is_favorite);
+  const others = list.filter((person) => !person.is_favorite);
+  const sections = [];
+  if (favorites.length) sections.push({ title: 'Favorite People', people: favorites, favoriteSection: true });
+  if (others.length) sections.push({ title: favorites.length ? 'All People' : '', people: others, favoriteSection: false });
+  sections.forEach((section, sectionIndex) => {
+    if (section.title) {
+      const header = document.createElement('div');
+      header.className = 'people-section-head';
+      header.style.gridColumn = '1 / -1';
+      const title = document.createElement('div');
+      title.className = 'advanced-search-section-title';
+      title.textContent = section.title;
+      header.appendChild(title);
+      el.appendChild(header);
+      if (!section.favoriteSection && favorites.length) {
+        const separator = document.createElement('div');
+        separator.className = 'people-section-separator';
+        separator.style.gridColumn = '1 / -1';
+        el.appendChild(separator);
+      }
+    }
+    section.people.forEach((person) => {
     const card = document.createElement('div');
     card.className = 'person-card';
     card.tabIndex = 0;
@@ -2620,6 +2676,20 @@ function renderPeopleCards(people) {
     card.appendChild(title);
     card.appendChild(count);
     card.appendChild(actions);
+    card.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showCtx(e.clientX, e.clientY, {
+        path: String(person.preview_path || ''),
+        media_type: 'image',
+        is_folder: false,
+        __personCardContext: {
+          personId: Number(person.id || 0),
+          personName: name,
+          isFavorite: !!person.is_favorite,
+        },
+      }, -1, false);
+    });
     card.addEventListener('click', () => {
       openPersonSearch(name);
     });
@@ -2630,6 +2700,7 @@ function renderPeopleCards(people) {
       }
     });
     el.appendChild(card);
+    });
   });
 }
 

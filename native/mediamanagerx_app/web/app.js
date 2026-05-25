@@ -941,15 +941,15 @@ function wireGalleryBackground() {
 let gPeopleProfileToastTimer = 0;
 let gPeopleProfileFooterTimer = 0;
 
-function showPeopleProfileUpdatedStatus(personName) {
-  const cleanName = String(personName || '').trim() || 'Person';
-  const message = `${cleanName}'s Profile Image Updated.`;
+function showPeopleTransientStatus(message) {
+  const cleanMessage = String(message || '').trim();
+  if (!cleanMessage) return;
   if (!gFooterProgressOwner) {
     if (gPeopleProfileFooterTimer) {
       window.clearTimeout(gPeopleProfileFooterTimer);
       gPeopleProfileFooterTimer = 0;
     }
-    setFooterProgress('people_profile', 'People:', message, 100);
+    setFooterProgress('people_profile', 'People:', cleanMessage, 100);
     gPeopleProfileFooterTimer = window.setTimeout(() => {
       clearFooterProgress('people_profile');
       gPeopleProfileFooterTimer = 0;
@@ -959,7 +959,7 @@ function showPeopleProfileUpdatedStatus(personName) {
   const toast = document.getElementById('peopleProfileToast');
   const text = document.getElementById('peopleProfileToastText');
   if (!toast || !text) return;
-  text.textContent = message;
+  text.textContent = cleanMessage;
   toast.hidden = false;
   if (gPeopleProfileToastTimer) {
     window.clearTimeout(gPeopleProfileToastTimer);
@@ -968,6 +968,11 @@ function showPeopleProfileUpdatedStatus(personName) {
     toast.hidden = true;
     gPeopleProfileToastTimer = 0;
   }, 5000);
+}
+
+function showPeopleProfileUpdatedStatus(personName) {
+  const cleanName = String(personName || '').trim() || 'Person';
+  showPeopleTransientStatus(`${cleanName}'s Profile Image Updated.`);
 }
 
 window.__mmx_setSearchQuery = function (query) {

@@ -1596,6 +1596,19 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   padding: 0 14px 14px;
 }
 
+.people-section-head {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding-top: 6px;
+}
+
+.people-section-separator {
+  height: 1px;
+  background: var(--border);
+  margin: -4px 0 4px;
+}
+
 .person-card {
   display: flex;
   flex-direction: column;

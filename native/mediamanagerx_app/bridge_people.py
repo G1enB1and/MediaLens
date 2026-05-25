@@ -359,6 +359,22 @@ class BridgePeopleMixin:
                 pass
             return False
 
+    @Slot(int, bool, result=bool)
+    def set_person_favorite(self, person_id: int, favorite: bool) -> bool:
+        from app.mediamanager.db.people_repo import set_person_favorite
+
+        try:
+            ok = bool(set_person_favorite(self.conn, int(person_id or 0), bool(favorite)))
+            if ok:
+                self.galleryScopeChanged.emit()
+            return ok
+        except Exception as exc:
+            try:
+                self._log(f"Set person favorite failed: {exc}")
+            except Exception:
+                pass
+            return False
+
     @Slot(str, str, result=bool)
     def assign_media_person(self, path: str, person_name: str) -> bool:
         from app.mediamanager.db.people_repo import add_manual_face_assignment

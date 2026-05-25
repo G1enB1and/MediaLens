@@ -41,6 +41,7 @@ def ensure_people_tables(conn: sqlite3.Connection) -> None:
           name TEXT,
           display_name TEXT NOT NULL,
           is_confirmed INTEGER NOT NULL DEFAULT 0,
+          is_favorite INTEGER NOT NULL DEFAULT 0,
           preview_face_id INTEGER,
           created_at_utc TEXT NOT NULL,
           updated_at_utc TEXT NOT NULL
@@ -49,6 +50,10 @@ def ensure_people_tables(conn: sqlite3.Connection) -> None:
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_people_name ON people(name)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_people_confirmed ON people(is_confirmed)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_people_favorite ON people(is_favorite)")
+    people_cols = {str(row[1] or "") for row in conn.execute("PRAGMA table_info(people)").fetchall()}
+    if "is_favorite" not in people_cols:
+        conn.execute("ALTER TABLE people ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS media_faces (
@@ -322,6 +327,20 @@ def set_person_preview_for_media(conn: sqlite3.Connection, person_name: str, pat
     return set_person_preview_face(conn, target_person_id, int(row[0] or 0))
 
 
+def set_person_favorite(conn: sqlite3.Connection, person_id: int, favorite: bool) -> bool:
+    ensure_people_tables(conn)
+    target_person_id = int(person_id or 0)
+    if target_person_id <= 0:
+        return False
+    now = _utc_now_iso()
+    cur = conn.execute(
+        "UPDATE people SET is_favorite = ?, updated_at_utc = ? WHERE id = ?",
+        (1 if favorite else 0, now, target_person_id),
+    )
+    conn.commit()
+    return int(cur.rowcount or 0) > 0
+
+
 def _supported_face_counts_for_person(conn: sqlite3.Connection, person_id: int) -> tuple[int, int]:
     rows = conn.execute(
         """
@@ -352,6 +371,7 @@ def list_people(conn: sqlite3.Connection, *, include_unnamed: bool = True) -> li
             p.name,
             p.display_name,
             p.is_confirmed,
+            p.is_favorite,
             COUNT(DISTINCT f.media_id) AS file_count,
             COUNT(f.id) AS face_count,
             COALESCE(p.preview_face_id, MIN(f.id)) AS preview_face_id,
@@ -368,7 +388,7 @@ def list_people(conn: sqlite3.Connection, *, include_unnamed: bool = True) -> li
         {where}
         GROUP BY p.id
         HAVING face_count > 0 OR p.is_confirmed != 0
-        ORDER BY p.is_confirmed DESC, LOWER(p.display_name), p.id
+        ORDER BY p.is_favorite DESC, p.is_confirmed DESC, LOWER(p.display_name), p.id
         """
     ).fetchall()
     people: list[dict] = []
@@ -383,9 +403,10 @@ def list_people(conn: sqlite3.Connection, *, include_unnamed: bool = True) -> li
                 "name": row[1] or "",
                 "display_name": row[2] or "",
                 "is_confirmed": bool(row[3]),
+                "is_favorite": bool(row[4]),
                 "file_count": file_count,
                 "face_count": face_count,
-                "preview_face_id": int(preview.get("preview_face_id") or row[6] or 0),
+                "preview_face_id": int(preview.get("preview_face_id") or row[7] or 0),
                 "preview_path": preview.get("preview_path") or "",
                 "preview_bbox": preview.get("preview_bbox") or [],
                 "preview_landmarks": preview.get("preview_landmarks") or [],
