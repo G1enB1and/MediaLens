@@ -47,6 +47,9 @@ class PeopleSettingsPage(SettingsPage):
         self.show_face_boxes = QCheckBox("Show face boxes in People review")
         self.show_face_boxes.setCursor(Qt.CursorShape.PointingHandCursor)
         workflow_layout.addWidget(self.show_face_boxes)
+        self.show_face_landmarks = QCheckBox("Show face landmarks in People review")
+        self.show_face_landmarks.setCursor(Qt.CursorShape.PointingHandCursor)
+        workflow_layout.addWidget(self.show_face_landmarks)
         layout.addWidget(workflow_box)
 
         threshold_box = QGroupBox("Matching")
@@ -64,6 +67,7 @@ class PeopleSettingsPage(SettingsPage):
         self.auto_apply_tags.toggled.connect(lambda value: self.dialog.set_setting_bool("people.sync_confirmed_to_tags", bool(value)))
         self.skip_existing_scans.toggled.connect(lambda value: self.dialog.set_setting_bool("people.skip_existing_scans", bool(value)))
         self.show_face_boxes.toggled.connect(lambda value: self.dialog.set_setting_bool("people.show_face_boxes", bool(value)))
+        self.show_face_landmarks.toggled.connect(lambda value: self.dialog.set_setting_bool("people.show_face_landmarks", bool(value)))
         self.engine_combo.currentIndexChanged.connect(self._save_engine)
         self.threshold_combo.currentIndexChanged.connect(self._save_threshold)
 
@@ -72,6 +76,7 @@ class PeopleSettingsPage(SettingsPage):
         self.auto_apply_tags.blockSignals(True)
         self.skip_existing_scans.blockSignals(True)
         self.show_face_boxes.blockSignals(True)
+        self.show_face_landmarks.blockSignals(True)
         self.engine_combo.blockSignals(True)
         self.threshold_combo.blockSignals(True)
         try:
@@ -79,6 +84,7 @@ class PeopleSettingsPage(SettingsPage):
             self.auto_apply_tags.setChecked(bool(self.settings.value("people/sync_confirmed_to_tags", False, type=bool)))
             self.skip_existing_scans.setChecked(bool(self.settings.value("people/skip_existing_scans", True, type=bool)))
             self.show_face_boxes.setChecked(bool(self.settings.value("people/show_face_boxes", True, type=bool)))
+            self.show_face_landmarks.setChecked(bool(self.settings.value("people/show_face_landmarks", False, type=bool)))
             engine = str(self.settings.value("people/recognition_engine", "none", type=str) or "none")
             engine_index = self.engine_combo.findData(engine)
             self.engine_combo.setCurrentIndex(engine_index if engine_index >= 0 else 0)
@@ -91,6 +97,7 @@ class PeopleSettingsPage(SettingsPage):
             self.auto_apply_tags.blockSignals(False)
             self.skip_existing_scans.blockSignals(False)
             self.show_face_boxes.blockSignals(False)
+            self.show_face_landmarks.blockSignals(False)
             self.engine_combo.blockSignals(False)
             self.threshold_combo.blockSignals(False)
 

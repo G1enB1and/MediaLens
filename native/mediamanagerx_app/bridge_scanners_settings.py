@@ -1397,6 +1397,7 @@ class BridgeScannersSettingsMixin:
                 "people.sync_confirmed_to_tags": bool(self.settings.value("people/sync_confirmed_to_tags", False, type=bool)),
                 "people.skip_existing_scans": bool(self.settings.value("people/skip_existing_scans", True, type=bool)),
                 "people.show_face_boxes": bool(self.settings.value("people/show_face_boxes", True, type=bool)),
+                "people.show_face_landmarks": bool(self.settings.value("people/show_face_landmarks", False, type=bool)),
                 "people.match_threshold": str(self.settings.value("people/match_threshold", "balanced", type=str) or "balanced"),
                 "metadata.display.order": self.settings.value("metadata/display/order", "[]", type=str),
                 "updates.check_on_launch": bool(self.settings.value("updates/check_on_launch", True, type=bool)),

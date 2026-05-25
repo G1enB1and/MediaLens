@@ -58,6 +58,7 @@ def ensure_people_tables(conn: sqlite3.Connection) -> None:
           detection_engine TEXT NOT NULL DEFAULT 'insightface',
           recognition_model TEXT,
           embedding_json TEXT,
+          landmarks_json TEXT,
           bbox_left REAL NOT NULL DEFAULT 0,
           bbox_top REAL NOT NULL DEFAULT 0,
           bbox_width REAL NOT NULL DEFAULT 0,
@@ -76,6 +77,9 @@ def ensure_people_tables(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_media_faces_media ON media_faces(media_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_media_faces_person ON media_faces(person_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_media_faces_status ON media_faces(status, ignored)")
+    cols = {str(row[1] or "") for row in conn.execute("PRAGMA table_info(media_faces)").fetchall()}
+    if "landmarks_json" not in cols:
+        conn.execute("ALTER TABLE media_faces ADD COLUMN landmarks_json TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS people_scan_state (
@@ -216,7 +220,7 @@ def confirm_face(conn: sqlite3.Connection, face_id: int) -> bool:
 def _preview_face_for_person(conn: sqlite3.Connection, person_id: int) -> dict:
     rows = conn.execute(
         """
-        SELECT f.id, m.path, f.bbox_left, f.bbox_top, f.bbox_width, f.bbox_height
+        SELECT f.id, m.path, f.bbox_left, f.bbox_top, f.bbox_width, f.bbox_height, f.landmarks_json
         FROM media_faces f
         JOIN media_items m ON m.id = f.media_id
         WHERE f.person_id = ? AND COALESCE(f.ignored, 0) = 0
@@ -232,8 +236,9 @@ def _preview_face_for_person(conn: sqlite3.Connection, person_id: int) -> dict:
             "preview_face_id": int(row[0] or 0),
             "preview_path": path,
             "preview_bbox": [float(row[2] or 0), float(row[3] or 0), float(row[4] or 0), float(row[5] or 0)],
+            "preview_landmarks": _landmarks_from_json(row[6]),
         }
-    return {"preview_face_id": 0, "preview_path": "", "preview_bbox": []}
+    return {"preview_face_id": 0, "preview_path": "", "preview_bbox": [], "preview_landmarks": []}
 
 
 def _supported_face_counts_for_person(conn: sqlite3.Connection, person_id: int) -> tuple[int, int]:
@@ -302,6 +307,7 @@ def list_people(conn: sqlite3.Connection, *, include_unnamed: bool = True) -> li
                 "preview_face_id": int(preview.get("preview_face_id") or row[6] or 0),
                 "preview_path": preview.get("preview_path") or "",
                 "preview_bbox": preview.get("preview_bbox") or [],
+                "preview_landmarks": preview.get("preview_landmarks") or [],
             }
         )
     return people
@@ -345,7 +351,7 @@ def list_faces_for_person(conn: sqlite3.Connection, person_id: int) -> list[dict
     rows = conn.execute(
         """
         SELECT f.id, f.media_id, m.path, p.display_name, f.bbox_left, f.bbox_top, f.bbox_width, f.bbox_height,
-               f.confidence, f.match_confidence, f.status
+               f.confidence, f.match_confidence, f.status, f.landmarks_json
         FROM media_faces f
         JOIN media_items m ON m.id = f.media_id
         LEFT JOIN people p ON p.id = f.person_id
@@ -369,6 +375,7 @@ def list_faces_for_person(conn: sqlite3.Connection, person_id: int) -> list[dict
                 "confidence": row[8],
                 "match_confidence": row[9],
                 "status": row[10] or "unreviewed",
+                "landmarks": _landmarks_from_json(row[11]),
             }
         )
     return faces
@@ -380,7 +387,7 @@ def list_unconfirmed_faces(conn: sqlite3.Connection) -> list[dict]:
         """
         SELECT f.id, f.media_id, m.path, p.id, p.display_name, p.is_confirmed,
                f.bbox_left, f.bbox_top, f.bbox_width, f.bbox_height,
-               f.confidence, f.match_confidence, f.status
+               f.confidence, f.match_confidence, f.status, f.landmarks_json
         FROM media_faces f
         JOIN media_items m ON m.id = f.media_id
         LEFT JOIN people p ON p.id = f.person_id
@@ -408,6 +415,7 @@ def list_unconfirmed_faces(conn: sqlite3.Connection) -> list[dict]:
                 "confidence": row[10],
                 "match_confidence": row[11],
                 "status": row[12] or "unreviewed",
+                "landmarks": _landmarks_from_json(row[13]),
             }
         )
     return faces
@@ -448,6 +456,19 @@ def _embedding_from_json(raw: str | None) -> list[float]:
     try:
         values = json.loads(str(raw or "[]"))
         return [float(value) for value in values]
+    except Exception:
+        return []
+
+
+def _landmarks_from_json(raw: str | None) -> list[list[float]]:
+    try:
+        values = json.loads(str(raw or "[]"))
+        points: list[list[float]] = []
+        for item in list(values or []):
+            coords = [float(value) for value in list(item or [])[:2]]
+            if len(coords) == 2:
+                points.append(coords)
+        return points
     except Exception:
         return []
 
@@ -550,6 +571,11 @@ def replace_detected_faces(
     for face in faces:
         embedding = [float(value) for value in list(face.get("embedding") or [])]
         bbox = [float(value) for value in list(face.get("bbox") or [])[:4]]
+        landmarks = [
+            [float(point[0]), float(point[1])]
+            for point in list(face.get("landmarks") or [])
+            if isinstance(point, (list, tuple)) and len(point) >= 2
+        ]
         if len(bbox) != 4 or not embedding:
             continue
         person_id, match_confidence = _best_person_match(conn, embedding, float(match_threshold))
@@ -560,11 +586,11 @@ def replace_detected_faces(
         conn.execute(
             """
             INSERT INTO media_faces(
-                media_id, person_id, detection_engine, recognition_model, embedding_json,
+                media_id, person_id, detection_engine, recognition_model, embedding_json, landmarks_json,
                 bbox_left, bbox_top, bbox_width, bbox_height, confidence, match_confidence,
                 status, ignored, created_at_utc, updated_at_utc
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
             """,
             (
                 media_id,
@@ -572,6 +598,7 @@ def replace_detected_faces(
                 detection_engine,
                 recognition_model,
                 json.dumps(embedding, separators=(",", ":")),
+                json.dumps(landmarks, separators=(",", ":")),
                 bbox[0],
                 bbox[1],
                 bbox[2],

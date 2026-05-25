@@ -1643,6 +1643,19 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   z-index: 2;
 }
 
+.person-face-landmark {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+  margin-top: -4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent), white 18%);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--card-bg), transparent 18%), 0 1px 5px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  z-index: 3;
+}
+
 .person-thumb-placeholder {
   width: 46px;
   height: 46px;

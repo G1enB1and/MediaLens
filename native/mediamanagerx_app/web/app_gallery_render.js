@@ -2001,8 +2001,32 @@ function peopleFaceBoxesEnabled() {
   return gPeopleShowFaceBoxes !== false;
 }
 
+function peopleFaceLandmarksEnabled() {
+  return gPeopleShowFaceLandmarks === true;
+}
+
 function peopleScrollContainer() {
   return document.querySelector('main');
+}
+
+function expandedPeopleDisplayBox(bbox, naturalW, naturalH) {
+  const [rawX, rawY, rawW, rawH] = bbox.map(Number);
+  if (![rawX, rawY, rawW, rawH].every(Number.isFinite) || rawW <= 0 || rawH <= 0) {
+    return null;
+  }
+  const horizontalPad = rawW * 0.10;
+  const topPad = rawH * 0.08;
+  const bottomPad = rawH * 0.22;
+  const left = Math.max(0, rawX - horizontalPad);
+  const top = Math.max(0, rawY - topPad);
+  const right = Math.min(naturalW, rawX + rawW + horizontalPad);
+  const bottom = Math.min(naturalH, rawY + rawH + bottomPad);
+  return {
+    x: left,
+    y: top,
+    w: Math.max(0, right - left),
+    h: Math.max(0, bottom - top),
+  };
 }
 
 function capturePeopleReviewScrollState(preferredFaceId = 0) {
@@ -2065,14 +2089,85 @@ function updatePeopleFaceCardStatus(card, nextStatus, personName) {
 
 function attachPeopleFaceBox(thumb, img, bbox) {
   if (!peopleFaceBoxesEnabled() || !thumb || !img || !Array.isArray(bbox) || bbox.length < 4) return;
-  const [x, y, w, h] = bbox.map(Number);
-  if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0) return;
+  if (thumb._peopleFaceBoxResizeObserver && typeof thumb._peopleFaceBoxResizeObserver.disconnect === 'function') {
+    thumb._peopleFaceBoxResizeObserver.disconnect();
+    thumb._peopleFaceBoxResizeObserver = null;
+  }
+  if (thumb._peopleFaceBoxWindowHandler) {
+    window.removeEventListener('resize', thumb._peopleFaceBoxWindowHandler);
+    thumb._peopleFaceBoxWindowHandler = null;
+  }
   const box = document.createElement('div');
   box.className = 'person-face-box';
   thumb.appendChild(box);
 
   let rafId = 0;
   const positionBox = () => {
+    rafId = 0;
+    const naturalW = Number(img.naturalWidth || 0);
+    const naturalH = Number(img.naturalHeight || 0);
+    const containerW = Number(thumb.clientWidth || 0);
+    const containerH = Number(thumb.clientHeight || 0);
+    if (naturalW <= 0 || naturalH <= 0 || containerW <= 0 || containerH <= 0) return;
+    const expanded = expandedPeopleDisplayBox(bbox, naturalW, naturalH);
+    if (!expanded || expanded.w <= 0 || expanded.h <= 0) return;
+    const objectFit = String(getComputedStyle(img).objectFit || 'cover');
+    const scale = objectFit === 'contain'
+      ? Math.min(containerW / naturalW, containerH / naturalH)
+      : Math.max(containerW / naturalW, containerH / naturalH);
+    const renderedW = naturalW * scale;
+    const renderedH = naturalH * scale;
+    const offsetX = (containerW - renderedW) / 2;
+    const offsetY = (containerH - renderedH) / 2;
+    box.style.left = `${offsetX + expanded.x * scale}px`;
+    box.style.top = `${offsetY + expanded.y * scale}px`;
+    box.style.width = `${expanded.w * scale}px`;
+    box.style.height = `${expanded.h * scale}px`;
+  };
+  const schedulePositionBox = () => {
+    if (rafId) return;
+    rafId = window.requestAnimationFrame(positionBox);
+  };
+
+  if (img.complete) schedulePositionBox();
+  img.addEventListener('load', schedulePositionBox, { once: true });
+  if (typeof ResizeObserver !== 'undefined') {
+    const observer = new ResizeObserver(schedulePositionBox);
+    observer.observe(thumb);
+    observer.observe(img);
+    thumb._peopleFaceBoxResizeObserver = observer;
+  } else {
+    thumb._peopleFaceBoxWindowHandler = schedulePositionBox;
+    window.addEventListener('resize', schedulePositionBox);
+  }
+  window.setTimeout(schedulePositionBox, 0);
+  window.setTimeout(schedulePositionBox, 80);
+  window.setTimeout(schedulePositionBox, 220);
+}
+
+function attachPeopleLandmarks(thumb, img, landmarks) {
+  if (!peopleFaceLandmarksEnabled() || !thumb || !img || !Array.isArray(landmarks) || !landmarks.length) return;
+  if (thumb._peopleLandmarksResizeObserver && typeof thumb._peopleLandmarksResizeObserver.disconnect === 'function') {
+    thumb._peopleLandmarksResizeObserver.disconnect();
+    thumb._peopleLandmarksResizeObserver = null;
+  }
+  if (thumb._peopleLandmarksWindowHandler) {
+    window.removeEventListener('resize', thumb._peopleLandmarksWindowHandler);
+    thumb._peopleLandmarksWindowHandler = null;
+  }
+  const points = [];
+  for (const point of landmarks) {
+    const coords = Array.isArray(point) ? point.map(Number) : [];
+    if (coords.length >= 2 && Number.isFinite(coords[0]) && Number.isFinite(coords[1])) {
+      const dot = document.createElement('div');
+      dot.className = 'person-face-landmark';
+      thumb.appendChild(dot);
+      points.push({ x: coords[0], y: coords[1], dot });
+    }
+  }
+  if (!points.length) return;
+  let rafId = 0;
+  const positionPoints = () => {
     rafId = 0;
     const naturalW = Number(img.naturalWidth || 0);
     const naturalH = Number(img.naturalHeight || 0);
@@ -2087,27 +2182,29 @@ function attachPeopleFaceBox(thumb, img, bbox) {
     const renderedH = naturalH * scale;
     const offsetX = (containerW - renderedW) / 2;
     const offsetY = (containerH - renderedH) / 2;
-    box.style.left = `${offsetX + x * scale}px`;
-    box.style.top = `${offsetY + y * scale}px`;
-    box.style.width = `${w * scale}px`;
-    box.style.height = `${h * scale}px`;
+    points.forEach((point) => {
+      point.dot.style.left = `${offsetX + point.x * scale}px`;
+      point.dot.style.top = `${offsetY + point.y * scale}px`;
+    });
   };
-  const schedulePositionBox = () => {
+  const schedulePositionPoints = () => {
     if (rafId) return;
-    rafId = window.requestAnimationFrame(positionBox);
+    rafId = window.requestAnimationFrame(positionPoints);
   };
-
-  if (img.complete) schedulePositionBox();
-  img.addEventListener('load', schedulePositionBox, { once: true });
+  if (img.complete) schedulePositionPoints();
+  img.addEventListener('load', schedulePositionPoints, { once: true });
   if (typeof ResizeObserver !== 'undefined') {
-    const observer = new ResizeObserver(schedulePositionBox);
+    const observer = new ResizeObserver(schedulePositionPoints);
     observer.observe(thumb);
     observer.observe(img);
+    thumb._peopleLandmarksResizeObserver = observer;
   } else {
-    window.addEventListener('resize', schedulePositionBox);
+    thumb._peopleLandmarksWindowHandler = schedulePositionPoints;
+    window.addEventListener('resize', schedulePositionPoints);
   }
-  window.setTimeout(schedulePositionBox, 0);
-  window.setTimeout(schedulePositionBox, 80);
+  window.setTimeout(schedulePositionPoints, 0);
+  window.setTimeout(schedulePositionPoints, 80);
+  window.setTimeout(schedulePositionPoints, 220);
 }
 
 function openPeopleGallery(mode = 'gallery') {
@@ -2220,6 +2317,7 @@ function renderPeopleCards(people) {
       img.src = `file:///${String(person.preview_path).replace(/\\/g, '/')}?people=${person.preview_face_id || 0}`;
       thumb.appendChild(img);
       attachPeopleFaceBox(thumb, img, person.preview_bbox || []);
+      attachPeopleLandmarks(thumb, img, person.preview_landmarks || []);
     } else {
       const placeholder = document.createElement('div');
       placeholder.className = 'person-thumb-placeholder';
@@ -2364,6 +2462,7 @@ function createPersonFaceReviewCard(face, person, refresh) {
   img.src = `file:///${String(face.path || '').replace(/\\/g, '/')}?face=${face.face_id || 0}`;
   thumb.appendChild(img);
   attachPeopleFaceBox(thumb, img, face.bbox || []);
+  attachPeopleLandmarks(thumb, img, face.landmarks || []);
   const pathLabel = document.createElement('div');
   pathLabel.className = 'person-name';
   pathLabel.textContent = getItemName({ path: face.path || '' });

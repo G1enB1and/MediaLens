@@ -135,6 +135,16 @@ def _detect_with_app(source: Path, app, insightface, ort, active_providers: list
         if len(bbox) != 4:
             continue
         left, top, right, bottom = bbox
+        raw_kps = getattr(face, "kps", None)
+        landmarks: list[list[float]] = []
+        if raw_kps is not None:
+            try:
+                for point in list(raw_kps):
+                    coords = list(point)[:2]
+                    if len(coords) == 2:
+                        landmarks.append([float(coords[0]), float(coords[1])])
+            except Exception:
+                landmarks = []
         embedding = getattr(face, "normed_embedding", None)
         if embedding is None:
             embedding = getattr(face, "embedding", None)
@@ -149,6 +159,7 @@ def _detect_with_app(source: Path, app, insightface, ort, active_providers: list
                 ],
                 "confidence": float(getattr(face, "det_score", 0.0) or 0.0),
                 "embedding": embedding_list,
+                "landmarks": landmarks,
             }
         )
     return {
