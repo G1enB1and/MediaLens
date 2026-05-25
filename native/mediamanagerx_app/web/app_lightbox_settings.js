@@ -667,7 +667,8 @@ function scheduleFilterSensitiveMetadataRefresh() {
   gGalleryFilterMetadataRefreshTimer = window.setTimeout(() => {
     gGalleryFilterMetadataRefreshTimer = 0;
     if (gPeopleMode) {
-      openPeopleGallery(gPeopleMode);
+      if (gPeopleMode === 'unconfirmed' && typeof openUnconfirmedPeopleReview === 'function') openUnconfirmedPeopleReview();
+      else openPeopleGallery(gPeopleMode);
       return;
     }
     refreshFromBridge(gBridge, false);

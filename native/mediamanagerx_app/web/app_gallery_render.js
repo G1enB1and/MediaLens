@@ -1997,6 +1997,43 @@ function wireCtxMenu() {
 
 // applySearch is no longer used for local filtering.
 
+function peopleFaceBoxesEnabled() {
+  return gPeopleShowFaceBoxes !== false;
+}
+
+function attachPeopleFaceBox(thumb, img, bbox) {
+  if (!peopleFaceBoxesEnabled() || !thumb || !img || !Array.isArray(bbox) || bbox.length < 4) return;
+  const [x, y, w, h] = bbox.map(Number);
+  if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0) return;
+  const box = document.createElement('div');
+  box.className = 'person-face-box';
+  thumb.appendChild(box);
+
+  const positionBox = () => {
+    const naturalW = Number(img.naturalWidth || 0);
+    const naturalH = Number(img.naturalHeight || 0);
+    const containerW = Number(thumb.clientWidth || 0);
+    const containerH = Number(thumb.clientHeight || 0);
+    if (naturalW <= 0 || naturalH <= 0 || containerW <= 0 || containerH <= 0) return;
+    const objectFit = String(getComputedStyle(img).objectFit || 'cover');
+    const scale = objectFit === 'contain'
+      ? Math.min(containerW / naturalW, containerH / naturalH)
+      : Math.max(containerW / naturalW, containerH / naturalH);
+    const renderedW = naturalW * scale;
+    const renderedH = naturalH * scale;
+    const offsetX = (containerW - renderedW) / 2;
+    const offsetY = (containerH - renderedH) / 2;
+    box.style.left = `${offsetX + x * scale}px`;
+    box.style.top = `${offsetY + y * scale}px`;
+    box.style.width = `${w * scale}px`;
+    box.style.height = `${h * scale}px`;
+  };
+
+  if (img.complete) positionBox();
+  img.addEventListener('load', positionBox, { once: true });
+  window.setTimeout(positionBox, 0);
+}
+
 function openPeopleGallery(mode = 'gallery') {
   gPeopleMode = mode === 'unnamed' ? 'unnamed' : 'gallery';
   gPeopleReviewPerson = null;
@@ -2021,6 +2058,28 @@ function openPeopleGallery(mode = 'gallery') {
       : allPeople;
     gPeopleCards = people;
     renderPeopleCards(people);
+  });
+}
+
+function openUnconfirmedPeopleReview() {
+  gPeopleMode = 'unconfirmed';
+  gPeopleReviewPerson = null;
+  gMedia = [];
+  gTotal = 0;
+  gPage = 0;
+  updateGalleryCountChip(0);
+  renderPager();
+  renderTimelineRail([]);
+  const el = document.getElementById('mediaList');
+  if (!el) return;
+  el.className = 'people-gallery';
+  el.innerHTML = '<div class="empty">Loading unconfirmed faces...</div>';
+  if (!gBridge || !gBridge.list_unconfirmed_faces) {
+    el.innerHTML = '<div class="empty">Unconfirmed People review is not available in this build.</div>';
+    return;
+  }
+  gBridge.list_unconfirmed_faces(function (faces) {
+    renderUnconfirmedFaceReview(Array.isArray(faces) ? faces : []);
   });
 }
 
@@ -2074,6 +2133,7 @@ function renderPeopleCards(people) {
       img.alt = '';
       img.src = `file:///${String(person.preview_path).replace(/\\/g, '/')}?people=${person.preview_face_id || 0}`;
       thumb.appendChild(img);
+      attachPeopleFaceBox(thumb, img, person.preview_bbox || []);
     } else {
       const placeholder = document.createElement('div');
       placeholder.className = 'person-thumb-placeholder';
@@ -2125,6 +2185,11 @@ function renderPeopleCards(people) {
   });
 }
 
+function personReviewReturn() {
+  if (gPeopleMode === 'unconfirmed') openUnconfirmedPeopleReview();
+  else openPeopleGallery(gPeopleMode || 'gallery');
+}
+
 function openPersonReview(person) {
   if (!person || !gBridge || !gBridge.list_person_faces) return;
   gPeopleReviewPerson = person;
@@ -2152,7 +2217,7 @@ function renderPersonReview(person, faces) {
   back.type = 'button';
   back.className = 'tb-btn';
   back.textContent = 'Back to People';
-  back.addEventListener('click', () => openPeopleGallery(gPeopleMode));
+  back.addEventListener('click', () => openPeopleGallery(gPeopleMode === 'unnamed' ? 'unnamed' : 'gallery'));
   const nameGroupBtn = document.createElement('button');
   nameGroupBtn.type = 'button';
   nameGroupBtn.className = 'tb-btn';
@@ -2161,7 +2226,7 @@ function renderPersonReview(person, faces) {
   const confirmGroupBtn = document.createElement('button');
   confirmGroupBtn.type = 'button';
   confirmGroupBtn.className = 'tb-btn person-confirm-btn';
-  confirmGroupBtn.innerHTML = '<img src="icons/check-green.svg" alt="" /> <span>Confirm Name</span>';
+  confirmGroupBtn.innerHTML = '<img src="icons/check-green.svg" alt="" /> <span>Confirm All</span>';
   confirmGroupBtn.disabled = !person.is_confirmed;
   confirmGroupBtn.addEventListener('click', () => {
     if (!gBridge || !gBridge.confirm_person_group) return;
@@ -2182,61 +2247,126 @@ function renderPersonReview(person, faces) {
     return;
   }
   faces.forEach((face) => {
-    const card = document.createElement('div');
-    card.className = 'person-card';
-    const thumb = document.createElement('div');
-    thumb.className = 'person-thumb';
-    const img = document.createElement('img');
-    img.alt = '';
-    img.src = `file:///${String(face.path || '').replace(/\\/g, '/')}?face=${face.face_id || 0}`;
-    thumb.appendChild(img);
-    const pathLabel = document.createElement('div');
-    pathLabel.className = 'person-name';
-    pathLabel.textContent = getItemName({ path: face.path || '' });
-    pathLabel.title = face.path || '';
-    const actions = document.createElement('div');
-    actions.className = 'person-actions';
-    const nameBtn = document.createElement('button');
-    nameBtn.type = 'button';
-    nameBtn.className = 'tb-btn';
-    nameBtn.textContent = 'Move / Rename';
-    nameBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const nextName = window.prompt('Name this person', person.display_name || '');
-      if (!nextName || !gBridge.assign_face_person) return;
-      gBridge.assign_face_person(Number(face.face_id || 0), String(nextName).trim(), function () {
-        openPersonReview(person);
-      });
+    el.appendChild(createPersonFaceReviewCard(face, person, () => openPersonReview(person)));
+  });
+}
+
+function createPersonFaceReviewCard(face, person, refresh) {
+  const card = document.createElement('div');
+  card.className = 'person-card person-face-card';
+  const thumb = document.createElement('div');
+  thumb.className = 'person-thumb person-review-thumb';
+  const img = document.createElement('img');
+  img.alt = '';
+  img.src = `file:///${String(face.path || '').replace(/\\/g, '/')}?face=${face.face_id || 0}`;
+  thumb.appendChild(img);
+  attachPeopleFaceBox(thumb, img, face.bbox || []);
+  const pathLabel = document.createElement('div');
+  pathLabel.className = 'person-name';
+  pathLabel.textContent = getItemName({ path: face.path || '' });
+  pathLabel.title = face.path || '';
+  const statusLabel = document.createElement('div');
+  statusLabel.className = 'person-count';
+  const personName = String((person && person.display_name) || face.display_name || '').trim();
+  const status = String(face.status || 'unreviewed').replace(/_/g, ' ');
+  statusLabel.textContent = `${personName || 'Unnamed'} | ${status}`;
+  const actions = document.createElement('div');
+  actions.className = 'person-actions';
+  const confirmed = String(face.status || '').toLowerCase() === 'confirmed';
+  const canConfirm = !!personName && (!!(person && person.is_confirmed) || !!face.is_confirmed);
+  const confirmBtn = document.createElement('button');
+  confirmBtn.type = 'button';
+  confirmBtn.className = 'tb-btn person-confirm-btn';
+  confirmBtn.innerHTML = confirmed
+    ? '<img src="icons/check-green.svg" alt="" /> <span>Confirmed</span>'
+    : '<img src="icons/check-green.svg" alt="" /> <span>Confirm</span>';
+  confirmBtn.disabled = confirmed || !canConfirm;
+  confirmBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!gBridge || !gBridge.confirm_face) return;
+    gBridge.confirm_face(Number(face.face_id || 0), function () {
+      if (typeof refresh === 'function') refresh();
     });
-    const notBtn = document.createElement('button');
-    notBtn.type = 'button';
-    notBtn.className = 'tb-btn';
-    notBtn.textContent = `Not ${String(person.display_name || 'Person').trim()}`;
-    notBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (!gBridge.reject_face_person) return;
-      gBridge.reject_face_person(Number(face.face_id || 0), function () {
-        openPersonReview(person);
-      });
+  });
+  const nameBtn = document.createElement('button');
+  nameBtn.type = 'button';
+  nameBtn.className = 'tb-btn';
+  nameBtn.textContent = 'Move / Rename';
+  nameBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const nextName = window.prompt('Name this person', personName);
+    if (!nextName || !gBridge.assign_face_person) return;
+    gBridge.assign_face_person(Number(face.face_id || 0), String(nextName).trim(), function () {
+      if (typeof refresh === 'function') refresh();
     });
-    const ignoreBtn = document.createElement('button');
-    ignoreBtn.type = 'button';
-    ignoreBtn.className = 'tb-btn';
-    ignoreBtn.textContent = 'Ignore';
-    ignoreBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (!gBridge.ignore_face) return;
-      gBridge.ignore_face(Number(face.face_id || 0), function () {
-        openPersonReview(person);
-      });
+  });
+  const notBtn = document.createElement('button');
+  notBtn.type = 'button';
+  notBtn.className = 'tb-btn';
+  notBtn.textContent = `Not ${personName || 'Person'}`;
+  notBtn.disabled = !Number(face.person_id || (person && person.id) || 0);
+  notBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!gBridge.reject_face_person) return;
+    gBridge.reject_face_person(Number(face.face_id || 0), function () {
+      if (typeof refresh === 'function') refresh();
     });
-    actions.appendChild(nameBtn);
-    actions.appendChild(notBtn);
-    actions.appendChild(ignoreBtn);
-    card.appendChild(thumb);
-    card.appendChild(pathLabel);
-    card.appendChild(actions);
-    el.appendChild(card);
+  });
+  const ignoreBtn = document.createElement('button');
+  ignoreBtn.type = 'button';
+  ignoreBtn.className = 'tb-btn';
+  ignoreBtn.textContent = 'Ignore';
+  ignoreBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!gBridge.ignore_face) return;
+    gBridge.ignore_face(Number(face.face_id || 0), function () {
+      if (typeof refresh === 'function') refresh();
+    });
+  });
+  actions.appendChild(confirmBtn);
+  actions.appendChild(nameBtn);
+  actions.appendChild(notBtn);
+  actions.appendChild(ignoreBtn);
+  card.appendChild(thumb);
+  card.appendChild(pathLabel);
+  card.appendChild(statusLabel);
+  card.appendChild(actions);
+  return card;
+}
+
+function renderUnconfirmedFaceReview(faces) {
+  const el = document.getElementById('mediaList');
+  if (!el) return;
+  el.className = 'people-gallery';
+  el.innerHTML = '';
+  const head = document.createElement('div');
+  head.className = 'person-review-head';
+  head.style.gridColumn = '1 / -1';
+  const title = document.createElement('div');
+  title.className = 'advanced-search-section-title';
+  title.textContent = 'Unconfirmed Review';
+  const back = document.createElement('button');
+  back.type = 'button';
+  back.className = 'tb-btn';
+  back.textContent = 'Back to People';
+  back.addEventListener('click', () => openPeopleGallery('gallery'));
+  head.appendChild(title);
+  head.appendChild(back);
+  el.appendChild(head);
+  const list = Array.isArray(faces) ? faces : [];
+  if (!list.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = 'No unconfirmed faces to review.';
+    el.appendChild(empty);
+    return;
+  }
+  list.forEach((face) => {
+    el.appendChild(createPersonFaceReviewCard(face, {
+      id: face.person_id || 0,
+      display_name: face.display_name || '',
+      is_confirmed: !!face.is_confirmed,
+    }, openUnconfirmedPeopleReview));
   });
 }
 
@@ -2766,6 +2896,10 @@ document.addEventListener('DOMContentLoaded', () => {
         });
       }
       setCustomSelectValue('peopleSelect', gPeopleMode ? gPeopleMode : 'none');
+      return;
+    }
+    if (val === 'unconfirmed') {
+      openUnconfirmedPeopleReview();
       return;
     }
     openPeopleGallery(val === 'unnamed' ? 'unnamed' : 'gallery');

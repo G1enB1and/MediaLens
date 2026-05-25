@@ -1249,6 +1249,7 @@ async function main() {
       gIncludeNestedFiles = !s || s['gallery.include_nested_files'] !== false;
       gShowFoldersInGallery = !s || s['gallery.show_folders'] !== false;
       gShowAllFileTypes = !!(s && s['gallery.show_all_file_types']);
+      gPeopleShowFaceBoxes = !s || s['people.show_face_boxes'] !== false;
       syncGalleryScopeToggles();
 
       gMuteVideoByDefault = (s && s['gallery.mute_video_by_default'] !== undefined)
@@ -1608,6 +1609,15 @@ async function main() {
         if (key === 'ui.theme_mode') {
           const themeRadio = document.getElementById(value ? 'themeLight' : 'themeDark');
           if (themeRadio) themeRadio.checked = true;
+          return;
+        }
+        if (key === 'people.show_face_boxes') {
+          gPeopleShowFaceBoxes = !!value;
+          if (gPeopleMode) {
+            if (gPeopleMode === 'unconfirmed') openUnconfirmedPeopleReview();
+            else if (gPeopleReviewPerson) openPersonReview(gPeopleReviewPerson);
+            else openPeopleGallery(gPeopleMode);
+          }
           return;
         }
         if (key === 'gallery.show_hidden' || key === 'gallery.include_nested_files' || key === 'gallery.show_folders' || key === 'gallery.show_all_file_types' || key === 'gallery.view_mode' || key === 'gallery.group_by' || key === 'gallery.group_date_granularity' || key === 'gallery.similarity_threshold') {

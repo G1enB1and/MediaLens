@@ -41,6 +41,9 @@ class PeopleSettingsPage(SettingsPage):
         self.auto_apply_tags = QCheckBox("Add confirmed people as regular tags")
         self.auto_apply_tags.setCursor(Qt.CursorShape.PointingHandCursor)
         workflow_layout.addWidget(self.auto_apply_tags)
+        self.show_face_boxes = QCheckBox("Show face boxes in People review")
+        self.show_face_boxes.setCursor(Qt.CursorShape.PointingHandCursor)
+        workflow_layout.addWidget(self.show_face_boxes)
         layout.addWidget(workflow_box)
 
         threshold_box = QGroupBox("Matching")
@@ -56,17 +59,20 @@ class PeopleSettingsPage(SettingsPage):
 
         self.bootstrap_tags.toggled.connect(lambda value: self.dialog.set_setting_bool("people.bootstrap_tags", bool(value)))
         self.auto_apply_tags.toggled.connect(lambda value: self.dialog.set_setting_bool("people.sync_confirmed_to_tags", bool(value)))
+        self.show_face_boxes.toggled.connect(lambda value: self.dialog.set_setting_bool("people.show_face_boxes", bool(value)))
         self.engine_combo.currentIndexChanged.connect(self._save_engine)
         self.threshold_combo.currentIndexChanged.connect(self._save_threshold)
 
     def refresh(self) -> None:
         self.bootstrap_tags.blockSignals(True)
         self.auto_apply_tags.blockSignals(True)
+        self.show_face_boxes.blockSignals(True)
         self.engine_combo.blockSignals(True)
         self.threshold_combo.blockSignals(True)
         try:
             self.bootstrap_tags.setChecked(bool(self.settings.value("people/bootstrap_tags", True, type=bool)))
             self.auto_apply_tags.setChecked(bool(self.settings.value("people/sync_confirmed_to_tags", False, type=bool)))
+            self.show_face_boxes.setChecked(bool(self.settings.value("people/show_face_boxes", True, type=bool)))
             engine = str(self.settings.value("people/recognition_engine", "none", type=str) or "none")
             engine_index = self.engine_combo.findData(engine)
             self.engine_combo.setCurrentIndex(engine_index if engine_index >= 0 else 0)
@@ -77,6 +83,7 @@ class PeopleSettingsPage(SettingsPage):
         finally:
             self.bootstrap_tags.blockSignals(False)
             self.auto_apply_tags.blockSignals(False)
+            self.show_face_boxes.blockSignals(False)
             self.engine_combo.blockSignals(False)
             self.threshold_combo.blockSignals(False)
 

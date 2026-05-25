@@ -1621,12 +1621,26 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   display: grid;
   place-items: center;
   overflow: hidden;
+  position: relative;
 }
 
 .person-thumb img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.person-review-thumb img {
+  object-fit: contain;
+}
+
+.person-face-box {
+  position: absolute;
+  border: 2px solid color-mix(in srgb, var(--accent), white 12%);
+  border-radius: 5px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--card-bg), transparent 25%), 0 2px 8px rgba(0, 0, 0, 0.32);
+  pointer-events: none;
+  z-index: 2;
 }
 
 .person-thumb-placeholder {

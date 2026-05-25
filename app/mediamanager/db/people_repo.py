@@ -10,8 +10,27 @@ from typing import Iterable
 from app.mediamanager.utils.pathing import normalize_windows_path
 
 
+PEOPLE_IMAGE_EXTENSIONS = {
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".gif",
+    ".bmp",
+    ".avif",
+    ".tif",
+    ".tiff",
+    ".heic",
+    ".heif",
+}
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _is_people_supported_image_path(path: str) -> bool:
+    return Path(str(path or "")).suffix.lower() in PEOPLE_IMAGE_EXTENSIONS
 
 
 def ensure_people_tables(conn: sqlite3.Connection) -> None:
@@ -148,6 +167,67 @@ def confirm_person_group(conn: sqlite3.Connection, person_id: int) -> bool:
     return int(cur.rowcount or 0) > 0
 
 
+def confirm_face(conn: sqlite3.Connection, face_id: int) -> bool:
+    ensure_people_tables(conn)
+    now = _utc_now_iso()
+    cur = conn.execute(
+        """
+        UPDATE media_faces
+        SET status = 'confirmed', match_confidence = COALESCE(match_confidence, 1), ignored = 0, updated_at_utc = ?
+        WHERE id = ? AND COALESCE(ignored, 0) = 0
+        """,
+        (now, int(face_id or 0)),
+    )
+    row = conn.execute("SELECT person_id FROM media_faces WHERE id = ?", (int(face_id or 0),)).fetchone()
+    if row and row[0]:
+        conn.execute("UPDATE people SET is_confirmed = 1, updated_at_utc = ? WHERE id = ?", (now, int(row[0])))
+    conn.commit()
+    return int(cur.rowcount or 0) > 0
+
+
+def _preview_face_for_person(conn: sqlite3.Connection, person_id: int) -> dict:
+    rows = conn.execute(
+        """
+        SELECT f.id, m.path, f.bbox_left, f.bbox_top, f.bbox_width, f.bbox_height
+        FROM media_faces f
+        JOIN media_items m ON m.id = f.media_id
+        WHERE f.person_id = ? AND COALESCE(f.ignored, 0) = 0
+        ORDER BY f.match_confidence DESC, f.id
+        """,
+        (int(person_id or 0),),
+    ).fetchall()
+    for row in rows:
+        path = row[1] or ""
+        if not _is_people_supported_image_path(path):
+            continue
+        return {
+            "preview_face_id": int(row[0] or 0),
+            "preview_path": path,
+            "preview_bbox": [float(row[2] or 0), float(row[3] or 0), float(row[4] or 0), float(row[5] or 0)],
+        }
+    return {"preview_face_id": 0, "preview_path": "", "preview_bbox": []}
+
+
+def _supported_face_counts_for_person(conn: sqlite3.Connection, person_id: int) -> tuple[int, int]:
+    rows = conn.execute(
+        """
+        SELECT f.id, f.media_id, m.path
+        FROM media_faces f
+        JOIN media_items m ON m.id = f.media_id
+        WHERE f.person_id = ? AND COALESCE(f.ignored, 0) = 0
+        """,
+        (int(person_id or 0),),
+    ).fetchall()
+    media_ids: set[int] = set()
+    face_count = 0
+    for face_id, media_id, path in rows:
+        if not _is_people_supported_image_path(path or ""):
+            continue
+        face_count += 1 if face_id else 0
+        media_ids.add(int(media_id or 0))
+    return len(media_ids), face_count
+
+
 def list_people(conn: sqlite3.Connection, *, include_unnamed: bool = True) -> list[dict]:
     ensure_people_tables(conn)
     where = "" if include_unnamed else "WHERE p.is_confirmed != 0"
@@ -177,24 +257,33 @@ def list_people(conn: sqlite3.Connection, *, include_unnamed: bool = True) -> li
         ORDER BY p.is_confirmed DESC, LOWER(p.display_name), p.id
         """
     ).fetchall()
-    return [
-        {
-            "id": int(row[0]),
-            "name": row[1] or "",
-            "display_name": row[2] or "",
-            "is_confirmed": bool(row[3]),
-            "file_count": int(row[4] or 0),
-            "face_count": int(row[5] or 0),
-            "preview_face_id": int(row[6] or 0),
-            "preview_path": row[7] or "",
-        }
-        for row in rows
-    ]
+    people: list[dict] = []
+    for row in rows:
+        file_count, face_count = _supported_face_counts_for_person(conn, int(row[0]))
+        if face_count <= 0:
+            continue
+        preview = _preview_face_for_person(conn, int(row[0]))
+        people.append(
+            {
+                "id": int(row[0]),
+                "name": row[1] or "",
+                "display_name": row[2] or "",
+                "is_confirmed": bool(row[3]),
+                "file_count": file_count,
+                "face_count": face_count,
+                "preview_face_id": int(preview.get("preview_face_id") or row[6] or 0),
+                "preview_path": preview.get("preview_path") or "",
+                "preview_bbox": preview.get("preview_bbox") or [],
+            }
+        )
+    return people
 
 
 def list_people_for_media(conn: sqlite3.Connection, path: str) -> list[dict]:
     ensure_people_tables(conn)
     normalized = normalize_windows_path(path)
+    if not _is_people_supported_image_path(normalized):
+        return []
     rows = conn.execute(
         """
         SELECT f.id, p.id, p.display_name, p.is_confirmed, f.status, f.match_confidence
@@ -237,19 +326,63 @@ def list_faces_for_person(conn: sqlite3.Connection, person_id: int) -> list[dict
         """,
         (int(person_id),),
     ).fetchall()
-    return [
-        {
-            "face_id": int(row[0]),
-            "media_id": int(row[1]),
-            "path": row[2] or "",
-            "display_name": row[3] or "",
-            "bbox": [float(row[4] or 0), float(row[5] or 0), float(row[6] or 0), float(row[7] or 0)],
-            "confidence": row[8],
-            "match_confidence": row[9],
-            "status": row[10] or "unreviewed",
-        }
-        for row in rows
-    ]
+    faces: list[dict] = []
+    for row in rows:
+        path = row[2] or ""
+        if not _is_people_supported_image_path(path):
+            continue
+        faces.append(
+            {
+                "face_id": int(row[0]),
+                "media_id": int(row[1]),
+                "path": path,
+                "display_name": row[3] or "",
+                "bbox": [float(row[4] or 0), float(row[5] or 0), float(row[6] or 0), float(row[7] or 0)],
+                "confidence": row[8],
+                "match_confidence": row[9],
+                "status": row[10] or "unreviewed",
+            }
+        )
+    return faces
+
+
+def list_unconfirmed_faces(conn: sqlite3.Connection) -> list[dict]:
+    ensure_people_tables(conn)
+    rows = conn.execute(
+        """
+        SELECT f.id, f.media_id, m.path, p.id, p.display_name, p.is_confirmed,
+               f.bbox_left, f.bbox_top, f.bbox_width, f.bbox_height,
+               f.confidence, f.match_confidence, f.status
+        FROM media_faces f
+        JOIN media_items m ON m.id = f.media_id
+        LEFT JOIN people p ON p.id = f.person_id
+        WHERE COALESCE(f.ignored, 0) = 0
+          AND COALESCE(f.status, 'unreviewed') != 'confirmed'
+        ORDER BY LOWER(COALESCE(p.display_name, '')), f.match_confidence DESC, m.path
+        """
+    ).fetchall()
+    faces: list[dict] = []
+    for row in rows:
+        path = row[2] or ""
+        if not _is_people_supported_image_path(path):
+            continue
+        face_id = int(row[0])
+        display_name = row[4] or f"Unnamed {row[3] or face_id}"
+        faces.append(
+            {
+                "face_id": face_id,
+                "media_id": int(row[1]),
+                "path": path,
+                "person_id": int(row[3] or 0),
+                "display_name": display_name,
+                "is_confirmed": bool(row[5]),
+                "bbox": [float(row[6] or 0), float(row[7] or 0), float(row[8] or 0), float(row[9] or 0)],
+                "confidence": row[10],
+                "match_confidence": row[11],
+                "status": row[12] or "unreviewed",
+            }
+        )
+    return faces
 
 
 def _embedding_from_json(raw: str | None) -> list[float]:
@@ -274,29 +407,35 @@ def _cosine_similarity(left: list[float], right: list[float]) -> float:
 def _best_person_match(conn: sqlite3.Connection, embedding: list[float], threshold: float) -> tuple[int | None, float]:
     rows = conn.execute(
         """
-        SELECT person_id, embedding_json
-        FROM media_faces
-        WHERE person_id IS NOT NULL
-          AND embedding_json IS NOT NULL
-          AND embedding_json != ''
-          AND COALESCE(ignored, 0) = 0
-          AND status IN ('unreviewed', 'suggested', 'confirmed')
+        SELECT f.person_id, f.embedding_json, f.status, m.path
+        FROM media_faces f
+        JOIN media_items m ON m.id = f.media_id
+        WHERE f.person_id IS NOT NULL
+          AND f.embedding_json IS NOT NULL
+          AND f.embedding_json != ''
+          AND COALESCE(f.ignored, 0) = 0
+          AND f.status IN ('unreviewed', 'suggested', 'confirmed')
         """
     ).fetchall()
     best_person_id: int | None = None
     best_score = 0.0
-    scores: dict[int, list[float]] = {}
-    for person_id, raw_embedding in rows:
+    scores: dict[int, list[tuple[float, bool]]] = {}
+    for person_id, raw_embedding, status, path in rows:
+        if not _is_people_supported_image_path(path or ""):
+            continue
         candidate = _embedding_from_json(raw_embedding)
         score = _cosine_similarity(embedding, candidate)
         if score <= 0.0:
             continue
-        scores.setdefault(int(person_id), []).append(score)
+        scores.setdefault(int(person_id), []).append((score, str(status or "") == "confirmed"))
     for person_id, person_scores in scores.items():
-        strongest = max(person_scores)
-        top_scores = sorted(person_scores, reverse=True)[:5]
+        weighted_scores = [min(1.0, score * (1.04 if confirmed else 1.0)) for score, confirmed in person_scores]
+        strongest = max(weighted_scores)
+        top_scores = sorted(weighted_scores, reverse=True)[:5]
         averaged = sum(top_scores) / max(1, len(top_scores))
-        score = max(strongest, averaged)
+        confirmed_scores = [score for score, confirmed in person_scores if confirmed]
+        confirmed_best = max(confirmed_scores) if confirmed_scores else 0.0
+        score = max(strongest, averaged, min(1.0, confirmed_best * 1.06))
         if score > best_score:
             best_score = score
             best_person_id = person_id
@@ -330,6 +469,8 @@ def replace_detected_faces(
     match_threshold: float = 0.45,
 ) -> int:
     ensure_people_tables(conn)
+    if not _is_people_supported_image_path(path):
+        return 0
     from app.mediamanager.db.media_repo import get_media_by_path
 
     media = get_media_by_path(conn, path)

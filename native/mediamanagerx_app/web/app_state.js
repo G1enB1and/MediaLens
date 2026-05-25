@@ -334,6 +334,7 @@ let gPeopleCards = [];
 let gPeopleReviewPerson = null;
 let gPeopleScanActive = false;
 let gPeopleScanPaused = false;
+let gPeopleShowFaceBoxes = true;
 
 function normalizedVideoLoopCutoffSeconds() {
   const parsed = Number(gVideoLoopCutoffSeconds);

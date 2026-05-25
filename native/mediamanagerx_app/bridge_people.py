@@ -70,6 +70,10 @@ class BridgePeopleMixin:
             self._people_scan_debug(f"could not resolve current gallery scope: {exc}")
             return []
 
+    def _people_supported_scan_path(self, path: str | Path) -> bool:
+        suffix = Path(str(path or "")).suffix.lower()
+        return suffix in (RASTER_IMAGE_EXTS | {".tif", ".tiff", ".heic", ".heif"})
+
     def _people_match_threshold_value(self) -> float:
         value = str(self.settings.value("people/match_threshold", "balanced", type=str) or "balanced").strip().lower()
         return {
@@ -231,6 +235,11 @@ class BridgePeopleMixin:
                         self._people_scan_debug(f"skipping missing file: {raw_path}")
                         self._emit_people_scan_status("running", f"Skipping missing file: {Path(str(raw_path or '')).name}", current=current, total=total, path=str(raw_path or ""), detected=detected, errors=errors)
                         continue
+                    if not self._people_supported_scan_path(media_path):
+                        scanned += 1
+                        self._people_scan_debug(f"skipping unsupported People media type: {raw_path}")
+                        self._emit_people_scan_status("running", f"Skipping unsupported People file: {media_path.name}", current=scanned + errors, total=total, path=str(media_path), detected=detected, errors=errors)
+                        continue
                     source_path = self._local_ai_source_path(media_path)
                     self._emit_people_scan_status("running", f"Scanning {media_path.name}", current=current - 1, total=total, path=str(media_path), detected=detected, errors=errors)
                     payload = self._run_insightface_server_detection(process, source_path)
@@ -299,6 +308,19 @@ class BridgePeopleMixin:
                 pass
             return []
 
+    @Slot(result=list)
+    def list_unconfirmed_faces(self) -> list:
+        from app.mediamanager.db.people_repo import list_unconfirmed_faces
+
+        try:
+            return list_unconfirmed_faces(self.conn)
+        except Exception as exc:
+            try:
+                self._log(f"List unconfirmed faces failed: {exc}")
+            except Exception:
+                pass
+            return []
+
     @Slot(str, result=list)
     def list_media_people(self, path: str) -> list:
         from app.mediamanager.db.people_repo import list_people_for_media
@@ -356,6 +378,24 @@ class BridgePeopleMixin:
         except Exception as exc:
             try:
                 self._log(f"Confirm person group failed: {exc}")
+            except Exception:
+                pass
+            return False
+
+    @Slot(int, result=bool)
+    def confirm_face(self, face_id: int) -> bool:
+        from app.mediamanager.db.people_repo import confirm_face
+
+        try:
+            ok = confirm_face(self.conn, int(face_id or 0))
+            if ok:
+                self._clear_gallery_count_cache()
+                self.galleryFilterSensitiveMetadataChanged.emit()
+                self.galleryScopeChanged.emit()
+            return bool(ok)
+        except Exception as exc:
+            try:
+                self._log(f"Confirm face failed: {exc}")
             except Exception:
                 pass
             return False
@@ -443,14 +483,24 @@ class BridgePeopleMixin:
                 self._people_scan_debug("InsightFace is not installed")
                 self._emit_people_scan_status("error", "InsightFace is not installed. Open AI Models Status and install it.")
                 return False
-            clean_paths = [str(path or "").strip() for path in list(paths or []) if str(path or "").strip()]
+            raw_clean_paths = [str(path or "").strip() for path in list(paths or []) if str(path or "").strip()]
+            clean_paths = [path for path in raw_clean_paths if self._people_supported_scan_path(path)]
+            skipped_unsupported = len(raw_clean_paths) - len(clean_paths)
             if not clean_paths:
                 clean_paths = self._people_scan_paths_from_current_scope()
+                before_filter = len(clean_paths)
+                clean_paths = [path for path in clean_paths if self._people_supported_scan_path(path)]
+                skipped_unsupported += before_filter - len(clean_paths)
                 self._people_scan_debug(f"resolved {len(clean_paths)} files from current gallery scope")
             if not clean_paths:
                 self._people_scan_debug("no media files were selected or found in current scope")
-                self._emit_people_scan_status("error", "No media files were selected or found in the current gallery scope.")
+                if skipped_unsupported:
+                    self._emit_people_scan_status("error", f"No supported image files found for People scan. Skipped {skipped_unsupported} unsupported files.")
+                else:
+                    self._emit_people_scan_status("error", "No media files were selected or found in the current gallery scope.")
                 return False
+            if skipped_unsupported:
+                self._people_scan_debug(f"skipped {skipped_unsupported} unsupported files before scan")
             self._emit_people_scan_status("starting", f"Starting People scan for {len(clean_paths)} files...", current=0, total=len(clean_paths))
             self._people_scan_running = True
             threading.Thread(
