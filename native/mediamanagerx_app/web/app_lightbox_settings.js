@@ -661,6 +661,10 @@ function refreshFromBridge(bridge, resetPage = false, options = {}) {
 
 function scheduleFilterSensitiveMetadataRefresh() {
   if (!gBridge) return;
+  if (gPeopleLocalReviewMutationPending) {
+    gPeopleLocalReviewMutationPending = false;
+    return;
+  }
   if (gGalleryFilterMetadataRefreshTimer) {
     clearTimeout(gGalleryFilterMetadataRefreshTimer);
   }

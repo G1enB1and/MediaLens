@@ -335,6 +335,7 @@ let gPeopleReviewPerson = null;
 let gPeopleScanActive = false;
 let gPeopleScanPaused = false;
 let gPeopleShowFaceBoxes = true;
+let gPeopleLocalReviewMutationPending = false;
 
 function normalizedVideoLoopCutoffSeconds() {
   const parsed = Number(gVideoLoopCutoffSeconds);

@@ -2001,6 +2001,68 @@ function peopleFaceBoxesEnabled() {
   return gPeopleShowFaceBoxes !== false;
 }
 
+function peopleScrollContainer() {
+  return document.querySelector('main');
+}
+
+function capturePeopleReviewScrollState(preferredFaceId = 0) {
+  const container = peopleScrollContainer();
+  if (!container) return null;
+  const cards = Array.from(document.querySelectorAll('.person-face-card[data-face-id]'));
+  if (!cards.length) {
+    return {
+      scrollTop: Number(container.scrollTop || 0),
+      anchorFaceId: 0,
+      anchorOffset: 0,
+    };
+  }
+  const containerTop = container.getBoundingClientRect().top;
+  let anchor = preferredFaceId
+    ? document.querySelector(`.person-face-card[data-face-id="${CSS.escape(String(preferredFaceId))}"]`)
+    : null;
+  if (!anchor) {
+    anchor = cards.find((card) => card.getBoundingClientRect().top >= containerTop - 2) || cards[0];
+  }
+  return {
+    scrollTop: Number(container.scrollTop || 0),
+    anchorFaceId: Number(anchor && anchor.getAttribute('data-face-id') || 0),
+    anchorOffset: anchor ? (anchor.getBoundingClientRect().top - containerTop) : 0,
+  };
+}
+
+function restorePeopleReviewScrollState(state) {
+  if (!state) return;
+  const apply = () => {
+    const container = peopleScrollContainer();
+    if (!container) return;
+    let nextScrollTop = Number(state.scrollTop || 0);
+    const anchorFaceId = Number(state.anchorFaceId || 0);
+    if (anchorFaceId) {
+      const anchor = document.querySelector(`.person-face-card[data-face-id="${CSS.escape(String(anchorFaceId))}"]`);
+      if (anchor) {
+        const containerTop = container.getBoundingClientRect().top;
+        const currentOffset = anchor.getBoundingClientRect().top - containerTop;
+        nextScrollTop += currentOffset - Number(state.anchorOffset || 0);
+      }
+    }
+    container.scrollTop = Math.max(0, nextScrollTop);
+  };
+  window.requestAnimationFrame(() => window.requestAnimationFrame(apply));
+}
+
+function updatePeopleFaceCardStatus(card, nextStatus, personName) {
+  if (!card) return;
+  const statusLabel = card.querySelector('.person-count');
+  if (statusLabel) {
+    statusLabel.textContent = `${String(personName || 'Unnamed').trim() || 'Unnamed'} | ${String(nextStatus || 'unreviewed').replace(/_/g, ' ')}`;
+  }
+  const confirmBtn = card.querySelector('.person-confirm-btn');
+  if (confirmBtn) {
+    confirmBtn.innerHTML = '<img src="icons/check-green.svg" alt="" /> <span>Confirmed</span>';
+    confirmBtn.disabled = true;
+  }
+}
+
 function attachPeopleFaceBox(thumb, img, bbox) {
   if (!peopleFaceBoxesEnabled() || !thumb || !img || !Array.isArray(bbox) || bbox.length < 4) return;
   const [x, y, w, h] = bbox.map(Number);
@@ -2225,7 +2287,7 @@ function personReviewReturn() {
   else openPeopleGallery(gPeopleMode || 'gallery');
 }
 
-function openPersonReview(person) {
+function openPersonReview(person, options = {}) {
   if (!person || !gBridge || !gBridge.list_person_faces) return;
   gPeopleReviewPerson = person;
   const el = document.getElementById('mediaList');
@@ -2234,6 +2296,9 @@ function openPersonReview(person) {
   el.innerHTML = '<div class="empty">Loading faces...</div>';
   gBridge.list_person_faces(Number(person.id || 0), function (faces) {
     renderPersonReview(person, Array.isArray(faces) ? faces : []);
+    if (options && options.scrollState) {
+      restorePeopleReviewScrollState(options.scrollState);
+    }
   });
 }
 
@@ -2282,13 +2347,16 @@ function renderPersonReview(person, faces) {
     return;
   }
   faces.forEach((face) => {
-    el.appendChild(createPersonFaceReviewCard(face, person, () => openPersonReview(person)));
+    el.appendChild(createPersonFaceReviewCard(face, person, (preferredFaceId) => {
+      openPersonReview(person, { scrollState: capturePeopleReviewScrollState(preferredFaceId) });
+    }));
   });
 }
 
 function createPersonFaceReviewCard(face, person, refresh) {
   const card = document.createElement('div');
   card.className = 'person-card person-face-card';
+  card.setAttribute('data-face-id', String(face.face_id || ''));
   const thumb = document.createElement('div');
   thumb.className = 'person-thumb person-review-thumb';
   const img = document.createElement('img');
@@ -2319,8 +2387,19 @@ function createPersonFaceReviewCard(face, person, refresh) {
   confirmBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     if (!gBridge || !gBridge.confirm_face) return;
-    gBridge.confirm_face(Number(face.face_id || 0), function () {
-      if (typeof refresh === 'function') refresh();
+    const scrollState = capturePeopleReviewScrollState(Number(face.face_id || 0));
+    gPeopleLocalReviewMutationPending = true;
+    gBridge.confirm_face(Number(face.face_id || 0), function (ok) {
+      if (!ok) {
+        gPeopleLocalReviewMutationPending = false;
+        restorePeopleReviewScrollState(scrollState);
+        return;
+      }
+      updatePeopleFaceCardStatus(card, 'confirmed', personName);
+      if (gPeopleReviewPerson && personName) {
+        gPeopleReviewPerson = Object.assign({}, gPeopleReviewPerson, { is_confirmed: true });
+      }
+      restorePeopleReviewScrollState(scrollState);
     });
   });
   const nameBtn = document.createElement('button');
@@ -2332,7 +2411,7 @@ function createPersonFaceReviewCard(face, person, refresh) {
     const nextName = window.prompt('Name this person', personName);
     if (!nextName || !gBridge.assign_face_person) return;
     gBridge.assign_face_person(Number(face.face_id || 0), String(nextName).trim(), function () {
-      if (typeof refresh === 'function') refresh();
+      if (typeof refresh === 'function') refresh(Number(face.face_id || 0));
     });
   });
   const notBtn = document.createElement('button');
@@ -2344,7 +2423,7 @@ function createPersonFaceReviewCard(face, person, refresh) {
     e.stopPropagation();
     if (!gBridge.reject_face_person) return;
     gBridge.reject_face_person(Number(face.face_id || 0), function () {
-      if (typeof refresh === 'function') refresh();
+      if (typeof refresh === 'function') refresh(Number(face.face_id || 0));
     });
   });
   const ignoreBtn = document.createElement('button');
@@ -2355,7 +2434,7 @@ function createPersonFaceReviewCard(face, person, refresh) {
     e.stopPropagation();
     if (!gBridge.ignore_face) return;
     gBridge.ignore_face(Number(face.face_id || 0), function () {
-      if (typeof refresh === 'function') refresh();
+      if (typeof refresh === 'function') refresh(Number(face.face_id || 0));
     });
   });
   actions.appendChild(confirmBtn);
