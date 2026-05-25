@@ -2529,6 +2529,8 @@ function renderPersonReview(person, faces) {
   const title = document.createElement('div');
   title.className = 'advanced-search-section-title';
   title.textContent = String(person.display_name || '').trim() || `Unnamed ${person.id || ''}`.trim();
+  const actions = document.createElement('div');
+  actions.className = 'person-review-actions';
   const back = document.createElement('button');
   back.type = 'button';
   back.className = 'tb-btn';
@@ -2551,9 +2553,10 @@ function renderPersonReview(person, faces) {
     });
   });
   head.appendChild(title);
-  head.appendChild(nameGroupBtn);
-  head.appendChild(confirmGroupBtn);
-  head.appendChild(back);
+  actions.appendChild(nameGroupBtn);
+  actions.appendChild(confirmGroupBtn);
+  actions.appendChild(back);
+  head.appendChild(actions);
   el.appendChild(head);
   if (!faces.length) {
     const empty = document.createElement('div');
@@ -2688,13 +2691,16 @@ function renderUnconfirmedFaceReview(faces) {
   const title = document.createElement('div');
   title.className = 'advanced-search-section-title';
   title.textContent = 'Unconfirmed Review';
+  const actions = document.createElement('div');
+  actions.className = 'person-review-actions';
   const back = document.createElement('button');
   back.type = 'button';
   back.className = 'tb-btn';
   back.textContent = 'Back to People';
   back.addEventListener('click', () => openPeopleGallery('gallery'));
   head.appendChild(title);
-  head.appendChild(back);
+  actions.appendChild(back);
+  head.appendChild(actions);
   el.appendChild(head);
   const list = Array.isArray(faces) ? faces : [];
   if (!list.length) {

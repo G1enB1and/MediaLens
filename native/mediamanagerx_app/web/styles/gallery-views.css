@@ -1704,9 +1704,23 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   background: var(--card-bg);
 }
 
+body:not(.gallery-scroll-top) .person-review-head {
+  background: var(--bg);
+  border-radius: 0;
+}
+
 .person-review-head .advanced-search-section-title {
   flex: 1 1 220px;
   min-width: 0;
+}
+
+.person-review-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+  margin-left: auto;
+  flex-wrap: nowrap;
 }
 
 .person-confirm-btn {
