@@ -2063,6 +2063,96 @@ function expandedPeopleDisplayBox(bbox, naturalW, naturalH) {
   };
 }
 
+function clampPeopleValue(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function computePeopleThumbCrop(naturalW, naturalH, containerW, containerH, bbox) {
+  if (naturalW <= 0 || naturalH <= 0 || containerW <= 0 || containerH <= 0) return null;
+  let cropW = naturalW;
+  let cropH = cropW * (containerH / containerW);
+  if (cropH > naturalH) {
+    cropH = naturalH;
+    cropW = cropH * (containerW / containerH);
+  }
+  cropW = Math.min(naturalW, cropW);
+  cropH = Math.min(naturalH, cropH);
+  const expanded = expandedPeopleDisplayBox(Array.isArray(bbox) ? bbox : [], naturalW, naturalH);
+  const focusBox = expanded && expanded.w > 0 && expanded.h > 0
+    ? expanded
+    : { x: naturalW * 0.25, y: naturalH * 0.25, w: naturalW * 0.5, h: naturalH * 0.5 };
+  const cropPadX = Math.max(12, focusBox.w * 0.10);
+  const cropPadY = Math.max(12, focusBox.h * 0.12);
+  const idealCenterX = focusBox.x + (focusBox.w / 2);
+  const idealCenterY = focusBox.y + (focusBox.h * 0.58);
+  const minCropX = Math.max(0, focusBox.x + focusBox.w + cropPadX - cropW);
+  const maxCropX = Math.min(naturalW - cropW, focusBox.x - cropPadX);
+  const minCropY = Math.max(0, focusBox.y + focusBox.h + cropPadY - cropH);
+  const maxCropY = Math.min(naturalH - cropH, focusBox.y - cropPadY);
+  let cropX = clampPeopleValue(idealCenterX - (cropW / 2), 0, Math.max(0, naturalW - cropW));
+  let cropY = clampPeopleValue(idealCenterY - (cropH / 2), 0, Math.max(0, naturalH - cropH));
+  if (minCropX <= maxCropX) cropX = clampPeopleValue(cropX, minCropX, maxCropX);
+  if (minCropY <= maxCropY) cropY = clampPeopleValue(cropY, minCropY, maxCropY);
+  const scale = Math.max(containerW / cropW, containerH / cropH);
+  return {
+    cropX,
+    cropY,
+    cropW,
+    cropH,
+    scale,
+    renderedW: naturalW * scale,
+    renderedH: naturalH * scale,
+  };
+}
+
+function attachPeopleThumbCrop(thumb, img, bbox) {
+  if (!thumb || !img) return;
+  thumb._peopleThumbCropBbox = Array.isArray(bbox) ? bbox.slice() : [];
+  if (thumb._peopleThumbCropResizeObserver && typeof thumb._peopleThumbCropResizeObserver.disconnect === 'function') {
+    thumb._peopleThumbCropResizeObserver.disconnect();
+    thumb._peopleThumbCropResizeObserver = null;
+  }
+  if (thumb._peopleThumbCropWindowHandler) {
+    window.removeEventListener('resize', thumb._peopleThumbCropWindowHandler);
+    thumb._peopleThumbCropWindowHandler = null;
+  }
+  let rafId = 0;
+  const applyCrop = () => {
+    rafId = 0;
+    const metrics = computePeopleThumbCrop(
+      Number(img.naturalWidth || 0),
+      Number(img.naturalHeight || 0),
+      Number(thumb.clientWidth || 0),
+      Number(thumb.clientHeight || 0),
+      bbox,
+    );
+    if (!metrics) return;
+    thumb._peopleThumbCropMetrics = metrics;
+    img.style.width = `${metrics.renderedW}px`;
+    img.style.height = `${metrics.renderedH}px`;
+    img.style.left = `${-metrics.cropX * metrics.scale}px`;
+    img.style.top = `${-metrics.cropY * metrics.scale}px`;
+  };
+  const scheduleCrop = () => {
+    if (rafId) return;
+    rafId = window.requestAnimationFrame(applyCrop);
+  };
+  if (img.complete) scheduleCrop();
+  img.addEventListener('load', scheduleCrop, { once: true });
+  if (typeof ResizeObserver !== 'undefined') {
+    const observer = new ResizeObserver(scheduleCrop);
+    observer.observe(thumb);
+    observer.observe(img);
+    thumb._peopleThumbCropResizeObserver = observer;
+  } else {
+    thumb._peopleThumbCropWindowHandler = scheduleCrop;
+    window.addEventListener('resize', scheduleCrop);
+  }
+  window.setTimeout(scheduleCrop, 0);
+  window.setTimeout(scheduleCrop, 80);
+  window.setTimeout(scheduleCrop, 220);
+}
+
 function capturePeopleReviewScrollState(preferredFaceId = 0) {
   const container = peopleScrollContainer();
   if (!container) return null;
@@ -2164,23 +2254,20 @@ function attachPeopleFaceBox(thumb, img, bbox) {
     rafId = 0;
     const naturalW = Number(img.naturalWidth || 0);
     const naturalH = Number(img.naturalHeight || 0);
-    const containerW = Number(thumb.clientWidth || 0);
-    const containerH = Number(thumb.clientHeight || 0);
-    if (naturalW <= 0 || naturalH <= 0 || containerW <= 0 || containerH <= 0) return;
     const expanded = expandedPeopleDisplayBox(bbox, naturalW, naturalH);
     if (!expanded || expanded.w <= 0 || expanded.h <= 0) return;
-    const objectFit = String(getComputedStyle(img).objectFit || 'cover');
-    const scale = objectFit === 'contain'
-      ? Math.min(containerW / naturalW, containerH / naturalH)
-      : Math.max(containerW / naturalW, containerH / naturalH);
-    const renderedW = naturalW * scale;
-    const renderedH = naturalH * scale;
-    const offsetX = (containerW - renderedW) / 2;
-    const offsetY = (containerH - renderedH) / 2;
-    box.style.left = `${offsetX + expanded.x * scale}px`;
-    box.style.top = `${offsetY + expanded.y * scale}px`;
-    box.style.width = `${expanded.w * scale}px`;
-    box.style.height = `${expanded.h * scale}px`;
+    const metrics = thumb._peopleThumbCropMetrics || computePeopleThumbCrop(
+      naturalW,
+      naturalH,
+      Number(thumb.clientWidth || 0),
+      Number(thumb.clientHeight || 0),
+      bbox,
+    );
+    if (!metrics) return;
+    box.style.left = `${(expanded.x - metrics.cropX) * metrics.scale}px`;
+    box.style.top = `${(expanded.y - metrics.cropY) * metrics.scale}px`;
+    box.style.width = `${expanded.w * metrics.scale}px`;
+    box.style.height = `${expanded.h * metrics.scale}px`;
   };
   const schedulePositionBox = () => {
     if (rafId) return;
@@ -2229,20 +2316,17 @@ function attachPeopleLandmarks(thumb, img, landmarks) {
     rafId = 0;
     const naturalW = Number(img.naturalWidth || 0);
     const naturalH = Number(img.naturalHeight || 0);
-    const containerW = Number(thumb.clientWidth || 0);
-    const containerH = Number(thumb.clientHeight || 0);
-    if (naturalW <= 0 || naturalH <= 0 || containerW <= 0 || containerH <= 0) return;
-    const objectFit = String(getComputedStyle(img).objectFit || 'cover');
-    const scale = objectFit === 'contain'
-      ? Math.min(containerW / naturalW, containerH / naturalH)
-      : Math.max(containerW / naturalW, containerH / naturalH);
-    const renderedW = naturalW * scale;
-    const renderedH = naturalH * scale;
-    const offsetX = (containerW - renderedW) / 2;
-    const offsetY = (containerH - renderedH) / 2;
+    const metrics = thumb._peopleThumbCropMetrics || computePeopleThumbCrop(
+      naturalW,
+      naturalH,
+      Number(thumb.clientWidth || 0),
+      Number(thumb.clientHeight || 0),
+      thumb._peopleThumbCropBbox || [],
+    );
+    if (!metrics) return;
     points.forEach((point) => {
-      point.dot.style.left = `${offsetX + point.x * scale}px`;
-      point.dot.style.top = `${offsetY + point.y * scale}px`;
+      point.dot.style.left = `${(point.x - metrics.cropX) * metrics.scale}px`;
+      point.dot.style.top = `${(point.y - metrics.cropY) * metrics.scale}px`;
     });
   };
   const schedulePositionPoints = () => {
@@ -2469,6 +2553,7 @@ function renderPeopleCards(people) {
       img.alt = '';
       img.src = `file:///${String(person.preview_path).replace(/\\/g, '/')}?people=${person.preview_face_id || 0}`;
       thumb.appendChild(img);
+      attachPeopleThumbCrop(thumb, img, person.preview_bbox || []);
       attachPeopleFaceBox(thumb, img, person.preview_bbox || []);
       attachPeopleLandmarks(thumb, img, person.preview_landmarks || []);
     } else {
@@ -2635,6 +2720,7 @@ function createPersonFaceReviewCard(face, person, refresh) {
   img.alt = '';
   img.src = `file:///${String(face.path || '').replace(/\\/g, '/')}?face=${face.face_id || 0}`;
   thumb.appendChild(img);
+  attachPeopleThumbCrop(thumb, img, face.bbox || []);
   attachPeopleFaceBox(thumb, img, face.bbox || []);
   attachPeopleLandmarks(thumb, img, face.landmarks || []);
   const pathLabel = document.createElement('div');

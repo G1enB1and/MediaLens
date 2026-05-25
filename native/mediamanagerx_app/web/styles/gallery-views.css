@@ -1616,22 +1616,20 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
 }
 
 .person-thumb {
+  aspect-ratio: 1 / 1;
   border-radius: 8px;
   background: var(--input-bg);
-  display: grid;
-  place-items: center;
   overflow: hidden;
   position: relative;
-  min-height: 180px;
   padding: 0;
 }
 
 .person-thumb img {
-  width: 100%;
-  height: auto;
-  max-height: 320px;
+  position: absolute;
+  inset: 0 auto auto 0;
   display: block;
-  object-fit: contain;
+  max-width: none;
+  max-height: none;
 }
 
 .person-face-box {
