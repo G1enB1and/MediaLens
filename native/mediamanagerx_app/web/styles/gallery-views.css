@@ -1601,6 +1601,7 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   flex-direction: column;
   gap: 9px;
   min-width: 0;
+  height: 100%;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--card-bg);
@@ -1678,6 +1679,7 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  margin-top: auto;
 }
 
 .person-actions .tb-btn {
