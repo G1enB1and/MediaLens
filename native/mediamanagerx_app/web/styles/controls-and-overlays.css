@@ -449,6 +449,11 @@
   background: var(--hover-bg);
 }
 
+.select-options div.disabled {
+  color: var(--muted);
+  opacity: 0.65;
+}
+
 .select-options div.selected {
   color: color-mix(in srgb, var(--fg), var(--accent) 65%);
   font-weight: 600;

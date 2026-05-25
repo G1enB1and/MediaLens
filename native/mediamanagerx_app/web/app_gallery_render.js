@@ -2024,6 +2024,14 @@ function openPeopleGallery(mode = 'gallery') {
   });
 }
 
+function updatePeoplePauseOption() {
+  const select = document.getElementById('peopleSelect');
+  const option = select && select.querySelector('[data-value="pause"]');
+  if (!option) return;
+  option.textContent = gPeopleScanPaused ? 'Resume Scan' : 'Pause Scan';
+  option.classList.toggle('disabled', !gPeopleScanActive);
+}
+
 function renderPeopleCards(people) {
   const el = document.getElementById('mediaList');
   if (!el) return;
@@ -2688,27 +2696,32 @@ document.addEventListener('DOMContentLoaded', () => {
       if (gBridge) refreshFromBridge(gBridge, true, { skipScanRefresh: true });
       return;
     }
+    if (val === 'pause') {
+      if (gBridge) {
+        if (gPeopleScanPaused && gBridge.resume_people_scan) {
+          gBridge.resume_people_scan();
+        } else if (gBridge.pause_people_scan) {
+          gBridge.pause_people_scan();
+        }
+      }
+      setCustomSelectValue('peopleSelect', gPeopleMode ? gPeopleMode : 'none');
+      updatePeoplePauseOption();
+      return;
+    }
     if (val === 'scan') {
       if (gBridge && gBridge.scan_faces_async) {
         const paths = Array.isArray(gMedia) ? gMedia.map(item => item && item.path).filter(Boolean) : [];
         gBridge.scan_faces_async(paths, function (ok) {
           setGlobalLoading(false);
-          if (ok) {
-            const el = document.getElementById('mediaList');
-            if (el) {
-              el.className = 'people-gallery';
-              el.innerHTML = '<div class="empty">Scanning faces. People Gallery will refresh when the scan finishes.</div>';
-            }
-            return;
-          }
+          if (ok) return;
           const el = document.getElementById('mediaList');
-          if (el) {
+          if (el && gPeopleMode) {
             el.className = 'people-gallery';
             el.innerHTML = '<div class="empty">People scan could not start. Check Settings > People and AI Models Status.</div>';
           }
         });
       }
-      setCustomSelectValue('peopleSelect', 'gallery');
+      setCustomSelectValue('peopleSelect', gPeopleMode ? gPeopleMode : 'none');
       return;
     }
     openPeopleGallery(val === 'unnamed' ? 'unnamed' : 'gallery');

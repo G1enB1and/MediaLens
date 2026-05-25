@@ -1472,15 +1472,31 @@ async function main() {
           if (errors > 0) detail += `, ${errors} errors`;
         }
         if (state === 'starting' || state === 'running') {
+          gPeopleScanActive = true;
+          gPeopleScanPaused = false;
+          if (typeof updatePeoplePauseOption === 'function') updatePeoplePauseOption();
           setFooterProgress('people', 'People Scan:', detail, percent);
           return;
         }
+        if (state === 'paused') {
+          gPeopleScanActive = true;
+          gPeopleScanPaused = true;
+          if (typeof updatePeoplePauseOption === 'function') updatePeoplePauseOption();
+          setFooterProgress('people', 'People Scan Paused:', message || detail || 'Paused', percent);
+          return;
+        }
         if (state === 'finished') {
+          gPeopleScanActive = false;
+          gPeopleScanPaused = false;
+          if (typeof updatePeoplePauseOption === 'function') updatePeoplePauseOption();
           setFooterProgress('people', 'People Scan:', detail || 'Finished', 100);
           window.setTimeout(() => clearFooterProgress('people'), 3500);
           return;
         }
         if (state === 'error') {
+          gPeopleScanActive = false;
+          gPeopleScanPaused = false;
+          if (typeof updatePeoplePauseOption === 'function') updatePeoplePauseOption();
           setFooterProgress('people', 'People Scan Error:', message || 'People scan failed', percent);
         }
       });

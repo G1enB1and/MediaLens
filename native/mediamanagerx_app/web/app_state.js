@@ -329,9 +329,11 @@ let gShowHidden = false;
 let gIncludeNestedFiles = true;
 let gShowFoldersInGallery = true;
 let gShowAllFileTypes = false;
-let gPeopleMode = 'gallery';
+let gPeopleMode = '';
 let gPeopleCards = [];
 let gPeopleReviewPerson = null;
+let gPeopleScanActive = false;
+let gPeopleScanPaused = false;
 
 function normalizedVideoLoopCutoffSeconds() {
   const parsed = Number(gVideoLoopCutoffSeconds);

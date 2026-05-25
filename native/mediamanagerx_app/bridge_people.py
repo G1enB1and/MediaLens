@@ -4,6 +4,12 @@ from native.mediamanagerx_app.common import *
 
 
 class BridgePeopleMixin:
+    def _ensure_people_scan_state(self) -> None:
+        if not hasattr(self, "_people_scan_pause"):
+            self._people_scan_pause = threading.Event()
+        if not hasattr(self, "_people_scan_running"):
+            self._people_scan_running = False
+
     def _people_scan_debug(self, message: str) -> None:
         clean = str(message or "").strip()
         if not clean:
@@ -127,36 +133,40 @@ class BridgePeopleMixin:
         errors = 0
         self._people_scan_debug(f"worker started for {total} files; runtime_python={python_path}")
         self._emit_people_scan_status("running", "Starting People scan...", current=0, total=total)
-        for raw_path in paths:
-            current = scanned + errors + 1
-            try:
-                media_path = Path(str(raw_path or ""))
-                if not media_path.is_file():
-                    errors += 1
-                    self._people_scan_debug(f"skipping missing file: {raw_path}")
-                    self._emit_people_scan_status("running", f"Skipping missing file: {Path(str(raw_path or '')).name}", current=current, total=total, path=str(raw_path or ""), detected=detected, errors=errors)
-                    continue
-                source_path = self._local_ai_source_path(media_path)
-                self._emit_people_scan_status("running", f"Scanning {media_path.name}", current=current - 1, total=total, path=str(media_path), detected=detected, errors=errors)
-                payload = self._run_insightface_detection(python_path, spec, source_path, settings_payload)
-                faces = [dict(face or {}) for face in list(payload.get("faces") or [])]
-                count = replace_detected_faces(
-                    self.conn,
-                    str(media_path),
-                    faces,
-                    detection_engine="insightface",
-                    recognition_model="buffalo_l",
-                    match_threshold=self._people_match_threshold_value(),
-                )
-                scanned += 1
-                detected += int(count or 0)
-                self._people_scan_debug(f"{media_path} detected={int(count or 0)} raw_faces={len(faces)}")
-                self._emit_people_scan_status("running", f"Scanned {media_path.name}: {int(count or 0)} faces", current=scanned + errors, total=total, path=str(media_path), detected=detected, errors=errors)
-            except Exception as exc:
-                errors += 1
-                self._people_scan_debug(f"failed for {raw_path}: {exc}")
-                self._emit_people_scan_status("error" if errors >= total and scanned == 0 else "running", f"Error scanning {Path(str(raw_path or '')).name}: {exc}", current=scanned + errors, total=total, path=str(raw_path or ""), detected=detected, errors=errors)
         try:
+            for raw_path in paths:
+                current = scanned + errors + 1
+                self._ensure_people_scan_state()
+                while self._people_scan_pause.is_set():
+                    self._emit_people_scan_status("paused", "People scan paused.", current=max(0, current - 1), total=total, path=str(raw_path or ""), detected=detected, errors=errors)
+                    time.sleep(0.25)
+                try:
+                    media_path = Path(str(raw_path or ""))
+                    if not media_path.is_file():
+                        errors += 1
+                        self._people_scan_debug(f"skipping missing file: {raw_path}")
+                        self._emit_people_scan_status("running", f"Skipping missing file: {Path(str(raw_path or '')).name}", current=current, total=total, path=str(raw_path or ""), detected=detected, errors=errors)
+                        continue
+                    source_path = self._local_ai_source_path(media_path)
+                    self._emit_people_scan_status("running", f"Scanning {media_path.name}", current=current - 1, total=total, path=str(media_path), detected=detected, errors=errors)
+                    payload = self._run_insightface_detection(python_path, spec, source_path, settings_payload)
+                    faces = [dict(face or {}) for face in list(payload.get("faces") or [])]
+                    count = replace_detected_faces(
+                        self.conn,
+                        str(media_path),
+                        faces,
+                        detection_engine="insightface",
+                        recognition_model="buffalo_l",
+                        match_threshold=self._people_match_threshold_value(),
+                    )
+                    scanned += 1
+                    detected += int(count or 0)
+                    self._people_scan_debug(f"{media_path} detected={int(count or 0)} raw_faces={len(faces)}")
+                    self._emit_people_scan_status("running", f"Scanned {media_path.name}: {int(count or 0)} faces", current=scanned + errors, total=total, path=str(media_path), detected=detected, errors=errors)
+                except Exception as exc:
+                    errors += 1
+                    self._people_scan_debug(f"failed for {raw_path}: {exc}")
+                    self._emit_people_scan_status("error" if errors >= total and scanned == 0 else "running", f"Error scanning {Path(str(raw_path or '')).name}: {exc}", current=scanned + errors, total=total, path=str(raw_path or ""), detected=detected, errors=errors)
             final_state = "finished" if errors == 0 or scanned > 0 else "error"
             final_message = f"People scan finished. Files scanned: {scanned}; faces detected: {detected}; errors: {errors}."
             self._people_scan_debug(final_message)
@@ -164,8 +174,10 @@ class BridgePeopleMixin:
             self._clear_gallery_count_cache()
             self.galleryFilterSensitiveMetadataChanged.emit()
             self.galleryScopeChanged.emit()
-        except Exception:
-            pass
+        finally:
+            self._ensure_people_scan_state()
+            self._people_scan_running = False
+            self._people_scan_pause.clear()
 
     @Slot(result=list)
     def list_people(self) -> list:
@@ -282,6 +294,11 @@ class BridgePeopleMixin:
     @Slot(list, result=bool)
     def scan_faces_async(self, paths: list | None = None) -> bool:
         try:
+            self._ensure_people_scan_state()
+            if bool(self._people_scan_running):
+                self._people_scan_debug("scan requested while another People scan is running")
+                self._emit_people_scan_status("running", "People scan is already running.")
+                return False
             self._people_scan_debug("scan requested")
             engine = str(self.settings.value("people/recognition_engine", "none", type=str) or "none").strip().lower()
             if engine != "insightface":
@@ -306,6 +323,7 @@ class BridgePeopleMixin:
                 self._emit_people_scan_status("error", "No media files were selected or found in the current gallery scope.")
                 return False
             self._emit_people_scan_status("starting", f"Starting People scan for {len(clean_paths)} files...", current=0, total=len(clean_paths))
+            self._people_scan_running = True
             threading.Thread(
                 target=self._scan_faces_worker,
                 args=(clean_paths,),
@@ -318,3 +336,25 @@ class BridgePeopleMixin:
             self._people_scan_debug(f"could not start: {exc}")
             self._emit_people_scan_status("error", f"People scan could not start: {exc}")
             return False
+
+    @Slot(result=bool)
+    def pause_people_scan(self) -> bool:
+        self._ensure_people_scan_state()
+        if not bool(self._people_scan_running):
+            self._emit_people_scan_status("error", "No People scan is running.")
+            return False
+        self._people_scan_pause.set()
+        self._people_scan_debug("pause requested")
+        self._emit_people_scan_status("paused", "People scan paused.")
+        return True
+
+    @Slot(result=bool)
+    def resume_people_scan(self) -> bool:
+        self._ensure_people_scan_state()
+        if not bool(self._people_scan_running):
+            self._emit_people_scan_status("error", "No People scan is running.")
+            return False
+        self._people_scan_pause.clear()
+        self._people_scan_debug("resume requested")
+        self._emit_people_scan_status("running", "People scan resumed.")
+        return True
