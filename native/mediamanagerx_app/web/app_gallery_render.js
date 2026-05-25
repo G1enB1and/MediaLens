@@ -3163,7 +3163,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (val === 'scan') {
       if (gBridge && gBridge.scan_faces_async) {
-        gBridge.scan_faces_async(function (ok) {
+        gBridge.scan_faces_async([], function (ok) {
           setGlobalLoading(false);
           if (ok) return;
           const el = document.getElementById('mediaList');
