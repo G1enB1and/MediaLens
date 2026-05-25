@@ -76,6 +76,7 @@ class Bridge(BridgeMediaListingScanMixin, BridgePeopleMixin, BridgeTagsMetadataM
     localAiCaptioningFinished = Signal(int, str)
     localAiModelInstallStatus = Signal(str, "QVariantMap")
     paddleOcrRuntimeInstallStatus = Signal("QVariantMap")
+    peopleScanStatus = Signal("QVariantMap")
     scannerStatusChanged = Signal(str, "QVariantMap")
     progressToastsRevealRequested = Signal()
     

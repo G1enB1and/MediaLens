@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import json
 import sys
+import traceback
 from pathlib import Path
 
 
@@ -73,7 +74,8 @@ def _detect(source: Path, settings: dict) -> dict:
     faces = app.get(image)
     detections: list[dict] = []
     for face in faces:
-        bbox = [float(value) for value in list(getattr(face, "bbox", []) or [])[:4]]
+        raw_bbox = getattr(face, "bbox", None)
+        bbox = [float(value) for value in list(raw_bbox)[:4]] if raw_bbox is not None else []
         if len(bbox) != 4:
             continue
         left, top, right, bottom = bbox
@@ -129,7 +131,17 @@ def _run_cli() -> int:
         print(json.dumps(payload, ensure_ascii=False), flush=True)
         return 0
     except Exception as exc:
-        print(json.dumps({"ok": False, "error": str(exc) or exc.__class__.__name__}, ensure_ascii=False), flush=True)
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "error": str(exc) or exc.__class__.__name__,
+                    "traceback": traceback.format_exc(limit=8),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
         return 1
 
 

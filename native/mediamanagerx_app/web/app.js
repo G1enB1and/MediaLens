@@ -1456,6 +1456,36 @@ async function main() {
       });
     }
 
+    if (bridge.peopleScanStatus) {
+      bridge.peopleScanStatus.connect(function (payload) {
+        const status = payload || {};
+        const state = String(status.state || '');
+        const message = String(status.message || '').trim();
+        const current = Number(status.current || 0);
+        const total = Number(status.total || 0);
+        const detected = Number(status.detected || 0);
+        const errors = Number(status.errors || 0);
+        const percent = Number(status.percent || 0);
+        let detail = message || 'People scan';
+        if (total > 0 && state !== 'error') {
+          detail = `${current} / ${total} files, ${detected} faces`;
+          if (errors > 0) detail += `, ${errors} errors`;
+        }
+        if (state === 'starting' || state === 'running') {
+          setFooterProgress('people', 'People Scan:', detail, percent);
+          return;
+        }
+        if (state === 'finished') {
+          setFooterProgress('people', 'People Scan:', detail || 'Finished', 100);
+          window.setTimeout(() => clearFooterProgress('people'), 3500);
+          return;
+        }
+        if (state === 'error') {
+          setFooterProgress('people', 'People Scan Error:', message || 'People scan failed', percent);
+        }
+      });
+    }
+
     if (bridge.nativeDragFinished) {
       bridge.nativeDragFinished.connect(function () {
         clearGalleryDragState();
