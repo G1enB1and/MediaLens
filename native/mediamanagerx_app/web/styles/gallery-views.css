@@ -1593,7 +1593,7 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
   gap: 14px;
-  padding: 10px 14px 14px;
+  padding: 0 14px 14px;
 }
 
 .person-card {
@@ -1696,14 +1696,12 @@ body.gallery-scroll-top #mediaList.gallery-details > .details-header {
   flex-wrap: wrap;
   gap: 12px;
   position: sticky;
-  top: 10px;
+  top: 0;
   z-index: 4;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--card-bg), transparent 8%);
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
-  backdrop-filter: blur(10px);
+  background: var(--card-bg);
 }
 
 .person-review-head .advanced-search-section-title {
