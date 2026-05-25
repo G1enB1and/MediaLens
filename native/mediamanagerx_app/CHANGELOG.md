@@ -1,6 +1,38 @@
 # Change Log
 
-## v1.2.15 (Current)
+## v1.3.0 (Current)
+
+### Summary
+
+This release introduces People to MediaLens as a new local facial recognition and people-browsing workspace. You can now scan for faces, group appearances by person, review matches, and move between People views and the normal library without losing the rest of your workflow.
+
+### Highlights
+
+- Browse a new People Gallery with named and unnamed person groups, favorite people, and profile images.
+- Scan folders for faces with background progress, pause and resume support, and faster rescans that can skip files already processed.
+- Review detected faces with confirmation tools, face overlays, profile image selection, and direct access to the Details panel for zoomable inspection.
+
+### Added
+
+- Added the new People feature to MediaLens with People Gallery, unnamed face groups, unconfirmed review, person profile images, and favorite people sections.
+- Added local face scanning with optional InsightFace runtime support through AI Models, including GPU-aware runtime detection, provider reporting, and scan progress in the footer.
+- Added person-aware search support so `person:Name` can open matched files directly from the main gallery and guided search flow.
+- Added People sections to the Details panel and metadata settings so detected people can be shown, hidden, reviewed, and rescanned alongside other file details.
+- Added review tools for naming whole groups, confirming all faces in a group, moving or renaming single faces, rejecting wrong matches, ignoring faces, and choosing a person's profile image from review or person search results.
+- Added face box and landmark overlays with People settings to control their visibility during review.
+- Added face-scan persistence so MediaLens can remember previously scanned files, skip rescans by default, and force full rescans when needed.
+
+### Changed
+
+- Changed People navigation so the dropdown can cleanly enter and exit People mode without trapping the gallery in a People-only view.
+- Changed People review cards to load the selected file into the normal Details panel, including larger preview support and wheel zoom for still images.
+- Changed People thumbnails to use face-aware square crops that keep the detected face centered while preserving overlay alignment for face boxes and landmarks.
+- Changed People review layout with sticky review headers, aligned action buttons, improved card spacing, themed dialogs, and better status feedback for profile image and favorite updates.
+- Changed supported People media handling so unsupported files are skipped from scanning and People review instead of appearing with broken results.
+
+---
+
+## v1.2.15
 
 ### Summary
 

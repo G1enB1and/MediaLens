@@ -1,19 +1,19 @@
-## MediaLens v1.2.15
+## MediaLens v1.3.0
 
 ### Summary
 
-This release makes duplicate and similar review easier to escape when a large folder takes time to process, so the app stays more responsive as you move between views. It also improves the image comparison panel with cleaner spacing, sharper borders, and more precise slider behavior.
+MediaLens now includes People as a new local People detection and person-based browsing feature. You can scan for faces, review and name matches, open person-based search results, and manage people directly inside the library workflow.
 
 ### Highlights
 
-- Large duplicate and similar review loads now stop when you switch folders or views.
-- The image comparison slider is slimmer and uses a proper horizontal resize cursor.
-- Comparison slot image borders and rounded edges render more cleanly.
-- Normalized scrollbars with matching size, color, and style for a more consistent modern look.
+- Use the new People Gallery to browse named and unnamed face groups.
+- Scan folders for faces with visible progress, pause and resume controls, and faster rescans.
+- Review detected faces with boxes, landmarks, profile image selection, and a zoomable Details preview.
 
 ### Notes
 
-- This update focuses on duplicate review responsiveness and comparison panel polish rather than adding new top-level tools.
+- People scanning uses an optional local InsightFace runtime that can be installed from AI Models when you want to enable facial recognition.
+- This release is centered on introducing People as a new top-level MediaLens capability rather than a refinement of an existing feature.
 
 Full Changelog:
 https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md
