@@ -231,6 +231,26 @@ class OcrReviewImageLabel(QLabel):
         self.update()
 
 
+class SidebarPreviewImageLabel(OcrReviewImageLabel):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWordWrap(True)
+
+    def clear_preview(self) -> None:
+        self._source_pixmap = QPixmap()
+        self.reset_view()
+        QLabel.setPixmap(self, QPixmap())
+        self.update()
+
+    def set_display_pixmap(self, pixmap: QPixmap | None) -> None:
+        self._source_pixmap = QPixmap()
+        self.reset_view()
+        QLabel.setPixmap(self, QPixmap(pixmap) if pixmap is not None else QPixmap())
+        if pixmap is not None and not pixmap.isNull():
+            self.setText("")
+        self.update()
+
+
 class FolderTreeView(QTreeView):
     """Tree view that does NOT change selection on right-click.
 

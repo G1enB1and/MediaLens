@@ -2350,6 +2350,26 @@ function ignorePersonGroup(person) {
   });
 }
 
+function clearPeopleCardSelection() {
+  document.querySelectorAll('.person-card.selected').forEach((card) => card.classList.remove('selected'));
+}
+
+function showPeopleMetadata(path, card = null) {
+  const cleanPath = String(path || '').trim();
+  if (!cleanPath || !gBridge || !gBridge.show_metadata) return;
+  if (gBridge.set_setting_bool) {
+    gBridge.set_setting_bool('ui.show_right_panel', true);
+  }
+  gSelectedPaths.clear();
+  gSelectedPaths.add(cleanPath);
+  gLockedCard = null;
+  clearPeopleCardSelection();
+  if (card) {
+    card.classList.add('selected');
+  }
+  gBridge.show_metadata([cleanPath]);
+}
+
 function renderPeopleCards(people) {
   const el = document.getElementById('mediaList');
   if (!el) return;
@@ -2381,6 +2401,21 @@ function renderPeopleCards(people) {
       const placeholder = document.createElement('div');
       placeholder.className = 'person-thumb-placeholder';
       thumb.appendChild(placeholder);
+    }
+    if (person.preview_path) {
+      card.setAttribute('data-path', String(person.preview_path || ''));
+      thumb.tabIndex = 0;
+      thumb.addEventListener('click', (e) => {
+        e.stopPropagation();
+        showPeopleMetadata(person.preview_path, card);
+      });
+      thumb.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          e.stopPropagation();
+          showPeopleMetadata(person.preview_path, card);
+        }
+      });
     }
     const title = document.createElement('div');
     title.className = 'person-name';
@@ -2514,6 +2549,7 @@ function createPersonFaceReviewCard(face, person, refresh) {
   const card = document.createElement('div');
   card.className = 'person-card person-face-card';
   card.setAttribute('data-face-id', String(face.face_id || ''));
+  card.setAttribute('data-path', String(face.path || ''));
   const thumb = document.createElement('div');
   thumb.className = 'person-thumb person-review-thumb';
   const img = document.createElement('img');
@@ -2604,6 +2640,15 @@ function createPersonFaceReviewCard(face, person, refresh) {
   card.appendChild(pathLabel);
   card.appendChild(statusLabel);
   card.appendChild(actions);
+  card.addEventListener('click', () => {
+    showPeopleMetadata(face.path || '', card);
+  });
+  card.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      showPeopleMetadata(face.path || '', card);
+    }
+  });
   return card;
 }
 

@@ -23,11 +23,14 @@ class WindowPreviewMetadataMixin:
                 pass
             self._preview_movie.stop()
             self._preview_movie.deleteLater()
-            self._preview_movie = None
+        self._preview_movie = None
         self._preview_source_pixmap = None
         self._preview_svg_path = ""
         self._preview_aspect_ratio = 1.0
-        self.preview_image_lbl.setPixmap(QPixmap())
+        if hasattr(self.preview_image_lbl, "clear_preview"):
+            self.preview_image_lbl.clear_preview()
+        else:
+            self.preview_image_lbl.setPixmap(QPixmap())
         self._sync_sidebar_video_preview_controls()
 
     def _ensure_sidebar_video_overlay(self) -> LightboxVideoOverlay:
@@ -56,7 +59,10 @@ class WindowPreviewMetadataMixin:
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
-        self.preview_image_lbl.setPixmap(scaled)
+        if hasattr(self.preview_image_lbl, "set_display_pixmap"):
+            self.preview_image_lbl.set_display_pixmap(scaled)
+        else:
+            self.preview_image_lbl.setPixmap(scaled)
         self.preview_image_lbl.setFixedHeight(max(96, scaled.height()))
         overlay = getattr(self, "sidebar_video_overlay", None)
         if overlay is not None and overlay.isVisible():
@@ -209,21 +215,23 @@ class WindowPreviewMetadataMixin:
         if self._preview_source_pixmap is not None and not self._preview_source_pixmap.isNull():
             self.preview_image_lbl.setText("")
             svg_path = str(getattr(self, "_preview_svg_path", "") or "")
-            scaled = QPixmap()
+            source_pixmap = self._preview_source_pixmap
             if svg_path:
                 svg_size = QSize(available_w, target_h)
                 rendered = _render_svg_image(svg_path, svg_size)
                 if rendered is not None and not rendered.isNull():
-                    scaled = QPixmap.fromImage(rendered)
-            if scaled.isNull():
-                scaled = self._preview_source_pixmap.scaled(
-                    available_w,
-                    target_h,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
+                    source_pixmap = QPixmap.fromImage(rendered)
+            scaled = source_pixmap.scaled(
+                available_w,
+                target_h,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
             self.preview_image_lbl.setFixedHeight(max(96, scaled.height()))
-            self.preview_image_lbl.setPixmap(scaled)
+            if hasattr(self.preview_image_lbl, "set_source_pixmap"):
+                self.preview_image_lbl.set_source_pixmap(source_pixmap)
+            else:
+                self.preview_image_lbl.setPixmap(scaled)
             overlay = getattr(self, "sidebar_video_overlay", None)
             if overlay is not None and overlay.isVisible():
                 overlay.setGeometry(self.preview_image_lbl.rect())

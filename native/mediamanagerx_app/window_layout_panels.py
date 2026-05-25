@@ -975,7 +975,7 @@ class WindowLayoutPanelsMixin:
 
         right_layout.addWidget(self.preview_header_row)
 
-        self.preview_image_lbl = QLabel()
+        self.preview_image_lbl = SidebarPreviewImageLabel()
         self.preview_image_lbl.setObjectName("previewImageLabel")
         self.preview_image_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_image_lbl.setMinimumHeight(0)
