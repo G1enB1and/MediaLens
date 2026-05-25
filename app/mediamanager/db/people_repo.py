@@ -167,6 +167,21 @@ def confirm_person_group(conn: sqlite3.Connection, person_id: int) -> bool:
     return int(cur.rowcount or 0) > 0
 
 
+def ignore_person_group(conn: sqlite3.Connection, person_id: int) -> bool:
+    ensure_people_tables(conn)
+    now = _utc_now_iso()
+    cur = conn.execute(
+        """
+        UPDATE media_faces
+        SET ignored = 1, status = 'ignored', updated_at_utc = ?
+        WHERE person_id = ? AND COALESCE(ignored, 0) = 0
+        """,
+        (now, int(person_id or 0)),
+    )
+    conn.commit()
+    return int(cur.rowcount or 0) > 0
+
+
 def confirm_face(conn: sqlite3.Connection, face_id: int) -> bool:
     ensure_people_tables(conn)
     now = _utc_now_iso()

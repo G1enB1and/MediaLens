@@ -668,6 +668,7 @@ function scheduleFilterSensitiveMetadataRefresh() {
     gGalleryFilterMetadataRefreshTimer = 0;
     if (gPeopleMode) {
       if (gPeopleMode === 'unconfirmed' && typeof openUnconfirmedPeopleReview === 'function') openUnconfirmedPeopleReview();
+      else if (gPeopleReviewPerson && typeof openPersonReview === 'function') openPersonReview(gPeopleReviewPerson);
       else openPeopleGallery(gPeopleMode);
       return;
     }

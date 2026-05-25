@@ -2108,6 +2108,16 @@ function namePersonGroup(person, afterName) {
   });
 }
 
+function ignorePersonGroup(person) {
+  if (!person || !gBridge || !gBridge.ignore_person_group) return;
+  const name = String(person.display_name || '').trim() || `Unnamed ${person.id || ''}`.trim();
+  const ok = window.confirm(`Ignore all faces in ${name}?`);
+  if (!ok) return;
+  gBridge.ignore_person_group(Number(person.id || 0), function () {
+    openPeopleGallery(gPeopleMode || 'gallery');
+  });
+}
+
 function renderPeopleCards(people) {
   const el = document.getElementById('mediaList');
   if (!el) return;
@@ -2168,6 +2178,17 @@ function renderPeopleCards(people) {
     });
     actions.appendChild(nameBtn);
     actions.appendChild(reviewBtn);
+    if (!person.is_confirmed) {
+      const ignoreBtn = document.createElement('button');
+      ignoreBtn.type = 'button';
+      ignoreBtn.className = 'tb-btn';
+      ignoreBtn.textContent = 'Ignore';
+      ignoreBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        ignorePersonGroup(person);
+      });
+      actions.appendChild(ignoreBtn);
+    }
     card.appendChild(thumb);
     card.appendChild(title);
     card.appendChild(count);

@@ -400,6 +400,24 @@ class BridgePeopleMixin:
                 pass
             return False
 
+    @Slot(int, result=bool)
+    def ignore_person_group(self, person_id: int) -> bool:
+        from app.mediamanager.db.people_repo import ignore_person_group
+
+        try:
+            ok = ignore_person_group(self.conn, int(person_id or 0))
+            if ok:
+                self._clear_gallery_count_cache()
+                self.galleryFilterSensitiveMetadataChanged.emit()
+                self.galleryScopeChanged.emit()
+            return bool(ok)
+        except Exception as exc:
+            try:
+                self._log(f"Ignore person group failed: {exc}")
+            except Exception:
+                pass
+            return False
+
     @Slot(int, str, result=bool)
     def assign_face_person(self, face_id: int, person_name: str) -> bool:
         from app.mediamanager.db.people_repo import assign_face_to_person
