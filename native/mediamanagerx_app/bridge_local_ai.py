@@ -1029,6 +1029,9 @@ class BridgeLocalAiMixin:
             "--gpu-index",
             str(max(0, int(gpu_index or 0))),
         ]
+        if str(getattr(spec, "settings_key", "") or "") == "insightface":
+            models_dir = str(self.settings.value("ai_caption/models_dir", self._local_ai_models_dir_default(), type=str) or self._local_ai_models_dir_default())
+            command.extend(["--models-dir", models_dir])
         child_env = self._local_ai_subprocess_env(worker_pythonpath)
         return command, worker_cwd, child_env
 
@@ -1167,11 +1170,12 @@ class BridgeLocalAiMixin:
             return " | ".join(parts)
         if backend in {"onnx", "insightface"}:
             active_provider = str(probe.get("active_provider") or "CPUExecutionProvider")
+            applied_providers = [str(name).strip() for name in list(probe.get("applied_providers") or []) if str(name).strip()]
             runtime_label = "InsightFace" if backend == "insightface" else "ONNX Runtime"
             parts = [
                 f"Runtime: {status_label}",
                 f"{runtime_label} {probe.get('insightface_version') or probe.get('onnxruntime_version') or '?'}",
-                active_provider,
+                applied_providers[0] if applied_providers else active_provider,
             ]
             if backend == "insightface" and probe.get("onnxruntime_version"):
                 parts.append(f"ONNX Runtime {probe.get('onnxruntime_version')}")
@@ -1226,6 +1230,9 @@ class BridgeLocalAiMixin:
             providers = [str(name).strip() for name in list(probe.get("available_providers") or []) if str(name).strip()]
             if providers:
                 lines.append(f"<b>Providers:</b> {html.escape(', '.join(providers[:4]))}")
+            applied_providers = [str(name).strip() for name in list(probe.get("applied_providers") or []) if str(name).strip()]
+            if applied_providers:
+                lines.append(f"<b>Applied Providers:</b> {html.escape(', '.join(applied_providers[:4]))}")
         elif backend == "gguf":
             profile_label = str(probe.get("profile_label") or "").strip()
             if profile_label:

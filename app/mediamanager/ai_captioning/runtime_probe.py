@@ -7,6 +7,9 @@ import platform
 import subprocess
 import sys
 from importlib import metadata
+from pathlib import Path
+
+_DLL_DIRECTORY_HANDLES = []
 
 
 def _windows_hidden_subprocess_kwargs() -> dict[str, object]:
@@ -25,6 +28,34 @@ def _windows_hidden_subprocess_kwargs() -> dict[str, object]:
     except AttributeError:
         pass
     return kwargs
+
+
+def _add_nvidia_dll_directories() -> None:
+    if os.name != "nt":
+        return
+    site_packages = Path(sys.prefix) / "Lib" / "site-packages"
+    dll_dirs: list[str] = []
+    for relative in (
+        Path("nvidia") / "cudnn" / "bin",
+        Path("nvidia") / "cublas" / "bin",
+        Path("nvidia") / "cuda_runtime" / "bin",
+        Path("nvidia") / "cuda_nvrtc" / "bin",
+        Path("nvidia") / "cufft" / "bin",
+        Path("nvidia") / "curand" / "bin",
+        Path("nvidia") / "nvjitlink" / "bin",
+    ):
+        candidate = site_packages / relative
+        if candidate.is_dir():
+            dll_dirs.append(str(candidate))
+            if not hasattr(os, "add_dll_directory"):
+                continue
+            try:
+                _DLL_DIRECTORY_HANDLES.append(os.add_dll_directory(str(candidate)))
+            except Exception:
+                pass
+    if dll_dirs:
+        existing_path = str(os.environ.get("PATH") or "")
+        os.environ["PATH"] = os.pathsep.join([*dll_dirs, existing_path])
 
 
 def _package_version(name: str) -> str:
@@ -159,6 +190,12 @@ def _probe_onnx(requested_device: str) -> dict[str, object]:
         return result
 
     result["import_ok"] = True
+    _add_nvidia_dll_directories()
+    if hasattr(ort, "preload_dlls"):
+        try:
+            ort.preload_dlls(directory="")
+        except Exception:
+            pass
     result["onnxruntime_version"] = str(getattr(ort, "__version__", "") or _package_version("onnxruntime-gpu") or _package_version("onnxruntime"))
     try:
         providers = list(ort.get_available_providers())
@@ -181,10 +218,11 @@ def _probe_onnx(requested_device: str) -> dict[str, object]:
     return result
 
 
-def _probe_insightface(requested_device: str) -> dict[str, object]:
+def _probe_insightface(requested_device: str, models_dir: str = "") -> dict[str, object]:
     result = _probe_onnx(requested_device)
     result["backend"] = "insightface"
     result["insightface_version"] = ""
+    result["applied_providers"] = []
     if not result.get("ok"):
         return result
     try:
@@ -194,6 +232,41 @@ def _probe_insightface(requested_device: str) -> dict[str, object]:
         result["reason"] = f"insightface import failed: {exc}"
         return result
     result["insightface_version"] = str(getattr(insightface, "__version__", "") or _package_version("insightface"))
+    if models_dir:
+        try:
+            from insightface.app import FaceAnalysis
+
+            provider_order = ["CUDAExecutionProvider", "DmlExecutionProvider", "CPUExecutionProvider"] if requested_device == "gpu" else ["CPUExecutionProvider"]
+            available = set(result.get("available_providers") or [])
+            active_providers = [provider for provider in provider_order if provider in available]
+            if "CPUExecutionProvider" not in active_providers:
+                active_providers.append("CPUExecutionProvider")
+            models_root = Path(models_dir).expanduser() / "insightface"
+            app = FaceAnalysis(name="buffalo_l", root=str(models_root), providers=active_providers)
+            ctx_id = int(result.get("requested_gpu_index") or 0) if active_providers[0] != "CPUExecutionProvider" else -1
+            app.prepare(ctx_id=ctx_id, det_size=(640, 640))
+            applied: list[str] = []
+            for model in getattr(app, "models", {}).values():
+                session = getattr(model, "session", None)
+                if session is None or not hasattr(session, "get_providers"):
+                    continue
+                for provider in list(session.get_providers() or []):
+                    provider = str(provider or "")
+                    if provider and provider not in applied:
+                        applied.append(provider)
+            result["applied_providers"] = applied
+            if applied:
+                result["active_provider"] = applied[0]
+                if applied[0] in {"CUDAExecutionProvider", "DmlExecutionProvider"}:
+                    result["selected_device"] = "gpu"
+                else:
+                    result["selected_device"] = "cpu"
+                    if "CUDAExecutionProvider" in list(result.get("available_providers") or []):
+                        result["reason"] = "CUDA provider is advertised but failed to load for the InsightFace models; using CPU fallback"
+        except Exception as exc:
+            result["selected_device"] = "cpu"
+            result["active_provider"] = "CPUExecutionProvider"
+            result["reason"] = f"InsightFace model provider probe failed: {exc}"
     return result
 
 
@@ -202,6 +275,7 @@ def _main() -> int:
     parser.add_argument("--backend", choices=("torch", "onnx", "insightface"), required=True)
     parser.add_argument("--requested-device", default="gpu")
     parser.add_argument("--gpu-index", type=int, default=0)
+    parser.add_argument("--models-dir", default="")
     args = parser.parse_args()
 
     requested_device = str(args.requested_device or "gpu").strip().lower() or "gpu"
@@ -210,7 +284,7 @@ def _main() -> int:
     elif args.backend == "onnx":
         payload = _probe_onnx(requested_device)
     else:
-        payload = _probe_insightface(requested_device)
+        payload = _probe_insightface(requested_device, str(args.models_dir or ""))
     print(json.dumps(payload, ensure_ascii=False), flush=True)
     return 0
 

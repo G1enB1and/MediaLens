@@ -3,9 +3,12 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import os
 import sys
 import traceback
 from pathlib import Path
+
+_DLL_DIRECTORY_HANDLES = []
 
 
 def _settings_from_json(raw: str) -> dict:
@@ -22,6 +25,32 @@ def _provider_names(requested_device: str) -> list[str]:
     return ["CPUExecutionProvider"]
 
 
+def _add_nvidia_dll_directories() -> None:
+    if os.name != "nt":
+        return
+    site_packages = Path(sys.prefix) / "Lib" / "site-packages"
+    dll_dirs: list[str] = []
+    for relative in (
+        Path("nvidia") / "cudnn" / "bin",
+        Path("nvidia") / "cublas" / "bin",
+        Path("nvidia") / "cuda_runtime" / "bin",
+        Path("nvidia") / "cuda_nvrtc" / "bin",
+        Path("nvidia") / "cufft" / "bin",
+        Path("nvidia") / "curand" / "bin",
+        Path("nvidia") / "nvjitlink" / "bin",
+    ):
+        candidate = site_packages / relative
+        if candidate.is_dir():
+            dll_dirs.append(str(candidate))
+            if not hasattr(os, "add_dll_directory"):
+                continue
+            with contextlib.suppress(Exception):
+                _DLL_DIRECTORY_HANDLES.append(os.add_dll_directory(str(candidate)))
+    if dll_dirs:
+        existing_path = str(os.environ.get("PATH") or "")
+        os.environ["PATH"] = os.pathsep.join([*dll_dirs, existing_path])
+
+
 def _load_app(settings: dict):
     try:
         import insightface
@@ -30,6 +59,10 @@ def _load_app(settings: dict):
     except Exception as exc:
         raise RuntimeError(f"InsightFace runtime import failed: {exc}") from exc
 
+    _add_nvidia_dll_directories()
+    if hasattr(ort, "preload_dlls"):
+        with contextlib.suppress(Exception):
+            ort.preload_dlls(directory="")
     models_root = Path(str(settings.get("models_dir") or "")).expanduser() / "insightface"
     models_root.mkdir(parents=True, exist_ok=True)
     requested_device = str(settings.get("device") or "gpu")
@@ -45,6 +78,22 @@ def _load_app(settings: dict):
     return app, insightface, ort, active_providers, available, models_root
 
 
+def _applied_provider_summary(app) -> list[str]:
+    providers: list[str] = []
+    for model in getattr(app, "models", {}).values():
+        session = getattr(model, "session", None)
+        if session is None or not hasattr(session, "get_providers"):
+            continue
+        try:
+            for provider in list(session.get_providers() or []):
+                provider = str(provider or "")
+                if provider and provider not in providers:
+                    providers.append(provider)
+        except Exception:
+            continue
+    return providers
+
+
 def _preload(settings: dict) -> dict:
     app, insightface, ort, active_providers, available, models_root = _load_app(settings)
     model_dir = models_root / "models" / "buffalo_l"
@@ -55,18 +104,18 @@ def _preload(settings: dict) -> dict:
         "onnxruntime_version": str(getattr(ort, "__version__", "") or ""),
         "available_providers": sorted(available),
         "active_providers": active_providers,
+        "applied_providers": _applied_provider_summary(app),
         "model_dir": str(model_dir),
         "model_files": sorted(path.name for path in model_dir.glob("*.onnx")),
     }
 
 
-def _detect(source: Path, settings: dict) -> dict:
+def _detect_with_app(source: Path, app, insightface, ort, active_providers: list[str]) -> dict:
     try:
         import cv2
     except Exception as exc:
         raise RuntimeError(f"OpenCV runtime import failed: {exc}") from exc
 
-    app, insightface, ort, active_providers, _available, _models_root = _load_app(settings)
     image = cv2.imread(str(source))
     if image is None:
         raise RuntimeError("InsightFace could not read the source image.")
@@ -103,23 +152,79 @@ def _detect(source: Path, settings: dict) -> dict:
         "image_width": int(width or 0),
         "image_height": int(height or 0),
         "active_providers": active_providers,
+        "applied_providers": _applied_provider_summary(app),
         "insightface_version": str(getattr(insightface, "__version__", "") or ""),
         "onnxruntime_version": str(getattr(ort, "__version__", "") or ""),
         "faces": detections,
     }
 
 
+def _detect(source: Path, settings: dict) -> dict:
+    app, insightface, ort, active_providers, _available, _models_root = _load_app(settings)
+    return _detect_with_app(source, app, insightface, ort, active_providers)
+
+
+def _serve(settings: dict) -> int:
+    with contextlib.redirect_stdout(sys.stderr):
+        app, insightface, ort, active_providers, _available, _models_root = _load_app(settings)
+        applied_providers = _applied_provider_summary(app)
+        print(
+            f"InsightFace ready with providers: {', '.join(applied_providers or active_providers)}",
+            file=sys.stderr,
+            flush=True,
+        )
+    print(
+        json.dumps(
+            {
+                "ok": True,
+                "ready": True,
+                "active_providers": active_providers,
+                "applied_providers": applied_providers,
+            },
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
+    for raw_line in sys.stdin:
+        raw_line = raw_line.strip()
+        if not raw_line:
+            continue
+        try:
+            request = json.loads(raw_line)
+            source = Path(str(request.get("source") or ""))
+            with contextlib.redirect_stdout(sys.stderr):
+                payload = _detect_with_app(source, app, insightface, ort, active_providers)
+            print(json.dumps(payload, ensure_ascii=False), flush=True)
+        except Exception as exc:
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "error": str(exc) or exc.__class__.__name__,
+                        "traceback": traceback.format_exc(limit=8),
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+    return 0
+
+
 def _run_cli() -> int:
     parser = argparse.ArgumentParser(description="Run one isolated MediaLens InsightFace People task.")
-    parser.add_argument("--operation", choices=("preload", "detect"), required=True)
-    parser.add_argument("--source", required=True)
+    parser.add_argument("--operation", choices=("preload", "detect", "serve"), required=True)
+    parser.add_argument("--source", default="")
     parser.add_argument("--settings-json", required=True)
     args = parser.parse_args()
 
     try:
         settings = _settings_from_json(args.settings_json)
+        if args.operation == "serve":
+            return _serve(settings)
         with contextlib.redirect_stdout(sys.stderr):
             if args.operation == "detect":
+                if not args.source:
+                    raise RuntimeError("InsightFace detect requires --source.")
                 payload = _detect(Path(args.source), settings)
             else:
                 payload = _preload(settings)

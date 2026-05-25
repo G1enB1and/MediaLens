@@ -120,6 +120,88 @@ class BridgePeopleMixin:
             raise RuntimeError(str(payload.get("error") or payload.get("reason") or "InsightFace detection failed."))
         return payload
 
+    def _start_insightface_detection_server(self, python_path: Path, spec, settings_payload: dict):
+        launcher, worker_cwd, worker_pythonpath = self._local_ai_worker_launcher(python_path, spec.worker_module)
+        command = [
+            *launcher,
+            "--operation",
+            "serve",
+            "--settings-json",
+            json.dumps(settings_payload, ensure_ascii=False),
+        ]
+        child_env = self._local_ai_subprocess_env(worker_pythonpath)
+        popen_kwargs = dict(
+            cwd=str(worker_cwd),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=child_env,
+            bufsize=1,
+        )
+        if _WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS:
+            popen_kwargs.update(_WINDOWS_NO_CONSOLE_SUBPROCESS_KWARGS)
+        self._people_scan_debug(f"starting persistent worker with {python_path}")
+        process = subprocess.Popen(command, **popen_kwargs)
+
+        def drain_stderr() -> None:
+            try:
+                assert process.stderr is not None
+                for line in process.stderr:
+                    clean = str(line or "").strip()
+                    if clean:
+                        self._people_scan_debug(f"worker: {clean[-2000:]}")
+            except Exception:
+                pass
+
+        threading.Thread(target=drain_stderr, daemon=True, name="people-insightface-stderr").start()
+        ready = self._read_insightface_server_payload(process, "InsightFace startup")
+        if not bool(ready.get("ok")) or not bool(ready.get("ready")):
+            raise RuntimeError(str(ready.get("error") or "InsightFace worker did not become ready."))
+        active_providers = [str(provider) for provider in list(ready.get("active_providers") or [])]
+        applied_providers = [str(provider) for provider in list(ready.get("applied_providers") or [])]
+        if applied_providers:
+            self._people_scan_debug(f"worker applied providers: {', '.join(applied_providers)}")
+        elif active_providers:
+            self._people_scan_debug(f"worker requested providers: {', '.join(active_providers)}")
+        if "CUDAExecutionProvider" in active_providers and "CUDAExecutionProvider" not in applied_providers:
+            self._people_scan_debug("CUDA provider was available but did not load for the InsightFace models; scan is using CPU fallback.")
+        return process
+
+    def _read_insightface_server_payload(self, process, context: str) -> dict:
+        assert process.stdout is not None
+        while True:
+            line = process.stdout.readline()
+            if not line:
+                code = process.poll()
+                if code is None:
+                    continue
+                raise RuntimeError(f"{context} failed ({self._local_ai_exit_code_text(code)}).")
+            clean = line.strip()
+            if not clean:
+                continue
+            try:
+                payload = json.loads(clean)
+            except Exception:
+                self._people_scan_debug(f"worker output: {clean[-2000:]}")
+                continue
+            if not isinstance(payload, dict):
+                raise RuntimeError(f"{context} returned invalid JSON.")
+            if not bool(payload.get("ok")):
+                raise RuntimeError(str(payload.get("error") or f"{context} failed."))
+            return payload
+
+    def _run_insightface_server_detection(self, process, source_path: Path) -> dict:
+        if process.poll() is not None:
+            raise RuntimeError(f"InsightFace worker exited early ({self._local_ai_exit_code_text(process.returncode)}).")
+        assert process.stdin is not None
+        request = {"source": str(source_path)}
+        process.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
+        process.stdin.flush()
+        return self._read_insightface_server_payload(process, f"InsightFace detection for {source_path.name}")
+
     def _scan_faces_worker(self, paths: list[str]) -> None:
         from app.mediamanager.ai_captioning.model_registry import INSIGHTFACE_MODEL_ID, model_spec
         from app.mediamanager.db.people_repo import replace_detected_faces
@@ -131,9 +213,11 @@ class BridgePeopleMixin:
         scanned = 0
         detected = 0
         errors = 0
+        process = None
         self._people_scan_debug(f"worker started for {total} files; runtime_python={python_path}")
         self._emit_people_scan_status("running", "Starting People scan...", current=0, total=total)
         try:
+            process = self._start_insightface_detection_server(python_path, spec, settings_payload)
             for raw_path in paths:
                 current = scanned + errors + 1
                 self._ensure_people_scan_state()
@@ -149,7 +233,7 @@ class BridgePeopleMixin:
                         continue
                     source_path = self._local_ai_source_path(media_path)
                     self._emit_people_scan_status("running", f"Scanning {media_path.name}", current=current - 1, total=total, path=str(media_path), detected=detected, errors=errors)
-                    payload = self._run_insightface_detection(python_path, spec, source_path, settings_payload)
+                    payload = self._run_insightface_server_detection(process, source_path)
                     faces = [dict(face or {}) for face in list(payload.get("faces") or [])]
                     count = replace_detected_faces(
                         self.conn,
@@ -175,6 +259,16 @@ class BridgePeopleMixin:
             self.galleryFilterSensitiveMetadataChanged.emit()
             self.galleryScopeChanged.emit()
         finally:
+            if process is not None:
+                try:
+                    if process.stdin:
+                        process.stdin.close()
+                except Exception:
+                    pass
+                try:
+                    process.terminate()
+                except Exception:
+                    pass
             self._ensure_people_scan_state()
             self._people_scan_running = False
             self._people_scan_pause.clear()
