@@ -1528,6 +1528,7 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
   const unpinFolderBtn = document.getElementById('ctxUnpinFolder');
   const renameBtn = document.getElementById('ctxRename');
   const addToCollectionBtn = document.getElementById('ctxAddToCollection');
+  const setPersonProfileBtn = document.getElementById('ctxSetPersonProfile');
 
   if (gBridge && gBridge.debug_log) {
     gBridge.debug_log(`showCtx: item=${item ? item.path : 'null'} idx=${idx}`);
@@ -1545,6 +1546,16 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
   const hasItem = !!item;
   const isFolder = hasItem && !!item.is_folder;
   const isSupportedMedia = hasItem && isSupportedMediaItem(item);
+  const peopleContext = item && item.__peopleContext ? item.__peopleContext : null;
+  const searchPersonName = getSinglePersonContextName();
+  const canSetPersonProfile = Boolean(
+    hasItem
+    && isSupportedMedia
+    && (
+      (peopleContext && peopleContext.personName && ((Number(peopleContext.faceId || 0) > 0 && Number(peopleContext.personId || 0) > 0) || item.path))
+      || (searchPersonName && item.path)
+    )
+  );
   ['ctxHide', 'ctxUnhide', 'ctxRename', 'ctxDelete', 'ctxOpenExternal', 'ctxExplorer', 'ctxCut', 'ctxCopy'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = hasItem ? 'block' : 'none';
@@ -1553,6 +1564,11 @@ function showCtx(x, y, item, idx, fromLightbox = false) {
   if (unpinFolderBtn) unpinFolderBtn.style.display = hasItem && isFolder && isPinnedFolder(item && item.path) ? 'block' : 'none';
   const metaBtn = document.getElementById('ctxMeta');
   if (metaBtn) metaBtn.style.display = isSupportedMedia ? 'block' : 'none';
+  if (setPersonProfileBtn) {
+    const personName = String((peopleContext && peopleContext.personName) || searchPersonName || '').trim();
+    setPersonProfileBtn.style.display = canSetPersonProfile ? 'block' : 'none';
+    setPersonProfileBtn.textContent = personName ? `Set as ${personName}'s Profile Image` : 'Set as Person Profile Image';
+  }
   if (addToCollectionBtn) addToCollectionBtn.style.display = (hasItem && isSupportedMedia) || (!hasItem && hasSelectedMediaCards()) ? 'block' : 'none';
   
   const isRotatable = hasItem && isSupportedMedia && (item.media_type === 'image' || isVideoMediaItem(item));
@@ -1935,6 +1951,26 @@ function wireCtxMenu() {
             gBridge.show_metadata(pathForMeta, () => { });
           }, 60);
         }
+        break;
+      case 'ctxSetPersonProfile':
+        if (item && item.path && gBridge) {
+          const targetContext = item.__peopleContext || null;
+          const targetName = String((targetContext && targetContext.personName) || getSinglePersonContextName() || '').trim();
+          let ok = false;
+          if (targetContext && gBridge.set_person_preview_face && Number(targetContext.personId || 0) > 0 && Number(targetContext.faceId || 0) > 0) {
+            ok = !!gBridge.set_person_preview_face(Number(targetContext.personId || 0), Number(targetContext.faceId || 0));
+          } else if (targetName && gBridge.set_person_preview_for_media) {
+            ok = !!gBridge.set_person_preview_for_media(targetName, item.path);
+          }
+          if (ok && targetContext && gPeopleMode) {
+            if (gPeopleMode === 'unconfirmed' && typeof openUnconfirmedPeopleReview === 'function') {
+              openUnconfirmedPeopleReview();
+            } else if (gPeopleReviewPerson && typeof openPersonReview === 'function') {
+              openPersonReview(gPeopleReviewPerson);
+            }
+          }
+        }
+        hideCtx();
         break;
       case 'ctxDelete':
         if (gBridge) {
@@ -2378,6 +2414,22 @@ function clearPeopleCardSelection() {
   document.querySelectorAll('.person-card.selected').forEach((card) => card.classList.remove('selected'));
 }
 
+function getSinglePersonContextName() {
+  const tokens = tokenizeSearchQuery(gSearchQuery || '').filter(Boolean);
+  const names = [];
+  for (const token of tokens) {
+    if (String(token || '').toUpperCase() === 'OR' || token === '|') return '';
+    const parsed = parseSearchFieldTerm(token);
+    if (!parsed || parsed.fieldKey !== 'people_names') continue;
+    if (parsed.negated || (parsed.operator && parsed.operator !== 'contains')) return '';
+    const value = String(parsed.value || '').trim();
+    if (!value) continue;
+    names.push(value);
+  }
+  if (names.length !== 1) return '';
+  return names[0];
+}
+
 function showPeopleMetadata(path, card = null) {
   const cleanPath = String(path || '').trim();
   if (!cleanPath || !gBridge || !gBridge.show_metadata) return;
@@ -2573,6 +2625,8 @@ function renderPersonReview(person, faces) {
 }
 
 function createPersonFaceReviewCard(face, person, refresh) {
+  const personName = String((person && person.display_name) || face.display_name || '').trim();
+  const personId = Number(face.person_id || (person && person.id) || 0);
   const card = document.createElement('div');
   card.className = 'person-card person-face-card';
   card.setAttribute('data-face-id', String(face.face_id || ''));
@@ -2591,7 +2645,6 @@ function createPersonFaceReviewCard(face, person, refresh) {
   pathLabel.title = face.path || '';
   const statusLabel = document.createElement('div');
   statusLabel.className = 'person-count';
-  const personName = String((person && person.display_name) || face.display_name || '').trim();
   const status = String(face.status || 'unreviewed').replace(/_/g, ' ');
   statusLabel.textContent = `${personName || 'Unnamed'} | ${status}`;
   const actions = document.createElement('div');
@@ -2667,6 +2720,20 @@ function createPersonFaceReviewCard(face, person, refresh) {
   card.appendChild(pathLabel);
   card.appendChild(statusLabel);
   card.appendChild(actions);
+  card.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    showCtx(e.clientX, e.clientY, {
+      path: face.path || '',
+      media_type: 'image',
+      is_folder: false,
+      __peopleContext: {
+        personId,
+        faceId: Number(face.face_id || 0),
+        personName,
+      },
+    }, -1, false);
+  });
   card.addEventListener('click', (e) => {
     e.stopPropagation();
     showPeopleMetadata(face.path || '', card);

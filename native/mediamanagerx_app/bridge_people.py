@@ -333,6 +333,38 @@ class BridgePeopleMixin:
         except Exception:
             return []
 
+    @Slot(int, int, result=bool)
+    def set_person_preview_face(self, person_id: int, face_id: int) -> bool:
+        from app.mediamanager.db.people_repo import set_person_preview_face
+
+        try:
+            ok = bool(set_person_preview_face(self.conn, int(person_id or 0), int(face_id or 0)))
+            if ok:
+                self.galleryScopeChanged.emit()
+            return ok
+        except Exception as exc:
+            try:
+                self._log(f"Set person preview face failed: {exc}")
+            except Exception:
+                pass
+            return False
+
+    @Slot(str, str, result=bool)
+    def set_person_preview_for_media(self, person_name: str, path: str) -> bool:
+        from app.mediamanager.db.people_repo import set_person_preview_for_media
+
+        try:
+            ok = bool(set_person_preview_for_media(self.conn, person_name, path))
+            if ok:
+                self.galleryScopeChanged.emit()
+            return ok
+        except Exception as exc:
+            try:
+                self._log(f"Set person preview for media failed: {exc}")
+            except Exception:
+                pass
+            return False
+
     @Slot(str, str, result=bool)
     def assign_media_person(self, path: str, person_name: str) -> bool:
         from app.mediamanager.db.people_repo import add_manual_face_assignment

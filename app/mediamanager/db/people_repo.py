@@ -241,6 +241,73 @@ def _preview_face_for_person(conn: sqlite3.Connection, person_id: int) -> dict:
     return {"preview_face_id": 0, "preview_path": "", "preview_bbox": [], "preview_landmarks": []}
 
 
+def _person_id_for_name(conn: sqlite3.Connection, name: str) -> int:
+    display_name = normalize_person_name(name)
+    if not display_name:
+        return 0
+    slug = _person_slug(display_name)
+    row = conn.execute("SELECT id FROM people WHERE name = ? OR display_name = ?", (slug, display_name)).fetchone()
+    return int(row[0] or 0) if row else 0
+
+
+def set_person_preview_face(conn: sqlite3.Connection, person_id: int, face_id: int) -> bool:
+    ensure_people_tables(conn)
+    target_person_id = int(person_id or 0)
+    target_face_id = int(face_id or 0)
+    if target_person_id <= 0 or target_face_id <= 0:
+        return False
+    row = conn.execute(
+        """
+        SELECT id
+        FROM media_faces
+        WHERE id = ? AND person_id = ? AND COALESCE(ignored, 0) = 0
+        """,
+        (target_face_id, target_person_id),
+    ).fetchone()
+    if not row:
+        return False
+    now = _utc_now_iso()
+    conn.execute(
+        "UPDATE people SET preview_face_id = ?, updated_at_utc = ? WHERE id = ?",
+        (target_face_id, now, target_person_id),
+    )
+    conn.commit()
+    return True
+
+
+def set_person_preview_for_media(conn: sqlite3.Connection, person_name: str, path: str) -> bool:
+    ensure_people_tables(conn)
+    target_person_id = _person_id_for_name(conn, person_name)
+    clean_path = normalize_windows_path(path)
+    if target_person_id <= 0 or not clean_path:
+        return False
+    row = conn.execute(
+        """
+        SELECT f.id
+        FROM media_faces f
+        JOIN media_items m ON m.id = f.media_id
+        WHERE f.person_id = ?
+          AND m.path = ?
+          AND COALESCE(f.ignored, 0) = 0
+        ORDER BY
+          CASE COALESCE(f.status, 'unreviewed')
+            WHEN 'confirmed' THEN 0
+            WHEN 'suggested' THEN 1
+            WHEN 'unreviewed' THEN 2
+            ELSE 3
+          END,
+          COALESCE(f.match_confidence, 0) DESC,
+          COALESCE(f.confidence, 0) DESC,
+          f.id
+        LIMIT 1
+        """,
+        (target_person_id, clean_path),
+    ).fetchone()
+    if not row:
+        return False
+    return set_person_preview_face(conn, target_person_id, int(row[0] or 0))
+
+
 def _supported_face_counts_for_person(conn: sqlite3.Connection, person_id: int) -> tuple[int, int]:
     rows = conn.execute(
         """
