@@ -2281,6 +2281,16 @@ function namePersonGroup(person, afterName) {
   });
 }
 
+function openPersonSearch(name) {
+  const cleanName = String(name || '').trim();
+  if (!cleanName) return;
+  gPeopleMode = '';
+  gPeopleReviewPerson = null;
+  gPeopleCards = [];
+  setCustomSelectValue('peopleSelect', 'none');
+  setAdvancedSearchQuery(`person:${quoteSearchValue(cleanName)}`);
+}
+
 function ignorePersonGroup(person) {
   if (!person || !gBridge || !gBridge.ignore_person_group) return;
   const name = String(person.display_name || '').trim() || `Unnamed ${person.id || ''}`.trim();
@@ -2368,12 +2378,12 @@ function renderPeopleCards(people) {
     card.appendChild(count);
     card.appendChild(actions);
     card.addEventListener('click', () => {
-      setAdvancedSearchQuery(`person:${quoteSearchValue(name)}`);
+      openPersonSearch(name);
     });
     card.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
-        setAdvancedSearchQuery(`person:${quoteSearchValue(name)}`);
+        openPersonSearch(name);
       }
     });
     el.appendChild(card);
