@@ -16,4 +16,4 @@ MediaLens now includes People as a new local People detection and person-based b
 - This release is centered on introducing People as a new top-level MediaLens capability rather than a refinement of an existing feature.
 
 Full Changelog:
-https://github.com/G1enB1and/MediaLens/blob/dev/native/mediamanagerx_app/CHANGELOG.md
+https://github.com/G1enB1and/MediaLens/blob/main/CHANGELOG.md

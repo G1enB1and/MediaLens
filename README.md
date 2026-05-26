@@ -333,8 +333,6 @@ MediaLens is evolving into a full intelligent media platform.
 
 ## License
 
-## License
-
 MediaLens is source-available under the Business Source License (BSL) 1.1.
 
 You may view, modify, and use the software for personal and non-commercial purposes, but commercial redistribution or resale is restricted.
