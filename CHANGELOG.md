@@ -1,6 +1,45 @@
 # Change Log
 
-## v1.3.0 (Current)
+## v1.3.1 (Current)
+
+### Summary
+
+This release adds a new Bulk Rename workspace built for safe, preview-first file renaming. You can now build rename patterns with guided controls, review conflicts before anything changes, and rename matching sidecar files with clear visibility into the final result.
+
+### Highlights
+
+- Use the new Bulk Rename editor to build filename rules with tokens, guided controls, and a live preview before renaming files.
+- Review rename conflicts, invalid names, sidecar matches, and no-change rows in a dedicated preview table and optional pop-out window.
+- Work more comfortably in the bulk editor with smoother resizing, tabbed editor modes, sticky rename actions, and theme-matched controls.
+- Rate files with a new five-star metadata system that now flows through the Details panel, filters, sorting, and search.
+- Run or schedule background People scans from Settings and see clearer Local AI readiness guidance for People, tags, descriptions, and OCR.
+- Use an improved Action History with date-grouped sections, better detail-pane behavior, copy-path support, and broader undo coverage for People actions.
+
+### Added
+
+- Added a fourth Bulk Editor mode for Rename with pattern-based batch renaming, live preview generation, validation, and execution only after explicit confirmation.
+- Added a standalone batch rename engine with token parsing, rename plan generation, conflict detection, sidecar rename support, and safer execution flow.
+- Added guided rename controls for filename, folder, date, counter, people, cleanup, conflict handling, missing values, and saved rename settings presets.
+- Added a floating Preview Rename Table window so larger rename plans can be reviewed outside the right sidebar.
+- Added five-star file rating metadata across the Details panel, metadata settings, gallery filters, sorting, and search.
+- Added scheduled and on-demand Scan for People controls to Settings > Background Processes, including status, next run, and cancel support.
+- Added date-grouped Action History sections, copy-path support, and expanded undo/redo coverage for People review actions.
+
+### Changed
+
+- Changed bulk editor mode switching from plain buttons to responsive tab-style controls that fit better in smaller sidebar widths.
+- Changed bulk editor controls, popups, combo boxes, checkboxes, and preview surfaces to better match MediaLens light mode, dark mode, and accent theme styling.
+- Changed bulk editor resize behavior to avoid the severe sidebar drag stalls that previously affected Tags, Descriptions, Text OCR, and Rename layouts.
+- Changed Local AI recommended setup and status summaries to include InsightFace Buffalo for People and clearer task-based readiness reporting.
+- Changed Background Processes scheduling controls from popup dropdowns to clearer radio-button selectors while eliminating the empty flashing helper windows they were causing.
+- Changed guided search metadata ordering and chevron behavior for People and Rating to make those filters read more cleanly.
+- Changed Action History detail and list behavior to reduce layout jumps, preserve selection better, and make date-section navigation easier to use.
+- Changed startup and dialog theming behavior to reduce blank-window flashes and stale theme repaint issues across settings, Action History, and bulk editor surfaces.
+- Changed animated GIF rotation handling so rotating and undoing animated GIFs preserves the full animation instead of flattening to a single frame.
+
+---
+
+## v1.3.0
 
 ### Summary
 
