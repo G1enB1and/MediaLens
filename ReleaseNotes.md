@@ -1,21 +1,22 @@
-## MediaLens v1.3.1
+## MediaLens v1.3.2
 
 ### Summary
 
-This release adds a new Bulk Rename workspace built for safe, preview-first file renaming. You can now build rename patterns with guided controls, review conflicts before anything changes, and rename matching sidecar files with clear visibility into the final result.
+This release is a workflow polish update focused on making MediaLens feel faster, cleaner, and more dependable during everyday review and cleanup. The Details panel, Collections workflow, Settings, menus, and Action History all receive usability improvements, while numerous UI delays, interaction issues, and theme inconsistencies have been resolved.
 
 ### Highlights
 
-- Use the new Bulk Rename editor to build filename rules with tokens, guided controls, and a live preview before renaming files.
-- Review rename conflicts, invalid names, sidecar matches, and no-change rows in a dedicated preview table and optional pop-out window.
-- Work more comfortably in the bulk editor with smoother resizing, tabbed editor modes, sticky rename actions, and theme-matched controls.
-- Rate files with a new five-star metadata system that now flows through the Details panel, filters, sorting, and search.
-- Run or schedule background People scans from Settings and see clearer Local AI readiness guidance for People, tags, descriptions, and OCR.
-- Use an improved Action History with date-grouped sections, better detail-pane behavior, copy-path support, and broader undo coverage for People actions.
+- Use an improved Details panel with collapsible sections, collection membership controls, unsupported-file handling, and more convenient save actions.
+- Open Action History and right-click menus faster, with visible loading feedback and improved responsiveness during larger operations.
+- Customize keyboard shortcuts from the new Hotkey Shortcuts settings page with conflict detection and persistent overrides.
+- Navigate pinned folders, folder trees, and collections more predictably with right-click behavior that no longer changes the active gallery unexpectedly.
+- Enjoy a more polished Settings experience with improved scrolling, cleaner organization, standard menu accelerators, and more consistent theme behavior.
+
 ### Notes
 
-- Bulk Rename only executes ready items after preview validation, helping prevent accidental overwrites or broken filenames.
-- Matching sidecar files can now be included in the same rename workflow when needed.
+This update focuses on workflow polish, responsiveness, and usability improvements rather than major new features.
+Includes improvements across Details, Collections, Settings, menus, Action History, People navigation, and search workflows.
 
-Full Changelog:
+### Full Changelog:
+
 https://github.com/G1enB1and/MediaLens/blob/main/CHANGELOG.md

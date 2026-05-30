@@ -1,6 +1,49 @@
 # Change Log
 
-## v1.3.1 (Current)
+## v1.3.2 (Current)
+
+### Summary
+
+This release focuses on workflow polish across MediaLens, making everyday cleanup work feel faster, clearer, and more dependable. Details, Collections, Settings, menus, and Action History all receive usability improvements, while numerous UI regressions and interaction delays have been resolved.
+
+### Highlights
+
+- Use an improved Details panel with collapsible sections, collection controls, unsupported-file handling, and more convenient save button locations.
+- Work faster with more responsive Action History and right-click menus, including visible loading feedback and less delay before menus or actions appear.
+- Customize keyboard shortcuts from a new Hotkey Shortcuts settings page with conflict detection and persistent overrides.
+- Navigate collections, pinned folders, and folder trees more predictably with right-click behavior that no longer changes the active gallery unexpectedly.
+- Enjoy a more polished Settings experience with better scrolling, full theme switching coverage, and corrected themed controls across light and dark mode.
+
+### Added
+
+- Added collection membership controls to the Details panel, including a themed Add to Collection action, clickable collection names, and per-collection removal controls for explicit memberships.
+- Added a dedicated unsupported-file Details state that keeps file identity visible while replacing media-only metadata sections with clear unsupported-file messaging.
+- Added a clear-search trashcan action inside the main gallery search box using existing MediaLens SVG assets and theme-aware hover styling.
+- Added new native menu entries for People Gallery, Unconfirmed People, and Unconfirmed Face Groups.
+- Added a Hotkey Shortcuts settings page with editable shortcut bindings, conflict validation, and persistent shortcut overrides.
+- Added a gallery context menu Duplicate action and active-collection removal support for both files and explicitly added folders.
+- Added dedicated footer notifications for undoable actions so recent edits appear immediately without waiting for Action History refreshes.
+- Added loading feedback in the Action History footer while history is being repopulated.
+- Added standard menu accelerators.
+
+### Changed
+
+- Changed the Details panel to use session-only collapse state memory so sections stay consistent while you switch files during a session but reset to expanded on a fresh launch.
+- Changed the Details panel layout, section rendering, and stabilization behavior to reduce blank space, improve grouped metadata organization, and better match the existing theme system.
+- Changed Details panel action rows for tags and descriptions to use responsive side-by-side layouts that can stack cleanly when width is limited.
+- Changed Settings > General to split startup options from gallery behavior, and changed all Settings pages to scroll within the dialog instead of forcing larger window sizes.
+- Changed Settings page scrollbars, theme propagation, and wrapper styling so settings content switches cleanly between light and dark mode and uses the same MediaLens scrollbar visuals.
+- Changed native menus to use standard Windows-style accelerators and visible shortcut labels, including Ctrl+O for Open Folder and clearer separators in the Edit menu.
+- Changed right-click menu grouping so file, compare, clipboard, collection, people, management, selection, and view actions are easier to scan.
+- Changed gallery and sidebar right-click behavior so folder trees and pinned folders no longer treat right-click as navigation or selection-changing input.
+- Changed Action History opening behavior so the window appears faster, refreshes after it is shown, and gives visible progress feedback while entries load.
+- Changed context menu responsiveness for duplicate, delete, paste, and remove-from-collection actions by closing the menu immediately and starting heavier work after the UI has a chance to repaint.
+- Changed delete workflows to reuse cached settings when available and show progress feedback sooner.
+- Changed People wording so Unconfirmed Review is now labeled Unconfirmed People in the People surfaces and menus.
+
+---
+
+## v1.3.1
 
 ### Summary
 
