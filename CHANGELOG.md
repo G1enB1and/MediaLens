@@ -1,6 +1,44 @@
 # Change Log
 
-## v1.3.2 (Current)
+## v1.3.3 (Current)
+
+### Summary
+
+This release focuses on faster large-library review workflows, a dedicated Bulk Metadata Editor, and expanded People organization tools. MediaLens is faster and more reliable when working through duplicates, similar files, metadata overrides, and growing People libraries, with additional polish across details and gallery menus.
+
+### Highlights
+
+- Use a dedicated Bulk Metadata Editor with independent layout settings to edit ratings, notes, collections, dates, and AI or text-detection overrides across many files from a single workspace.
+- Review duplicates and similar files more reliably with persistent cache reuse, clearer real progress reporting, and better handling for very large folders.
+- Organize People more easily with Favorite People, custom People groups, and profile-image actions directly from the gallery.
+- Work more confidently in the Details panel and gallery menus with better themed dropdowns, clearer text-detection controls, and more consistent right-click grouping.
+
+### Added
+
+- Added a dedicated Bulk Metadata Editor with its own Metadata settings scope, separate single-file and bulk layout preferences, and bulk editing support for ratings, notes, collections, dates, and AI and text-detection overrides.
+- Added persistent duplicate review caching that reuses completed review results across folder changes and app restarts.
+- Added persistent similar review caching with automatic invalidation when underlying media changes.
+- Added stable review signatures to safely determine when cached review results can be reused.
+- Added native progress reporting for duplicate and similar review preparation, hashing, grouping, ranking, cache reuse, and result generation.
+- Added Favorite People sections and favorite-star actions directly in the People gallery.
+- Added custom People groups and group membership management.
+- Added person profile image actions in the People gallery.
+- Added favorite-star toggles directly on People cards so favorite organization can be managed without leaving the gallery.
+
+### Changed
+
+- Changed duplicate and similar review loading so usable review results appear before large scans fully complete.
+- Changed similar-review grouping and ranking to scale better on large libraries through faster pHash neighbor search, safer cache reuse, and stale-result invalidation.
+- Changed bulk metadata controls to focus on truly editable override-oriented fields instead of mixing in unrelated text-editing surfaces.
+- Changed bulk and single-file override controls to use themed combo boxes that match MediaLens light mode, dark mode, and accent color behavior more consistently.
+- Changed combo box wheel handling across the native UI so closed dropdowns no longer change values accidentally while the sidebar is being scrolled.
+- Changed the Details panel text-detection override from a toggle to a clearer three-state dropdown that supports automatic detection, explicit text detected, and explicit no text detected.
+- Changed People merge behavior so custom group memberships are preserved more reliably when people are consolidated.
+- Changed gallery context menus to group related actions more consistently and improve scanning and predictability.
+
+---
+
+## v1.3.2
 
 ### Summary
 

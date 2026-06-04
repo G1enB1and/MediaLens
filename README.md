@@ -16,13 +16,23 @@ MediaLens is built for that entire experience, not just detection, but decision 
 
 ## Why MediaLens?
 
-Most tools show duplicates.
+Most duplicate finders focus on deletion.
 
-**MediaLens shows what actually changed and helps you decide.**
+Most media managers focus on storage.
 
+**MediaLens focuses on understanding your library.**
+
+- Explainable cleanup decisions 
 - See differences like resolution, edits, format, text, and more
 - Get clear “best version” recommendations based on your rules
+- AI metadata extraction  
+- OCR searchability  
+- Facial recognition  
+- Bulk metadata workflows  
+- Timeline browsing  
+- Local-first AI
 - Review safely before anything is removed
+- Rest easy with file retention and undoable action history 
 
 No guesswork. No blind deletes.
 
@@ -32,11 +42,13 @@ No guesswork. No blind deletes.
 
 Once your library is clean, MediaLens becomes your daily workspace:
 
-- Fast search, filtering, and tagging
-- Collections beyond folders
-- Bulk editing across hundreds of files
-- Timeline browsing by when things happened
-- Deep metadata + AI understanding
+- Fast search, filtering, ratings, and tagging  
+- Collections, Smart Collections, and folder-backed collections  
+- Facial recognition and People browsing  
+- Bulk editing and bulk renaming  
+- OCR and AI-powered metadata extraction  
+- Timeline browsing by when things happened  
+- Deep metadata, prompts, workflows, and AI detection
 
 ---
 
@@ -82,7 +94,7 @@ Each group is labeled with meaningful differences:
 
 Always transparent. Always reversible.
 
-![Similar Groups](docs/Screenshots/Screenshot-Similar-Groups-Puppy.png)
+![Similar Groups](docs/Screenshot-Similar-Groups-Puppy.png)
 
 ---
 
@@ -97,13 +109,13 @@ Evaluate two images without leaving your workflow.
 
 Compare → decide → clean up.
 
-![Comparison](docs/Screenshots/Screenshot-Comparison-Zoom.png)
+![Comparison](docs/Screenshot-Comparison-Zoom.png)
 
 ---
 
 ### Bulk Editing Workspace
 
-Tags, descriptions, and OCR, all in one place.
+Tags, descriptions, OCR, and Rename all in one place.
 
 #### Tags
 
@@ -111,25 +123,25 @@ Tags, descriptions, and OCR, all in one place.
 - Common vs uncommon tag detection
 - Tag lists with one-click apply
 
-![Bulk Tag Editor](docs/Screenshots/Screenshot-Bulk-Tag-Editor.png)
+![Bulk Tag Editor](docs/Screenshot-Bulk-Tag-Editor.png)
 
 #### Descriptions
 
 - Edit or generate captions in bulk
 - AI-assisted descriptions (local models)
 
-![Bulk Description Editor](docs/Screenshots/Screenshot-Bulk-Description-Editor.png)
+![Bulk Description Editor](docs/Screenshot-Bulk-Description-Editor.png)
 
 #### Text OCR (Fast + AI)
 
 - Extract text from images and video previews
 - Choose:
-  - Fast OCR (quick)
-  - AI OCR (higher accuracy)
+    - Fast OCR (quick)
+    - AI OCR (higher accuracy)
 - Mark files as “No Text”
 - Save and edit results directly
 
-![Bulk OCR Editor](docs/Screenshots/Screenshot-Bulk-OCR-Editor.png)
+![Bulk OCR Editor](docs/Screenshot-Bulk-OCR-Editor.png)
 
 ---
 
@@ -140,7 +152,36 @@ Tags, descriptions, and OCR, all in one place.
 - Confirm best result per file
 - Navigate quickly across files
 
-![OCR Review](docs/Screenshots/Screenshot-OCR-Review-Zoom.png)
+![OCR Review](docs/Screenshot-OCR-Review-Zoom.png)
+
+---
+
+#### Bulk Rename Editor
+
+Rename hundreds or thousands of files with custom rules.  
+  
+- Live preview table before applying changes  
+- Prefix and suffix tools  
+- Numbering sequences with custom padding and start
+- Case conversion  
+- Metadata-driven naming  
+- Support for renaming sidecar files in matching groups such as txt files with captions that match image files -  very useful for training datasets
+- Sanitation options to make file names safer across all operating systems
+- Undo support through Action History  
+  
+Preview exactly what will happen before making changes.
+
+---
+
+### Bulk Metadata Editor
+
+Update metadata across hundreds of files at once.
+
+- Bulk ratings
+- Bulk collections
+- bulk people
+- Configurable metadata fields
+- Per-file and batch editing workflows
 
 ---
 
@@ -159,7 +200,22 @@ MediaLens includes optional **local AI models** to help organize your media with
 - Run locally (GPU or CPU)
 - Never overwrite your data without permission
 
-![AI Descriptions Settings](docs/Screenshots/Screenshot-Settings-AI-Descriptions.png)
+![AI Descriptions Settings](docs/Screenshot-Settings-AI-Descriptions.png)
+
+---
+
+### People & Facial Recognition  
+  
+Find and organize photos by the people who appear in them.  
+  
+- Local facial detection and recognition  
+- Automatic grouping of similar faces  
+- Name people and browse their photos  
+- Review face crops, landmarks, and profile images  
+- Open person-based search results instantly  
+- Fully local processing using optional InsightFace models  
+  
+Perfect for family photos, event photography, and large personal archives.
 
 ---
 
@@ -172,7 +228,7 @@ Find exactly what you're looking for without memorizing syntax.
 - Save searches
 - Sync between UI and raw search
 
-![Guided Search](docs/Screenshots/Screenshot-Guided-Search-File-Date-Panda.png)
+![Guided Search](docs/Screenshot-Guided-Search-File-Date-Panda.png)
 
 ---
 
@@ -181,16 +237,43 @@ Find exactly what you're looking for without memorizing syntax.
 Go beyond filenames.
 
 - Extract:
-  - AI prompts & workflows
-  - EXIF / camera data
-  - Embedded metadata
+    - AI prompts & workflows
+    - EXIF / camera data
+    - Embedded metadata
 - Edit metadata in bulk
 - Persistent tagging via file hashing
 - Works even if files move or rename
 
-![AI Detection](docs/Screenshots/Screenshot-AI-Detection-Google.png)
+![AI Detection](docs/Screenshot-AI-Detection-Google.png)
 
-![AI Metadata](docs/Screenshots/Screenshot-Settings-Metadata-AI.png)
+---
+
+### AI Detection & Metadata  
+  
+Identify AI-generated content automatically.  
+  
+- Detect AI-generated images from embedded metadata  
+- Extract prompts and workflows  
+- Identify generation tools and models  
+- Manual AI / Non-AI overrides  
+- Search and filter by AI status  
+- Works alongside OCR, tags, descriptions, and ratings
+
+![AI Metadata](docs/Screenshot-Settings-Metadata-AI.png)
+
+---
+
+### Ratings & Curation  
+  
+Quickly identify your best content.  
+  
+- 1–5 star rating system  
+- Filter by rating  
+- Sort by rating  
+- Bulk rating updates  
+- Combine ratings with tags, collections, and search  
+  
+Perfect for selecting portfolio images, favorites, and keeper shots.
 
 ---
 
@@ -202,7 +285,7 @@ Explore your media by **when**, not just where.
 - Smooth timeline scrubbing
 - Jump instantly across large libraries
 
-![Timeline](docs/Screenshots/Screenshot-Timeline-Grid.png)
+![Timeline](docs/Screenshot-Timeline-Grid.png)
 
 ---
 
@@ -215,7 +298,7 @@ Keep your library up to date automatically.
 - Background processing
 - Resume interrupted scans
 
-![Scanners](docs/Screenshots/Screenshot-Settings-Scanners-Expanded.png)
+![Scanners](docs/Screenshot-Settings-Scanners-Expanded.png)
 
 ---
 
@@ -226,14 +309,17 @@ Your library is safe and portable.
 - Export full library backups
 - Restore fully or partially
 - Merge or replace:
-  - Metadata
-  - Thumbnails
-  - AI models
-  - App data
+    - Metadata backups
+    - Thumbnails and cache backups
+    - AI model backups
+    - App data and settings backups
+    - OCR data backups
+    - People Identification backups
+    - Retention system backups
 
 Includes automatic safety backups before restore.
 
-![Backup & Restore](docs/Screenshots/Screenshot-Export-Library-Backup.png)
+![Gallery](docs/Screenshot-Export-Library-Backup.png)
 
 ---
 
@@ -248,26 +334,49 @@ Built for thousands of files without slowing down.
 
 ---
 
-### Smart Organization
-
-- Collections independent of folders
-- Drag-and-drop between folders
-- Flexible filtering and sorting
-- Clean, responsive UI
+### Collections & Smart Collections  
+  
+Organize files beyond folders.  
+  
+- Traditional collections  
+- Folder-backed live collections  
+- Smart collections based on rules  
+- Recent files  
+- Missing tags  
+- Missing descriptions  
+- Large files  
+- AI-generated files  
+- Text-detected files  
+  
+Create dynamic views without moving files.
 
 ---
 
-### Action History
+### Folder-Based Collections & Drag-Drop Organization
 
-Review and recover previous actions with persistent undo and redo history.
+- Folder drag-and-drop
+- Explorer integration
+- Collection sources
+- Live folder collections
+- Pinned folders
+- Nested file controls
 
-- Undo or redo deletes, moves, copies, renames, folder creation, metadata edits, rotations, and hidden-status changes
-- Supports both bulk actions and single-file edits
-- Clearly shows what can still be undone or redone
-- Explains when recovery is no longer possible
-- Works with MediaLens Retention and the Windows Recycle Bin
+---
 
-![Action History](docs/Screenshots/Screenshot-Action-History.png)
+### Action History  
+  
+Review and recover changes with confidence.  
+  
+- Persistent Action History across sessions  
+- Undo and Redo support  
+- Recover deletes, moves, copies, renames, metadata edits, rotations, and more  
+- Group actions and individual file actions  
+- Clear status indicators showing what can and cannot be undone  
+- Search and filter history entries  
+  
+MediaLens is designed so actions remain recoverable whenever possible.
+
+![Gallery](docs/Screenshot-Action-History.png)
 
 ---
 
@@ -283,21 +392,6 @@ Download the latest release:
 - All dependencies included
 - Ready to go
 
----
-
-## Run from Source
-
-git clone [https://github.com/G1enB1and/MediaLens.git](https://github.com/G1enB1and/MediaLens.git)  
-cd MediaLens
-
-python -m venv .venv  
-..venv\Scripts\Activate.ps1
-
-python -m pip install -U pip  
-python -m pip install -e .
-
-python scripts\setup.py  
-python run.py
 
 ---
 
@@ -307,15 +401,28 @@ MediaLens is evolving into a full intelligent media platform.
 
 ### Near-Term
 
-- Batch rename engine
-- Rating system
-- Expanded filters (photo vs illustration, etc.)
+- Expanded filters (photo vs illustration, screenshots, people, etc.)
+- Automatically label images with faces looking toward camera and smiling to help determine best image out of similar image groupings
 
 ### AI
 
 - Prompt library tools
 - “Chat with your images”
 - Advanced similarity validation
+- Segment Anything
+- AI Powered Image Editing
+- In-Painting / Out-Painting
+
+### Built-In Editor
+- Crop, resize, rotate
+- Add / remove text
+- Work in layers
+- Apply filters such as color grading 
+- Apply effects such as blur
+- Segment anything
+- Remove background
+- In-Paint / Out-Paint
+- AI built in for easier editing by text, selection by SAM, Expand by Outpainting, etc.
 
 ### Ecosystem
 
@@ -325,9 +432,7 @@ MediaLens is evolving into a full intelligent media platform.
 
 ### Advanced Tools
 
-- Facial recognition
 - Dataset creation workflows
-- Bulk metadata generation
 
 ---
 

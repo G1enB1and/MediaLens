@@ -1,22 +1,19 @@
-## MediaLens v1.3.2
+## MediaLens v1.3.3
 
 ### Summary
 
-This release is a workflow polish update focused on making MediaLens feel faster, cleaner, and more dependable during everyday review and cleanup. The Details panel, Collections workflow, Settings, menus, and Action History all receive usability improvements, while numerous UI delays, interaction issues, and theme inconsistencies have been resolved.
+This release focuses on faster large-library review workflows, a dedicated Bulk Metadata Editor, and expanded People organization tools. MediaLens is faster and more reliable when working through duplicates, similar files, metadata overrides, and growing People libraries, with additional polish across details and gallery menus.
 
 ### Highlights
 
-- Use an improved Details panel with collapsible sections, collection membership controls, unsupported-file handling, and more convenient save actions.
-- Open Action History and right-click menus faster, with visible loading feedback and improved responsiveness during larger operations.
-- Customize keyboard shortcuts from the new Hotkey Shortcuts settings page with conflict detection and persistent overrides.
-- Navigate pinned folders, folder trees, and collections more predictably with right-click behavior that no longer changes the active gallery unexpectedly.
-- Enjoy a more polished Settings experience with improved scrolling, cleaner organization, standard menu accelerators, and more consistent theme behavior.
+- Use a dedicated Bulk Metadata Editor with independent layout settings to edit ratings, notes, collections, dates, and AI or text-detection overrides across many files from a single workspace.
+- Review duplicates and similar files more reliably with persistent cache reuse, clearer real progress reporting, and better handling for very large folders.
+- Organize People more easily with Favorite People, custom People groups, and profile-image actions directly from the gallery.
+- Work more confidently in the Details panel and gallery menus with better themed dropdowns, clearer text-detection controls, and more consistent right-click grouping.
 
 ### Notes
 
-This update focuses on workflow polish, responsiveness, and usability improvements rather than major new features.
-Includes improvements across Details, Collections, Settings, menus, Action History, People navigation, and search workflows.
+- This update also includes Details panel and gallery context menu polish, including clearer text-detection override controls and more consistent themed dropdown styling.
 
-### Full Changelog:
-
+Full Changelog:
 https://github.com/G1enB1and/MediaLens/blob/main/CHANGELOG.md
