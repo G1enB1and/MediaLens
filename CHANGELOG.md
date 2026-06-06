@@ -1,6 +1,44 @@
 # Change Log
 
-## v1.3.3 (Current)
+## v1.3.4 (Current)
+
+### Summary
+
+This release overhauls the Lightbox viewing experience for images, GIFs, and videos. MediaLens now delivers a more unified slideshow workflow, cleaner controls, better theme behavior, more reliable mixed-media playback, dedicated fullscreen Lightbox mode that stays separate from the main app window state, and expanded Lightbox hotkey support.
+
+### Highlights
+
+- Use a more capable Lightbox with a real slideshow player that can move smoothly through images, GIFs, and videos in one flow.
+- Navigate with redesigned Lightbox controls that auto-hide, stay aligned to the media itself, and behave more consistently in both light and dark mode.
+- Open the Lightbox into its own dedicated fullscreen mode without changing the app window layout, side panels, or maximize state.
+- Control the Lightbox more directly with shortcut support for mute or unmute, fullscreen, play or pause, escape, and previous or next navigation.
+- Close, pause, mute, and move between items more reliably in the native video overlay with better theme syncing and fewer playback or tooltip issues.
+- Enjoy cleaner Lightbox contrast and stability after removing the shadow-heavy control treatments that caused clipping, blinking, and inconsistent rendering.
+
+### Added
+
+- Added a true Lightbox slideshow player that can auto-advance through supported media using the configured Player interval and shared slideshow state across image, GIF, and video viewing.
+- Added dedicated Lightbox close controls that remain accessible alongside the existing click-to-close behavior.
+- Added dedicated fullscreen Lightbox controls for both the web image or GIF viewer and the native video overlay.
+- Added a separate slideshow play or pause control at the center of the Lightbox while keeping independent video playback controls for videos.
+- Added configurable Lightbox player shortcuts including Ctrl+M for mute or unmute and Ctrl+F for fullscreen toggle, alongside the existing spacebar, escape, and arrow key controls.
+
+### Changed
+
+- Changed Lightbox controls to auto-hide after pointer inactivity and reappear on movement, while remaining visible when the pointer rests over a control.
+- Changed Lightbox fullscreen behavior to use a separate frameless fullscreen host so viewer fullscreen no longer changes the main MediaLens window state.
+- Changed Lightbox previous and next controls into edge-aligned side tabs that stay attached to the displayed media bounds instead of drifting into the background.
+- Changed Lightbox navigation to wrap back to the beginning and skip unsupported files so slideshow playback does not stall on invalid entries.
+- Changed image, GIF, and video Lightbox controls to follow a more consistent theme-aware contrast model across light and dark mode.
+- Changed Lightbox theme refresh behavior so open viewers update immediately when switching themes instead of waiting for the viewer to reopen.
+- Changed native video overlay layout so mute, video play or pause, close, and slideshow controls align more consistently with the Lightbox chrome.
+- Changed Lightbox icon and button treatment away from shadow-dependent rendering in favor of more stable high-contrast controls.
+- Changed native video overlay tooltips and volume slider styling to better match the active theme.
+- Changed Lightbox keyboard control support so both configurable shortcuts and built-in navigation keys work more consistently across image, GIF, and video viewing.
+
+---
+
+## v1.3.3
 
 ### Summary
 
