@@ -1,6 +1,37 @@
 # Change Log
 
-## v1.3.4 (Current)
+## v1.3.5 (Current)
+
+### Summary
+
+This release finishes a major round of Lightbox refinement. MediaLens now gives the slideshow player proper looping across paginated galleries, clearer playback controls, more stable fullscreen behavior, and more predictable control placement for both images and videos.
+
+### Highlights
+
+- Let Lightbox slideshows keep going across paginated galleries instead of stopping at the current page.
+- Control slideshow looping directly from both Settings and a new shortcut, while keeping image, GIF, and video playback in one smoother flow.
+- Use fixed-position Lightbox controls that no longer jump around as different media sizes load.
+- Read video playback controls more clearly with distinct slideshow and video play or pause pills, plus better top-row layout in the native video overlay.
+
+### Added
+
+- Added a new `Settings > Player > Loop slideshow` setting, enabled by default.
+- Added a new `Settings > Hotkey Shortcuts` entry for toggling slideshow loop with `Ctrl+L`.
+- Added dedicated dark-theme `slideshow` and `video` SVG assets for the new native Lightbox playback pills.
+
+### Changed
+
+- Changed timed Lightbox slideshow playback to advance across paginated galleries, skip unsupported files between pages, and loop through the full result set instead of only the current page.
+- Changed manual Lightbox next navigation to follow the same paginated cross-page behavior as autoplay slideshow advance.
+- Changed Lightbox control anchoring so image, GIF, and video navigation buttons stay fixed to the viewer area instead of shifting with each file's rendered size.
+- Changed image and GIF slideshow controls to match the native video slideshow pill styling while keeping the separate video play or pause control video-only.
+- Changed native Lightbox video controls so slideshow, video play or pause, and mute or volume now sit together in a clearer top-left control row.
+- Changed Lightbox playback pills and native mute or volume controls to use a squarer rounded-rectangle shape that better matches the rest of the viewer chrome.
+- Changed native Lightbox video pointer activity handling so moving the mouse anywhere in the Lightbox, including outside the rendered video, can reveal controls again.
+
+---
+
+## v1.3.4
 
 ### Summary
 
