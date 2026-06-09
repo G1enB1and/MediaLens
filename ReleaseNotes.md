@@ -1,19 +1,19 @@
-## MediaLens v1.3.5
+## MediaLens v1.4.0
 
 ### Summary
 
-This release finishes a major round of Lightbox refinement. MediaLens now gives the slideshow player proper looping across paginated galleries, clearer playback controls, more stable fullscreen behavior, and more predictable control placement for both images and videos.
+This release introduces the first beta of the new MediaLens Image Editor, bringing a Photoshop-inspired layered raster editing workspace directly into MediaLens. Crop, resize, paint, text, filters, adjustment layers, selection, project saving, and undo are now integrated into the existing media workflow.
 
 ### Highlights
 
-- Let Lightbox slideshows keep going across paginated galleries instead of stopping at the current page.
-- Control slideshow looping directly from both Settings and a new shortcut, while keeping image, GIF, and video playback in one smoother flow.
-- Use fixed-position Lightbox controls that no longer jump around as different media sizes load.
-- Read video playback controls more clearly with distinct slideshow and video play or pause pills, plus better top-row layout in the native video overlay.
+- Open the new Image Editor directly inside MediaLens with layered editing, a Photoshop-style workspace, and document tabs.
+- Edit images with crop, resize, selections, paint tools, text layers, fills, gradients, filters, and non-destructive adjustment layers without leaving MediaLens.
+- Save layered work to the new `.mlimage` project format or export flattened images back to standard image files.
+- Undo saved image overwrites more safely with dedicated image-edit retention and `Image Edited` Action History support.
 
 ### Notes
 
-- This release focuses on Lightbox slideshow navigation, playback control clarity, and viewer interaction polish for mixed image, GIF, and video browsing.
+- The Image Editor is still in beta and will continue to evolve, but it is now far enough along for broader testing and feedback.
 
 Full Changelog:
 https://github.com/G1enB1and/MediaLens/blob/main/CHANGELOG.md

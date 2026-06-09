@@ -1,6 +1,44 @@
 # Change Log
 
-## v1.3.5 (Current)
+## v1.4.0 (Current)
+
+### Summary
+
+This release introduces the first beta of the new MediaLens Image Editor, bringing a Photoshop-inspired layered raster editing workspace directly into MediaLens. Crop, resize, paint, text, filters, adjustment layers, selection, project saving, and undo are now integrated into the existing media workflow.
+
+### Highlights
+
+- Open the new Image Editor directly inside MediaLens with layered editing, a Photoshop-style workspace, and document tabs.
+- Edit images with crop, resize, selections, paint tools, text layers, fills, gradients, filters, and non-destructive adjustment layers without leaving MediaLens.
+- Save layered work to the new `.mlimage` project format or export flattened images back to standard image files.
+- Undo saved image overwrites more safely with dedicated image-edit retention and `Image Edited` Action History support.
+
+### Added
+
+- Added a new beta Image Editor mode with direct `Edit Image` entry points from the main Edit menu and image context menus.
+- Added an image editor workspace with a left tool rail, top options ribbon, central canvas, right Layers panel, document tabs, and bottom status bar.
+- Added layer-based editing with active layer selection, reordering, renaming, duplication, visibility, opacity, and flattened image export.
+- Added interactive crop and resize workflows with on-canvas crop handles, top-bar resize controls, aspect-ratio lock, and editor-only undo support.
+- Added rectangle, oval, lasso, and magic-wand selection tools with replace, add, subtract, tolerance, and crop or resize-aware selection-mask behavior.
+- Added Brush, Eraser, Fill, and Gradient tools with active-layer editing, selection-aware behavior, brush preview, and foreground/background color controls.
+- Added editable text layers with direct on-canvas text entry, later re-editing, font family selection, text sizing, text width controls, and themed text highlight styling.
+- Added Gaussian Blur, Bokeh Blur, and initial color-look filters with live preview support.
+- Added editable non-destructive filter layers and adjustment layers for brightness, contrast, saturation, hue, temperature, tint, Levels, and Color Balance.
+- Added a new `.mlimage` layered project format with project save and reopen support for layers, text, selections, filters, adjustments, and editor metadata.
+- Added dedicated image-edit retention support and saved-edit `Image Edited` Action History entries so overwritten images can be restored after save.
+- Added focused automated tests and offscreen editor runtime QA coverage for editor workflows, project round-tripping, filter preview behavior, and core editing interactions.
+
+### Changed
+
+- Expanded MediaLens beyond organization and review workflows by adding integrated in-app image editing.
+- Changed editor menus, layer controls, blend mode presentation, rulers, status UI, dirty-document indicators, and toolbar styling to follow a more polished Photoshop-inspired editing model.
+- Changed text editing behavior from a separate apply flow to direct on-canvas editing with better live preview, layer reopening, and themed font selection.
+- Changed filter and adjustment workflows so MediaLens can support both destructive edits and more reusable non-destructive layer-based editing paths.
+- Changed image-save handling so editor saves, Save As operations, and project saves use editor-specific routing instead of the regular gallery open and save flow.
+
+---
+
+## v1.3.5
 
 ### Summary
 
