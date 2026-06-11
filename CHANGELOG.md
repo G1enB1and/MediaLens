@@ -1,6 +1,60 @@
 # Change Log
 
-## v1.4.0 (Current)
+## v1.4.1 (Current)
+
+### Summary
+
+This release continues polishing the Image Editor toward a professional Photoshop-inspired editing experience while improving performance, consistency, and overall usability across nearly every editing workflow.
+
+### Highlights
+
+- Use the Image Editor with traditional desktop-style menus that no longer overlap or leave detached dropdowns behind.
+- Adjust layer opacity and other editor values faster with unified drag, typing, and mouse-wheel numeric controls throughout the editor.
+- Paint with smoother brush strokes, improved soft-edge behavior, and cleaner editor-only menus that stay focused on editing workflows.
+- Edit text directly on the canvas with reopenable text layers, themed font selection, and improved live text-edit behavior that feels closer to a traditional raster editor.
+- Work with a more polished Photoshop-inspired editor featuring rulers, foreground and background color wells, stronger active-tool highlighting, refined Layers controls, and clearer dirty-document feedback.
+- Open Image Editor dialogs and filter popups with consistent theming, dedicated per-filter workflows, async filter processing, and faster preview behavior on larger images.
+
+### Added
+
+- Added reusable inline numeric controls across the Image Editor toolbar with direct typing, horizontal drag adjustment, and mouse-wheel support.
+- Added expanded automated test coverage for Image Editor menu visibility and shared numeric input behavior.
+- Added direct on-canvas text editing with support for reopening existing text layers instead of always creating new ones.
+- Added a themed font picker for text layers with corrected preview sizing, accent-aware selection styling, and themed popup scrollbars.
+- Added Photoshop-style foreground and background color wells with a dedicated swap control and shared editor color state for paint and fill tools.
+- Added Photoshop-style rulers with a View menu toggle and improved cursor or document context readouts.
+- Added expanded blend-mode support, persistent layer masks, improved compositing, unrestricted layer movement, and softer hardness-aware brush rendering within the editor document model.
+- Added dedicated editor-only Selection, Layers, Image, and Filter menu workflows with popup dialogs for image sizing, layer properties, and filter operations.
+- Added shared themed editor dialog controls for rename, layer properties, crop, resize, and filter windows with custom dropdowns, drag-wheel numeric inputs, and accent-aware checkbox styling.
+- Added async filter preview and apply execution so expensive filter work runs off the main UI thread with safer stale-preview handling.
+
+### Changed
+
+- Changed top-level Image Editor menu visibility handling to use proper menubar behavior instead of popup-style widgets.
+- Changed Image Editor menu behavior so only one top-level menu can be active at a time, preventing overlapping or detached menus.
+- Changed Image Editor Edit and View menus to hide gallery-only actions while editing, keeping bulk editors, People review actions, gallery views, and unrelated panel toggles out of the editing workspace.
+- Changed View > Show Right Panel in the Image Editor to correctly control the shared right panel when it is being used as the Layers panel.
+- Changed brush and paint option controls to use the same inline numeric editing style as layer opacity for more consistent interactions.
+- Changed brush hardness response and stroke interpolation so softer brushes produce more natural falloff and smoother curved strokes.
+- Changed filter and image-size controls to remain in menus and dialogs instead of crowding the editor toolbars.
+- Changed text editing from a separate apply-style flow to direct on-canvas editing with hidden underlying text-layer rendering during live edits, reopen support, and better initialization for new text layers.
+- Changed dirty-document feedback in editor tabs to use a clearer high-contrast accent indicator beside the close control.
+- Changed the editor toolbar chrome with clearer active-tool highlighting and better foreground or background color control placement and theming.
+- Changed the Layers panel layout, tabs rail, row sizing, visibility controls, blend-mode chrome, top opacity controls, and drag-reorder behavior to better match the intended Photoshop-style editing model.
+- Changed the layer opacity field from a spinbox to the shared scrub-type numeric control and applied the same editing model across brush, text, fill, filter, adjustment, and resize controls.
+- Changed image editor font, blend-mode, selection-shape, fill-mode, and filter dialogs to standardize on themed custom combo boxes instead of stock Qt dropdowns.
+- Changed filter dialogs so each menu action opens a dedicated filter workflow, shows immediately before preview work starts, and reports processing status inside the dialog.
+- Changed filter preview and apply handling to run asynchronously, discard stale results safely, and avoid cloning the full layered document when only the active layer preview is needed.
+- Changed canvas redraw behavior to cache composited editor output between invalidations and changed large filter previews to use downscaled proxy rendering for better responsiveness.
+- Changed Image Editor runtime behavior to better tolerate lightweight shells and testing environments, preventing regressions when bridge settings are unavailable.
+
+### Removed
+
+- Removed gallery-only View modes and non-editor Edit menu actions from the Image Editor workspace.
+
+---
+
+## v1.4.0
 
 ### Summary
 

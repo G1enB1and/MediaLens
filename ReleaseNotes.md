@@ -1,19 +1,21 @@
-## MediaLens v1.4.0
+## MediaLens v1.4.1
 
 ### Summary
 
-This release introduces the first beta of the new MediaLens Image Editor, bringing a Photoshop-inspired layered raster editing workspace directly into MediaLens. Crop, resize, paint, text, filters, adjustment layers, selection, project saving, and undo are now integrated into the existing media workflow.
+This release continues polishing the Image Editor toward a professional Photoshop-inspired editing experience while improving performance, consistency, and overall usability across nearly every editing workflow.
 
 ### Highlights
 
-- Open the new Image Editor directly inside MediaLens with layered editing, a Photoshop-style workspace, and document tabs.
-- Edit images with crop, resize, selections, paint tools, text layers, fills, gradients, filters, and non-destructive adjustment layers without leaving MediaLens.
-- Save layered work to the new `.mlimage` project format or export flattened images back to standard image files.
-- Undo saved image overwrites more safely with dedicated image-edit retention and `Image Edited` Action History support.
+- Use the Image Editor with traditional desktop-style menus that no longer overlap or leave detached dropdowns behind.
+- Adjust layer opacity and other editor values faster with unified drag, typing, and mouse-wheel numeric controls throughout the editor.
+- Paint with smoother brush strokes, improved soft-edge behavior, and cleaner editor-only menus that stay focused on editing workflows.
+- Edit text directly on the canvas with reopenable text layers, themed font selection, and improved live text-edit behavior that feels closer to a traditional raster editor.
+- Work with a more polished Photoshop-inspired editor featuring rulers, foreground and background color wells, stronger active-tool highlighting, refined Layers controls, and clearer dirty-document feedback.
+- Open Image Editor dialogs and filter popups with consistent theming, dedicated per-filter workflows, async filter processing, and faster preview behavior on larger images.
 
 ### Notes
 
-- The Image Editor is still in beta and will continue to evolve, but it is now far enough along for broader testing and feedback.
+- The Image Editor remains in active development, but this release significantly improves day-to-day usability and stability.
 
 Full Changelog:
 https://github.com/G1enB1and/MediaLens/blob/main/CHANGELOG.md
