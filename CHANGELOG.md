@@ -1,6 +1,45 @@
 # Change Log
 
-## v1.4.1 (Current)
+## v1.4.2 (Current)
+
+### Summary
+
+This release significantly expands MediaLens People workflows with a redesigned Review People experience, broader bulk editing capabilities, and a shared naming system that makes organizing faces faster and more reliable.
+
+### Highlights
+
+- Review everyone found in one image from a dedicated Review People workspace with bounding boxes, face actions, and image-to-image navigation.
+- Manage detected people directly from normal image selections in the Bulk Editor, including scan, rename, ignore, and group-management workflows scoped to the files you selected.
+- Name and rename people anywhere in MediaLens using a shared picker that combines typing, dropdown selection, autocomplete suggestions, and Tab completion.
+- Use more consistent People buttons, dropdowns, hover states, and accent styling across review panels, bulk editing, and details views.
+- Review, name, confirm, ignore, and organize faces much faster thanks to a redesigned workflow that keeps everything in context without jumping between dialogs.
+
+### Added
+
+- Added a dedicated Review People workspace for single-image face review with pan and zoom preview, bounding-box overlays, label toggles, per-face actions, and Previous and Next navigation tied to bulk-selected images.
+- Added bulk People support for normal image selections with a Selected Images review list, per-file Review and Scan for People actions, Scan All for People, and detected-people actions scoped only to the selected files.
+- Added collapsible Selected Images and Detected People sections in the bulk People editor, including a persistent draggable splitter between them.
+- Added per-person Rename and Ignore actions in the bulk People detected list plus Ignore Unnamed support when unnamed detections are present.
+- Added a shared People name picker used throughout MediaLens with direct typing, known-name dropdowns, autocomplete suggestions, and Tab completion for faster naming workflows.
+- Added per-group Remove from Group buttons on People cards and expanded multi-select support across People gallery, unconfirmed, and unnamed views.
+
+### Changed
+
+- Changed Review Faces in the details panel to open the native Review People workspace instead of a one-name popup so multiple faces in one image can be reviewed in context.
+- Changed single-file and bulk People workflows to treat generated "Unnamed" identities consistently, ensuring the correct naming, ignore, and not-person actions are always available.
+- Changed People scan refresh behavior so details, Review People, and bulk People views all update immediately after a scan completes.
+- Changed bulk People counts, actions, and summaries to stay scoped to the currently selected files instead of the full People library.
+- Changed People controls across details, bulk, and review surfaces to use the shared MediaLens themed button system, custom dropdown styling, accent-aware hover states, and light or dark mode contrast rules more consistently.
+- Changed Review People face cards, separators, labels, and overlays for better contrast, cleaner spacing, stronger accent usage, and more predictable empty and no-scan states.
+- Changed drag-preview behavior so drag overlays remain inside the MediaLens window for a more integrated experience.
+
+### Removed
+
+- Removed the old single-name Review Faces popup workflow from single-image People review.
+
+---
+
+## v1.4.1
 
 ### Summary
 
