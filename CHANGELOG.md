@@ -1,6 +1,42 @@
 # Change Log
 
-## v1.4.2 (Current)
+## v1.4.3 (Current)
+
+### Summary
+
+This release refines the new MediaLens People workflows with stronger bulk-review behavior, better deduplication, per-person group management, and much better responsiveness when reviewing people with large image sets.
+
+### Highlights
+
+- Review people from the Bulk Editor more reliably with deduplicated face cards, cleaner per-image summaries, and counts that stay scoped to the files you are actually working on.
+- Work through large people libraries more smoothly thanks to async loading, lazy thumbnail updates, cached people-per-image mappings, and better default splitter behavior.
+- Manage group membership directly from each detected person card in the bulk People editor using the same custom typed dropdown workflow as People naming and renaming.
+- Use a more polished bulk People image list with improved layout, clearer People summaries, per-image Ignore, and better thumbnail and button behavior in both wide and narrow panel sizes.
+- Keep Review People, bulk People, and per-image summaries in sync with matching deduplication logic so duplicate bridge rows no longer create repeated cards or repeated names.
+
+### Added
+
+- Added per-person Rename and Ignore actions plus a collapsible Groups section to bulk People detected cards, including per-group remove actions and a custom typed Add to Group workflow.
+- Added Ignore Unnamed support to the bulk People detected section when unnamed detections are present.
+- Added per-image Ignore actions to bulk People selected-image cards alongside Scan for People and Review.
+- Added context-aware bulk People image-source labeling so person-driven workflows clearly show image sets such as Images Containing Amy Rollins.
+
+### Changed
+
+- Changed single-person People Gallery selection to open the bulk People workflow, auto-populate Selected Images from that person or face selection, and reuse scoped caches for faster review setup.
+- Changed bulk People image rows to use a more compact layout with People summaries, responsive button placement, and taller thumbnails aligned to the action stack.
+- Changed bulk People selected-image summaries to show the full deduplicated People list for each image so the image list stays consistent with Review People.
+- Changed Review People and related People surfaces to deduplicate repeated face records using face identifiers and bounding-box signatures so identical people no longer appear multiple times.
+- Changed bulk People loading to populate large image sets asynchronously in batches, lazy-load visible thumbnails on scroll, and recenter the splitter when a new People context opens unless the user already resized it.
+- Changed the bulk People bottom section label from Detected People to People for clearer wording across load states and refreshes.
+
+### Removed
+
+- Removed the old shared bulk People footer group actions in favor of per-person group controls inside each detected person card.
+
+---
+
+## v1.4.2
 
 ### Summary
 
