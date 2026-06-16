@@ -1,6 +1,50 @@
 # Change Log
 
-## v1.4.3 (Current)
+## v1.4.4 (Current)
+
+### Summary
+
+This release expands MediaLens People workflows with a more complete gallery and review experience, stronger bulk editing, improved duplicate-face handling, and more polished People-specific controls throughout the app.
+
+### Highlights
+
+- Review one person across every image they appear in with new Show All, Review All, and Review Unconfirmed modes, plus faster bulk editing that stays centered on the People tab while still unlocking the other bulk tools when files are in scope.
+- Manage people more directly with cleaner person-only context menus, a themed Manage dialog, custom profile pictures, hidden people and hidden groups, and better People-gallery status and navigation controls.
+- Eliminate repeated cloned face entries across People review, bulk People summaries, and single-image People details by deduplicating duplicate face records at the shared data layer.
+
+### Added
+
+- Added Show All, Review All, and Review Unconfirmed person-gallery modes with sticky header controls for switching between People review states.
+- Added a themed Manage dialog for People cards and person review headers with rename, group, favorite, ignore, visibility, and profile-picture actions.
+- Added support for custom People profile pictures with built-in profile image switching controls.
+- Added hide and show support for individual people and custom People groups, including filtering that respects the existing Show Hidden setting.
+- Added a sticky header close button in person review views that returns directly to the normal gallery.
+- Added a sticky People Gallery header with All, Unnamed, and Unconfirmed tabs, plus Scan for Faces and close controls that keep People navigation available without relying on the main header control.
+- Added a People Show All folder-scope toggle so person-specific normal-gallery results can either use the person's complete image set or be limited to the current folder when needed.
+
+### Changed
+
+- Changed the header People control from a dropdown into a direct People button with inactive gray icon styling and active light or dark mode icons.
+- Changed People Show All to use the normal gallery renderer and the user’s current gallery view, such as Masonry or Grid, instead of custom People face cards with bounding boxes.
+- Changed People Show All scoping to use exact person-id filtering and a People-derived image scope by default, so results do not disappear when the current folder does not contain that person’s images.
+- Changed People Show All refresh behavior so paging, infinite scroll, lightbox page changes, view changes, filters, sorting, and metadata-sensitive refreshes preserve the active person scope.
+- Changed live search to render the first matching batch quickly and continue loading additional matching batches in the background for better responsiveness in large galleries.
+- Changed People review and Show All bulk selection so the same bulk People editor used by the main People gallery opens by default, auto-loads the relevant files, and still allows switching to metadata, tags, OCR, captions, and rename tabs when files are selected.
+- Changed People review bulk counts so the People section stays scoped to the currently selected files instead of the full person group.
+- Changed People review galleries and related summaries to automatically deduplicate repeated face detections, preventing duplicate cards, inflated counts, and repeated names.
+- Changed People card actions, person review context menus, and person-gallery header controls to focus on person workflows instead of generic image actions.
+- Changed People card styling with circular profile images, a hover-only profile-picture switcher, stronger accent-aware hover states, and bolded person names.
+- Changed People review presentation so Show All and review modes are separated cleanly, Confirm All hides when it is not relevant, and Review Unconfirmed hides when a person has nothing left to review.
+- Changed the People gallery footer count chip to show named and unnamed people totals instead of a misleading file count.
+- Changed the Include Nested Files header toggle to use the new custom file-tree SVG icon set.
+
+### Removed
+
+- Removed generic image-focused actions from People card context menus and person-group review menus where those actions did not match People workflows.
+
+---
+
+## v1.4.3
 
 ### Summary
 

@@ -124,16 +124,21 @@ Perfect for AI generations, photography edits, and near duplicates.
 
 ## People & Facial Recognition
 
-Find photos by the people who appear in them.
+Find every photo of the people who matter most.
 
-- Local facial recognition
-- Automatic grouping
-- Named people
-- Unnamed face review
-- Profile image selection
-- Person-based search
+MediaLens automatically detects and groups faces across your library, making it easy to organize decades of photos by the people who appear in them.
 
-Everything runs locally using optional AI models.
+- Automatic face detection and grouping
+- Named and unnamed people
+- Favorite people
+- Custom people groups
+- Review and confirm unrecognized faces
+- Custom profile pictures
+- Person-specific review across every image they appear in
+- Person-based search throughout your library
+- Hide or ignore unwanted people
+
+Everything runs locally using optional AI models, so your photos remain private and never have to leave your computer.
 
 ---
 
