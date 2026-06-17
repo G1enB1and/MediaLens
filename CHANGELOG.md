@@ -1,6 +1,38 @@
 # Change Log
 
-## v1.4.4 (Current)
+## v1.4.5 (Current)
+
+### Summary
+
+This release makes MediaLens much better at recognizing near-identical images with color filters or color shifts, while also tightening People review, bulk editing, and comparison behavior so labels and navigation stay more predictable.
+
+### Highlights
+
+- Detect filtered, recolored, and color-shifted versions of the same image more reliably in Similar Files.
+- Review similar and duplicate groups with more trustworthy guidance thanks to smarter Best Overall handling that backs off when MediaLens cannot safely auto-pick a winner.
+- Move through People galleries more smoothly with better review fallbacks, safer navigation behavior, improved bulk-tab persistence, and cleaner face-focused profile crops.
+
+### Added
+
+- Added colorhash-based color-shift detection so Similar Files can better group images that match structurally but differ mainly by applied color filters.
+- Added a Color Shifted Pairs preference rule under Settings > Similar File Rules with Keep Both and Keep Newest options, defaulting to Keep Both.
+- Added action-history-backed edited-image labeling so similar groups can identify MediaLens-edited files and use stronger original-versus-edited hints when provenance is reliable.
+
+### Changed
+
+- Changed Similar Files grouping at high and very high thresholds to stop missing close matches because of overly restrictive prefix bucketing.
+- Changed similar-group labels to distinguish color-shifted matches more clearly and downgrade weak pixel-only matches to a neutral Color-shifted pair label when edit provenance is not strong enough.
+- Changed duplicate and similar review auto-resolution so Best Overall is suppressed when keep-both rules apply or when MediaLens does not automatically mark any item for deletion.
+- Changed the bottom comparison panel to follow the same no-best logic as the review gallery so color-shifted and other keep-both pairs no longer show a conflicting Best in Comparison label.
+- Changed People card review entry behavior to open Review All automatically when Review Unconfirmed has nothing left to review.
+- Changed People bulk-editor tab behavior so file-backed People views keep the last used tab across Review and Show All transitions, while the top-level People Gallery still stays locked to the People-only workflow where file tabs are not applicable.
+- Changed People header navigation controls to avoid unpredictable folder-history behavior while People galleries or People review surfaces are active.
+- Changed People profile-circle face crops and unnamed-face review thumbnails to use a gentler face zoom that keeps a bit more of the image in frame.
+- Changed image-editor opening from gallery selections to prefer the current file and avoid expensive large-selection scanning that could stall the UI.
+
+---
+
+## v1.4.4
 
 ### Summary
 

@@ -120,6 +120,10 @@ Compare images without leaving your workflow.
 
 Perfect for AI generations, photography edits, and near duplicates.
 
+![MediaLens Logo](docs/Screenshots/Screenshot-Comparison-Color-Shift.png)
+
+![Comparison](docs/Screenshots/Screenshot-Comparison-Zoom.png)
+
 ---
 
 ## People & Facial Recognition
@@ -139,6 +143,12 @@ MediaLens automatically detects and groups faces across your library, making it 
 - Hide or ignore unwanted people
 
 Everything runs locally using optional AI models, so your photos remain private and never have to leave your computer.
+
+![Comparison](docs/Screenshots/Screenshot-People-Gallery-01.png)
+
+![Comparison](docs/Screenshots/Screenshot-People-Review-All-of-Person.png)
+
+![Comparison](docs/Screenshots/Screenshot-People-Review-Lightbox.png)
 
 ---
 
