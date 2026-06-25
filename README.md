@@ -59,11 +59,13 @@ Models install only when needed and can run on either CPU or GPU.
 
 Your images never have to leave your computer.
 
+![MediaLens Logo](docs/Screenshots/Screenshot-Settings-AI-Descriptions-01.png)
+
 ---
 
 ## Image Editor
 
-MediaLens includes a built-in layered image editor, so you can edit images without switching applications.
+MediaLens includes a built-in Photoshop-style layered image editor, allowing you to edit images without ever leaving your library. No need for a separate application. You're entire workflow can stay inside MediaLens.
 
 - Layers
 - Crop
@@ -78,6 +80,8 @@ MediaLens includes a built-in layered image editor, so you can edit images witho
 - Non-destructive adjustment layers
 
 Open an image directly from your library, make changes, save, and continue organizing without interrupting your workflow.
+
+![MediaLens Logo](docs/Screenshots/Screenshot-Image-Editor-01.png)
 
 ---
 
@@ -94,9 +98,9 @@ Detect:
 - Crops
 - Resized versions
 - Compression changes
-- Watermarks
+- Color-shifted versions
 - Grayscale conversions
-- Text additions
+- Text addition/removal
 - Metadata differences
 
 Every group includes meaningful explanations so you understand exactly why images were grouped together.
@@ -156,14 +160,11 @@ Everything runs locally using optional AI models, so your photos remain private 
 
 Make screenshots and text-heavy images searchable.
 
-Choose between:
-
-- Fast OCR
-- High-accuracy AI OCR
-- Manual corrections
-- Text detection overrides
+Compare Fast OCR, AI OCR, and your own corrections side-by-side, then choose the best result with a single click.
 
 Review results with a dedicated comparison workspace and save the best version.
+
+![Comparison](docs/Screenshots/Screenshot-Text-OCR-Review.png)
 
 ---
 
@@ -187,6 +188,8 @@ Search by:
 
 Use either guided visual search builders or advanced search syntax.
 
+![Comparison](docs/Screenshots/Screenshot-Advanced-Search-New-Large-Files-of-Pandas.png)
+
 ---
 
 ## Bulk Editing
@@ -204,6 +207,12 @@ Bulk edit:
 - Metadata
 
 Generate AI descriptions locally and review everything before saving.
+
+![Comparison](docs/Screenshots/Screenshot-Bulk-Tags-Editor-With-Tags-List.png)
+
+![Comparison](docs/Screenshots/Screenshot-Bulk-Descriptions-Editor.png)
+
+![Comparison](docs/Screenshots/Screenshot-Bulk-Metadata-Editor.png)
 
 ---
 
@@ -223,6 +232,8 @@ Supports:
 - Safe filename cleanup
 
 Preview every change before applying.
+
+![Comparison](docs/Screenshots/Screenshot-Batch-Rename-Counter-Sidecar.png)
 
 ---
 
@@ -285,6 +296,9 @@ Optimized for large collections without sacrificing responsiveness.
 Browse your memories chronologically.
 
 Jump instantly through years of media with smooth timeline navigation and intelligent grouping by day, month, and year.
+
+![Comparison](docs/Screenshots/Screenshot-Group-By-Date-03.png)
+
 ---
 
 ## Action History
@@ -302,6 +316,8 @@ Undo:
 - People grouping
 
 MediaLens is designed so cleanup never has to feel risky.
+
+![Comparison](docs/Screenshots/Screenshot-Action-History-Rename.png)
 
 ---
 
@@ -357,7 +373,7 @@ Future plans include:
 
 ---
 
-MediaLens transforms folders full of files into a searchable, organized, AI-assisted library you'll actually enjoy using.
+**MediaLens transforms folders full of files into a searchable, organized, AI-assisted library you'll actually enjoy using.**
 
 ---
 

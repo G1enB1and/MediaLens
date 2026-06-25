@@ -1,18 +1,19 @@
-## MediaLens v1.4.5
+## MediaLens v1.4.6
 
 ### Summary
 
-This release makes MediaLens much better at recognizing near-identical images with color filters or color shifts, while also tightening People review, bulk editing, and comparison behavior so labels and navigation stay more predictable.
+This release is a broad polish and stability update across MediaLens, led by a much faster and more capable Image Editor. It also improves Settings, Bulk Editor behavior, Action History stability, and native UI consistency across the app.
 
 ### Highlights
 
-- Detect filtered, recolored, and color-shifted versions of the same image more reliably in Similar Files.
-- Review similar and duplicate groups with more trustworthy guidance thanks to smarter Best Overall handling that backs off when MediaLens cannot safely auto-pick a winner.
-- Move through People galleries more smoothly with better review fallbacks, safer navigation behavior, improved bulk-tab persistence, and cleaner face-focused profile crops.
+- Edit images faster with accelerated blur, live brush strokes, drag-based Magic Wand selection, marching-ants outlines, and a new Lasso selection tool.
+- Work with text more reliably using resizable on-canvas bounds, safer font handling, remembered font choice, and text positioning that stays aligned across zoom levels.
+- Use a cleaner, more consistent native interface with improved Settings controls, better editor dropdowns, fixed Bulk Editor combo behavior, and steadier Action History row interaction.
 
 ### Notes
 
-- This release also improves People review flow with smarter Review All fallback behavior, steadier bulk-tab persistence across People views, safer People navigation controls, and gentler face-focused profile crops.
+- This update includes a large amount of Image Editor stabilization work, especially around text editing and selection behavior.
+- Settings, Bulk Editor, and Action History also received focused fixes that make native workflows more predictable.
 
 Full Changelog:
 https://github.com/G1enB1and/MediaLens/blob/main/CHANGELOG.md

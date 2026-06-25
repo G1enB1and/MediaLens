@@ -1,6 +1,61 @@
 # Change Log
 
-## v1.4.5 (Current)
+## v1.4.6 (Current)
+
+### Summary
+
+This release is a broad polish and stability update across MediaLens, led by a much faster and more capable Image Editor. It also improves Settings, Bulk Editor refresh behavior, Action History stability, and native UI consistency so everyday workflows feel steadier across the app.
+
+### Highlights
+
+- Edit faster with accelerated blur, live brush strokes, drag-based Magic Wand selection, marching-ants outlines, and a new Lasso selection option.
+- Work with text more reliably using scalable font handling, resizable on-canvas bounds, better toolbar size changes, remembered font choice, and improved zoom alignment.
+- Use a cleaner native interface with more consistent Settings controls, better editor dropdowns, fixed Bulk Editor combo behavior, and steadier Action History row interaction.
+
+### Added
+
+- Added accelerated image-processing paths for Image Editor blur, brush, eraser, and Magic Wand operations using reusable NumPy and optional OpenCV-backed processing where available.
+- Added live brush and eraser application during drag gestures so strokes are applied immediately instead of waiting for a delayed final pass.
+- Added Photoshop-style Magic Wand drag sampling, selection-tool sizing, circle cursor feedback, and forced selection within the wand cursor size.
+- Added animated marching-ants outlines for selection masks across selection tools.
+- Added a Lasso selection tool with path-based selection support.
+- Added add and subtract cursor markers for selection tools so the active selection mode is visible at the cursor.
+- Added a live brush-tip preview that reflects opacity and edge softness values.
+- Added direct on-canvas text transform bounds with move and resize handles for active text layers.
+- Added safer font handling for text layers by blocking the problematic 8514oem font, normalizing legacy layers to scalable fonts, and remembering the last selected text font across sessions.
+- Added a 1px grey border around Image Editor layer preview thumbnails.
+- Added new Image Editor brush, eraser, fill, and text-alignment SVG assets, including dark-mode variants where needed.
+- Added regression coverage for Image Editor live brush painting, Magic Wand dragging, selection outlines, text sizing, text bounds, font handling, toolbar focus behavior, and zoom-specific text overlay alignment.
+- Added native Action History safeguards so dynamically created detail widgets and lower-table row clicks stay parented and routed correctly.
+
+### Changed
+
+- Changed Magic Wand selection cleanup so selected areas form more closed, filled regions instead of loose tolerance-only pixel islands.
+- Changed the Magic Wand drag experience by removing the accented preview path line and using the selection outline itself as the main feedback.
+- Changed Image Editor text sizing to render and measure with pixel-sized fonts so toolbar size values visibly scale text layers more predictably.
+- Changed Image Editor text toolbar edits to target the intended text layer even when focus or active-layer state changes during editing.
+- Changed Image Editor text selection behavior so toolbar edits preserve the previous highlighted or unhighlighted live text state instead of forcing a new state.
+- Changed Image Editor text bounds so the editable transform box has more usable padding and aligns correctly across zoom levels.
+- Changed Image Editor text color handling so the text tool follows the shared foreground color picker like the brush and fill tools.
+- Changed live Image Editor brush, eraser, and Magic Wand drag updates to avoid full preview and tab-state refreshes during mouse movement, cache selection overlays, and keep accelerated operations feeling responsive.
+- Changed Image Editor font and combo controls to use the shared themed combo path with fixed-height controls, predictable popup height, stable row sizing, and better closed-control alignment.
+- Changed Image Editor alignment controls to use themed SVG menu buttons with corrected light and dark mode rendering.
+- Changed Settings controls to use shared themed combos, spin boxes, buttons, tabs, and text inputs more consistently across light and dark mode.
+- Changed Settings tab geometry, AI page tabs, Background Processes tabs, and scanner/OCR control styling so native settings pages align more consistently and avoid clipped or disconnected tab chrome.
+- Changed shared native control heights and spacing so settings, editor toolbar controls, buttons, combos, line edits, and numeric inputs align more consistently.
+- Changed Bulk Editor metadata settings so visibility changes made in Settings refresh live without requiring deselecting and reselecting files.
+- Changed bulk metadata and bulk rename dropdowns back to the single-chevron custom combo path so duplicate arrows do not return.
+- Changed Action History details so normal row clicks no longer fall through embedded action-cell widgets or create transient popup windows.
+- Changed Image Editor opening from large gallery selections to prefer the current file and avoid expensive selection scanning.
+
+### Removed
+
+- Removed obsolete Image Editor text editing paths that could create phantom boxes, stale geometry, or unreliable resize behavior.
+- Removed the old Magic Wand drag path preview line in favor of the cleaner selection-outline feedback.
+
+---
+
+## v1.4.5
 
 ### Summary
 
