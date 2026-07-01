@@ -59,7 +59,7 @@ Models install only when needed and can run on either CPU or GPU.
 
 Your images never have to leave your computer.
 
-![MediaLens Logo](docs/Screenshots/Screenshot-Settings-AI-Descriptions-01.png)
+![MediaLens Settings AI Descriptions](docs/Screenshots/Screenshot-Settings-AI-Descriptions.png)
 
 ---
 
@@ -81,7 +81,9 @@ MediaLens includes a built-in Photoshop-style layered image editor, allowing you
 
 Open an image directly from your library, make changes, save, and continue organizing without interrupting your workflow.
 
-![MediaLens Logo](docs/Screenshots/Screenshot-Image-Editor-01.png)
+![MediaLens Image Editor Magic Wand Selection](docs/Screenshots/Screenshot-Image-Editor-Magic-Wand.png)
+
+![MediaLens Image Editor Paintbrush tool](docs/Screenshots/Screenshot-Image-Editor-Paintbrush.png)
 
 ---
 
@@ -109,6 +111,8 @@ MediaLens can recommend the best version based on your own configurable rules wh
 
 Safe, transparent, and undoable.
 
+![MediaLens Duplicates and Similar Files](docs/Screenshots/Screenshot-Duplicates-and-Similar-01.png)
+
 ---
 
 ## Image Comparison
@@ -124,9 +128,9 @@ Compare images without leaving your workflow.
 
 Perfect for AI generations, photography edits, and near duplicates.
 
-![MediaLens Logo](docs/Screenshots/Screenshot-Comparison-Color-Shift.png)
+![MediaLens File Comparison with Color Shifted Pair](docs/Screenshots/Screenshot-Comparison-Color-Shift.png)
 
-![Comparison](docs/Screenshots/Screenshot-Comparison-Zoom.png)
+![MediaLens File Comparison Slider Zoomed In](docs/Screenshots/Screenshot-Comparison-Zoom.png)
 
 ---
 
@@ -148,11 +152,11 @@ MediaLens automatically detects and groups faces across your library, making it 
 
 Everything runs locally using optional AI models, so your photos remain private and never have to leave your computer.
 
-![Comparison](docs/Screenshots/Screenshot-People-Gallery-01.png)
+![MediaLens People Gallery](docs/Screenshots/Screenshot-People-Gallery-01.png)
 
-![Comparison](docs/Screenshots/Screenshot-People-Review-All-of-Person.png)
+![MediaLens People Review All from Person](docs/Screenshots/Screenshot-People-Review-All-of-Person.png)
 
-![Comparison](docs/Screenshots/Screenshot-People-Review-Lightbox.png)
+![MediaLens Lightbox to Review All People in Image](docs/Screenshots/Screenshot-People-Review-Lightbox.png)
 
 ---
 
@@ -164,7 +168,7 @@ Compare Fast OCR, AI OCR, and your own corrections side-by-side, then choose the
 
 Review results with a dedicated comparison workspace and save the best version.
 
-![Comparison](docs/Screenshots/Screenshot-Text-OCR-Review.png)
+![MediaLens Text OCR Review](docs/Screenshots/Screenshot-Text-OCR-Review.png)
 
 ---
 
@@ -188,7 +192,7 @@ Search by:
 
 Use either guided visual search builders or advanced search syntax.
 
-![Comparison](docs/Screenshots/Screenshot-Advanced-Search-New-Large-Files-of-Pandas.png)
+![MediaLens Advanced Search](docs/Screenshots/Screenshot-Advanced-Search-New-Large-Files-of-Pandas.png)
 
 ---
 
@@ -208,11 +212,11 @@ Bulk edit:
 
 Generate AI descriptions locally and review everything before saving.
 
-![Comparison](docs/Screenshots/Screenshot-Bulk-Tags-Editor-With-Tags-List.png)
+![MediaLens Bulk Tags Editor](docs/Screenshots/Screenshot-Bulk-Tags-Editor-With-Tags-List.png)
 
-![Comparison](docs/Screenshots/Screenshot-Bulk-Descriptions-Editor.png)
+![MediaLens Bulk Descriptions Editor](docs/Screenshots/Screenshot-Bulk-Descriptions-Editor.png)
 
-![Comparison](docs/Screenshots/Screenshot-Bulk-Metadata-Editor.png)
+![MediaLens Bulk Metadata Editor](docs/Screenshots/Screenshot-Bulk-Metadata-Editor.png)
 
 ---
 
@@ -233,7 +237,7 @@ Supports:
 
 Preview every change before applying.
 
-![Comparison](docs/Screenshots/Screenshot-Batch-Rename-Counter-Sidecar.png)
+![MediaLens Bulk Rename Editor](docs/Screenshots/Screenshot-Batch-Rename-Counter-Sidecar.png)
 
 ---
 
@@ -252,6 +256,8 @@ Extract:
 - Embedded metadata
 
 Metadata stays with your library even when files move or are renamed.
+
+![MediaLens Settings Metadata AI](docs/Screenshots/Screenshot-Settings-Metadata-AI.png)
 
 ---
 
@@ -297,7 +303,7 @@ Browse your memories chronologically.
 
 Jump instantly through years of media with smooth timeline navigation and intelligent grouping by day, month, and year.
 
-![Comparison](docs/Screenshots/Screenshot-Group-By-Date-03.png)
+![MediaLens Group By Date](docs/Screenshots/Screenshot-Group-By-Date-03.png)
 
 ---
 
@@ -317,7 +323,7 @@ Undo:
 
 MediaLens is designed so cleanup never has to feel risky.
 
-![Comparison](docs/Screenshots/Screenshot-Action-History-Rename.png)
+![MediaLens Action History](docs/Screenshots/Screenshot-Action-History-Rename.png)
 
 ---
 

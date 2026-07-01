@@ -1,6 +1,69 @@
 # Change Log
 
-## v1.4.6 (Current)
+## v1.5.0 (Current)
+
+### Summary
+
+This is a major Image Editor release centered on SAM 3-powered object segmentation, Photoshop-style masks, and faster object-aware selection editing. MediaLens can now separate people, pets, furniture, and everyday objects into editable masked layers, while Local AI setup is more guided and resilient with Hugging Face access handling, prompt presets, known-person naming, progress feedback, and immediate cancellation.
+
+### Highlights
+
+- Automatically separate people, pets, and objects into editable layers and masks with Meta SAM 3, including better prompts, saved prompt presets, generated image-specific prompts, duplicate suppression, and known-person naming from MediaLens People data.
+- Edit objects and selections more like a serious raster editor with layer masks, mask painting, Object Aware selection, refine brushes, lasso refinement, free transform, grow, shrink, feather, copy, cut, delete, paste in place, paste as a new layer, promote to new layer, and Select Pixels from the layer list.
+- Install and use SAM 3 more reliably with a dedicated local runtime, early background model downloads, Hugging Face access-token prompting, GPU compatibility fixes, clearer validation, progress feedback, timeout recovery, and immediate cancellation.
+
+### Added
+
+- Added optional SAM 3 installation with automatic GPU support, isolated runtime management, and Image Editor Auto Segment integration that converts detected objects into editable layers.
+- Added Local AI installer guidance for SAM 3 authorization, including in-app token prompting and direct links to the Hugging Face model-access and token-management pages.
+- Added early SAM 3 checkpoint downloading in parallel with runtime setup so model transfers can progress while the rest of the installer prepares the environment.
+- Added Image Editor selection clipboard workflows for copy, cut, delete, paste in place, paste as a new layer, promote selection to a new layer, and layer-driven Select Pixels actions.
+- Added Image Editor menu actions, editor-aware shortcut routing, layer context menu support, and focused regression coverage for the new selection and SAM 3 workflows.
+- Added Free Transform plus selection Grow, Shrink, and Feather dialogs for more complete selection and layer editing workflows.
+- Added editable Image Editor layer masks with linked mask rows, mask thumbnails, active layer-versus-mask highlighting, and brush-driven mask editing.
+- Added SAM 3 masked-layer integration so Auto Segment and Object Aware results can create masked object layers instead of only flat cutout layers.
+- Added Object Aware selection mode backed by SAM 3 interactive point prompts, including Select, Replace, Merge Objects, Refine Selection, and Add New Object workflows.
+- Added Object Aware local refinement tools for Brush and Lasso correction, with Add and Subtract controls that edit the selected layer mask directly.
+- Added Object Aware prompt editing for clicked-object detection and Add New Object prompt-driven segmentation.
+- Added an Auto Segment search dialog with editable prompt text, specific-object search input, longer-list guidance, duplicate-mask suppression, and an option to allow overlapping masks for subset objects.
+- Added persistent Auto Segment prompt presets with Save Prompt, Load Prompt, Generic Default, and per-image Auto Generated preset support.
+- Added Auto Generate List for Auto Segment prompts using existing image tags, local tag generation fallback, and Gemma 4 tag filtering when an installed LLM is available.
+- Added Apply known people support for Auto Segment so confirmed MediaLens People face locations can be matched to SAM person masks and renamed with the known person name.
+- Added Show All Segments and Hide All Segments controls with multi-color overlays, full segment selection, and deselection when hiding overlays.
+- Added mask-row Select Pixels behavior so clicking a mask layer row can select all visible pixels for that mask.
+- Added an Allow overlapping masks option so users can intentionally create subset layers such as a person plus clothing, hair, or accessories.
+- Added an Auto Segment cancel button that stays available during multi-step processing and restores the editor immediately when cancellation is requested.
+
+### Changed
+
+- Changed SAM 3 runtime installation to include Meta's recommended extras and Windows Triton support so future interactive image and video features can build on the same runtime instead of requiring another installer redesign.
+- Changed SAM 3 validation and dependency reporting so missing runtime pieces and import failures surface more directly during install and retry flows.
+- Improved GPU compatibility across different CUDA configurations to reduce installation and inference failures.
+- Changed Auto Segment execution to reduce the default segmentation prompt sweep, stream worker progress to the Image Editor status bar, shorten timeout handling, and clean up stale runs after worker failures.
+- Changed Auto Segment to open the prompt dialog before running so users can see, edit, save, load, or generate the exact prompt that will be used.
+- Changed Auto Segment prompt execution so the visible comma-separated prompt order is preserved exactly, with no hidden concept reordering.
+- Changed the default SAM Auto Segment concept list to the requested ordered set and added regression coverage to prevent unintended drift.
+- Changed repeated Auto Segment searches to skip masks that substantially overlap existing segmented AI layers by default, preventing accidental duplicate object layers.
+- Changed known-person Auto Segment processing to use regular person segmentation and select the returned person mask that contains the confirmed face point, improving full-body outlines compared with restrictive face-derived boxes.
+- Changed Auto Generated prompt handling so it becomes the default preset when available and preloads the prompt text automatically.
+- Changed Object Aware Select to reuse existing visible object layers before calling SAM 3, and to report no existing object when clicking empty/background areas instead of selecting the background.
+- Changed Object Aware Add and Subtract into Refine Selection behavior with direct hard mask correction strokes, full-radius drag interpolation, and no current-selection clipping.
+- Changed Object Aware toolbar defaults and layout so Select is the default, prompt controls only show when Add New Object is active, refine method controls appear only where relevant, and combo boxes are wide enough for their labels.
+- Changed layer mask painting to use Photoshop-style mask values where white reveals, black conceals, and gray partially reveals.
+- Changed segment overlays so multiple selected segments receive unique colors while a single selected layer keeps the normal accent overlay.
+- Changed the Image Editor layers panel scrollbar and segment controls to better match the custom MediaLens theme.
+- Changed inline numeric drag behavior so releasing a value drag restores the cursor that was active before the drag.
+- Changed SAM worker progress and cancellation handling so long-running runs provide better heartbeat feedback, timeout cleanup, and immediate editor-side cancellation while the background worker is terminated.
+
+### Removed
+
+- Removed the long wait before SAM 3 model downloads begin by overlapping checkpoint transfer with the installer environment setup.
+- Removed the separate Auto Segment search icon workflow by routing Auto Segment through the search and prompt dialog directly.
+- Removed redundant Object Aware toolbar mode buttons in favor of a single clearer mode dropdown plus contextual refine controls.
+
+---
+
+## v1.4.6
 
 ### Summary
 
@@ -37,7 +100,7 @@ This release is a broad polish and stability update across MediaLens, led by a m
 - Changed Image Editor text selection behavior so toolbar edits preserve the previous highlighted or unhighlighted live text state instead of forcing a new state.
 - Changed Image Editor text bounds so the editable transform box has more usable padding and aligns correctly across zoom levels.
 - Changed Image Editor text color handling so the text tool follows the shared foreground color picker like the brush and fill tools.
-- Changed live Image Editor brush, eraser, and Magic Wand drag updates to avoid full preview and tab-state refreshes during mouse movement, cache selection overlays, and keep accelerated operations feeling responsive.
+- Changed live Image Editor brush, eraser, and Magic Wand interactions to avoid unnecessary full preview and UI refreshes during drag operations, cache selection overlays, and keep editing responsive even on large images.
 - Changed Image Editor font and combo controls to use the shared themed combo path with fixed-height controls, predictable popup height, stable row sizing, and better closed-control alignment.
 - Changed Image Editor alignment controls to use themed SVG menu buttons with corrected light and dark mode rendering.
 - Changed Settings controls to use shared themed combos, spin boxes, buttons, tabs, and text inputs more consistently across light and dark mode.
