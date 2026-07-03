@@ -1,6 +1,45 @@
 # Change Log
 
-## v1.5.0 (Current)
+## v1.5.1 (Current)
+
+### Summary
+
+This release polishes several everyday MediaLens workflows with a redesigned File Details panel, new categorized Tag Lists, and a smoother Image Editor Auto Segment experience. It focuses on making tag management, metadata editing, and Image Editing easier and faster.
+
+### Highlights
+
+- Manage tag lists with collapsible categories, category drag-and-drop, category context menus, and direct add-tag actions inside a chosen category.
+- Use the refreshed Details panel with native preview controls, themed web-rendered metadata fields, better action placement, and more reliable preview sizing.
+- Use Image Editor Auto Segment without freezing the editor while SAM 3 runs in the background, with more responsive cancellation and recovery.
+
+### Added
+
+- Added categorized Tag Lists with collapsible sections, drag-and-drop organization, themed category management, category-aware Add Tag actions, and right-click commands for adding, moving and renaming tags and categories.
+- Added layout and service regression coverage for the Details panel metadata renderer, footer behavior, themed controls, preview sizing, and shared metadata editing helpers.
+
+### Changed
+
+- Redesigned the single-file Details panel using WebEngine instead of Qt widgets, eliminating the unwanted gaps between collapsed metadata sections while modernizing the layout.
+- Changed the Details panel to keep the native preview controls above the WebEngine metadata view, preserving the existing Qt preview header and native video overlay while modernizing the metadata surface below it.
+- Improved Details metadata editing reliability across tags, descriptions, OCR, AI metadata, and related fields by removing reliability on the previous QT widgets entirely.
+- Changed Details panel styling and layout to better match MediaLens theme tokens, including scrollbars, checkboxes, text areas, action buttons, disabled states, hover states, section hierarchy, footer spacing, and preview splitter behavior.
+- Changed Details preview sizing so hidden previews collapse cleanly, animated GIFs use aspect-ratio-aware sizing, the initial preview height is capped when no manual resize exists, and manual splitter resizing remains respected.
+- Changed collapsible Details section layout to avoid extra gaps and stale fixed-height behavior after expanding or collapsing metadata sections.
+- Changed Image Editor Auto Segment to run its SAM 3 preparation and processing through an asynchronous Qt worker, preventing editor freezes during long-running operations while improving cancellation and cleanup.
+- Changed Tag List category dropdowns to sort alphabetically, default new categories to the top, move the None category to the bottom initially, and keep the None section movable afterward.
+- Changed Tag List category collapse and expand behavior to hide and show loaded rows in place instead of rebuilding the full list, reducing work for large uncategorized tag sets.
+- Changed Tag List drag feedback so category reordering uses above and below insertion lines while dropping a tag into a category highlights the target category instead of showing a misleading insertion line.
+- Changed Tag List close and splitter persistence so reopening the Tag List does not temporarily collapse the file tree and user-resized panel widths are preserved more reliably.
+- Changed bulk Tags editor action placement so the footer buttons stay fixed below the scroll content.
+
+### Removed
+
+- Removed reliance on hidden Qt detail widgets for web-rendered Details action availability by moving action metadata into the web details model.
+- Removed redundant Details preview spacing and duplicate footer/button chrome while WebEngine Details is active.
+
+---
+
+## v1.5.0
 
 ### Summary
 
