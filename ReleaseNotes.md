@@ -1,19 +1,19 @@
-## MediaLens v1.5.1
+## MediaLens v1.5.2
 
 ### Summary
 
-This release polishes several everyday MediaLens workflows with a redesigned File Details panel, new categorized Tag Lists, and a smoother Image Editor Auto Segment experience. It focuses on making tag management, metadata editing, and Image Editing easier and faster.
+This release expands MediaLens local AI with stronger Gemma 4 GGUF vision support, and more reliable SAM 3 and InsightFace installers. It also polishes Image Editor object and mask workflows, improves Details panel AI feedback, and makes local model setup easier to inspect and repair.
 
 ### Highlights
 
-- Manage tag lists with collapsible categories, category drag-and-drop, category context menus, and direct add-tag actions inside a chosen category.
-- Use the refreshed Details panel with native preview controls, themed web-rendered metadata fields, better action placement, and more reliable preview sizing.
-- Use Image Editor Auto Segment without freezing the editor while SAM 3 runs in the background, with more responsive cancellation and recovery.
+- Use Gemma 4 and Gemma 4 Abliterated GGUF models more reliably for tags, descriptions, and AI OCR, with working multimodal projectors and automatic selection of installed models.
+- Install and repair SAM 3 and InsightFace with clearer runtime diagnostics, better GPU fallback handling, saved Hugging Face token reuse, and more visible model-folder controls.
+- Improved Image Editor with better Layer Mask workflow and better Object Aware Selection and masking. 
 
 ### Notes
 
-- Tag List categories are added through schema migration, so existing tag lists are preserved and uncategorized tags remain under None.
-- SAM 3 remains an optional Local AI install and is not bundled into the main installer.
+- Flux Klein, SAM 3, InsightFace, and Gemma GGUF remain optional Local AI installs and are not bundled into the main MediaLens installer.
+- Local model folder buttons now open the exact model-specific storage location, making it easier to add, remove, or reuse downloaded model files. 
 
 Full Changelog:
 https://github.com/G1enB1and/MediaLens/blob/main/CHANGELOG.md

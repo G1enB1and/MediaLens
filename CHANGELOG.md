@@ -1,6 +1,54 @@
 # Change Log
 
-## v1.5.1 (Current)
+## v1.5.2 (Current)
+
+### Summary
+
+This release expands MediaLens local AI with stronger Gemma 4 GGUF vision support, and more reliable SAM 3 and InsightFace installers. It also polishes Image Editor object and mask workflows, improves Details panel AI feedback, and makes local model setup easier to inspect and repair.
+
+### Highlights
+
+- Use Gemma 4 and Gemma 4 Abliterated GGUF models more reliably for tags, descriptions, and AI OCR, with working multimodal projectors and automatic selection of installed models.
+- Install and repair SAM 3 and InsightFace with clearer runtime diagnostics, better GPU fallback handling, saved Hugging Face token reuse, and more visible model-folder controls.
+- Improved Image Editor with better Layer Mask workflow and better Object Aware Selection and masking. 
+
+### Added
+
+- Added Flux Klein GGUF local image generation with an isolated ComfyUI runtime, selectable Qwen text encoders, CUDA Torch selection, image generation dialog access, packaging hooks, and regression coverage for local AI assets (Flux Klein is Not working yet).
+- Added driver-aware CUDA Torch wheel selection and combined-VRAM recommendations for Flux Klein installs, including selected encoder downloads and runtime status that stays in Installing while setup continues.
+- Added local AI model folder buttons that open each model's exact storage location and create missing model-specific folders when needed.
+- Added distinctly labeled Gemma 4 E4B and 12B Abliterated GGUF model profiles, including support for the matching multimodal projector files.
+- Added Gemma 4 automatic selection for local AI tags, descriptions, and OCR when installed models are available.
+- Added SAM 3 runtime probe details after install, including GPU, CUDA, and Triton status.
+- Added explicit SAM 3 repair handling for missing pkg_resources and focused bridge regression coverage for failed imports, GPU fallback warnings, and CPU fallback acceptance.
+- Added Image Editor reusable masks, Photoshop-style masked layer groups, adjustment layers, mask thumbnails, mask painting, mask movement, linked mask controls, and project round-trip support.
+- Added Object Aware selection improvements backed by SAM 3 point prompts, local mask ranking, refine controls, and prompt workflows.
+- Added progress updates while SAM 3 packages and finalizes reusable masks.
+
+### Changed
+
+- Changed Flux Klein setup to improve install resilience, cache CUDA Torch wheels across retries, start model downloads earlier, format pip progress more clearly, and continuously drain worker output so generation progress remains live.
+- Changed Flux Klein model handling so GGUF models live in the ComfyUI unet folder with legacy migration and per-dropdown delete actions for selected Flux and Qwen files.
+- Changed SAM 3 installs to use short local AI temp and cache paths to avoid Windows long-path failures, skip the Hugging Face token prompt when a saved token exists, persist saved tokens more reliably, and treat Triton acceleration as optional when unsupported.
+- Changed SAM 3 runtime validation and repair policy to distinguish broken imports, CPU fallback, GPU fallback warnings, and repair-needed states more accurately.
+- Changed InsightFace setup to avoid Windows native build failures, install ONNX Runtime CUDA and cuDNN extras during GPU repair, and report CPU fallback when the CUDA provider is advertised but unavailable.
+- Changed Gemma GGUF validation to reject special-token-only responses, improve diagnostics when llama-server exits early, retry with reduced GPU offload, and use the Q8_0 projector for Gemma 4 12B Abliterated vision output.
+- Changed Details panel AI actions so tags, descriptions, and AI OCR show progress in the gallery footer, refresh the web Details panel after completion, and preserve scroll position.
+- Changed local AI recommendations to use total GPU VRAM so high-VRAM cards receive appropriate model suggestions.
+- Changed Image Editor Auto Segment to store reusable cropped masks instead of cutout layers, reduce memory use, prevent large mask batches from crashing, and preserve full-document selection reconstruction.
+- Changed Object Aware click handling, prompt scaling, candidate ranking, and blank-prompt behavior to improve object locality and reduce accidental background or distant-object selections.
+- Changed Hue/Saturation and adjustment workflows with clearer Photoshop-style dialogs, faster vectorized processing, better graph rendering, and more stable marker alignment.
+- Changed Image Editor layer rows, thumbnails, separators, and row backgrounds to improve drag-and-drop reordering, top insertion, and layer panel stability.
+- Changed bundled FFmpeg handling so ffmpeg.exe and ffprobe.exe are ignored and removed from the repository index.
+
+### Removed
+
+- Removed stale Flux runtime-unavailable install details after successful setup.
+- Removed orphaned Image Editor object-mask toggle UI and other misleading layer-panel drag handles.
+
+---
+
+## v1.5.1
 
 ### Summary
 
