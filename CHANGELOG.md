@@ -1,6 +1,45 @@
 # Change Log
 
-## v1.5.2 (Current)
+## v1.5.3 (Current)
+
+### Summary
+
+This release transforms how MediaLens discovers, compares, and investigates related media across your entire library. MediaLens now combines DINOv2 visual similarity, edited-version detection, tag matching, exact duplicate discovery, and a redesigned reverse image lookup workspace with smoother People and Details Panel navigation.
+
+### Highlights
+
+- Find visually similar images anywhere in your library using local DINOv2 analysis with consistent five-level similarity thresholds.
+- Investigate an image through a dedicated reverse lookup workspace with visual evidence, optional Google Cloud Vision results, and local AI page analysis.
+- Move naturally between detected people, similarity results, lightboxes, and prior gallery pages without losing your original selection or browsing scope.
+- New Face forward and Smile detection labels contribute to similar file keep and delete rules.
+
+### Added
+
+- Added optional DINOv2 Small visual similarity with local CPU or GPU processing, cached embeddings, resumable idle indexing, clean cancellation, and database-wide matching.
+- Added separate Details panel workflows for Visually Similar Files, Likely Edited Versions, Similar Tags, and Identical Duplicates, each with independently configurable visibility and ordering.
+- Added right-click Find Similar and Similar Files gallery workflows with clickable Details results, Show All, source-first comparison, library-wide discovery, and removable unwanted matches.
+- Added Similar Tag searches with editable queries, configurable minimum matches, shared-person ranking, persistent exclusions, and progress reporting.
+- Added a reverse image lookup gallery workspace with embedded providers, draggable image preview, Google Cloud Vision Web Detection, evidence thumbnails, local Gemma page analysis, Notes saving, and undoable higher-resolution replacement.
+- Added People scanning from GIF, animated WebP, and video preview frames, including stable WebP preview generation for InsightFace.
+- Added face-direction and smile preferences to Similar File Rules, with reorderable priorities and clearer winner labels using InsightFace landmarks.
+- Added Detected People buttons that open the selected person's Show All gallery, reselect the originating file, and preserve exact Back navigation.
+
+### Changed
+
+- Changed Similar Files to use DINOv2 as the primary visual similarity engine, while preserving perceptual hash and color matching as the separate Edited Variations workflow.
+- Changed DINOv2 thresholds so Details and Group By share the same Very Low, Low, Medium, High, and Very High options and numeric cutoffs, with High as the default.
+- Changed visual indexing to reuse unchanged file embeddings, process new or modified files during idle time, pause for user-requested scans, and explain why the first scan of a scope takes longer.
+- Changed Similar Files scanning and presentation with target-aware progress, reliable terminal refreshes, running-only Cancel controls, clearer empty states, library-wide results, and restoration of the previous gallery scope and page.
+- Changed the Details Panel settings organization so similarity sections can be shown, hidden, and sorted independently, and improved threshold menu opacity, accent theming, collapse indicators, and action separation.
+- Changed People controls so scans become available immediately after InsightFace installation and Review Faces and Scan for People are visually separated from detected-person results.
+- Changed installed builds to use WebEngine hardware acceleration by default for smoother full-size animated GIF playback while retaining an opt-in software compatibility mode.
+- Changed installer packaging to include required runtime dependencies more reliably and fixed DINOv2 model-install status detection during first-time setup.
+- Changed reverse lookup API evidence cards to emphasize preview images and supporting links while keeping AI analysis grounded in captured page or API evidence rather than filenames.
+- Changed similarity review recommendations to account for face direction and smile quality while removing DINOv2 percentage text from category-winning labels.
+
+---
+
+## v1.5.2
 
 ### Summary
 
@@ -27,6 +66,8 @@ This release expands MediaLens local AI with stronger Gemma 4 GGUF vision suppor
 
 ### Changed
 
+- Changed animated WebP People scans to create a stable first-frame JPEG preview directly, allowing InsightFace to scan them without depending on FFmpeg WebP decoding.
+- Changed installed builds to use WebEngine hardware acceleration by default so full-size animated GIFs retain smooth playback, while preserving the opt-in software compatibility mode for affected systems.
 - Changed Flux Klein setup to improve install resilience, cache CUDA Torch wheels across retries, start model downloads earlier, format pip progress more clearly, and continuously drain worker output so generation progress remains live.
 - Changed Flux Klein model handling so GGUF models live in the ComfyUI unet folder with legacy migration and per-dropdown delete actions for selected Flux and Qwen files.
 - Changed SAM 3 installs to use short local AI temp and cache paths to avoid Windows long-path failures, skip the Hugging Face token prompt when a saved token exists, persist saved tokens more reliably, and treat Triton acceleration as optional when unsupported.

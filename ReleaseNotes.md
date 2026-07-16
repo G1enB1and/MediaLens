@@ -1,19 +1,21 @@
-## MediaLens v1.5.2
+## MediaLens v1.5.3
 
 ### Summary
 
-This release expands MediaLens local AI with stronger Gemma 4 GGUF vision support, and more reliable SAM 3 and InsightFace installers. It also polishes Image Editor object and mask workflows, improves Details panel AI feedback, and makes local model setup easier to inspect and repair.
+MediaLens can now find meaningfully related images across your entire library, not just duplicates or edits. This update combines local DINOv2 visual matching with improved edited-version, tag, duplicate, reverse lookup, and People workflows.
 
 ### Highlights
 
-- Use Gemma 4 and Gemma 4 Abliterated GGUF models more reliably for tags, descriptions, and AI OCR, with working multimodal projectors and automatic selection of installed models.
-- Install and repair SAM 3 and InsightFace with clearer runtime diagnostics, better GPU fallback handling, saved Hugging Face token reuse, and more visible model-folder controls.
-- Improved Image Editor with better Layer Mask workflow and better Object Aware Selection and masking. 
+- Find visually similar images using optional local DINOv2 analysis, with cached results and consistent five-level thresholds.
+- Compare visually similar files, edited versions, similar tags, and exact duplicates from separately configurable Details Panel sections.
+- Use the redesigned reverse image lookup workspace with visual evidence, optional Google Cloud Vision results, and local AI page analysis.
+- Open detected people's galleries and similarity results without losing the original file, gallery scope, or page when you go Back.
 
 ### Notes
 
-- Flux Klein, SAM 3, InsightFace, and Gemma GGUF remain optional Local AI installs and are not bundled into the main MediaLens installer.
-- Local model folder buttons now open the exact model-specific storage location, making it easier to add, remove, or reuse downloaded model files. 
+- DINOv2 remains an optional Local AI install and is not bundled into the main MediaLens installer.
+- The first DINOv2 scan of a scope takes longer; unchanged results are cached, and later scans only process new or modified files.
+- Installed builds now use WebEngine hardware acceleration by default for smoother animated GIF playback, with software compatibility mode still available.
 
 Full Changelog:
 https://github.com/G1enB1and/MediaLens/blob/main/CHANGELOG.md
