@@ -1,6 +1,45 @@
 # Change Log
 
-## v1.5.3 (Current)
+## v1.5.4 (Current)
+
+### Summary
+
+This release turns FLUX.2 Klein into a practical, gallery-integrated image generation workspace while making everyday browsing feel faster and more dependable. Create and edit images with references, structural guidance, LoRAs, masks, and flexible canvases, then see new results appear in the gallery automatically.
+
+### Highlights
+
+- Generate or edit images locally with FLUX.2 Klein using up to four visual inputs, structural guides, LoRAs, inpainting, outpainting, and flexible canvas sizes.
+- Work in a responsive three-column generator beneath the gallery, with progressive controls, painted masks, reference-based sizing, and automatic output refresh.
+- Browse more smoothly with reliable double-click selection, preserved lightbox state, responsive Details loading, and steadier animated GIF playback.
+
+### Added
+
+- Added an embedded FLUX.2 Klein generation workspace beneath the gallery with resizable Prompt and Size, References and LoRAs, and Output columns.
+- Added canvas presets from 21:9 through 9:21, custom width and height, and automatic sizing from Reference Image 1.
+- Added up to four reference images with per-reference Influence controls, pose, depth, Canny, and line-art structural guidance, and explicit prompt roles for multiple references.
+- Added LoRA loading with progressive Add LoRA controls and adjustable model strength.
+- Added inpainting and outpainting based on Reference Image 1, including an interactive mask canvas with mouse pan and zoom, brush size, edge softness, cursor preview, and selectable mask color.
+- Added background ComfyUI and model preloading when the generator opens, live progress reporting, generated-output folder access, and scoped output-folder watching that refreshes an active gallery without polling.
+- Added advanced FLUX model and text-encoder selection, recommended download actions, cancellable asset downloads, runtime/model status separation, and copyable generation diagnostics.
+
+### Changed
+
+- Changed FLUX.2 Klein setup and generation to use validated GGUF checkpoint and Qwen encoder combinations, the documented FP8 encoder default, improved VRAM-aware recommendations, CPU encoder offload when needed, and clearer installation status.
+- Changed reference conditioning so the default 65% Influence is applied correctly instead of erasing the reference latent, while structural guidance affects composition without forcing line-art output.
+- Changed the generator interface to reveal reference and LoRA controls progressively, use MediaLens-themed selectors and numeric fields, keep status concise, and hide output chrome until a result exists.
+- Changed ComfyUI session shutdown to terminate complete process trees, preventing orphaned model processes from consuming GPU memory and stalling later generations.
+- Changed gallery double-click behavior so the opened item is selected before the lightbox appears and remains selected after it closes.
+- Changed gallery selection, Details inspection, preview decoding, and lightbox activation to move expensive work off the UI thread, reduce repeated layout and WebEngine refreshes, and preserve animated media playback.
+- Changed recycle bin layout, scrollbars, and counts for clearer responsive behavior.
+
+### Removed
+
+- Removed redundant generator help text and always-visible empty reference, LoRA, and output controls.
+- Removed stale or incompatible FLUX encoder choices from recommended workflows and reduced misleading runtime status states.
+
+---
+
+## v1.5.3
 
 ### Summary
 

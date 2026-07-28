@@ -1,21 +1,20 @@
-## MediaLens v1.5.3
+## MediaLens v1.5.4
 
 ### Summary
 
-MediaLens can now find meaningfully related images across your entire library, not just duplicates or edits. This update combines local DINOv2 visual matching with improved edited-version, tag, duplicate, reverse lookup, and People workflows.
+This release turns FLUX.2 Klein into a practical, gallery-integrated image generation workspace while making everyday browsing feel faster and more dependable. Create and edit images with references, structural guidance, LoRAs, masks, and flexible canvases, then see new results appear in the gallery automatically.
 
 ### Highlights
 
-- Find visually similar images using optional local DINOv2 analysis, with cached results and consistent five-level thresholds.
-- Compare visually similar files, edited versions, similar tags, and exact duplicates from separately configurable Details Panel sections.
-- Use the redesigned reverse image lookup workspace with visual evidence, optional Google Cloud Vision results, and local AI page analysis.
-- Open detected people's galleries and similarity results without losing the original file, gallery scope, or page when you go Back.
+- Generate or edit images locally with FLUX.2 Klein using up to four visual inputs, structural guides, LoRAs, inpainting, outpainting, and flexible canvas sizes.
+- Work in a responsive three-column generator beneath the gallery, with progressive controls, painted masks, reference-based sizing, and automatic output refresh.
+- Browse more smoothly with reliable double-click selection, preserved lightbox state, responsive Details loading, and steadier animated GIF playback.
 
 ### Notes
 
-- DINOv2 remains an optional Local AI install and is not bundled into the main MediaLens installer.
-- The first DINOv2 scan of a scope takes longer; unchanged results are cached, and later scans only process new or modified files.
-- Installed builds now use WebEngine hardware acceleration by default for smoother animated GIF playback, with software compatibility mode still available.
+- ComfyUI and the selected Klein model begin loading when the generator opens, reducing the wait after Generate is clicked.
+- ComfyUI sessions now shut down completely so old model processes do not consume GPU memory or stall later generations.
+- Optional model runtimes and weights remain separate from the main MediaLens installer.
 
 Full Changelog:
 https://github.com/G1enB1and/MediaLens/blob/main/CHANGELOG.md
