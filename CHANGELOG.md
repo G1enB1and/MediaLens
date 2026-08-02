@@ -1,6 +1,35 @@
 # Change Log
 
-## v1.5.4 (Current)
+## v1.5.5 (Current)
+
+### Summary
+
+This release makes split-gallery browsing more flexible, improves People workflows, fixes image-editor file saves, and reduces human verification for reverse image lookup. 
+
+### Highlights
+
+- Fixed Image Editor File saves.
+- Compare media in horizontal or vertical split panes with active-pane navigation and native toolbar controls.
+- Manage People more confidently with a protected Ungrouped group, clearer merge behavior, and immediate known-People display.
+- Keep reverse image lookup sessions available across image changes and normal app restarts when the browser profile supports it.
+
+### Added
+
+- Added resizable horizontal and vertical split-gallery panes with active-pane navigation, restored folder scope, and themed controls.
+- Added a system-maintained Ungrouped People group with protected membership handling.
+- Added persistent reverse image lookup browser-profile reuse across image changes and normal app restarts.
+
+### Changed
+
+- Changed split-gallery layout so each pane owns its scrolling, while split commands are available from the native top-right toolbar and View menu.
+- Changed People rename and merge paths to converge on existing person records, preserve immediate known-People display, and avoid unnecessary SQLite write locks.
+- Changed gallery selection operations and native file-tree synchronization to respect the active split pane and its restored folder scope.
+- Changed image-editor Save and Save As replacement handling to release image-writer resources before replacing files, and restored normal gallery scrolling when split view is disabled.
+- Changed People review headers to use a more compact layout.
+
+---
+
+## v1.5.4
 
 ### Summary
 
