@@ -1,15 +1,14 @@
-## MediaLens v1.5.5
+## MediaLens v1.5.6
 
 ### Summary
 
-This release makes split-gallery browsing more flexible, improves People workflows, fixes image-editor file saves, and reduces human verification for reverse image lookup. 
+This release brings faster duplicate review, stronger reverse image evidence, and a professional local AI editing workflow to MediaLens Image Editor.
 
 ### Highlights
 
-- Fixed Image Editor File saves.
-- Compare media in horizontal or vertical split panes with active-pane navigation and native toolbar controls.
-- Manage People more confidently with a protected Ungrouped group, clearer merge behavior, and immediate known-People display.
-- Keep reverse image lookup sessions available across image changes and normal app restarts when the browser profile supports it.
+- Repair and extend images locally with FLUX.2 Klein inpainting and outpainting while protecting original pixels.
+- Remove exact duplicates with targeted gallery updates and live progress instead of disruptive full refreshes.
+- Review reverse image results with stronger visual evidence, identity-aware ranking, and clearer source links.
 
 ### Notes
 - Optional model runtimes and weights remain separate from the main MediaLens installer.

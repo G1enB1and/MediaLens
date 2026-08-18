@@ -1,6 +1,33 @@
 # Change Log
 
-## v1.5.5 (Current)
+## v1.5.6 (Current)
+
+### Summary
+
+This release makes duplicate review faster and more responsive, strengthens reverse image lookup with clearer visual evidence, and adds a professional FLUX.2 Klein AI editing workflow to Image Editor.
+
+### Highlights
+
+- Edit images locally with layered FLUX.2 Klein inpainting and outpainting tools that protect the original image while extending or repairing the canvas.
+- Review and remove exact duplicates with targeted updates, live delete progress, and fewer disruptive gallery refreshes.
+- Get more useful reverse image results through evidence-backed visual matching, identity-aware ranking, and stronger source links.
+
+### Added
+
+- Added a reusable Image Editor AI workflow for FLUX.2 Klein with layer and mask references, inpainting, outpainting, adaptive seam repair, and editor-lifetime model sessions.
+- Added reverse image evidence processing with URL-backed previews, alternate-preview retries, identity-aware ranking, social-account extraction, and sourced web enrichment.
+- Added targeted duplicate-review deletion updates, shared gallery-footer progress phases, and in-place count reconciliation.
+- Added the option for People gallery groups to start collapsed on entry.
+
+### Changed
+
+- Changed Image Editor inpainting and outpainting to preserve original pixels, blend repaired boundaries, match surrounding colors, and use the full unpadded image for reference conditioning.
+- Changed duplicate deletion to preserve review caches, cancel stale gallery requests, suppress delayed refreshes, and avoid redundant full-gallery rebuilds.
+- Changed reverse image lookup to suppress failed previews, retry alternate visual evidence, rank repeated identity evidence more carefully, and optionally translate foreign results locally.
+
+---
+
+## v1.5.5
 
 ### Summary
 
